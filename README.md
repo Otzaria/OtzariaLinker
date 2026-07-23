@@ -1,150 +1,107 @@
-# Otzaria Commentary & Links Manager
+<div dir="rtl">
 
-A lightweight **offline-capable web application** for creating, editing, and managing **commentaries and links** for the **Otzaria** library.
+# מנהל הקישורים — אוצריא · מסמך תחזוקה למפתח
 
-The application runs entirely in your browser using HTML and JavaScript and **does not require any internet connection** once the page is loaded.
-
----
-
-## What Is This For?
-
-This tool is designed for users who want to:
-
-* Create **new commentaries and links** for books in Otzaria
-* Edit or delete **existing commentaries and links**
-* Work faster and more comfortably than manual file editing
-
-It visually presents books, commentaries, and links in a way similar to Otzaria itself, but in a simplified interface.
+קובץ יחיד עצמאי: **`מנהל-הקישורים-החדש.html`**. פותחים בכל דפדפן (גם `file://`, גם ללא רשת). אין תלות חיצונית — sql.js, ה‑WASM שלו, JSZip, ומנוע הטעינה העצלה מוטמעים בקובץ (base64).
 
 ---
 
-## Safety & File Handling
+## 1. הרצה ושימוש
 
-* The application **never modifies Otzaria’s original files directly**
-* All changes generate **new files only**
-* You choose whether and when to replace Otzaria’s original files
-* The app exports modified files as a **ZIP archive**
+1. פותחים את `מנהל-הקישורים-החדש.html` בדפדפן.
+2. מסך "מקורות": מחברים מסד נתונים (SQLite) ו/או מעלים txt/תיקייה ו/או מייבאים `_links.json` קיים.
+3. "כניסה לעורך": בוחרים ספר מקור (עמודת הספרים → נטען לפאנל הפעיל), בוחרים יעד (טוגל "יעד" בעמודת הספרים), מסמנים קטעים, ויוצרים קישור.
+4. "ייצוא": מייצר `links/<ספר>_links.json` + `_report.txt` (ZIP או קבצים בודדים).
+5. "שמור עותק אופליין" (💾): מוריד עותק עצמאי של הכלי עצמו.
 
-⚠️ **Important:**
-This project is currently **experimental**.
-It is strongly recommended to **back up your original Otzaria files** before replacing anything.
-
----
-
-## How It Works
-
-### Step 1 – Load the Otzaria Folder
-
-Click **“Load Otzaria Folder”** and select the main Otzaria directory, usually:
-
-```
-C:\Otzaria
-```
-
-Confirm folder access when prompted.
+### בדיקות עצמיות בזמן ריצה
+פתיחת הקובץ עם `?selftest` בכתובת מריצה את `runSelfTests()` (תוצאות בקונסול): offsets, גימטריה, בניית ייצוא, ועוד.
 
 ---
 
-### Step 2 – Select a Book
+## 2. ארכיטקטורה (הפרדת שכבות מלאה בתוך קובץ אחד)
 
-Choose a book from the book list.
+הכל בסקריפט אחד, מחולק ל‑IIFE‑ים ברורים. תלות בכיוון אחד: `UI → Domain → Data → Util`.
 
----
-
-### Step 3 – Select a Text Segment
-
-Click a text segment in the right panel.
-
-* Existing commentaries and links will appear automatically
-* Clicking a commentary or link opens it in the left panel
-* You can navigate quickly using the **Table of Contents**
-
----
-
-### Step 4 – Edit a Commentary or Link
-
-Click the **edit (pencil) icon** next to a commentary or link.
-
-Key concept to understand:
-
-> Otzaria links and commentaries connect **line numbers** from one book to **line numbers** in another book.
-
-You can:
-
-* Manually edit source or target line numbers
-* Select new source or target lines visually
-* Choose a completely different target book
+| שכבה | אחריות | רכיבים מרכזיים |
+|---|---|---|
+| **Util** | עזרי בסיס, ללא תלות | לוגר (4 רמות), `rawOffsetFromVisible`/`countVisibleChars`, `toGematria`, קריאת קבצים, מיפוי סוגי‑קשר (`COMMENTATOR_TYPES`/`REFERENCE_TYPES`), `CONNECTION_TYPE_KEY` |
+| **Data** | גישה לנתונים בלבד | `FileBookRepository` (txt/תיקייה), `DbBookRepository` (sql.js, סינכרוני), `LazyDbBookRepository` (עצל, א‑סינכרוני), `openSqlite` (בורר היברידי), `JsonLinksRepository`, `ExportWriter` |
+| **Domain** | לוגיקה עסקית, ללא DOM | `state`, `LinkService` (יצירה/עריכה/מחיקה/ולידציה), `ExportBuilder` (מודל→פורמט אוצריא), `History` (undo/redo), `ensureBookLoaded`, `structuralMatch`, `computeHeRef`, `buildTocTree`, אינדקס גלובלי |
+| **UI** | מסכים, ווידג'טים, אירועים | רשימת ספרים וירטואלית, פאנלי מקור/יעד, פאנל מפרשים/קישורים (טור אמצעי), בילדר, דיאלוגים (עריכה/ייצוא/אוטומטי/TOC/איתור/היסטוריה) |
+| **Bootstrap** | חיווט אירועים ואתחול | מאזינים, קיצורי מקלדת, ערכת נושא, ייצוא אופליין |
+| **LazySqlite** | מנוע קריאה עצל (בלוק נפרד) | `window.LazySqlite` — קורא SQLite read‑only ב‑B‑tree, עמוד‑לפי‑עמוד |
 
 ---
 
-### Step 5 – Save Changes
+## 3. מנוע הטעינה העצלה (`LazySqlite`)
 
-After selecting the new source or target line, click **Save**.
+**הבעיה:** `seforim.db` ≈ 8GB. דפדפן לא יכול להחזיק ArrayBuffer/WASM כזה בזיכרון, לכן `new SQL.Database(bytes)` בלתי‑אפשרי.
 
----
+**הפתרון:** מנוע טהור‑JS שקורא רק את העמודים (16KB) הנחוצים דרך `File.slice(off,len)` — לא טוען את הקובץ. אומת **בייט‑בייט** מול `seforim.db` האמיתי (MD5 של תוכן ספר זהה ל‑SQLite).
 
-### Step 6 – One-Way or Two-Way Links
+יכולות: פענוח header, varint, records, serial types, סריקת טבלה, `scanRange` (טווח rowid — יעיל לספר רציף), `rowById`, `indexEqFirstCol` (seek באינדקס עם גיזום), ו‑**overflow pages** (תוכן ארוך שחוצה עמודים).
 
-When saving, the app will ask whether to:
+מסלול היברידי (`Data.openSqlite`): קובץ ≤ `LAZY_THRESHOLD_MB` (700MB) → **sql.js** (מלא, כולל עוגני/טווחי קישורים קיימים). גדול יותר → **LazySqlite** (עצל). ספרי‑lazy טוענים שורות מראש ב‑`Domain.ensureBookLoaded` (א‑סינכרוני), ומשם הכל סינכרוני (`getLines`).
 
-* Create a **two-way link** (Book A ↔ Book B), like standard Otzaria links
-* Or create a **one-way link** only in the current book
+ביצועים אמיתיים (מול 8GB): רשימת 7,293 ספרים ~130ms; שורות של ספר ~30–100ms הקוראות ~1MB.
 
-Changes appear **immediately** in the interface.
-
----
-
-### Optional – Create a New Commentary or Link
-
-You can also create new items from scratch:
-
-1. Select a source text segment
-2. Click the **plus (+)** button next to Commentaries or Links
-3. Choose the target line and target book
-4. Save
+**הרחבה עתידית:** אם צריך שאילתות נוספות, מוסיפים מתודה ב‑`LazyDbBookRepository` שמשתמשת ב‑`indexEqFirstCol`/`scanRange`/`rowById`. לכתיבה ל‑DB — לא נתמך בכוונה (הכלי אף פעם לא כותב למסד; ראו §5).
 
 ---
 
-### Step 7 – Export Changes
+## 4. מודל הקישורים
 
-When finished, click **Export**.
+**קטגוריית קשר** (connectionType) נפרדת מ**סוג הקישור המבני**:
 
-* All modified files are downloaded as a **ZIP archive**
-* Extract the files into:
+- קטגוריה: `commentary`/`targum`/`reference`… (22 ערכים, מקובצים "מפרשים"/"קישורים"). 8 ערכי המפרש המדויקים → פאנל מפרשים; השאר → פאנל קישורים.
+- סוג מבני (זהה בידני ובאוטומטי):
+  - **שורה↔שורה** — שורת הסמן ↔ השורה המקבילה.
+  - **מקטע↔מקטע** — מהסמן עד לפני הסמן הבא, בשני הצדדים.
+  - **שורה(מקור)↔מקטע(יעד)** — שורה במקור, מקטע ביעד עד הסמן הבא.
+  - **מילה(מקור)↔שורה(יעד)** — עוגן פר‑מילה על טקסט הסמן ↔ שורה מלאה.
 
-  ```
-  C:\Otzaria\links
-  ```
-* Replace the existing files with the new ones
-
----
-
-### Step 8 – View the Result in Otzaria
-
-Open Otzaria and enjoy your updated commentaries and links 🎉
+באוטומטי, "הסמן" = ההתאמה (תג/כותרת/Regex), ו"מקטע" = עד הסמן הבא (מחושב מרשימת ההתאמות).
 
 ---
 
-## Important Notes
+## 5. פורמט הייצוא (מקור האמת: `קישורים-וכותרות.md`)
 
-* Changes exist **only in memory**
-* If you refresh the page or close the browser **without exporting**, all changes are lost
-* Always export before closing the app
+`ExportBuilder` ממיר מודל פנימי → רשומות אוצריא. כללי‑ברזל שנאכפים:
 
----
+- שם השדה **`"Conection Type"`** — n אחת בכוונה (שגיאת כתיב היסטורית של ספריא).
+- אינדקסים **1‑based** בקובץ (0‑based בזיכרון).
+- `start`/`end` = אופסטי תו **גולמיים** (מומרים מ‑visible דרך `rawOffsetFromVisible`).
+- `line_index_1_end`/`line_index_2_end` לטווחים.
+- דילוג שורות כותרת (`<h…>`), חד‑כיווניות (רשומה אחת מקור→יעד).
 
-## Technical Overview
-
-* 100% client-side web application
-* Runs locally in the browser
-* No server, no tracking, no network usage
-* Works offline after loading
-* Uses Otzaria’s existing file structure and formats
+הכלי **קורא בלבד** מה‑DB; לעולם לא כותב אליו. הפלט הוא קובצי קישורים לייבוא באוצריא.
 
 ---
 
-## Status
+## 6. בדיקות (בתיקיית העבודה, לא נדרש בהפצה)
 
-🧪 **Experimental / Beta**
+הבדיקות רצות ב‑Node מול הקוד המחולץ מה‑HTML (ומול ה‑DB האמיתי כשקיים):
 
-Feedback, testing, and improvements are welcome.
+- `test.js` — 15 בדיקות אלגוריתם (offsets, גימטריה, ExportBuilder, טווח, דילוג כותרת).
+- `domtest.js` — 8 בדיקות פיצ'רים (heRef, TOC‑tree, מבני, אינדקס גלובלי).
+- `dbtest3.js` — סכימה אמיתית + זיהוי מסד‑משתמש.
+- `lazytest.js`/`lazyrepo.js` — הקורא העצל **מול seforim.db האמיתי** (השוואת MD5 ל‑SQLite).
+- `boottest.js` — הרצת כל האפליקציה כולל bootstrap (איתור קריסות טעינה).
+- `synchk.js` — תחביר + כל מזהי ה‑DOM קיימים.
+
+---
+
+## 7. פערים ידועים (לפיתוח עתידי)
+
+- **עליות / alt_toc (מבנה כותרות חלופי):** ה‑`ExportWriter` תומך בקובץ `alt_toc/<ספר>_alt_toc.json`, אך **עורך UI ליצירתו טרם נבנה**. זה הצעד הבא הטבעי (אפיון §5.2ד, §6.3).
+- **ייצוא CSV:** כרגע JSON + ZIP בלבד (JSON עדיף לפי האפיון §6.2).
+- **עוגני/טווחי קישורים קיימים במסלול lazy:** נטענים בסיסית (סוג+שורות); עוגן/טווח של קישור קיים אינם נקראים במסלול העצל (רלוונטי בעיקר לספרי‑בסיס גדולים; לספרים אישיים אין קישורים קיימים).
+
+---
+
+## 8. פלטת עיצוב
+
+משתני CSS ב‑`:root` (פלטת אוצריא החמה) + `html[data-theme="dark"]` למצב לילה (נשמר ב‑localStorage, מכבד `prefers-color-scheme`). גופן כותרות: Frank Ruhl Libre. רספונסיבי לדסקטופ/טאבלט/מובייל.
+
+</div>
