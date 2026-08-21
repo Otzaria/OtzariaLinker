@@ -1,0 +1,43 @@
+name: Add standalone HTML to release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  attach-html:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the released revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Upload standalone HTML asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          asset_name="Otzaria-Link-Manager-${version}.html"
+          asset_label="מנהל הקישורים של אוצריא גרסא ${version}.html"
+
+          test -f index.html
+          cp index.html "$asset_name"
+          gh release upload "$TAG" "$asset_name" --repo "$REPOSITORY" --clobber
+
+          asset_id="$(gh api "repos/${REPOSITORY}/releases/tags/${TAG}" \
+            --jq ".assets[] | select(.name == \"${asset_name}\") | .id" | tail -n 1)"
+          test -n "$asset_id"
+
+          gh api --method PATCH "repos/${REPOSITORY}/releases/assets/${asset_id}" \
+            --raw-field "name=${asset_name}" \
+            --raw-field "label=${asset_label}" >/dev/null
