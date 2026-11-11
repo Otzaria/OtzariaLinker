@@ -4,6 +4,7 @@ import type { DbMapping, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
+import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
 import { stripTags } from "../core/text/html";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
@@ -12,6 +13,7 @@ import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
 import { MappedDbSource } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
+import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
 import { TextFilesSource, type TextFile } from "./text/text-source";
 
@@ -53,6 +55,8 @@ export class SourceRegistry {
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
   private readonly pending = new Map<string, { blob: Blob; label: string }>();
   private seq = 0;
+  /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
+  private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
@@ -116,9 +120,38 @@ export class SourceRegistry {
     return out;
   }
 
+  /** Counts of a book's existing links by type and by the other book, or why it has none (stage 10). */
+  async dbLinkSummary(bookKey: string, ctx: ListingContext = {}): Promise<DbLinkSummary | DbLinksUnavailable> {
+    const l = await this.listing(bookKey, ctx);
+    if (typeof l === "string") return { bookKey, reason: l };
+    const books = new Map((await this.of(bookKey).books()).map((b) => [b.key, b]));
+    return l.summary((k) => ({ title: books.get(k)?.title ?? k, origin: books.get(k)?.origin ?? "unknown" }));
+  }
+
+  /** One page of a book's existing links, filtered (stage 10). */
+  async dbLinksPage(bookKey: string, query: DbLinkQuery, ctx: ListingContext = {}): Promise<DbLinkPage> {
+    const l = await this.listing(bookKey, ctx);
+    return typeof l === "string" ? { total: 0, offset: query.offset, links: [] } : l.page(query);
+  }
+
+  private async listing(bookKey: string, ctx: ListingContext): Promise<LinkListing | string> {
+    const s = this.of(bookKey);
+    if (s.linkListing) return s.linkListing(bookKey, ctx);
+    if (s.info.kind === "text-files") return "לספרים מקובצי טקסט אין קישורים קיימים במסד. קישורים שלהם נטענים מקובצי ‎_links.json.";
+    let p = this.fallbackListings.get(bookKey);
+    if (!p) {
+      const t0 = performance.now();
+      p = s.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER).then((links) => listingFromLinks(bookKey, links, Math.round(performance.now() - t0)));
+      this.fallbackListings.set(bookKey, p);
+      p.catch(() => this.fallbackListings.delete(bookKey));
+    }
+    return p;
+  }
+
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
+    for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
   private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[]): Promise<void> {
@@ -204,6 +237,8 @@ export class SourceRegistry {
     return `s${++this.seq}`;
   }
 }
+
+type ListingContext = { signal?: AbortSignal; progress?: (done: number, total: number) => void };
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;
 
