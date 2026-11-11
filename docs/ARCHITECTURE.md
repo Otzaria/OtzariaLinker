@@ -54,8 +54,8 @@
 | `matching` | השוואת טקסט עברי: טוקנים עם אופסטים גולמיים, דמיון מילים, צעד יישור עם גשרים (ראשי תיבות, קיצורים, מילים דבוקות), משקלי מילים; יישור שורות בין שתי מהדורות של ספר (שלב 11, עדיין בלי ממשק) | `hebrew-tokens.ts`, `token-match.ts`, `similarity.ts`, `word-weights.ts`, `line-diff.ts` |
 | `linking` | המנועים האוטומטיים (פונקציות טהורות מספרים להצעות), זיהוי זוגות לאצווה, ודוח האיכות | `automatic/types.ts`, `automatic/index.ts`, `automatic/{headings,dibur-hamatchil,footnotes}/`, `batch.ts`, `qa.ts` |
 | `formats` | `_links.json`: פרסור שמדווח לכל רשומה, המרה 1-based ↔ 0-based, כתיבה דטרמיניסטית, תוכנית ייצוא ו־ZIP | `links-json/{parse,record,convert,serialize,export}.ts` |
-| `database` | קורא SQLite עצל לפי עמודים, מפענח zstd, קורא מסדי אוצריא לפי יכולות (סכמות 0–7), שחזור שורות עם הערות (סכמה 7), קריאת קישורים קיימים; sql.js לבדיקת הפעלה בלבד | `sqlite/lazy/sqlite-file.ts`, `compression/zstd.ts`, `otzaria/{capabilities,reader,line-notes,links-reader}.ts` |
-| `sources` | "דלת אחת" לכל מה שהמשתמש פתח: זיהוי לפי תוכן, ZIP בטוח, ספרים מקובצי טקסט, ספרים ממסד | `registry.ts`, `detect.ts`, `archives/safe-unzip.ts`, `text/text-source.ts`, `db/db-source.ts`, `book-source.ts` |
+| `database` | קורא SQLite עצל לפי עמודים, מפענח zstd, קורא מסדי אוצריא לפי יכולות (סכמות 0–7), שחזור שורות עם הערות (סכמה 7), קריאת קישורים קיימים; קורא של מסד במבנה אחר לפי מיפוי (תצוגה מקדימה, פענוח טקסט, אינדקס סדר לכל ספר); sql.js לבדיקת הפעלה בלבד | `sqlite/lazy/sqlite-file.ts`, `compression/zstd.ts`, `otzaria/{capabilities,reader,line-notes,links-reader}.ts`, `generic/{preview,text-codec,mapped-reader}.ts` |
+| `sources` | "דלת אחת" לכל מה שהמשתמש פתח: זיהוי לפי תוכן, ZIP בטוח, ספרים מקובצי טקסט, ספרים ממסד, ספרים ממסד במבנה אחר לפי מיפוי | `registry.ts`, `detect.ts`, `archives/safe-unzip.ts`, `text/text-source.ts`, `db/db-source.ts`, `db/mapped-source.ts`, `db/pending.ts`, `book-source.ts` |
 | `projects` | קובץ הפרויקט: כתיבה, קריאה ואימות | `project-format.ts` |
 | `diagnostics` | יומן מובנה וחסום בגודל, בלי טקסט ספרים. **עדיין לא מחובר לשום מקום ב־HEAD** | `log.ts` |
 | `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, ואצווה של זוגות (זוג אחד בזיכרון בכל פעם) | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `engine-job.ts` |
@@ -74,13 +74,20 @@
   → BooksService.open      RPC אל ה־Worker
   → SourceRegistry.open    לכל קובץ: 4KiB ראשונים → detectKind
        sqlite      → DbBookSource.open   (OtzariaDbReader על blobSource: File.slice)
+                     לא במבנה של אוצריא (db/no-books) → needsMapping: תצוגה מקדימה + ניחוש + אסימון
        zip         → safeUnzip → ‎.txt לספרים, ‎.json לקישורים/פרויקט
        text        → TextFilesSource (כל קובצי הטקסט של הפתיחה יחד)
        links-json / project → טקסט מפוענח, מוחזר כמסמך
        אחר         → skipped, עם סיבה בעברית
-  ← OpenResult { sources (+ספרים), documents, skipped }
+  ← OpenResult { sources (+ספרים), documents, skipped, needsMapping? }
   → AppStore: sources.value; importLinksFile / openProject לכל מסמך; הודעות
+  → needsMapping: מיפוי שמור לאותה טביעת מבנה → openMapped מיד; אחרת pendingDbs → אשף המיפוי
+       (ui/dialogs/db-mapping-dialog.tsx) → AppStore.openMapped → BooksService.openMapped
+       → Worker: SourceRegistry.openMapped(token, mapping) → MappedDbSource (סריקה אחת אם אין אינדקס)
 ```
+
+הטיפוסים של המיפוי (`DbMapping`, `SchemaPreview`, `PendingDb`) והכללים הטהורים שלו (ניחוש, בדיקה, קריאה
+מ־JSON) נמצאים ב־`core/db-mapping.ts`, כדי שגם `state`, `ui` ו־`projects` יוכלו להחזיק אותם.
 
 ### 4.2 קריאת שורות
 
@@ -158,11 +165,11 @@ AppStore.prepareExport / runQualityCheck
 
 ## 7. מה ממומש ומה לא (HEAD)
 
-ממומש: פתיחת מסדי אוצריא (0–7), קובצי טקסט, תיקיות ו־ZIP; קריאה עצלה; בונה ידני עם ולידציה חיה; שלושה
+ממומש: פתיחת מסדי אוצריא (0–7), מסדי SQLite במבנה אחר דרך אשף מיפוי, קובצי טקסט, תיקיות ו־ZIP; קריאה עצלה; בונה ידני עם ולידציה חיה; שלושה
 מנועים אוטומטיים, לזוג ספרים או באצווה; ייבוא וייצוא `_links.json`; בדיקת איכות; פרויקטים, שמירה
 אוטומטית ושחזור.
 
-לא ממומש: מיפוי מסדי SQLite כלליים, ייבוא CSV/TSV ו־JSON כללי, קישור מחדש אחרי שינוי ספר (יש רק
+לא ממומש: ייבוא JSON כללי, קישור מחדש אחרי שינוי ספר (יש רק
 המודול `matching/line-diff.ts`, בלי ממשק), חיבור `diagnostics` לממשק, `alt_toc`. הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
 
 </div>
