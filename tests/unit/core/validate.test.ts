@@ -30,6 +30,12 @@ describe("validateLink — generator gates", () => {
     expect(codes(link({ declaredType: "linker" }))).toContain("error:export/linker");
     expect(codes(link({ declaredType: "sifrei mitsvot" }))).toContain("warning:export/unknown-type");
   });
+  it("a links file whose source title is no open book: the generator drops the whole file", () => {
+    // real library case: "וזה לשונו - שובבי׳׳ם_links.json" — the database spells the book "…שובבי״ם"
+    const unknown: BookRef = { key: "unresolved:וזה לשונו - שובבי׳׳ם", title: "וזה לשונו - שובבי׳׳ם", origin: "unknown" };
+    expect(codes(link({ provenance: "file", status: "existing", source: { book: unknown, line: 1 } }))).toContain("warning:export/source-unknown");
+    expect(codes(link())).not.toContain("warning:export/source-unknown");
+  });
   it("db links cannot be exported as file records", () => expect(codes(link({ provenance: "db", status: "existing" }))).toContain("error:export/db-link"));
   it("a companion 'הערות על X' target is silently dropped by the generator", () => {
     expect(codes(link({ target: { book: book("הערות על ספר א"), line: 2 } }))).toContain("warning:export/companion-merged");

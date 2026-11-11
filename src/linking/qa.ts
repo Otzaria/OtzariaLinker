@@ -35,6 +35,7 @@ export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: s
 
 const CATEGORY_OF: Record<string, QaCategory> = {
   "export/duplicate": "duplicate",
+  "export/source-unknown": "missing-book",
   "export/target-unknown": "missing-book",
   "export/line-out-of-range": "out-of-range",
   "export/range-out-of-range": "out-of-range",
