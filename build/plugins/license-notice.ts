@@ -31,7 +31,6 @@ export function licenseNotice(opts: { packages: readonly string[]; version: stri
           "See <https://www.gnu.org/licenses/>. Source code: the repository above, at the tag of this version.",
           "",
           "Bundled third-party software:",
-          "SQLite (inside sql.js) is in the public domain.",
           "Otzaria Icons (github.com/Otzaria/otzaria_icons) — GPL-3.0.",
           "Fluent UI System Icons (github.com/microsoft/fluentui-system-icons), a few generic icons — MIT,",
           "  Copyright (c) 2020 Microsoft Corporation.",

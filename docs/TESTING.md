@@ -40,7 +40,7 @@ npm run check                                       # typecheck + npm test + E2E
 
 | קובץ E2E | מה הוא בודק |
 |---|---|
-| `offline-single-file.spec.ts` | הקובץ עולה אופליין, וה־Worker מריץ sql.js ו־zstd תחת ה־CSP |
+| `offline-single-file.spec.ts` | הקובץ עולה אופליין, וה־Worker קורא בקורא ה־SQLite העצל וב־zstd תחת ה־CSP |
 | `manual-linking.spec.ts` | פתיחת מסד וקובץ, בחירה, יצירה, undo/redo, ייצוא; ערכה כהה ומסך צר |
 | `automatic-linking.spec.ts` | מנוע הכותרות ב־Worker, טבלה, "אישור כל הוודאיות", כרטיס, undo |
 | `engines.spec.ts` | מנוע ההערות על זוג טקסטים, מנוע הד"ה על רש"י ובראשית מהמסד האמיתי החלקי, וקישור באצווה |

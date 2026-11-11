@@ -15,7 +15,7 @@ import type { MaxLinkJobOptions } from "./maxlink-job";
 /** The worker's operations, as the UI calls them through RpcClient. */
 export interface SourcesApi {
   [op: string]: (...args: never[]) => unknown;
-  /** proves sql.js and the zstd WASM start in this environment (file://, CSP) */
+  /** the self-check (self-check.ts): what the lazy SQLite reader and the zstd decoder read from tiny probes */
   ping(): { sqlite: string; zstd: string };
   /** cheap liveness probe for the watchdog */
   alive(): true;

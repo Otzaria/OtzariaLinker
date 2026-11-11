@@ -18,7 +18,7 @@ npm run build       # dist/OtzariaLinker.html
 1. `vite build` בונה את `index.html` ואת `src/app/main.tsx` לקובץ אחד, `dist/index.html`:
    - `vite-plugin-singlefile` מטמיע JS ו־CSS; `assetsInlineLimit` אינסופי מטמיע גופנים ותמונות.
    - ה־Worker (`sources.worker.ts?worker&inline`) נבנה כ־IIFE ומוטמע כ־blob.
-   - `build/plugins/wasm-base64.ts` מטמיע את ה־WASM של sql.js ושל מפענח zstd כמחרוזות base64.
+   - `build/plugins/wasm-base64.ts` מטמיע את ה־WASM של מפענח zstd כמחרוזת base64 (sql.js כבר אינו בתוצר).
    - `build/plugins/build-info.ts` מגדיר `__APP_VERSION__`, `__APP_COMMIT__` ו־`__APP_BUILD_DATE__`.
      התאריך הוא **תאריך ה־commit**, כדי שבנייה חוזרת תפיק אותם בתים. בבנייה מקומית מעץ עבודה מלוכלך,
      ל־commit נוסף `-dirty`. הגרסה וה־commit מוצגים בתחתית תפריט ההגדרות, והגרסה נכתבת גם לקובץ הפרויקט.

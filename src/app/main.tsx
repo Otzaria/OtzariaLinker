@@ -86,9 +86,9 @@ effect(() => {
 });
 effect(() => document.documentElement.style.setProperty("--font-scale", String(store.prefs.fontScale.value)));
 
-// a self-check the offline E2E test reads: proves sql.js and zstd start in this environment
+// a self-check the offline E2E test reads: proves the SQLite reader and zstd start in this environment
 void rpc.call("ping", []).then(
-  (r) => (document.documentElement.dataset.engine = `SQLite ${r.sqlite} · ${r.zstd}`),
+  (r) => (document.documentElement.dataset.engine = `${r.sqlite} · ${r.zstd}`),
   (e: Error) => (document.documentElement.dataset.engine = `שגיאה: ${e.message}`),
 );
 // debugging and E2E hook (no data leaves the page)

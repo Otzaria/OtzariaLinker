@@ -26,6 +26,7 @@
     "@types/node": "26.6.6",
     "@types/sql.js": "1.4.11",
     "fast-check": "4.10.2",
+    "sql.js": "1.16.0",
     "typescript": "7.0.2",
     "vite": "8.3.8",
     "vite-plugin-singlefile": "2.3.4",
@@ -35,7 +36,6 @@
     "@preact/signals": "2.11.4",
     "fflate": "0.8.3",
     "preact": "11.2.0",
-    "sql.js": "1.16.0",
     "zstd-wasm-decoder": "0.2.3"
   }
 }

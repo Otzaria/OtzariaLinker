@@ -45,7 +45,8 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 
 ### 2.3 קריאה בלבד על נתוני המשתמש
 - מסדים נקראים דרך הקורא העצל (`src/database/sqlite/lazy/`) עם `Blob.slice`. אין ממשק כתיבה, ואין
-  להוסיף אחד. sql.js משמש רק לבדיקת `ping` על מסד בזיכרון.
+  להוסיף אחד. בדיקת ההפעלה (`ping`, ‏`src/workers/self-check.ts`) קוראת בקורא העצל מסד זעיר מוטמע. sql.js
+  משמש רק בבדיקות, ככותב SQLite עצמאי ליצירת fixtures, ואינו בתוצר.
 - התוצר היחיד הוא הורדה דרך `Saver` (`src/state/services.ts`).
 - גם סקריפטים ובדיקות פותחים מסד אמיתי לקריאה בלבד (`mode=ro` בפייתון, `openSync(path, "r")` ב־Node).
 
