@@ -190,3 +190,20 @@ describe("AppStore — batch linking", () => {
     expect(store.approveSuggestions(store.pendingAtLeast("certain"))).toBeGreaterThan(50);
   });
 });
+
+describe("AppStore — rejections survive a saved project", () => {
+  it("a suggestion rejected in one session is still rejected after reopening the project", async () => {
+    const a = makeStore();
+    await a.store.openFiles([DB]);
+    const key = (s: ReturnType<typeof makeStore>, t: string) => [...s.store.books.value.values()].find((b) => b.title === t)!.key;
+    await a.store.runEngine("headings", key(a, "תרגום אונקלוס על בראשית"), key(a, "בראשית"));
+    const first = a.store.pendingAtLeast("certain")[0]!;
+    a.store.rejectSuggestions([first]);
+    a.store.saveProject();
+
+    const b = makeStore();
+    await b.store.openFiles([{ path: "p.json", blob: new Blob([a.saved.at(-1)!.data as string]) }, { path: "other-name.db", blob: DB.blob }]);
+    await b.store.runEngine("headings", key(b, "תרגום אונקלוס על בראשית"), key(b, "בראשית"));
+    expect(b.store.suggestionCounts.value.rejected).toBe(1);
+  });
+});

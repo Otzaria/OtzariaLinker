@@ -107,7 +107,10 @@ export class AppStore {
   readonly qa = signal<QaReport | null>(null);
   /** the link revision the report was made on — a different revision means the report is stale */
   readonly qaRevision = signal(-1);
-  /** rejected suggestion ids — kept across re-runs, since suggestion ids are deterministic */
+  /**
+   * Rejected suggestions, by a key made of book TITLES and positions (rejectionKey) — session book keys
+   * change between sessions, titles do not — so a rejection survives re-runs and saved projects.
+   */
   readonly rejected = signal<ReadonlySet<string>>(new Set());
   /** the suggestion shown in the inline/card views */
   readonly currentSuggestion = signal<string | null>(null);
@@ -444,7 +447,7 @@ export class AppStore {
     for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(storedKey(l));
     for (const s of run.result.suggestions) {
       const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(s.id) ? "rejected" : existing.has(storedKey(this.suggestionLink(s))) ? "exists" : "pending");
+      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(rejectionKey(s)) ? "rejected" : existing.has(storedKey(this.suggestionLink(s))) ? "exists" : "pending");
     }
     return m;
   });
@@ -482,7 +485,8 @@ export class AppStore {
     const ids2 = new Set(links.map((l) => l.id.slice(5)));
     batch(() => {
       this.apply(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
-      if ([...ids2].some((id) => this.rejected.value.has(id))) this.rejected.value = new Set([...this.rejected.value].filter((id) => !ids2.has(id)));
+      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).map(rejectionKey));
+      if ([...keys].some((k) => this.rejected.value.has(k))) this.rejected.value = new Set([...this.rejected.value].filter((k) => !keys.has(k)));
     });
     return links.length;
   }
@@ -491,13 +495,18 @@ export class AppStore {
     const approved = ids.map((id) => `auto:${id}`).filter((id) => this.linkState.value.links.has(id));
     batch(() => {
       if (approved.length) this.apply("ביטול אישור", approved.map((id) => ({ id, before: this.linkState.value.links.get(id)! })));
-      this.rejected.value = new Set([...this.rejected.value, ...ids]);
+      this.rejected.value = new Set([...this.rejected.value, ...this.keysOf(ids)]);
     });
   }
 
   resetSuggestions(ids: readonly string[]): void {
-    const drop = new Set(ids);
-    this.rejected.value = new Set([...this.rejected.value].filter((id) => !drop.has(id)));
+    const drop = new Set(this.keysOf(ids));
+    this.rejected.value = new Set([...this.rejected.value].filter((k) => !drop.has(k)));
+  }
+
+  private keysOf(ids: readonly string[]): string[] {
+    const want = new Set(ids);
+    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).map(rejectionKey);
   }
 
   /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */
@@ -742,6 +751,12 @@ export class AppStore {
   }
 }
 
+
+/** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
+export function rejectionKey(s: Suggestion): string {
+  const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
+  return `${s.engine}|${end(s.source)}${s.anchor ? `@${s.anchor.rawStart}` : ""}>${end(s.target)}`;
+}
 
 declare const __APP_VERSION__: string;
 const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
