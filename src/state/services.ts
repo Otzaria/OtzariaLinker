@@ -1,5 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
+import type { DbMapping, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
@@ -24,6 +25,8 @@ export interface OpenResult {
   sources: OpenedSource[];
   documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
   skipped: { path: string; reason: string }[];
+  /** SQLite files not in Otzaria's schema, waiting for the mapping wizard */
+  needsMapping?: PendingDb[];
 }
 
 export interface CallOptions {
@@ -33,6 +36,7 @@ export interface CallOptions {
 
 export interface BooksService {
   open(files: InputFile[], opts?: CallOptions): Promise<OpenResult>;
+  openMapped(token: string, mapping: DbMapping, opts?: CallOptions): Promise<OpenedSource>;
   lines(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<SourceLine[]>;
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;

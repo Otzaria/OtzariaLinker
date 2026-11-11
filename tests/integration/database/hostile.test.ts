@@ -26,7 +26,8 @@ describe("hostile databases fail fast", () => {
   }, 10_000);
 
   it("an unterminated [ in a table's SQL does not loop forever", async () => {
-    await expect(open("bracket.db").then((s) => s.books())).resolves.toBeDefined();
+    // its line table parses to one odd column, so it is not an Otzaria database (it goes to the mapping wizard)
+    await expect(open("bracket.db")).rejects.toMatchObject({ code: "db/no-books" });
   }, 10_000);
 
   it("a record whose header claims to be larger than the record is rejected", () => {

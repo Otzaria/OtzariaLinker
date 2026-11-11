@@ -30,6 +30,7 @@ const handle = serve<SourcesApi>(
     },
     alive: () => true as const,
     open: (ctx, files) => registry.open(files, ctx.signal),
+    openMapped: (ctx, token, mapping) => registry.openMapped(token, mapping, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     close: (_ctx, sourceId) => registry.close(sourceId),

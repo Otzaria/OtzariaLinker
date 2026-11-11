@@ -1,4 +1,5 @@
 import type { AltTocBook, AltTocEntry, AltTocOrigin, AltTocStructure } from "../core/alt-toc/model";
+import { parseSavedDbMappings, type SavedDbMapping } from "../core/db-mapping";
 import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
 
 /*
@@ -45,6 +46,11 @@ export interface ProjectFile {
   rejectedSuggestions: string[];
   view: { source: string | null; target: string | null };
   altToc?: AltTocBook[];
+  /**
+   * Optional (added in 2.0 without a version bump: older readers ignore it): how databases in
+   * someone else's schema were mapped, by schema fingerprint, so reopening one skips the wizard.
+   */
+  dbMappings?: SavedDbMapping[];
 }
 
 export interface ProjectData {
@@ -55,6 +61,7 @@ export interface ProjectData {
   view: { source: string | null; target: string | null };
   /** alternative TOC structures of the project (absent in files saved before they existed) */
   altToc?: AltTocBook[];
+  dbMappings?: SavedDbMapping[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -75,6 +82,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date()):
     rejectedSuggestions: p.rejectedSuggestions,
     view: p.view,
     ...(p.altToc?.length && { altToc: p.altToc }),
+    ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
   };
   return JSON.stringify(file);
 }
@@ -114,6 +122,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     rejectedSuggestions: Array.isArray(f.rejectedSuggestions) ? f.rejectedSuggestions.filter((x) => typeof x === "string") : [],
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
     altToc: altToc.books,
+    dbMappings: parseSavedDbMappings(f.dbMappings),
     skipped: skipped + altToc.skipped,
   };
 }

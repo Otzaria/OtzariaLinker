@@ -1,5 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
+import type { DbMapping, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
@@ -9,6 +10,8 @@ import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
+import { MappedDbSource } from "./db/mapped-source";
+import { pendingMapping } from "./db/pending";
 import { detectKind, type DetectedKind } from "./detect";
 import { TextFilesSource, type TextFile } from "./text/text-source";
 
@@ -36,6 +39,8 @@ export interface OpenResult {
   documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
   /** files that were not opened, each with a reason the user can act on */
   skipped: { path: string; reason: string }[];
+  /** SQLite files not in Otzaria's schema: opened through openMapped once the user maps them */
+  needsMapping?: PendingDb[];
 }
 
 const HEAD = 4096;
@@ -45,6 +50,8 @@ const MAX_ZIP = 512 * 1024 ** 2;
 
 export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
+  /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
+  private readonly pending = new Map<string, { blob: Blob; label: string }>();
   private seq = 0;
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
@@ -67,6 +74,13 @@ export class SourceRegistry {
       result.sources.push(await this.add(src));
     }
     return result;
+  }
+
+  /** Opens a database that needed a mapping (see OpenResult.needsMapping). The token stays valid for a re-map. */
+  async openMapped(token: string, mapping: DbMapping, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<OpenedSource> {
+    const p = this.pending.get(token);
+    if (!p) throw new LinkerError("db/mapping-unknown-token", "המסד הזה כבר אינו פתוח לבחירת מיפוי. גררו אותו שוב.");
+    return this.add(await MappedDbSource.open(this.nextId(), p.label, blobSource(p.blob), mapping, ctx));
   }
 
   async lines(bookKey: string, from: number, to: number): Promise<SourceLine[]> {
@@ -113,6 +127,8 @@ export class SourceRegistry {
         try {
           result.sources.push(await this.add(await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob))));
         } catch (err) {
+          // not Otzaria's schema: hand its tables to the mapping wizard instead of refusing the file
+          if (err instanceof LinkerError && err.code === "db/no-books") return this.offerMapping(f, result);
           result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את המסד.") });
         }
         return;
@@ -140,6 +156,14 @@ export class SourceRegistry {
         return;
       case "binary":
         return void result.skipped.push({ path: f.path, reason: "קובץ בינארי שאינו מסד SQLite או ZIP." });
+    }
+  }
+
+  private async offerMapping(f: InputFile, result: OpenResult): Promise<void> {
+    try {
+      (result.needsMapping ??= []).push(await pendingMapping(f.path, nameOf(f.path), f.blob, this.pending));
+    } catch (err) {
+      result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את המסד.") });
     }
   }
 

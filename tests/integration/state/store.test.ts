@@ -12,6 +12,7 @@ function makeStore() {
   const reg = new SourceRegistry();
   const service: BooksService = {
     open: (f) => reg.open(f),
+    openMapped: (t, m) => reg.openMapped(t, m),
     lines: (k, a, b) => reg.lines(k, a, b),
     existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
     close: async (id) => reg.close(id),

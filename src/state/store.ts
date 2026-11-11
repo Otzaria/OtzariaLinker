@@ -1,6 +1,7 @@
 import { batch, computed, effect, signal } from "@preact/signals";
 import { parseProject, serializeProject } from "../projects/project-format";
 import type { SourceBook } from "../core/books";
+import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
@@ -214,6 +215,7 @@ export class AppStore {
     for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
     for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
+    if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);
@@ -654,6 +656,66 @@ export class AppStore {
     });
   }
 
+  /* ---------------- databases in someone else's schema (mapping wizard) ---------------- */
+
+  /** databases waiting for the mapping wizard; the dialog shows the first */
+  readonly pendingDbs = signal<PendingDb[]>([]);
+  /** confirmed mappings by schema fingerprint — saved in the project, reused when the schema comes back */
+  readonly dbMappings = signal<ReadonlyMap<string, SavedDbMapping>>(new Map());
+  /** the pending entry each mapped source was opened from, so it can be mapped again */
+  private readonly mappedFrom = new Map<string, PendingDb>();
+
+  private async offerMappings(list: readonly PendingDb[]): Promise<void> {
+    for (const p of list) {
+      const saved = this.dbMappings.value.get(p.preview.fingerprint)?.mapping;
+      if (saved && !mappingProblems(p.preview, saved).some((x) => x.level === "error") && (await this.openMapped(p, saved))) {
+        this.notify("info", `${p.label}: נפתח לפי המיפוי השמור בפרויקט (${describeMapping(saved)}). לשינוי: "מיפוי" ברשימת המקורות.`);
+        continue;
+      }
+      this.pendingDbs.value = [...this.pendingDbs.value.filter((x) => x.token !== p.token), p];
+    }
+  }
+
+  /** Opens a pending database through a mapping. False (with a notice) when it failed — the wizard stays open. */
+  async openMapped(p: PendingDb, mapping: DbMapping): Promise<boolean> {
+    const src = await this.runTask(`פותח את ${p.label} לפי המיפוי…`, (opts) => this.service.openMapped(p.token, mapping, opts));
+    if (!src) return false;
+    this.mappedFrom.set(src.info.id, p);
+    batch(() => {
+      this.pendingDbs.value = this.pendingDbs.value.filter((x) => x.token !== p.token);
+      this.dbMappings.value = new Map(this.dbMappings.value).set(p.preview.fingerprint, { fingerprint: p.preview.fingerprint, label: p.label, mapping });
+      this.sources.value = [...this.sources.value, src];
+      for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
+    });
+    if (src.books.length) {
+      this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־${src.info.label}.`);
+      this.chooseRoles(src.books);
+    }
+    this.screen.value = "workspace";
+    return true;
+  }
+
+  dismissMapping(token: string): void {
+    const p = this.pendingDbs.value.find((x) => x.token === token);
+    this.pendingDbs.value = this.pendingDbs.value.filter((x) => x.token !== token);
+    if (p) this.notify("info", `${p.label} לא נפתח. אפשר לגרור אותו שוב בכל עת.`);
+  }
+
+  /** The pending entry a mapped source came from (to show its mapping again). */
+  canRemap(sourceId: string): boolean {
+    return this.mappedFrom.has(sourceId);
+  }
+
+  /** Closes a mapped source and reopens the wizard on it, starting from the mapping it was opened with. */
+  async remapSource(sourceId: string): Promise<void> {
+    const p = this.mappedFrom.get(sourceId);
+    if (!p) return;
+    const current = this.dbMappings.value.get(p.preview.fingerprint)?.mapping ?? p.guess;
+    await this.closeSource(sourceId);
+    this.mappedFrom.delete(sourceId);
+    this.pendingDbs.value = [...this.pendingDbs.value, { ...p, guess: current }];
+  }
+
   /* ---------------- moving links to a new edition (stage 11) ---------------- */
 
   /** a dialog opened from inside a panel */
@@ -858,6 +920,7 @@ export class AppStore {
         rejectedSuggestions: [...this.rejected.value],
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
         altToc: this.altToc.list.value,
+        dbMappings: [...this.dbMappings.value.values()],
       },
       APP_VERSION,
     );
@@ -888,6 +951,7 @@ export class AppStore {
     batch(() => {
       this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges);
       this.rejected.value = new Set(p.rejectedSuggestions);
+      if (p.dbMappings?.length) this.dbMappings.value = new Map([...this.dbMappings.value, ...p.dbMappings.map((m) => [m.fingerprint, m] as const)]);
       this.savedRevision.value = this.linkState.value.revision;
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
       this.view.source.value = show(p.view.source) ?? this.view.source.value;

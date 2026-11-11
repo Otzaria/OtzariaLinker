@@ -1,8 +1,9 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceLine } from "../core/books";
+import type { DbMapping } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
-import type { InputFile, OpenResult } from "../sources/registry";
+import type { InputFile, OpenedSource, OpenResult } from "../sources/registry";
 import type { BatchItem, BookDiff } from "./engine-job";
 import type { BookSearchResult } from "../core/text/find";
 import type { SearchOptions } from "./search-job";
@@ -15,6 +16,8 @@ export interface SourcesApi {
   /** cheap liveness probe for the watchdog */
   alive(): true;
   open(files: InputFile[]): OpenResult;
+  /** opens a database from OpenResult.needsMapping through the user's mapping (may scan: progress, cancel) */
+  openMapped(token: string, mapping: DbMapping): OpenedSource;
   lines(bookKey: string, from: number, to: number): SourceLine[];
   existingLinks(bookKey: string, from: number, to: number): Link[];
   close(sourceId: string): void;

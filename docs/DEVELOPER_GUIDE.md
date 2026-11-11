@@ -39,7 +39,7 @@ WASM או CSP מופיעות רק בקובץ הבנוי. לכן בודקים א�
 | מה נכתב לקובץ הקישורים | `src/formats/links-json/convert.ts` (רשומה), `serialize.ts` (בתים וסדר מפתחות), `export.ts` (קבצים ותוכנית) |
 | כלל שקובע אם קישור תקין | `src/core/links/validate.ts`. הבדיקה והייצוא משתמשים באותו כלל אוטומטית |
 | איך אוצריא תשמור קישור | `src/core/links/stored-form.ts`, `connection-type.ts`, `titles.ts` |
-| קריאה ממסד | `src/database/otzaria/reader.ts`, `links-reader.ts`; עמודי SQLite ב־`src/database/sqlite/lazy/` |
+| קריאה ממסד | `src/database/otzaria/reader.ts`, `links-reader.ts`; מסד במבנה אחר: `src/database/generic/`, `src/core/db-mapping.ts`; עמודי SQLite ב־`src/database/sqlite/lazy/` |
 | זיהוי קבצים | `src/sources/detect.ts`, `src/sources/registry.ts` |
 | פעולת משתמש | מתודה ב־`AppStore` (`src/state/store.ts`), שקוראת ל־`apply()` |
 | מסך או פאנל | `src/ui/workspace/`, `src/ui/screens/`, `src/ui/dialogs/` |

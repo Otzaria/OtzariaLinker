@@ -47,6 +47,38 @@
 `provenance: "db"`. הם מוצגים כמספר ליד השורה ומשמשים לזיהוי כפילויות, אבל לא נערכים ולא נכתבים לקובץ:
 אי אפשר לשחזר מהם רשומה זהה ([`LINK_FORMATS.md`](contracts/LINK_FORMATS.md) §4.4).
 
+### 2.1 מסד SQLite במבנה אחר (אשף המיפוי)
+
+| קוד | תפקיד |
+|---|---|
+| `src/core/db-mapping.ts` | `DbMapping`, `SchemaPreview`, הניחוש (`guessMapping`), הבדיקות (`mappingProblems`), קריאה בטוחה מ־JSON (`parseDbMapping`) |
+| `src/database/generic/preview.ts` | טבלאות, עמודות (סוג לפי 20 שורות לדוגמה), אינדקסים, גודל בעמודים, 5 שורות לתצוגה, טביעת מבנה |
+| `src/database/generic/text-codec.ts` | TEXT כמו שהוא; BLOB כ־UTF-8, zstd בלי מילון, gzip או zlib, עם תקרה של 9MB |
+| `src/database/generic/mapped-reader.ts` | ספרים ושורות לפי המיפוי, בקריאה עצלה (ראו "אסטרטגיות") |
+| `src/sources/db/mapped-source.ts` | `MappedDbSource`: `BookSource` מסוג `mapped-db` |
+| `SourceRegistry.open` / `openMapped` | מסד שאינו של אוצריא חוזר ב־`needsMapping`; פתיחה לפי מיפוי באסימון |
+| `AppStore.pendingDbs`, `openMapped`, `dbMappings` | התור של האשף, הפתיחה, והמיפויים שנשמרים בפרויקט |
+| `src/ui/dialogs/db-mapping-dialog.tsx` | האשף |
+
+- **מתי.** `DbBookSource.open` נכשל ב־`db/no-books` כשאין `book`+`line` עם `book.title`, `line.bookId`,
+  `line.lineIndex` (כל סכמה 0–7 כוללת אותן). במקום "לא נפתח", הרישום מחזיר `PendingDb` עם התצוגה המקדימה
+  והניחוש, ושומר את הקובץ (רק את ה־`File`, עד 16 מסדים) תחת אסימון.
+- **אסטרטגיות קריאה.** אינדקס שמתחיל בעמודת הספר (או טבלת WITHOUT ROWID עם מפתח (ספר, סדר)): בלי סריקה;
+  סדר השורות של ספר נקרא מהאינדקס בפתיחה הראשונה שלו ונשמר במטמון (LRU, 4 מיליון שורות). אחרת (וגם בטבלה
+  אחת, שבה רשימת הספרים עצמה לא ידועה, וכשממופים קישורים): מעבר אחד על הטבלה, או על אינדקס צר יותר
+  שמתחיל בספר, שבונה לכל ספר מערך rowid לפי הסדר (8 בתים לשורה), עם התקדמות וביטול. מספר שורה = המקום
+  בספר (0-based) לפי עמודת הסדר, ולא הערך שבה.
+- **מדידות** (Node, הקובץ בזיכרון): 50 אלף שורות ב־50 ספרים — סריקה 112ms (שתי טבלאות) / 138ms (טבלה אחת),
+  עם אינדקס 1ms ונתח ראשון של 200 שורות ב־10–14ms. מיליון שורות (163MB) — סריקה 1.9s; עם אינדקס 4ms. בדפדפן (Chrome, מקובץ, מהגרירה ועד שהמקור פתוח) מיליון השורות נפתחות ב־4.0s: הקורא קורא מראש בחתיכות של 256KiB (`bufferedSource`), כי קריאת `Blob.slice` לכל עמוד לחוד לקחה 26.5s.
+- **שורה ממופה:** `anchorText` = הטקסט כמו שהוא שמור; `heRef` = null; כותרת מעמודת הכותרת (1–6) או מ־`<hN>`
+  בתחילת השורה. ערך שאינו טקסט מוצג כשורה ריקה.
+- **קישורים ממופים:** שתי עמודות של מזהה שורה (rowid של טבלת השורות), סוג לפי מזהה של הגנרטור (1-based) או
+  לפי שם, אחרת `other`. `provenance: "db"`, כמו קישורי מסד של אוצריא. מזהה שלא נמצא נספר באזהרה.
+- **מסד עוין:** `SqliteFile.leafCount` דוחה עץ שמצהיר על יותר עלים מעמודי הקובץ; סריקה עוצרת כשיש יותר
+  רשומות ממה שהעמודים מסוגלים להכיל; פריסה נעשית בחתיכות של 1KiB עם תקרה.
+- **Fixtures:** `scripts/fixtures/make_generic_dbs.py` ← `tests/fixtures/db/generic/`. מסד 50 אלף השורות
+  והמסדים הפגומים נבנים בזמן הבדיקה (`tests/integration/database/mapped-reader.test.ts`).
+
 ## 3. ייצוא
 
 ### 3.1 התוכנית (`src/formats/links-json/export.ts`)
@@ -175,7 +207,8 @@ _report.txt
   "view": { "source": "…", "target": "…" },
   "altToc": [{ "title": "…", "origin": "user",
                "structures": [{ "key": "Parasha", "heTitle": "פרשה",
-                                "entries": [{ "heTitle": "בראשית", "line": 1, "level": 0 }] }] }]
+                                "entries": [{ "heTitle": "בראשית", "line": 1, "level": 0 }] }] }],
+  "dbMappings": [{ "fingerprint": "…", "label": "corpus.db", "mapping": { "layout": "two-tables", "books": { … }, "lines": { … } } }]
 }
 ```
 
@@ -192,6 +225,9 @@ _report.txt
 - `altToc` (מבני כותרות, לפי שם ספר) הוא שדה **רשות** של גרסה 1: קובץ ישן בלעדיו נפתח כמו קודם, ופרויקט
   בלי מבנים לא כותב אותו. בקריאה הוא נבנה מחדש שדה־שדה, כמו הקישורים; ספר או מבנה פגומים מדולגים ונספרים
   ב־`skipped`.
+- `dbMappings` (לא חובה, ונכתב רק כשיש): המיפויים של מסדים במבנה אחר, לפי טביעת המבנה (גיבוב של
+  `sqlite_master`). נוסף בלי להעלות את `version`: קורא ישן מתעלם ממנו, וקובץ ישן נקרא כ"אין מיפויים".
+  בקריאה כל מיפוי נבנה מחדש שדה־שדה (`parseDbMapping`).
 - **קריאה:** JSON לא תקין, `format` אחר, `version` גבוה מ־1 או בלי `links` נדחים עם הודעה בעברית
   (`ProjectError`). רשומה פגומה מדולגת ונספרת (`skipped`).
 - **שמירה אוטומטית:** אותו טקסט בדיוק, ב־IndexedDB (מסד `otzaria-linker`, מאגר `kv`, מפתח `autosave:v1`),

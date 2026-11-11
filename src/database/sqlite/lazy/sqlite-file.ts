@@ -285,6 +285,31 @@ export class SqliteFile {
     return out;
   }
 
+  /**
+   * Leaf pages of a b-tree (table or index), counted by reading only its interior pages — a cheap
+   * size measure, and the denominator for the progress of a full scan. B-trees are balanced, so the
+   * leaf depth is found once on the leftmost path. A tree that claims more leaves than the file has
+   * pages is corrupt (a hostile page shared by many parents would otherwise multiply the walk).
+   */
+  async leafCount(root: number): Promise<number> {
+    let p = await this.page(root);
+    let depth = 0;
+    while (p.type === PageType.TableInterior || p.type === PageType.IndexInterior) {
+      p = await this.page(p.cells.length ? readU32(p.data, p.cells[0]!) : p.rightChild, ++depth);
+    }
+    if (depth === 0) return 1;
+    let total = 0;
+    const visit = async (no: number, level: number): Promise<void> => {
+      const pg = await this.page(no, level);
+      if (pg.type !== PageType.TableInterior && pg.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${no} אינו בעומק הצפוי בעץ — המסד פגום.`);
+      if (level === depth - 1) total += pg.cells.length + 1;
+      else for (const child of [...pg.cells.map((off) => readU32(pg.data, off)), pg.rightChild]) await visit(child, level + 1);
+      if (total > this.header.pageCount) throw new SqliteFormatError("עץ העמודים במסד מצביע על יותר עמודים משיש בקובץ — המסד פגום.");
+    };
+    await visit(root, 0);
+    return total;
+  }
+
   // ---- b-tree walking --------------------------------------------------------------------
 
   private async *walkTable(pageNo: number, from: number | null, to: number | null, depth = 0): AsyncGenerator<{ rowid: number; values: SqlValue[] }> {
