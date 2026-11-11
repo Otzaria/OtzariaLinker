@@ -501,6 +501,25 @@ export class AppStore {
   }
 
   /**
+   * The citations engine (single book): the references in one book ("(בראשית א, ב)", "ב"ק דף ט:"),
+   * linked into whatever books are open. There is no target to pick.
+   */
+  async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
+    const source = this.refOf(sourceKey);
+    const result = await this.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, options, opts));
+    if (!result) return false;
+    await this.loadDbLinkKeys([source.key]);
+    batch(() => {
+      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}`, result, at: Date.now() };
+      this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
+      this.sideTab.value = "suggestions";
+    });
+    const c = this.suggestionCounts.value;
+    this.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
+    return true;
+  }
+
+  /**
    * Batch linking (stage 8.4): every book of one open source (e.g. a folder of commentaries) against
    * the base book its title names, among all open books. Unpaired books are listed with the reason.
    */

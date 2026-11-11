@@ -29,4 +29,6 @@ export interface SourcesApi {
   searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
   altToc(bookKey: string): LibraryAltTocStructure[] | null;
   headings(bookKey: string): BookHeading[];
+  /** the citations engine on one book: its references, linked into every open book (progress in per-mille) */
+  runCitations(source: BookRef, options: Record<string, unknown>): EngineResult;
 }

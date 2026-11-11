@@ -48,6 +48,8 @@ export interface BooksService {
   altToc(bookKey: string, opts?: CallOptions): Promise<LibraryAltTocStructure[] | null>;
   /** every heading line of a book, in order */
   headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
+  /** the citations engine (single book): references in one book, linked into all open books */
+  runCitations(source: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */

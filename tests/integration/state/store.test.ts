@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
 import { searchJob } from "../../../src/workers/search-job";
+import { citationsJob } from "../../../src/workers/citations-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -22,6 +23,7 @@ function makeStore() {
     searchBook: (k, q, o, opts) => searchJob(reg, k, q, o, { ...(opts?.signal && { signal: opts.signal }), ...(opts?.onProgress && { progress: opts.onProgress }) }),
     altToc: (k) => reg.altToc(k),
     headings: (k) => reg.headings(k),
+    runCitations: (s, o) => citationsJob(reg, s, o, {}),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
