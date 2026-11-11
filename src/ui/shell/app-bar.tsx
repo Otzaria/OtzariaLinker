@@ -63,11 +63,14 @@ export function AppBar({ onExport }: { onExport: () => void }) {
 
       <span class="grow" />
 
-      <label class="switch" title="מצב מתקדם: עריכת מחרוזת הסוג הגולמית ושדות ספריא; בהמשך גם ספי ודאות וכללי נרמול">
+      <label class="switch" title="מצב מתקדם: עריכת מחרוזת הסוג הגולמית, והגדרות השיטות האוטומטיות (ספי ודאות, סימני הערות ועוד)">
         <input type="checkbox" checked={prefs.advanced.value} onChange={(e) => (prefs.advanced.value = e.currentTarget.checked)} />
         <span>מצב מתקדם</span>
       </label>
       <span class="sep" />
+      <button class="icon-btn" onClick={() => store.openHelp()} title="עזרה — מדריך למשתמש (F1)" aria-label="עזרה">
+        <Icon name="fl_question_circle" />
+      </button>
       <Menu icon="fl_settings" label="הגדרות">
         {(close) => (
           <>

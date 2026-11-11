@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useStore } from "./context";
 import { ExportDialog } from "./dialogs/export-dialog";
+import { HelpDialog } from "./dialogs/help-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
 import { Home } from "./screens/home";
@@ -16,6 +17,11 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F1" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        if (store.dialog.value !== "help") store.openHelp();
+        return;
+      }
       const typing = (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]");
       // shortcuts belong to the workspace; on the home screen Ctrl+S would save an empty project
       if (typing || !(e.ctrlKey || e.metaKey) || store.screen.value !== "workspace") return;
@@ -52,6 +58,7 @@ export function App() {
       <Notices />
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {store.dialog.value === "relink" && <RelinkDialog onClose={() => (store.dialog.value = null)} />}
+      {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onClose={() => (store.dialog.value = null)} />}
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

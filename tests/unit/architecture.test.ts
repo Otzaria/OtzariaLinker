@@ -42,6 +42,8 @@ describe("architecture boundaries", () => {
     for (const m of text.matchAll(/^\s*(?:import|export)\b[^'"]*?from\s+["']([^"']+)["']/gm)) {
       const spec = m[1]!;
       const rel = relative(SRC, file);
+      // the user guide, bundled as text for the help dialog: data, not code
+      if (from === "ui" && /\?raw$/.test(spec) && relative(resolve("docs"), resolve(file, "..", spec.replace(/\?raw$/, ""))).match(/^[^.\\/][^\\/]*\.md$/)) continue;
       if (spec.startsWith(".")) {
         const to = layerOf(resolve(file, "..", spec));
         if (to !== from && !ALLOWED[from]!.includes(to)) violations.push(`${rel} → ${to} (${spec})`);

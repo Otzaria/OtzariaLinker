@@ -632,7 +632,14 @@ export class AppStore {
   /* ---------------- moving links to a new edition (stage 11) ---------------- */
 
   /** a dialog opened from inside a panel */
-  readonly dialog = signal<"relink" | null>(null);
+  readonly dialog = signal<"relink" | "help" | null>(null);
+  /** the guide section (heading id) the help opens at */
+  readonly helpSection = signal<string | undefined>(undefined);
+
+  openHelp(section?: string): void {
+    this.helpSection.value = section;
+    this.dialog.value = "help";
+  }
   readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number> } | null>(null);
 
   async planRelinkFor(oldKey: string, newKey: string): Promise<boolean> {
