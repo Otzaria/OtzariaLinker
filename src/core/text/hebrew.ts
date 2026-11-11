@@ -74,3 +74,69 @@ const skeletonImpl = boundedMemo((x: string) => {
 
 /** Consonantal skeleton: no ו/י (plene vs defective spelling); final א↔ה, ן↔ם unified (from 3 letters). */
 export const skeleton = (w: unknown): string => skeletonImpl(String(w ?? ""));
+
+/** A string folded for text search, with where each folded char came from. */
+export interface Folded {
+  readonly text: string;
+  /** map[i] = index in the input of folded char i */
+  readonly map: readonly number[];
+}
+
+/*
+ * What foldForSearch does with each UTF-16 unit: KEEP it, DROP it, or make it a SPACE. A table, not
+ * regexes per char: the in-book search folds every line of a book, so this loop is the hot path.
+ */
+const KEEP = 0;
+const DROP = 1;
+const SPACE = 2;
+const FOLD_CLASS = (() => {
+  const t = new Uint8Array(0x10000);
+  for (let c = 0; c <= 0x20; c++) t[c] = SPACE;
+  for (let c = 0x591; c <= 0x5c7; c++) t[c] = DROP; // nikud and cantillation
+  // maqaf, paseq, sof pasuq, nun hafukha: inside that block, but they SEPARATE words (as in hebrew-tokens)
+  for (const c of "־׀׃׆") t[c.charCodeAt(0)] = SPACE;
+  for (const c of "\"'׳״‘’“”`´″„‟") t[c.charCodeAt(0)] = DROP; // quote marks of every kind
+  for (const c of [0xad, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0xfeff]) t[c] = DROP; // invisible
+  for (const c of ".,;:!?()[]{}-–—…‐‑‒―") t[c.charCodeAt(0)] = SPACE;
+  for (const c of [0x85, 0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000]) t[c] = SPACE;
+  for (let c = 0x2000; c <= 0x200a; c++) t[c] = SPACE;
+  return t;
+})();
+
+/**
+ * Search folding for text inside a book: the same rules as `normalize` (nikud and cantillation
+ * dropped, quote marks dropped, punctuation and runs of spaces become one space), with three
+ * differences that a search in running text needs:
+ *   • no abbreviation expansion — the user looks for what is written ("סי'" is not "סימן");
+ *   • maqaf, paseq and sof pasuq separate words ("כל־האדם" is found by "כל האדם");
+ *   • every folded char keeps its position in the input, so a match maps back to the original
+ *     text for a snippet or a highlight. Latin letters are lower-cased.
+ * The result never starts with a space; it may end with one.
+ */
+export function foldForSearch(input: unknown): Folded {
+  const s = String(input ?? "");
+  const codes: number[] = [];
+  const map: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let c = s.charCodeAt(i);
+    const k = FOLD_CLASS[c]!;
+    if (k === DROP) continue;
+    if (k === SPACE) {
+      if (codes.length && codes[codes.length - 1] !== 0x20) codes.push(0x20), map.push(i);
+      continue;
+    }
+    if (c >= 0x41 && c <= 0x5a) c += 0x20;
+    else if (c >= 0xc0 && (c < 0x5d0 || c > 0x5ea)) {
+      const lower = s[i]!.toLowerCase();
+      if (lower.length === 1) c = lower.charCodeAt(0); // a lower case that is longer would break the map
+    }
+    codes.push(c);
+    map.push(i);
+  }
+  let text = "";
+  for (let i = 0; i < codes.length; i += 8192) text += String.fromCharCode(...codes.slice(i, i + 8192));
+  return { text, map };
+}
+
+/** A search query folded like the text it is matched against, without edge spaces. */
+export const foldQuery = (q: unknown): string => foldForSearch(q).text.trim();
