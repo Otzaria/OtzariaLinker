@@ -4,6 +4,7 @@ import { AltTocDialog } from "./dialogs/alt-toc-dialog";
 import { DbMappingDialog } from "./dialogs/db-mapping-dialog";
 import { ExportDialog } from "./dialogs/export-dialog";
 import { HelpDialog } from "./dialogs/help-dialog";
+import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
 import { Home } from "./screens/home";
@@ -65,6 +66,7 @@ export function App() {
       {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onClose={() => (store.dialog.value = null)} />}
       {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => (store.dialog.value = null)} />}
       <DbMappingDialog />
+      <RecordsDialog />
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

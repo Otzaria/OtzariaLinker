@@ -5,6 +5,7 @@ import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
 import { decodeText } from "../core/text/decode";
+import { parseRecords } from "../formats/records/records";
 import { stripTags } from "../core/text/html";
 import { sharedDictionaries } from "../database/compression/zstd";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
@@ -37,7 +38,7 @@ export interface OpenedSource {
 export interface OpenResult {
   sources: OpenedSource[];
   /** links files and project files, as decoded text — imported by the state layer */
-  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project" | "records"; text: string }[];
   /** files that were not opened, each with a reason the user can act on */
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema: opened through openMapped once the user maps them */
@@ -151,7 +152,14 @@ export class SourceRegistry {
         } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
         return;
       case "json":
-        return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאינו קובץ קישורים של אוצריא. ייבוא JSON אחר דורש מיפוי שדות (מצב מתקדם, בקרוב)." });
+        // other JSON (an array of records, an object holding one, JSON Lines): the user maps its fields
+        if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
+        {
+          const text = decodeText(new Uint8Array(await f.blob.arrayBuffer())).text;
+          if (!parseRecords(text, f.path)) return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאין בו רשומות קישורים (מערך של אובייקטים, אובייקט שמכיל מערך כזה, או JSON Lines)." });
+          result.documents.push({ path: f.path, kind: "records", text });
+        }
+        return;
       case "csv":
       case "tsv":
         if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });

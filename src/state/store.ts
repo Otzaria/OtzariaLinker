@@ -25,6 +25,7 @@ import { BookFind } from "./book-find";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
+import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
@@ -220,6 +221,7 @@ export class AppStore {
     });
     for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
+    for (const d of res.documents) if (d.kind === "records") this.offerRecords(d.path, d.text);
     for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
@@ -797,6 +799,8 @@ export class AppStore {
   /** A spreadsheet of links (CSV/TSV): one links file per source book, through the same import. */
   importLinksCsv(path: string, text: string): void {
     const r = parseLinksCsv(text, path);
+    // a sheet whose columns are not the library's names: let the user map them instead of failing
+    if (!r.files.length && r.problems.some((p) => p.startsWith("חסרה עמודה"))) return this.offerRecords(path, text);
     if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${path}": ${r.problems.length} בעיות בגיליון.`, r.problems.slice(0, 100));
     for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
   }
@@ -1016,6 +1020,31 @@ export class AppStore {
   }
 
   /* ---------------- notices and tasks ---------------- */
+
+  /* ---------------- links in someone else's layout (JSON, JSON Lines, CSV with other columns) ---------------- */
+
+  /** files waiting for the field-mapping dialog, first one shown */
+  readonly pendingRecords = signal<{ path: string; table: RecordsTable; mapping: RecordsMapping }[]>([]);
+
+  offerRecords(path: string, text: string): void {
+    const table = parseRecords(text, path);
+    if (!table) return void this.notify("error", `"${path}": לא נמצאו בקובץ רשומות קישורים (מערך של אובייקטים, JSON Lines או טבלה עם שורת כותרות).`);
+    this.pendingRecords.value = [...this.pendingRecords.value, { path, table, mapping: guessRecordsMapping(table) }];
+  }
+
+  /** Imports the first waiting file with the user's mapping, through the ordinary links-file import. */
+  importRecords(mapping: RecordsMapping): void {
+    const [first, ...rest] = this.pendingRecords.value;
+    if (!first) return;
+    const r = recordsToLinksFiles(first.table, mapping, first.path);
+    this.pendingRecords.value = rest;
+    if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${first.path}": ${r.problems.length} רשומות לא יובאו.`, r.problems);
+    for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
+  }
+
+  skipRecords(): void {
+    this.pendingRecords.value = this.pendingRecords.value.slice(1);
+  }
 
   /** diagnostics (see diagnostics.ts): notices, tasks, worker restarts and uncaught errors */
   readonly log = diagnosticsLog();

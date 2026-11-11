@@ -23,7 +23,7 @@ export interface OpenedSource {
 
 export interface OpenResult {
   sources: OpenedSource[];
-  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project" | "records"; text: string }[];
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema, waiting for the mapping wizard */
   needsMapping?: PendingDb[];
