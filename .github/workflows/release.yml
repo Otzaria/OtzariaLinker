@@ -1,0 +1,43 @@
+name: Release
+
+# Publishing a GitHub Release builds the single HTML file from the tagged commit, runs every check
+# against it, and attaches:
+#   OtzariaLinker.html            (fixed name → .../releases/latest/download/OtzariaLinker.html)
+#   OtzariaLinker-<version>.html
+#   SHA256SUMS
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tag matches package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "${{ github.event.release.tag_name }}"
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chrome msedge
+      - name: E2E against the built file, offline
+        run: npx playwright test
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          gh release upload "$TAG" dist/OtzariaLinker.html "dist/OtzariaLinker-${version}.html" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --clobber
