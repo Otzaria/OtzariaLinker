@@ -54,6 +54,16 @@ describe("maxlinkJob", () => {
     expect(spy).toHaveBeenCalledTimes(2); // the commentary and its base, once
   });
 
+  it("commentaries on one base read the base once: it is kept from one pair to the next", async () => {
+    const { reg, all, byTitle } = await setup();
+    const plan = planMaxLink({ selected: [byTitle("ארצות החיים").key], library: all });
+    expect(plan.steps.filter((s) => s.kind === "pair" && s.target.title === "ארצות החיים")).toHaveLength(4); // two commentaries, two engines
+    const spy = vi.spyOn(reg, "lines");
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    expect(spy.mock.calls.map((c) => c[0]).filter((k) => k === byTitle("ארצות החיים").key)).toHaveLength(1);
+    expect(res.items.map((i) => i.stepId)).toEqual(plan.steps.map((s) => s.id)); // still reported in the plan's order
+  });
+
   it("a failing step is reported and the rest still run", async () => {
     const { reg, all, texts } = await setup();
     const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all });

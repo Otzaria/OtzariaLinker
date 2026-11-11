@@ -39,11 +39,13 @@ export async function maxlinkJob(
   ctx: EngineContext,
   runners: Partial<Record<string, SingleRunner>> = SINGLE_BOOK_RUNNERS,
 ): Promise<MaxLinkJobResult> {
-  // steps of the same pair next to each other, so the pair is read once; otherwise the plan's order
+  // steps of the same pair next to each other, so the pair is read once, and pairs that share a book
+  // (every commentary on one base) next to each other, so that book is read once too; else the plan's order
   const order = new Map<string, number>();
   const pairKey = (s: PlanStep) => (s.kind === "pair" ? `${s.source.key}>${s.target.key}` : `single:${s.id}`);
-  steps.forEach((s) => order.has(pairKey(s)) || order.set(pairKey(s), order.size));
-  const sorted = [...steps].sort((a, b) => order.get(pairKey(a))! - order.get(pairKey(b))!);
+  const shared = (s: PlanStep) => (s.kind === "pair" ? `book:${s.target.key}` : `single:${s.id}`);
+  for (const s of steps) for (const k of [shared(s), pairKey(s)]) if (!order.has(k)) order.set(k, order.size);
+  const sorted = [...steps].sort((a, b) => order.get(shared(a))! - order.get(shared(b))! || order.get(pairKey(a))! - order.get(pairKey(b))!);
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
   const optionsOf = (engine: string) => options.engineOptions?.[engine] ?? {};
@@ -65,9 +67,15 @@ export async function maxlinkJob(
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
         if (loaded?.key !== key) {
-          loaded = null; // drop the previous pair before reading the next one
+          // drop the previous pair before reading the next one — but keep a book the next pair shares
+          const wanted = (x: EngineBook) => x.book.key === step.source.key || x.book.key === step.target.key;
+          const kept: EngineBook[] = loaded ? [loaded.source, loaded.target].filter(wanted) : [];
+          loaded = null;
+          const reuse = (b: BookRef) => kept.find((x) => x.book.key === b.key);
           try {
-            loaded = { key, source: await load(registry, step.source), target: await load(registry, step.target) };
+            const source = reuse(step.source) ?? (await load(registry, step.source));
+            const target = reuse(step.target) ?? (await load(registry, step.target));
+            loaded = { key, source, target };
           } catch (err) {
             if (ctx.signal?.aborted) throw err;
             loadError = { key, message: messageOf(err) };
