@@ -42,8 +42,10 @@ export function recordToObject(r: LinksRecord): Record<string, unknown> {
   }
   for (const k of Object.keys(r.extras)) take(k);
 
+  // defineProperty, not assignment: a library record may carry a "__proto__" key, and `out[k] = v`
+  // would hit the prototype setter and silently drop it from the rewritten file (SECURITY.md §6)
   const out: Record<string, unknown> = {};
-  for (const k of order) out[k] = values[k];
+  for (const k of order) Object.defineProperty(out, k, { value: values[k], enumerable: true, writable: true, configurable: true });
   return out;
 }
 

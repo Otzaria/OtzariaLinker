@@ -377,7 +377,7 @@ const SA_COMMENTARY_BASE: Readonly<Record<string, string>> = {
 function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
   const title = sourceTitle.replace(/[״]/g, '"');
   const on = / על (.+)$/.exec(title)?.[1];
-  const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, SA_COMMENTARY_BASE[title]];
+  const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, Object.hasOwn(SA_COMMENTARY_BASE, title) ? SA_COMMENTARY_BASE[title] : undefined];
   for (const n of names) {
     if (!n) continue;
     const t = aliases.lookup(n)?.targets.find((x) => x.tier === "title" && (x.collection === "bavli" || x.collection === "sa"));

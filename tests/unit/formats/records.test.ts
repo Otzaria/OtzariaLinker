@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessRecordsMapping, mappingGaps, parseRecords, recordsToLinksFiles, type RecordsMapping } from "../../../src/formats/records/records";
+import { guessRecordsMapping, mappingGaps, MAX_FIELDS, parseRecords, recordsToLinksFiles, type RecordsMapping } from "../../../src/formats/records/records";
 import { parseLinksJson } from "../../../src/formats/links-json/parse";
 
 describe("links in someone else's layout", () => {
@@ -15,7 +15,37 @@ describe("links in someone else's layout", () => {
   it("nested values are not offered; a key named __proto__ stays data", () => {
     const t = parseRecords('[{"a":{"x":1},"b":2,"__proto__":"p"}]', "x.json")!;
     expect(t.fields).toEqual(["b", "__proto__"]);
-    expect(Object.getPrototypeOf(t.rows[0])).toBe(Object.prototype);
+    // rows have no prototype: "__proto__" is an own field, and nothing is inherited (security review A10)
+    expect(Object.getPrototypeOf(t.rows[0])).toBeNull();
+    expect(t.rows[0]!["__proto__"]).toBe("p");
+  });
+
+  it("fields named like Object.prototype members are data, and a missing one is just missing (A10)", () => {
+    const t = parseRecords(JSON.stringify([{ src: "A", l1: 1, toString: "B", l2: 2 }, { src: "A", l1: 3, l2: 4 }]), "x.json")!;
+    const m: RecordsMapping = { source: { field: "src" }, sourceLine: "l1", targetLine: "l2", targetTitle: "toString", type: { fixed: "reference" }, base: 1 };
+    const r = recordsToLinksFiles(t, m, "x.json"); // used to throw a TypeError on the row without "toString"
+    expect(r.files.map((f) => [f.sourceTitle, f.rows])).toEqual([["A", 1]]);
+    expect(r.problems).toEqual(["רשומה 2: ספר היעד ריק."]);
+    const t2 = parseRecords(JSON.stringify([{ constructor: "A", l1: 1, tgt: "B", l2: 2 }, { l1: 3, tgt: "B", l2: 4 }]), "x.json")!;
+    const r2 = recordsToLinksFiles(t2, { source: { field: "constructor" }, sourceLine: "l1", targetLine: "l2", targetTitle: "tgt", type: { fixed: "reference" }, base: 1 }, "x.json");
+    // the second row has no source: reported, not titled "function Object() { [native code] }"
+    expect(r2.files.map((f) => f.sourceTitle)).toEqual(["A"]);
+    expect(r2.problems).toEqual(["רשומה 2: ספר המקור ריק."]);
+  });
+
+  it("a short-row sheet under a huge header stays small and fast (security review A5)", () => {
+    const header = Array.from({ length: 8000 }, (_, i) => `c${i}`).join(",");
+    const text = `${header}\n${"x\n".repeat(8000)}`; // 61 KB: was 64M cells, 35 s, +2.9 GB
+    const t0 = performance.now();
+    const t = parseRecords(text, "a.csv")!;
+    expect(performance.now() - t0).toBeLessThan(3000);
+    expect(t.fields).toHaveLength(MAX_FIELDS);
+    expect(t.truncated).toEqual({ fields: 8000 - MAX_FIELDS });
+    expect(t.rows).toHaveLength(8000);
+    expect(Object.keys(t.rows[0]!)).toEqual(["c0"]); // only the cell the row has
+    const j = parseRecords(JSON.stringify([Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`k${i}`, 1]))]), "a.json")!;
+    expect(j.fields).toHaveLength(MAX_FIELDS);
+    expect(j.truncated).toEqual({ fields: 1000 - MAX_FIELDS });
   });
 
   it("guesses fields by name, Hebrew too, and notices 0-based files", () => {

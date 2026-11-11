@@ -11,11 +11,17 @@ import { CONNECTION_TYPE_KEY } from "../links-json/record";
  */
 
 export interface RecordsTable {
-  /** every field name seen, in first-seen order */
+  /** every field name seen, in first-seen order (at most MAX_FIELDS) */
   fields: string[];
-  /** values as text ("" = absent) */
+  /**
+   * values as text, ONLY the non-empty cells of each row ("" or missing = absent). Rows have no
+   * prototype, so a field named "constructor", "toString" or "__proto__" is plain data and a missing
+   * one reads as undefined — never a function of Object.prototype (security review A10).
+   */
   rows: Record<string, string>[];
   layout: "json" | "jsonl" | "csv" | "tsv";
+  /** what was cut to keep the table bounded (security review A5); absent when nothing was */
+  truncated?: { fields?: number; rows?: number };
 }
 
 /** A field of the file, a fixed value for every row, or (source only) the file name. */
@@ -38,7 +44,18 @@ export interface RecordsMapping {
   base: 0 | 1;
 }
 
-const MAX_ROWS = 2_000_000;
+/*
+ * Bounds (security review A5). A 61 KB sheet with an 8,000-column header and 8,000 one-cell rows
+ * used to become 64 million row properties: 35 s and +2.9 GB on the UI thread. Now a row holds only
+ * its non-empty cells, so memory follows the file's size, and the table stops at fixed limits. A
+ * links sheet needs about ten columns; 256 is generous.
+ */
+export const MAX_ROWS = 2_000_000;
+export const MAX_FIELDS = 256;
+/** non-empty cells over the whole table */
+export const MAX_CELLS = 20_000_000;
+
+const newRow = (): Record<string, string> => Object.create(null) as Record<string, string>;
 
 /** Reads a table of records, or null when the text is not one (then it is not offered for mapping). */
 export function parseRecords(text: string, fileName: string): RecordsTable | null {
@@ -56,16 +73,37 @@ export function parseRecords(text: string, fileName: string): RecordsTable | nul
   }
   if (/\.(csv|tsv)$/i.test(fileName) || /[,\t]/.test(t.split(/\r?\n/, 1)[0] ?? "")) {
     const tab = /\.tsv$/i.test(fileName) || (t.split(/\r?\n/, 1)[0] ?? "").includes("\t");
-    const rows = parseDelimited(t, tab ? "\t" : ",");
-    if (rows.length < 2) return null;
-    const fields = rows[0]!.map((h) => h.trim());
-    return {
-      fields,
-      rows: rows.slice(1, MAX_ROWS + 1).filter((c) => c.some((v) => v.trim())).map((c) => Object.fromEntries(fields.map((f, i) => [f, (c[i] ?? "").trim()]))),
-      layout: tab ? "tsv" : "csv",
-    };
+    const all = parseDelimited(t, tab ? "\t" : ",");
+    if (all.length < 2) return null;
+    const header = all[0]!.map((h) => h.trim());
+    const fields = header.slice(0, MAX_FIELDS);
+    const rows: Record<string, string>[] = [];
+    let cells = 0;
+    let cut = all.length - 1 > MAX_ROWS ? all.length - 1 - MAX_ROWS : 0;
+    for (let r = 1; r < all.length && r <= MAX_ROWS; r++) {
+      const c = all[r]!;
+      const row = newRow();
+      let any = false;
+      // only the cells the row has, never every header column (a short row under a wide header)
+      for (let i = 0, n = Math.min(c.length, fields.length); i < n; i++) {
+        const v = c[i]!.trim();
+        if (v) (row[fields[i]!] = v), (any = true), cells++;
+      }
+      if (!any) continue;
+      if (cells > MAX_CELLS) {
+        cut += all.length - r;
+        break;
+      }
+      rows.push(row);
+    }
+    return withTruncation({ fields, rows, layout: tab ? "tsv" : "csv" }, header.length - fields.length, cut);
   }
   return null;
+}
+
+function withTruncation(table: RecordsTable, fields: number, rows: number): RecordsTable {
+  if (fields <= 0 && rows <= 0) return table;
+  return { ...table, truncated: { ...(fields > 0 && { fields }), ...(rows > 0 && { rows }) } };
 }
 
 function parseJsonl(t: string): RecordsTable | null {
@@ -92,17 +130,34 @@ function fromObjects(arr: readonly unknown[], layout: "json" | "jsonl"): Records
   const fields: string[] = [];
   const seen = new Set<string>();
   const rows: Record<string, string>[] = [];
-  for (const o of arr.slice(0, MAX_ROWS)) {
+  let extraFields = 0;
+  const extraSeen = new Set<string>();
+  let cells = 0;
+  let cut = arr.length > MAX_ROWS ? arr.length - MAX_ROWS : 0;
+  const n = Math.min(arr.length, MAX_ROWS);
+  for (let i = 0; i < n; i++) {
+    const o = arr[i];
     if (!o || typeof o !== "object" || Array.isArray(o)) continue;
-    const row: Record<string, string> = {};
+    const row = newRow();
     for (const [k, v] of Object.entries(o)) {
       if (v === null || v === undefined || typeof v === "object") continue; // nested values are not mappable
-      if (!seen.has(k)) seen.add(k), fields.push(k);
-      Object.defineProperty(row, k, { value: String(v).trim(), enumerable: true, writable: true, configurable: true });
+      if (!seen.has(k)) {
+        if (fields.length >= MAX_FIELDS) {
+          if (!extraSeen.has(k)) extraSeen.add(k), extraFields++;
+          continue;
+        }
+        seen.add(k), fields.push(k);
+      }
+      const s = String(v).trim();
+      if (s) (row[k] = s), cells++;
+    }
+    if (cells > MAX_CELLS) {
+      cut += n - i;
+      break;
     }
     rows.push(row);
   }
-  return rows.length && fields.length ? { fields, rows, layout } : null;
+  return rows.length && fields.length ? withTruncation({ fields, rows, layout }, extraFields, cut) : null;
 }
 
 /* ---------------- guessing ---------------- */

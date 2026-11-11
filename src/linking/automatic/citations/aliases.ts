@@ -532,7 +532,7 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
     }
     case "sa": {
       const part = title.slice("שולחן ערוך, ".length);
-      for (const p of SA_PARTS[part] ?? [part]) {
+      for (const p of (Object.hasOwn(SA_PARTS, part) ? SA_PARTS[part] : undefined) ?? [part]) {
         for (const n of [...SA_NAMES, 'רמ"א', 'הרמ"א']) out.push({ name: `${n} ${p}` });
         // "או"ח סי' א", "בחושן משפט סי' ק"צ" alone are the Shulchan Aruch (the Tur needs its own name before it)
         out.push({ name: p });

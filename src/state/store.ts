@@ -1088,6 +1088,8 @@ export class AppStore {
   offerRecords(path: string, text: string): void {
     const table = parseRecords(text, path);
     if (!table) return void this.notify("error", `"${path}": לא נמצאו בקובץ רשומות קישורים (מערך של אובייקטים, JSON Lines או טבלה עם שורת כותרות).`);
+    if (table.truncated)
+      this.notify("warning", `"${path}" גדול מדי לייבוא מלא: ${[table.truncated.fields && `${table.truncated.fields.toLocaleString("he")} עמודות`, table.truncated.rows && `${table.truncated.rows.toLocaleString("he")} רשומות`].filter(Boolean).join(" ו־")} לא נקראו. פצלו את הקובץ, או השאירו בו רק את העמודות של הקישורים.`);
     this.pendingRecords.value = [...this.pendingRecords.value, { path, table, mapping: guessRecordsMapping(table) }];
   }
 
