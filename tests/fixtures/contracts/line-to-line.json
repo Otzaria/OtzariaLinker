@@ -1,0 +1,485 @@
+{
+ "_comment": "Plain line->line records without ref_* (local<->local). \"source\"-typed records are stored flipped as COMMENTARY (dbRows[].link.storedDirection == \"flipped\"). Some records resolve to no book (name traps) - see status.",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "shape": "L->L",
+   "file": "DictaToOtzaria/ערוך/links/מהריט אלגאזי על הלכות בכורות וחלה_links.json",
+   "recordIndex": 969,
+   "record": {
+    "line_index_1": 1228,
+    "line_index_2": 140,
+    "heRef_2": "הלכות בכורות וחלה להרמבן הלכות חלה להרמב\"ן, לה",
+    "path_2": "הלכות בכורות וחלה להרמבן.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מהריט אלגאזי על הלכות בכורות וחלה",
+    "targetTitle": "הלכות בכורות וחלה להרמבן",
+    "sourceBook": {
+     "id": 7992,
+     "source": "DictaToOtzaria",
+     "totalLines": 2376,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8012,
+     "source": "DictaToOtzaria",
+     "totalLines": 252,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9161174,
+     "heRef": "מהריט אלגאזי על הלכות בכורות וחלה 1228"
+    },
+    "targetLine": {
+     "id": 9315535,
+     "heRef": "הלכות בכורות וחלה להרמבן 140"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12260222,
+      "sourceBookId": 8012,
+      "targetBookId": 7992,
+      "sourceLineId": 9315535,
+      "targetLineId": 9161174,
+      "targetLineIndex": 1227,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "DictaToOtzaria/ערוך/links/מהריט אלגאזי על הלכות בכורות וחלה_links.json",
+   "recordIndex": 1454,
+   "record": {
+    "line_index_1": 1801,
+    "line_index_2": 204,
+    "heRef_2": "הלכות בכורות וחלה להרמבן הלכות בכורות להרמב\"ן, נה",
+    "path_2": "הלכות בכורות וחלה להרמבן.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מהריט אלגאזי על הלכות בכורות וחלה",
+    "targetTitle": "הלכות בכורות וחלה להרמבן",
+    "sourceBook": {
+     "id": 7992,
+     "source": "DictaToOtzaria",
+     "totalLines": 2376,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8012,
+     "source": "DictaToOtzaria",
+     "totalLines": 252,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9161747,
+     "heRef": "מהריט אלגאזי על הלכות בכורות וחלה 1801"
+    },
+    "targetLine": {
+     "id": 9315599,
+     "heRef": "הלכות בכורות וחלה להרמבן 204"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12260707,
+      "sourceBookId": 8012,
+      "targetBookId": 7992,
+      "sourceLineId": 9315599,
+      "targetLineId": 9161747,
+      "targetLineIndex": 1800,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "DictaToOtzaria/ערוך/links/מהריט אלגאזי על הלכות בכורות וחלה_links.json",
+   "recordIndex": 1938,
+   "record": {
+    "line_index_1": 2375,
+    "line_index_2": 249,
+    "heRef_2": "הלכות בכורות וחלה להרמבן הלכות בכורות להרמב\"ן, ק",
+    "path_2": "הלכות בכורות וחלה להרמבן.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מהריט אלגאזי על הלכות בכורות וחלה",
+    "targetTitle": "הלכות בכורות וחלה להרמבן",
+    "sourceBook": {
+     "id": 7992,
+     "source": "DictaToOtzaria",
+     "totalLines": 2376,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8012,
+     "source": "DictaToOtzaria",
+     "totalLines": 252,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9162321,
+     "heRef": "מהריט אלגאזי על הלכות בכורות וחלה 2375"
+    },
+    "targetLine": {
+     "id": 9315644,
+     "heRef": "הלכות בכורות וחלה להרמבן 249"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12261191,
+      "sourceBookId": 8012,
+      "targetBookId": 7992,
+      "sourceLineId": 9315644,
+      "targetLineId": 9162321,
+      "targetLineIndex": 2374,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/סידור אשכנז_links.json",
+   "recordIndex": 2609,
+   "record": {
+    "line_index_1": 46.0,
+    "heRef_2": "עולת ראיה, מה טובו,  ה,",
+    "path_2": "אוצריא\\מחשבת ישראל\\ספרות מודרנית\\כתבי הרב קוק\\עולת ראיה.txt",
+    "line_index_2": 170.0,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "סידור אשכנז",
+    "targetTitle": "עולת ראיה",
+    "sourceBook": {
+     "id": 6043,
+     "source": "MoreBooks",
+     "totalLines": 4860,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   }
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/סידור אשכנז_links.json",
+   "recordIndex": 2770,
+   "record": {
+    "line_index_1": 201.0,
+    "heRef_2": "עולת ראיה, פסוקי דזמרה,  מה,",
+    "path_2": "אוצריא\\מחשבת ישראל\\ספרות מודרנית\\כתבי הרב קוק\\עולת ראיה.txt",
+    "line_index_2": 643.0,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "סידור אשכנז",
+    "targetTitle": "עולת ראיה",
+    "sourceBook": {
+     "id": 6043,
+     "source": "MoreBooks",
+     "totalLines": 4860,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   }
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/סידור אשכנז_links.json",
+   "recordIndex": 2930,
+   "record": {
+    "line_index_1": 73.0,
+    "heRef_2": "עולת ראיה, יגדל,  ט,",
+    "path_2": "אוצריא\\מחשבת ישראל\\ספרות מודרנית\\כתבי הרב קוק\\עולת ראיה.txt",
+    "line_index_2": 192.0,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "סידור אשכנז",
+    "targetTitle": "עולת ראיה",
+    "sourceBook": {
+     "id": 6043,
+     "source": "MoreBooks",
+     "totalLines": 4860,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   }
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/תיקונים מזוהר חדש - דפוס וילנא_links.json",
+   "recordIndex": 1801,
+   "record": {
+    "line_index_1": 284,
+    "line_index_2": 1989,
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיקונים מזוהר חדש - דפוס וילנא",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 7463,
+     "source": "MoreBooks",
+     "totalLines": 560,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 7766489,
+     "heRef": "תיקונים מזוהר חדש - דפוס וילנא 284"
+    },
+    "targetLine": {
+     "id": 7764290,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1989"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11379335,
+      "sourceBookId": 7463,
+      "targetBookId": 7461,
+      "sourceLineId": 7766489,
+      "targetLineId": 7764290,
+      "targetLineIndex": 1988,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/תיקונים מזוהר חדש - דפוס וילנא_links.json",
+   "recordIndex": 2701,
+   "record": {
+    "line_index_1": 420,
+    "line_index_2": 2937,
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיקונים מזוהר חדש - דפוס וילנא",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 7463,
+     "source": "MoreBooks",
+     "totalLines": 560,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 7766625,
+     "heRef": "תיקונים מזוהר חדש - דפוס וילנא 420"
+    },
+    "targetLine": {
+     "id": 7765238,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 2937"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11380235,
+      "sourceBookId": 7463,
+      "targetBookId": 7461,
+      "sourceLineId": 7766625,
+      "targetLineId": 7765238,
+      "targetLineIndex": 2936,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/תיקונים מזוהר חדש - דפוס וילנא_links.json",
+   "recordIndex": 3601,
+   "record": {
+    "line_index_1": 38,
+    "line_index_2": 63,
+    "heRef_2": "הגהות וליקוטים",
+    "path_2": "הגהות וליקוטים על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיקונים מזוהר חדש - דפוס וילנא",
+    "targetTitle": "הגהות וליקוטים על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 7463,
+     "source": "MoreBooks",
+     "totalLines": 560,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7462,
+     "source": "MoreBooks",
+     "totalLines": 64,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9622752,
+     "heRef": "תיקונים מזוהר חדש - דפוס וילנא 38"
+    },
+    "targetLine": {
+     "id": 7766204,
+     "heRef": "הגהות וליקוטים על תיקונים מזוהר חדש - דפוס וילנא 63"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12526498,
+      "sourceBookId": 7463,
+      "targetBookId": 7462,
+      "sourceLineId": 9622752,
+      "targetLineId": 7766204,
+      "targetLineIndex": 62,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L",
+   "file": "MoreBooks/links/תקוני הזהר מסודר על פי הגרא_links.json",
+   "recordIndex": 4526,
+   "record": {
+    "line_index_1": 1393,
+    "line_index_2": 4583,
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תקוני הזהר.txt",
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תקוני הזהר מסודר על פי הגרא",
+    "targetTitle": "ביאור הגרא על תקוני הזהר",
+    "sourceBook": {
+     "id": 7974,
+     "source": "MoreBooks",
+     "totalLines": 2748,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7973,
+     "source": "MoreBooks",
+     "totalLines": 9148,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9124770,
+     "heRef": "תקוני הזהר מסודר על פי הגרא 1393"
+    },
+    "targetLine": {
+     "id": 9087176,
+     "heRef": "ביאור הגרא על תקוני הזהר 4583"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12272782,
+      "sourceBookId": 7974,
+      "targetBookId": 7973,
+      "sourceLineId": 9124770,
+      "targetLineId": 9087176,
+      "targetLineIndex": 4582,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  }
+ ]
+}

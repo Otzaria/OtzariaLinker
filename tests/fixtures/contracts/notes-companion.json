@@ -1,0 +1,609 @@
+{
+ "_comment": "Records pointing at \"הערות על X\" companions. When the merge plan accepts the pair, the companion gets NO book row: its notes are merged into the base lines (line_note rows in schema 7) and every link record into it is skipped. status=book_not_found_or_ambiguous with an empty targetBook is the expected outcome. A source file whose name is not the exact DB title (e.g. ׳׳ vs ״) is dropped entirely.",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/בית אבות על מסכת אבות_links.json",
+   "recordIndex": 721,
+   "record": {
+    "line_index_1": 830,
+    "line_index_2": 767,
+    "heRef_2": "הערות",
+    "path_2": "הערות על בית אבות על מסכת אבות.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "בית אבות על מסכת אבות",
+    "targetTitle": "הערות על בית אבות על מסכת אבות",
+    "sourceBook": {
+     "id": 7964,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1774,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 227,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 1,
+     "charPos": 523,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/בית אבות על מסכת אבות_links.json",
+   "recordIndex": 1081,
+   "record": {
+    "line_index_1": 1270,
+    "line_index_2": 1143,
+    "heRef_2": "הערות",
+    "path_2": "הערות על בית אבות על מסכת אבות.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "בית אבות על מסכת אבות",
+    "targetTitle": "הערות על בית אבות על מסכת אבות",
+    "sourceBook": {
+     "id": 7964,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1774,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 46,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 1,
+     "charPos": 79,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 2,
+     "charPos": 167,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 3,
+     "charPos": 224,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 4,
+     "charPos": 384,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 5,
+     "charPos": 520,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 6,
+     "charPos": 577,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 7,
+     "charPos": 622,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/בית אבות על מסכת אבות_links.json",
+   "recordIndex": 1441,
+   "record": {
+    "line_index_1": 1726,
+    "line_index_2": 1522,
+    "heRef_2": "הערות",
+    "path_2": "הערות על בית אבות על מסכת אבות.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "בית אבות על מסכת אבות",
+    "targetTitle": "הערות על בית אבות על מסכת אבות",
+    "sourceBook": {
+     "id": 7964,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1774,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 774,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/דרשות תלמיד הראש_links.json",
+   "recordIndex": 1504,
+   "record": {
+    "line_index_1": 510,
+    "line_index_2": 1506,
+    "heRef_2": "הערות",
+    "path_2": "הערות על דרשות תלמיד הראש.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "דרשות תלמיד הראש",
+    "targetTitle": "הערות על דרשות תלמיד הראש",
+    "sourceBook": {
+     "id": 8019,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1003,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 121,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 1,
+     "charPos": 181,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 2,
+     "charPos": 201,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 3,
+     "charPos": 234,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 4,
+     "charPos": 249,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 5,
+     "charPos": 577,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 6,
+     "charPos": 786,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 7,
+     "charPos": 866,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 8,
+     "charPos": 988,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 9,
+     "charPos": 1440,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 10,
+     "charPos": 1539,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 11,
+     "charPos": 1749,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 12,
+     "charPos": 1966,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 13,
+     "charPos": 2085,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 14,
+     "charPos": 2148,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 15,
+     "charPos": 2585,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/דרשות תלמיד הראש_links.json",
+   "recordIndex": 2256,
+   "record": {
+    "line_index_1": 700,
+    "line_index_2": 2258,
+    "heRef_2": "הערות",
+    "path_2": "הערות על דרשות תלמיד הראש.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "דרשות תלמיד הראש",
+    "targetTitle": "הערות על דרשות תלמיד הראש",
+    "sourceBook": {
+     "id": 8019,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1003,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 14,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 1,
+     "charPos": 47,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/דרשות תלמיד הראש_links.json",
+   "recordIndex": 3008,
+   "record": {
+    "line_index_1": 992,
+    "line_index_2": 3010,
+    "heRef_2": "הערות",
+    "path_2": "הערות על דרשות תלמיד הראש.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "דרשות תלמיד הראש",
+    "targetTitle": "הערות על דרשות תלמיד הראש",
+    "sourceBook": {
+     "id": 8019,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1003,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 39,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/חידושי רבי זרחיה גוטה_links.json",
+   "recordIndex": 104,
+   "record": {
+    "line_index_1": 565,
+    "line_index_2": 106,
+    "heRef_2": "הערות",
+    "path_2": "הערות על חידושי רבי זרחיה גוטה.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "חידושי רבי זרחיה גוטה",
+    "targetTitle": "הערות על חידושי רבי זרחיה גוטה",
+    "sourceBook": {
+     "id": 7989,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1010,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 70,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/חידושי רבי זרחיה גוטה_links.json",
+   "recordIndex": 156,
+   "record": {
+    "line_index_1": 796,
+    "line_index_2": 158,
+    "heRef_2": "הערות",
+    "path_2": "הערות על חידושי רבי זרחיה גוטה.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "חידושי רבי זרחיה גוטה",
+    "targetTitle": "הערות על חידושי רבי זרחיה גוטה",
+    "sourceBook": {
+     "id": 7989,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1010,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 131,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/חידושי רבי זרחיה גוטה_links.json",
+   "recordIndex": 208,
+   "record": {
+    "line_index_1": 1007,
+    "line_index_2": 210,
+    "heRef_2": "הערות",
+    "path_2": "הערות על חידושי רבי זרחיה גוטה.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "חידושי רבי זרחיה גוטה",
+    "targetTitle": "הערות על חידושי רבי זרחיה גוטה",
+    "sourceBook": {
+     "id": 7989,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1010,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 7,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "BeitAharonVeYisraelToOtzaria/links/טופסי גיטין_links.json",
+   "recordIndex": 811,
+   "record": {
+    "line_index_1": 653,
+    "line_index_2": 129,
+    "heRef_2": "הערות",
+    "path_2": "הערות על טופסי גיטין.txt",
+    "Conection Type": "footnotes"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "טופסי גיטין",
+    "targetTitle": "הערות על טופסי גיטין",
+    "sourceBook": {
+     "id": 7991,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1328,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 225,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+footnotes+hearot"
+  },
+  {
+   "file": "MoreBooks/links/ברכת ראש על מסכת נזיר_links.json",
+   "recordIndex": 3,
+   "record": {
+    "line_index_1": 36,
+    "heRef_2": "הערות",
+    "path_2": "הערות על ברכת ראש על מסכת נזיר.txt",
+    "line_index_2": 4,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "ברכת ראש על מסכת נזיר",
+    "targetTitle": "הערות על ברכת ראש על מסכת נזיר",
+    "sourceBook": {
+     "id": 7987,
+     "source": "MoreBooks",
+     "totalLines": 2471,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 708,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 1,
+     "charPos": 752,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 2,
+     "charPos": 1401,
+     "hasMarker": 1
+    },
+    {
+     "noteIndex": 3,
+     "charPos": 1436,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+hearot"
+  },
+  {
+   "file": "MoreBooks/links/ברכת ראש על מסכת נזיר_links.json",
+   "recordIndex": 4,
+   "record": {
+    "line_index_1": 37,
+    "heRef_2": "הערות",
+    "path_2": "הערות על ברכת ראש על מסכת נזיר.txt",
+    "line_index_2": 5,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "ברכת ראש על מסכת נזיר",
+    "targetTitle": "הערות על ברכת ראש על מסכת נזיר",
+    "sourceBook": {
+     "id": 7987,
+     "source": "MoreBooks",
+     "totalLines": 2471,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 1183,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+hearot"
+  },
+  {
+   "file": "MoreBooks/links/ברכת ראש על מסכת נזיר_links.json",
+   "recordIndex": 5,
+   "record": {
+    "line_index_1": 38,
+    "heRef_2": "הערות",
+    "path_2": "הערות על ברכת ראש על מסכת נזיר.txt",
+    "line_index_2": 6,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "ברכת ראש על מסכת נזיר",
+    "targetTitle": "הערות על ברכת ראש על מסכת נזיר",
+    "sourceBook": {
+     "id": 7987,
+     "source": "MoreBooks",
+     "totalLines": 2471,
+     "isBaseBook": 0
+    },
+    "targetBook": []
+   },
+   "baseLineNotes": [
+    {
+     "noteIndex": 0,
+     "charPos": 69,
+     "hasMarker": 1
+    }
+   ],
+   "shape": "L->L+hearot"
+  },
+  {
+   "file": "MoreBooks/links/וזה לשונו - שובבי׳׳ם_links.json",
+   "recordIndex": 58,
+   "record": {
+    "line_index_1": 710,
+    "heRef_2": "הערות",
+    "path_2": "הערות על וזה לשונו - שובבי׳׳ם.txt",
+    "line_index_2": 59,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "וזה לשונו - שובבי׳׳ם",
+    "targetTitle": "הערות על וזה לשונו - שובבי׳׳ם",
+    "sourceBook": [],
+    "targetBook": []
+   },
+   "shape": "L->L+hearot"
+  },
+  {
+   "file": "MoreBooks/links/וזה לשונו - שובבי׳׳ם_links.json",
+   "recordIndex": 87,
+   "record": {
+    "line_index_1": 1066,
+    "heRef_2": "הערות",
+    "path_2": "הערות על וזה לשונו - שובבי׳׳ם.txt",
+    "line_index_2": 88,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "וזה לשונו - שובבי׳׳ם",
+    "targetTitle": "הערות על וזה לשונו - שובבי׳׳ם",
+    "sourceBook": [],
+    "targetBook": []
+   },
+   "shape": "L->L+hearot"
+  },
+  {
+   "file": "MoreBooks/links/וזה לשונו - שובבי׳׳ם_links.json",
+   "recordIndex": 115,
+   "record": {
+    "line_index_1": 2701,
+    "heRef_2": "הערות",
+    "path_2": "הערות על וזה לשונו - שובבי׳׳ם.txt",
+    "line_index_2": 116,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "book_not_found_or_ambiguous",
+    "sourceTitle": "וזה לשונו - שובבי׳׳ם",
+    "targetTitle": "הערות על וזה לשונו - שובבי׳׳ם",
+    "sourceBook": [],
+    "targetBook": []
+   },
+   "shape": "L->L+hearot"
+  }
+ ]
+}

@@ -1,0 +1,708 @@
+{
+ "_comment": "Shapes that exist in the DB but have NO producer in the live otzaria-library _links.json files: range->range (Sefaria CSV ranges on both sides), LINKER citation range anchors (LinkerToOtzaria Phase-2, never from _links.json - \"linker\" records are skipped by the generator), side=1 anchors (Sefaria char-level QUOTATION), and link_suppressed_side rows (Sefaria visibility masks). Not reproducible from _links.json.",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "rangeToRange": [
+  {
+   "linkId": 8613083,
+   "source": {
+    "title": "חגיגה",
+    "origin": "Sefaria",
+    "lineIndex0": 502,
+    "heRef": "חגיגה, יז., ב"
+   },
+   "target": {
+    "title": "משנה חגיגה",
+    "origin": "Sefaria",
+    "lineIndex0": 13,
+    "heRef": "משנה חגיגה, ב, ג"
+   },
+   "connectionType": "MISHNAH_IN_TALMUD",
+   "link_anchor": [],
+   "link_range": [
+    {
+     "side": 0,
+     "endLineIndex0": 504
+    },
+    {
+     "side": 1,
+     "endLineIndex0": 14
+    }
+   ],
+   "link_coverage_rows": {
+    "0": 2,
+    "1": 1
+   },
+   "link_suppressed_side": []
+  },
+  {
+   "linkId": 8837408,
+   "source": {
+    "title": "מנחות",
+    "origin": "Sefaria",
+    "lineIndex0": 733,
+    "heRef": "מנחות, כא:, י"
+   },
+   "target": {
+    "title": "פסחים",
+    "origin": "Sefaria",
+    "lineIndex0": 1883,
+    "heRef": "פסחים, סא:, ד"
+   },
+   "connectionType": "MESORAT_HASHAS",
+   "link_anchor": [],
+   "link_range": [
+    {
+     "side": 0,
+     "endLineIndex0": 734
+    },
+    {
+     "side": 1,
+     "endLineIndex0": 1884
+    }
+   ],
+   "link_coverage_rows": {
+    "0": 1,
+    "1": 1
+   },
+   "link_suppressed_side": []
+  },
+  {
+   "linkId": 8848375,
+   "source": {
+    "title": "מנחות",
+    "origin": "Sefaria",
+    "lineIndex0": 858,
+    "heRef": "מנחות, כה:, ז"
+   },
+   "target": {
+    "title": "תוספתא פסחים",
+    "origin": "Sefaria",
+    "lineIndex0": 98,
+    "heRef": "תוספתא פסחים, ח, ה"
+   },
+   "connectionType": "MESORAT_HASHAS",
+   "link_anchor": [],
+   "link_range": [
+    {
+     "side": 0,
+     "endLineIndex0": 859
+    },
+    {
+     "side": 1,
+     "endLineIndex0": 99
+    }
+   ],
+   "link_coverage_rows": {
+    "0": 1,
+    "1": 1
+   },
+   "link_suppressed_side": []
+  }
+ ],
+ "linkerAnchorRange": [
+  {
+   "linkId": 13353847,
+   "source": {
+    "title": "יהל אור",
+    "origin": "DictaToOtzaria",
+    "lineIndex0": 46,
+    "heRef": "יהל אור 47"
+   },
+   "target": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 1263,
+    "heRef": "טור, אורח חיים,  תריב, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 22,
+     "charEnd": 42,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "הטור באו\"ח סי' תרי\"ב"
+  },
+  {
+   "linkId": 6033665,
+   "source": {
+    "title": "ערוך השולחן",
+    "origin": "Sefaria",
+    "lineIndex0": 19129,
+    "heRef": "ערוך השולחן, אבן העזר,  קכו, ח"
+   },
+   "target": {
+    "title": "שולחן ערוך, אבן העזר",
+    "origin": "Sefaria",
+    "lineIndex0": 1510,
+    "heRef": "שולחן ערוך, אבן העזר,  קל, ד"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 576,
+     "charEnd": 589,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "בסי' ק\"ל בס\"ד"
+  },
+  {
+   "linkId": 12117195,
+   "source": {
+    "title": "ייטב לב בראשית",
+    "origin": "DictaToOtzaria",
+    "lineIndex0": 993,
+    "heRef": "ייטב לב בראשית 994"
+   },
+   "target": {
+    "title": "ספר הזהר",
+    "origin": "Sefaria",
+    "lineIndex0": 1307,
+    "heRef": "ספר הזהר, בראשית,  קא, ד"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 6,
+     "charEnd": 31,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 1320
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "בזוהר סוף בראשית (נח ע\"ב)"
+  },
+  {
+   "linkId": 4936635,
+   "source": {
+    "title": "מראה יחזקאל על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 225,
+    "heRef": "מראה יחזקאל על התורה, מקץ,  כא"
+   },
+   "target": {
+    "title": "ספר הזהר",
+    "origin": "Sefaria",
+    "lineIndex0": 2741,
+    "heRef": "ספר הזהר, וירא,  כט, ח"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 179,
+     "charEnd": 197,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 2748
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "זוה\"ק ח\"א קט\"ז ע\"ב"
+  },
+  {
+   "linkId": 13134441,
+   "source": {
+    "title": "מהרש חלק ד",
+    "origin": "DictaToOtzaria",
+    "lineIndex0": 700,
+    "heRef": "מהרש חלק ד 701"
+   },
+   "target": {
+    "title": "שפתי כהן על שולחן ערוך יורה דעה",
+    "origin": "Sefaria",
+    "lineIndex0": 387,
+    "heRef": "שפתי כהן על שולחן ערוך יורה דעה,  טז, א, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 1037,
+     "charEnd": 1055,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 437
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "הש\"ך ביו\"ד סי' ט\"ז"
+  },
+  {
+   "linkId": 12715575,
+   "source": {
+    "title": "תוספות רבי עקיבא איגר על משנה נדרים",
+    "origin": "Sefaria",
+    "lineIndex0": 117,
+    "heRef": "תוספות רבי עקיבא איגר על משנה נדרים, יא, יב, ב"
+   },
+   "target": {
+    "title": "שפתי כהן על שולחן ערוך יורה דעה",
+    "origin": "Sefaria",
+    "lineIndex0": 9701,
+    "heRef": "שפתי כהן על שולחן ערוך יורה דעה,  רלח, א, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 1613,
+     "charEnd": 1634,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 9755
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "הש\"ך יו\"ד (סימן רל\"ח)"
+  },
+  {
+   "linkId": 13563280,
+   "source": {
+    "title": "מטה אשר",
+    "origin": "National-LibraryToOtzaria",
+    "lineIndex0": 205,
+    "heRef": "מטה אשר 206"
+   },
+   "target": {
+    "title": "שפתי כהן על שולחן ערוך חושן משפט",
+    "origin": "Sefaria",
+    "lineIndex0": 10038,
+    "heRef": "שפתי כהן על שולחן ערוך חושן משפט,  שמח, א, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 2108,
+     "charEnd": 2127,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 10049
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "הש\"ך חו\"מ בסי' שמ\"ח"
+  },
+  {
+   "linkId": 13144414,
+   "source": {
+    "title": "כתב סופר יורה דעה",
+    "origin": "DictaToOtzaria",
+    "lineIndex0": 2897,
+    "heRef": "כתב סופר יורה דעה 2898"
+   },
+   "target": {
+    "title": "בית יוסף",
+    "origin": "Sefaria",
+    "lineIndex0": 13408,
+    "heRef": "בית יוסף, יורה דעה,  כח, א, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 120,
+     "charEnd": 137,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 13494
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "הב\"י יו\"ד סי' כ\"ח"
+  },
+  {
+   "linkId": 13623118,
+   "source": {
+    "title": "דור המלקטים על אבן העזר",
+    "origin": "MoreBooks",
+    "lineIndex0": 5690,
+    "heRef": "דור המלקטים על אבן העזר 5691"
+   },
+   "target": {
+    "title": "ב\"ח",
+    "origin": "Sefaria",
+    "lineIndex0": 18277,
+    "heRef": "ב\"ח, אבן העזר,  סד, א, א"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 179,
+     "charEnd": 198,
+     "label": null
+    }
+   ],
+   "link_range": [
+    {
+     "side": 1,
+     "endLineIndex0": 18285
+    }
+   ],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": "והב\"ח באה\"ע סי' ס\"ד"
+  },
+  {
+   "linkId": 10770840,
+   "source": {
+    "title": "בית יעקב על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 974,
+    "heRef": "בית יעקב על התורה, תולדות,  נב, א"
+   },
+   "target": {
+    "title": "בראשית",
+    "origin": "Sefaria",
+    "lineIndex0": 51,
+    "heRef": "בראשית, ב, יח"
+   },
+   "connectionType": "LINKER",
+   "link_anchor": [
+    {
+     "side": 0,
+     "charStart": 1958,
+     "charEnd": 1971,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": ""
+  }
+ ],
+ "targetSideAnchor": [
+  {
+   "linkId": 6112106,
+   "source": {
+    "title": "במדבר",
+    "origin": "Sefaria",
+    "lineIndex0": 990,
+    "heRef": "במדבר, כז, יג"
+   },
+   "target": {
+    "title": "צרור המור על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 1546,
+    "heRef": "צרור המור על התורה, במדבר,  לד, ב, א"
+   },
+   "connectionType": "QUOTATION",
+   "link_anchor": [
+    {
+     "side": 1,
+     "charStart": 82,
+     "charEnd": 106,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": null
+  },
+  {
+   "linkId": 6120764,
+   "source": {
+    "title": "ישעיהו",
+    "origin": "Sefaria",
+    "lineIndex0": 1334,
+    "heRef": "ישעיהו, סו, א"
+   },
+   "target": {
+    "title": "לקוטי תורה",
+    "origin": "Sefaria",
+    "lineIndex0": 5328,
+    "heRef": "לקוטי תורה, שיר השירים,  מא, יד"
+   },
+   "connectionType": "QUOTATION",
+   "link_anchor": [
+    {
+     "side": 1,
+     "charStart": 160,
+     "charEnd": 186,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": null
+  },
+  {
+   "linkId": 6127173,
+   "source": {
+    "title": "במדבר",
+    "origin": "Sefaria",
+    "lineIndex0": 1003,
+    "heRef": "במדבר, כח, ב"
+   },
+   "target": {
+    "title": "צרור המור על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 1076,
+    "heRef": "צרור המור על התורה, ויקרא,  א, ב, ה"
+   },
+   "connectionType": "QUOTATION",
+   "link_anchor": [
+    {
+     "side": 1,
+     "charStart": 740,
+     "charEnd": 775,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": null
+  },
+  {
+   "linkId": 6130735,
+   "source": {
+    "title": "במדבר",
+    "origin": "Sefaria",
+    "lineIndex0": 1023,
+    "heRef": "במדבר, כח, כב"
+   },
+   "target": {
+    "title": "צרור המור על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 1515,
+    "heRef": "צרור המור על התורה, במדבר,  כו, נג, ג"
+   },
+   "connectionType": "QUOTATION",
+   "link_anchor": [
+    {
+     "side": 1,
+     "charStart": 902,
+     "charEnd": 926,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": null
+  },
+  {
+   "linkId": 6133231,
+   "source": {
+    "title": "במדבר",
+    "origin": "Sefaria",
+    "lineIndex0": 1031,
+    "heRef": "במדבר, כח, ל"
+   },
+   "target": {
+    "title": "צרור המור על התורה",
+    "origin": "Sefaria",
+    "lineIndex0": 1515,
+    "heRef": "צרור המור על התורה, במדבר,  כו, נג, ג"
+   },
+   "connectionType": "QUOTATION",
+   "link_anchor": [
+    {
+     "side": 1,
+     "charStart": 1011,
+     "charEnd": 1035,
+     "label": null
+    }
+   ],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [],
+   "visibleTextAtAnchor": null
+  }
+ ],
+ "suppressedSide": [
+  {
+   "linkId": 479904,
+   "source": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 7064,
+    "heRef": "טור, חושן משפט,  שכא, א"
+   },
+   "target": {
+    "title": "ב\"ח",
+    "origin": "Sefaria",
+    "lineIndex0": 25797,
+    "heRef": "ב\"ח, חושן משפט,  שכא, א, א"
+   },
+   "connectionType": "COMMENTARY",
+   "link_anchor": [],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [
+    {
+     "side": 1,
+     "reasonMask": 1
+    }
+   ]
+  },
+  {
+   "linkId": 2334533,
+   "source": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 969,
+    "heRef": "טור, אורח חיים,  תסח, א"
+   },
+   "target": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 1105,
+    "heRef": "טור, אורח חיים,  תקלה, א"
+   },
+   "connectionType": "OTHER",
+   "link_anchor": [],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [
+    {
+     "side": 0,
+     "reasonMask": 1
+    },
+    {
+     "side": 1,
+     "reasonMask": 1
+    }
+   ]
+  },
+  {
+   "linkId": 2334533,
+   "source": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 969,
+    "heRef": "טור, אורח חיים,  תסח, א"
+   },
+   "target": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 1105,
+    "heRef": "טור, אורח חיים,  תקלה, א"
+   },
+   "connectionType": "OTHER",
+   "link_anchor": [],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [
+    {
+     "side": 0,
+     "reasonMask": 1
+    },
+    {
+     "side": 1,
+     "reasonMask": 1
+    }
+   ]
+  },
+  {
+   "linkId": 2714457,
+   "source": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 2785,
+    "heRef": "טור, חושן משפט,  ט, א"
+   },
+   "target": {
+    "title": "פרישה",
+    "origin": "Sefaria",
+    "lineIndex0": 28407,
+    "heRef": "פרישה, חושן משפט,  ט, א, א"
+   },
+   "connectionType": "COMMENTARY",
+   "link_anchor": [],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [
+    {
+     "side": 1,
+     "reasonMask": 1
+    }
+   ]
+  },
+  {
+   "linkId": 3119376,
+   "source": {
+    "title": "טור",
+    "origin": "Sefaria",
+    "lineIndex0": 2061,
+    "heRef": "טור, יורה דעה,  רפז, א"
+   },
+   "target": {
+    "title": "ספר מצוות גדול",
+    "origin": "Sefaria",
+    "lineIndex0": 1491,
+    "heRef": "ספר מצוות גדול, עשין,  כג, א"
+   },
+   "connectionType": "EIN_MISHPAT",
+   "link_anchor": [],
+   "link_range": [],
+   "link_coverage_rows": {},
+   "link_suppressed_side": [
+    {
+     "side": 0,
+     "reasonMask": 1
+    },
+    {
+     "side": 1,
+     "reasonMask": 1
+    }
+   ]
+  }
+ ]
+}

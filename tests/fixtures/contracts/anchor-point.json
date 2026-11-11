@@ -1,0 +1,752 @@
+{
+ "_comment": "Word-anchored records: \"start\" only (no \"end\" exists anywhere in the live library). anchorCheck recomputes countVisibleChars(rawLine, start) on the DB line text and compares to link_anchor.charStart. label comes from \" אות X\" in heRef_2 only; otherwise NULL. tashma records also carry ref_1 + anchor_src_hash + anchor_context (pipeline-only).",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "shape": "L->L+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 660,
+   "record": {
+    "line_index_1": 323,
+    "heRef_2": "המאיר לארץ על ארצות החיים, סימן יא, סעיף ד ס\"ק יח",
+    "path_2": "המאיר לארץ על ארצות החיים.txt",
+    "line_index_2": 1307,
+    "start": 33,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "המאיר לארץ על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8051,
+     "source": "pninimToOtzaria",
+     "totalLines": 2664,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536132,
+     "heRef": "ארצות החיים 323"
+    },
+    "targetLine": {
+     "id": 9519689,
+     "heRef": "המאיר לארץ על ארצות החיים 1307"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13469515,
+      "sourceBookId": 8050,
+      "targetBookId": 8051,
+      "sourceLineId": 10536132,
+      "targetLineId": 9519689,
+      "targetLineIndex": 1306,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 28,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 33,
+    "sourceLineLength": 584,
+    "sourceLineUtf16Length": 584,
+    "expectedCharStart": 28,
+    "contextAfterRawStart": "מארבע גודלים</big> <i>וי\"א שש גודלים</i>",
+    "contextBeforeRawStart": "<big>אורך החוטין השמונה אין פחות ",
+    "dbCharStart": [
+     28
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->L+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 998,
+   "record": {
+    "line_index_1": 425,
+    "heRef_2": "המאיר לארץ על ארצות החיים, סימן כא, סעיף ב ס\"ק ח",
+    "path_2": "המאיר לארץ על ארצות החיים.txt",
+    "line_index_2": 1979,
+    "start": 5,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "המאיר לארץ על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8051,
+     "source": "pninimToOtzaria",
+     "totalLines": 2664,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536234,
+     "heRef": "ארצות החיים 425"
+    },
+    "targetLine": {
+     "id": 9520361,
+     "heRef": "המאיר לארץ על ארצות החיים 1979"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13469853,
+      "sourceBookId": 8050,
+      "targetBookId": 8051,
+      "sourceLineId": 10536234,
+      "targetLineId": 9520361,
+      "targetLineIndex": 1978,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 0,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 5,
+    "sourceLineLength": 121,
+    "sourceLineUtf16Length": 121,
+    "expectedCharStart": 0,
+    "contextAfterRawStart": "טליתות של מצוה שבלו אדם בודל עצמו מהם וא",
+    "contextBeforeRawStart": "<big>",
+    "dbCharStart": [
+     0
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->L+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 1324,
+   "record": {
+    "line_index_1": 613,
+    "heRef_2": "המאיר לארץ על ארצות החיים, סימן לא, סעיף ב ס\"ק יח",
+    "path_2": "המאיר לארץ על ארצות החיים.txt",
+    "line_index_2": 2663,
+    "start": 646,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "המאיר לארץ על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8051,
+     "source": "pninimToOtzaria",
+     "totalLines": 2664,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536358,
+     "heRef": "ארצות החיים 613"
+    },
+    "targetLine": {
+     "id": 9521045,
+     "heRef": "המאיר לארץ על ארצות החיים 2663"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13470178,
+      "sourceBookId": 8050,
+      "targetBookId": 8051,
+      "sourceLineId": 10536358,
+      "targetLineId": 9521045,
+      "targetLineIndex": 2662,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 611,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 646,
+    "sourceLineLength": 695,
+    "sourceLineUtf16Length": 695,
+    "expectedCharStart": 611,
+    "contextAfterRawStart": "וצבור שנהגו להניח תפילין אין להם לשנות מ",
+    "contextBeforeRawStart": "כנ״ס שמניחים תפילין יניח עמהם בלא ברכה: ",
+    "dbCharStart": [
+     611
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->R+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 687,
+   "record": {
+    "line_index_1": 333,
+    "heRef_2": "ארץ יהודה על ארצות החיים, סימן יא, סעיף ט ס\"ק יא",
+    "path_2": "ארץ יהודה על ארצות החיים.txt",
+    "line_index_2": 314,
+    "line_index_2_end": 317,
+    "start": 5,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "ארץ יהודה על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8049,
+     "source": "pninimToOtzaria",
+     "totalLines": 712,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536142,
+     "heRef": "ארצות החיים 333"
+    },
+    "targetLine": {
+     "id": 9517214,
+     "heRef": "ארץ יהודה על ארצות החיים 314"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13469542,
+      "sourceBookId": 8050,
+      "targetBookId": 8049,
+      "sourceLineId": 10536142,
+      "targetLineId": 9517214,
+      "targetLineIndex": 313,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 0,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9517217,
+       "endLineIndex": 316
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 3
+     },
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 5,
+    "sourceLineLength": 914,
+    "sourceLineUtf16Length": 914,
+    "expectedCharStart": 0,
+    "contextAfterRawStart": "יעשה נקב בארך הטלית</big> <i>וי״א שצריך ",
+    "contextBeforeRawStart": "<big>",
+    "dbCharStart": [
+     0
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->R+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 933,
+   "record": {
+    "line_index_1": 397,
+    "heRef_2": "ארץ יהודה על ארצות החיים, סימן יז, סעיף ב ס\"ק ב",
+    "path_2": "ארץ יהודה על ארצות החיים.txt",
+    "line_index_2": 450,
+    "line_index_2_end": 455,
+    "start": 5,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "ארץ יהודה על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8049,
+     "source": "pninimToOtzaria",
+     "totalLines": 712,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536206,
+     "heRef": "ארצות החיים 397"
+    },
+    "targetLine": {
+     "id": 9517349,
+     "heRef": "ארץ יהודה על ארצות החיים 450"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13469788,
+      "sourceBookId": 8050,
+      "targetBookId": 8049,
+      "sourceLineId": 10536206,
+      "targetLineId": 9517349,
+      "targetLineIndex": 449,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 0,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9517354,
+       "endLineIndex": 454
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 5
+     },
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 5,
+    "sourceLineLength": 900,
+    "sourceLineUtf16Length": 900,
+    "expectedCharStart": 0,
+    "contextAfterRawStart": "נשים ועבדים פטורים מפני שהוא מ\"ע שהז״ג</",
+    "contextBeforeRawStart": "<big>",
+    "dbCharStart": [
+     0
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->R+anchor-point",
+   "file": "pninimToOtzaria/links/ארצות החיים_links.json",
+   "recordIndex": 1314,
+   "record": {
+    "line_index_1": 613,
+    "heRef_2": "ארץ יהודה על ארצות החיים, סימן לא, סעיף ב ס\"ק א",
+    "path_2": "ארץ יהודה על ארצות החיים.txt",
+    "line_index_2": 672,
+    "line_index_2_end": 711,
+    "start": 5,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ארצות החיים",
+    "targetTitle": "ארץ יהודה על ארצות החיים",
+    "sourceBook": {
+     "id": 8050,
+     "source": "pninimToOtzaria",
+     "totalLines": 771,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8049,
+     "source": "pninimToOtzaria",
+     "totalLines": 712,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 10536358,
+     "heRef": "ארצות החיים 613"
+    },
+    "targetLine": {
+     "id": 9517571,
+     "heRef": "ארץ יהודה על ארצות החיים 672"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13470168,
+      "sourceBookId": 8050,
+      "targetBookId": 8049,
+      "sourceLineId": 10536358,
+      "targetLineId": 9517571,
+      "targetLineIndex": 671,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 0,
+       "charEnd": null,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9517610,
+       "endLineIndex": 710
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 39
+     },
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 5,
+    "sourceLineLength": 695,
+    "sourceLineUtf16Length": 695,
+    "expectedCharStart": 0,
+    "contextAfterRawStart": "בחש\"מ ג\"כ אסור להניח תפילין מהטעם הזה בע",
+    "contextBeforeRawStart": "<big>",
+    "dbCharStart": [
+     0
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->L+anchor-point+ref_1",
+   "file": "tashmaToOtzaria/links/משנה ברורה_links.json",
+   "recordIndex": 8990,
+   "record": {
+    "line_index_1": 9464,
+    "ref_1": "Mishnah Berurah,  335:17",
+    "anchor_src_hash": "sha256:d391cbbac40a8985aef25936c56bd91a1767adb15cf9180099e384d48357dc31",
+    "anchor_context": {
+     "before": "(יז) אחד הנה וכו' - דזה הוי ",
+     "after": "כעובדא דחול כשמקבצן ונותנן לתוך "
+    },
+    "heRef_2": "שער הציון, סימן שלה, סעיף יז אות יב",
+    "path_2": "שער הציון.txt",
+    "line_index_2": 9328,
+    "start": 28,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "משנה ברורה",
+    "targetTitle": "שער הציון",
+    "sourceBook": {
+     "id": 3860,
+     "source": "Sefaria",
+     "totalLines": 18119,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 5976,
+     "source": "tashmaToOtzaria",
+     "totalLines": 18680,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 3015186,
+     "heRef": "משנה ברורה,  שלה, יז"
+    },
+    "targetLine": {
+     "id": 4018330,
+     "heRef": "שער הציון 9328"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 4192761,
+      "sourceBookId": 3860,
+      "targetBookId": 5976,
+      "sourceLineId": 3015186,
+      "targetLineId": 4018330,
+      "targetLineIndex": 9327,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 28,
+       "charEnd": null,
+       "label": "יב"
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 28,
+    "sourceLineLength": 244,
+    "sourceLineUtf16Length": 244,
+    "expectedCharStart": 28,
+    "contextAfterRawStart": "כעובדא דחול כשמקבצן ונותנן לתוך הסל משא\"",
+    "contextBeforeRawStart": "(יז) אחד הנה וכו' - דזה הוי ",
+    "dbCharStart": [
+     28
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->L+anchor-point+ref_1",
+   "file": "tashmaToOtzaria/links/משנה ברורה_links.json",
+   "recordIndex": 13485,
+   "record": {
+    "line_index_1": 13910,
+    "ref_1": "Mishnah Berurah,  499:4",
+    "anchor_src_hash": "sha256:ead133e2753368afa13a0596464fb2f2b105b4b53fe4f5733cbcae4243494d34",
+    "anchor_context": {
+     "before": "די שלא תפסד ואע\"ג דבעלמא עור לח ",
+     "after": "אסור לטלטלו וכדלעיל בסימן ש\"ח סכ"
+    },
+    "heRef_2": "שער הציון, סימן תצט, סעיף ד אות ז",
+    "path_2": "שער הציון.txt",
+    "line_index_2": 13987,
+    "start": 94,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "משנה ברורה",
+    "targetTitle": "שער הציון",
+    "sourceBook": {
+     "id": 3860,
+     "source": "Sefaria",
+     "totalLines": 18119,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 5976,
+     "source": "tashmaToOtzaria",
+     "totalLines": 18680,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 3019632,
+     "heRef": "משנה ברורה,  תצט, ד"
+    },
+    "targetLine": {
+     "id": 4022989,
+     "heRef": "שער הציון 13987"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 4197256,
+      "sourceBookId": 3860,
+      "targetBookId": 5976,
+      "sourceLineId": 3019632,
+      "targetLineId": 4022989,
+      "targetLineIndex": 13986,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 94,
+       "charEnd": null,
+       "label": "ז"
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 94,
+    "sourceLineLength": 189,
+    "sourceLineUtf16Length": 189,
+    "expectedCharStart": 94,
+    "contextAfterRawStart": "אסור לטלטלו וכדלעיל בסימן ש\"ח סכ\"ה הכא ה",
+    "contextBeforeRawStart": "מה לצל כדי שלא תפסד ואע\"ג דבעלמא עור לח ",
+    "dbCharStart": [
+     94
+    ],
+    "matchesGeneratorFormula": true
+   }
+  },
+  {
+   "shape": "L->L+anchor-point+ref_1",
+   "file": "tashmaToOtzaria/links/משנה ברורה_links.json",
+   "recordIndex": 17979,
+   "record": {
+    "line_index_1": 18119,
+    "ref_1": "Mishnah Berurah,  697:5",
+    "anchor_src_hash": "sha256:97fd62f19c8e781e4d07d1c2cc43c995059edd135936110d88c5c0947a6a6f27",
+    "anchor_context": {
+     "before": "ל מפריש רגיל להרבות ולהזמין ב\"א ",
+     "after": "וזהו שסיים הרמ\"א וטוב לב משתה תמ"
+    },
+    "heRef_2": "שער הציון, סימן תרצז, סעיף ה אות ט",
+    "path_2": "שער הציון.txt",
+    "line_index_2": 18679,
+    "start": 90,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "משנה ברורה",
+    "targetTitle": "שער הציון",
+    "sourceBook": {
+     "id": 3860,
+     "source": "Sefaria",
+     "totalLines": 18119,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 5976,
+     "source": "tashmaToOtzaria",
+     "totalLines": 18680,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 3023841,
+     "heRef": "משנה ברורה,  תרצז, ה"
+    },
+    "targetLine": {
+     "id": 4027681,
+     "heRef": "שער הציון 18679"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 4201750,
+      "sourceBookId": 3860,
+      "targetBookId": 5976,
+      "sourceLineId": 3023841,
+      "targetLineId": 4027681,
+      "targetLineIndex": 18678,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 90,
+       "charEnd": null,
+       "label": "ט"
+      }
+     ],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ],
+   "anchorCheck": {
+    "rawStart": 90,
+    "sourceLineLength": 170,
+    "sourceLineUtf16Length": 170,
+    "expectedCharStart": 90,
+    "contextAfterRawStart": "וזהו שסיים הרמ\"א וטוב לב משתה תמיד היינו",
+    "contextBeforeRawStart": "ינו יחיאל מפריש רגיל להרבות ולהזמין ב\"א ",
+    "dbCharStart": [
+     90
+    ],
+    "matchesGeneratorFormula": true
+   }
+  }
+ ]
+}

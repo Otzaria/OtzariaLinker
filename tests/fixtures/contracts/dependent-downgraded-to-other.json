@@ -1,0 +1,49 @@
+{
+ "_comment": "A dependent-type record (\"commentary\") from a non-base book into a base book (isBaseBook=1) whose title does not declare \"X על <base>\": the generator stores it as OTHER (Generator.kt:2282-2291).",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "counts": {
+  "commentary|MoreBooks": 1
+ },
+ "examples": [
+  {
+   "file": "MoreBooks/links/סידור אשכנז_links.json",
+   "recordIndex": 1389,
+   "record": {
+    "line_index_1": 981.0,
+    "heRef_2": "בראשית טו, א,",
+    "path_2": "אוצריא\\תנך\\תורה\\בראשית.txt",
+    "line_index_2": 378.0,
+    "ref_2": "Genesis 15:1",
+    "Conection Type": "commentary"
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11500769,
+      "sourceBookId": 6043,
+      "targetBookId": 1,
+      "sourceLineId": 4112041,
+      "targetLineId": 6173239,
+      "targetLineIndex": 377,
+      "targetBookOrderIndex": 1,
+      "connectionType": "OTHER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  }
+ ]
+}
