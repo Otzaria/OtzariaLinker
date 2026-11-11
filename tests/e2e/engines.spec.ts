@@ -46,3 +46,21 @@ test("dibur hamatchil: Rashi on Bereshit against Bereshit from the real database
   expect(await page.locator(".sug-table tbody tr").count()).toBeGreaterThan(20);
   expect(seen.errors).toEqual([]);
 });
+
+test("batch: a folder of commentaries, each against the base its title names", async ({ page }) => {
+  const seen = watchPage(page);
+  await open(page, [
+    { name: "seforim.db", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "ביאור על בראשית.txt", buffer: Buffer.from(["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", "<h3>פסוק א</h3>", "ביאור לפסוק הראשון", "<h3>פסוק ב</h3>", "ביאור לפסוק השני"].join("\n")) },
+    { name: "חידושים.txt", buffer: Buffer.from("שורה") },
+  ]);
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByRole("radio", { name: "ספרים רבים (אצווה)" }).click();
+  await page.getByLabel("המקור שבו נמצאים הפירושים").selectOption({ label: "2 קובצי טקסט (2 ספרים)" });
+  await expect(page.getByText("זוהו 1 מתוך 2 ספרים")).toBeVisible();
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await expect(page.getByRole("table", { name: "הצעות" }).locator("tbody tr").first()).toBeVisible({ timeout: 30_000 });
+  await page.locator("summary", { hasText: "סיכום לפי ספר" }).click();
+  await expect(page.getByRole("table", { name: "סיכום לפי ספר" })).toContainText("חידושים");
+  expect(seen.errors).toEqual([]);
+});

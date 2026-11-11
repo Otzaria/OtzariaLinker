@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { CONFIDENCE_LABELS, ENGINES, type Confidence, type EngineId, type Suggestion } from "../../linking/automatic";
 import { stripTags } from "../../core/text/html";
+import { pairByTitle } from "../../linking/batch";
 import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/store";
 import { useStore } from "../context";
@@ -28,7 +29,7 @@ export function SuggestionsPanel() {
     <div style="display:flex;flex-direction:column;min-height:100%">
       <div class="sug-head">
         <div class="grow">
-          <b>{engine?.title}</b>: {run.source.title} ← {run.target.title}
+          <b>{engine?.title}</b>: {run.label}
           <div class="muted" style="font-size:var(--fs-sm)">
             {run.result.suggestions.length.toLocaleString("he")} הצעות · {c.pending.toLocaleString("he")} ממתינות · {c.approved.toLocaleString("he")} אושרו
             {run.result.unmatched.length > 0 && ` · ${run.result.unmatched.length.toLocaleString("he")} שורות בלי התאמה`}
@@ -56,6 +57,7 @@ export function SuggestionsPanel() {
           ))}
         </ul>
       )}
+      <BatchSummary />
       {view === "table" ? <TableView /> : <StepView card={view === "card"} />}
     </div>
   );
@@ -64,13 +66,31 @@ export function SuggestionsPanel() {
 function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => void) | undefined }) {
   const store = useStore();
   const [engine, setEngine] = useState<EngineId>("headings");
+  const [mode, setMode] = useState<"pair" | "batch">("pair");
+  const sources = store.sources.value;
+  const [batchSource, setBatchSource] = useState<string>(() => sources.find((x) => x.info.kind === "text-files")?.info.id ?? sources[0]?.info.id ?? "");
   const info = ENGINES.find((e) => e.id === engine)!;
   const s = store.view.source.value;
   const t = store.view.target.value;
-  const ready = !!s && !!t && s !== t;
+  const ready = mode === "pair" ? !!s && !!t && s !== t : !!batchSource;
+  const preview = useMemo(() => {
+    const src = sources.find((x) => x.info.id === batchSource);
+    if (mode !== "batch" || !src) return [];
+    return pairByTitle(src.books.map((b) => store.refOf(b.key)), [...store.books.value.values()].map((b) => store.refOf(b.key)));
+  }, [mode, batchSource, sources]);
+  const paired = preview.filter((p) => p.target).length;
+
+  const start = async () => {
+    const ok = mode === "pair" ? await store.runEngine(engine, s!, t!) : await store.runBatch(engine, batchSource);
+    if (ok) onDone();
+  };
   return (
     <div class="builder">
       <h3 style="margin:0">קישור אוטומטי</h3>
+      <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
+        <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => setMode("batch")}>ספרים רבים (אצווה)</button>
+      </div>
       <label class="field">
         שיטה
         <select value={engine} onChange={(e) => setEngine(e.currentTarget.value as EngineId)}>
@@ -80,25 +100,80 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         </select>
         <span class="muted">{info.description}</span>
       </label>
-      <div class={`end source${s ? " set" : ""}`}>
-        <span class="side-badge source">{info.sourceRole}</span>
-        <span>{s ? store.refOf(s).title : "בחרו ספר בחלונית המקור"}</span>
-      </div>
-      <div class={`end target${t ? " set" : ""}`}>
-        <span class="side-badge target">{info.targetRole}</span>
-        <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
-      </div>
+      {mode === "pair" ? (
+        <>
+          <div class={`end source${s ? " set" : ""}`}>
+            <span class="side-badge source">{info.sourceRole}</span>
+            <span>{s ? store.refOf(s).title : "בחרו ספר בחלונית המקור"}</span>
+          </div>
+          <div class={`end target${t ? " set" : ""}`}>
+            <span class="side-badge target">{info.targetRole}</span>
+            <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <label class="field">
+            המקור שבו נמצאים הפירושים
+            <select value={batchSource} onChange={(e) => setBatchSource(e.currentTarget.value)}>
+              {sources.map((x) => (
+                <option key={x.info.id} value={x.info.id}>{x.info.label} ({x.books.length} ספרים)</option>
+              ))}
+            </select>
+            <span class="muted">כל ספר מקושר לספר שבשמו ("… על בראשית" ← בראשית), מבין כל הספרים הפתוחים.</span>
+          </label>
+          {preview.length > 0 && (
+            <details class="held" open={preview.length <= 12}>
+              <summary>זוהו {paired} מתוך {preview.length} ספרים</summary>
+              <ul class="problems" style="margin-top:6px">
+                {preview.map((p) => (
+                  <li key={p.source.key} class={p.target ? "info" : "warning"}>
+                    <span>{p.source.title} {p.target ? `← ${p.target.title}` : `— ${p.reason}`}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
       <p class="muted" style="margin:0;font-size:var(--fs-sm)">
         הכלי רק מציע. שום קישור לא נוצר בלי אישור שלכם, וכל אישור אפשר לבטל.
       </p>
       <div class="row">
-        <button class="btn filled" disabled={!ready || !!store.task.value} onClick={async () => (await store.runEngine(engine, s!, t!)) && onDone()}>
+        <button class="btn filled" disabled={!ready || !!store.task.value || (mode === "batch" && !paired)} onClick={start}>
           <Icon name="oz_link_search" size={18} />
           חיפוש התאמות
         </button>
         {onCancel && <button class="btn text" onClick={onCancel}>ביטול</button>}
       </div>
     </div>
+  );
+}
+
+function BatchSummary() {
+  const store = useStore();
+  const rows = store.run.value?.batch;
+  if (!rows) return null;
+  return (
+    <details class="held" style="margin:0 6px 6px">
+      <summary>סיכום לפי ספר ({rows.length})</summary>
+      <table class="sug-table" style="margin-top:6px" aria-label="סיכום לפי ספר">
+        <thead>
+          <tr><th>ספר</th><th>הצעות</th><th>ודאיות</th><th>גבוהות</th><th>לבדיקה</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.source.key} title={r.problem ?? (r.target ? `← ${r.target.title}` : "")}>
+              <td>{r.source.title}{r.problem && <div class="muted">{r.problem}</div>}</td>
+              <td>{r.suggestions.toLocaleString("he")}</td>
+              <td>{r.certain.toLocaleString("he")}</td>
+              <td>{r.high.toLocaleString("he")}</td>
+              <td>{r.review.toLocaleString("he")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
 
@@ -154,7 +229,7 @@ function TableView() {
           </>
         )}
       </div>
-      <table class="sug-table">
+      <table class="sug-table" aria-label="הצעות">
         <thead>
           <tr>
             <th>
@@ -190,7 +265,7 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       <td onClick={(e) => e.stopPropagation()}>
         <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label="בחירה" />
       </td>
-      <td>{end(s.source.line, s.source.end)}</td>
+      <td>{store.run.value?.batch && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
       <td>{s.heRef2}</td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>

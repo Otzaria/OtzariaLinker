@@ -25,6 +25,7 @@ const service: BooksService = {
   existingLinks: (key, from, to, opts) => rpc.call("existingLinks", [key, from, to], opts),
   close: async (id) => void (await rpc.call("close", [id])),
   runEngine: (engine, source, target, options, opts) => rpc.call("runEngine", [engine, source, target, options], opts),
+  runBatch: (engine, pairs, options, opts) => rpc.call("runBatch", [engine, pairs, options], opts),
 };
 
 const saver: Saver = {

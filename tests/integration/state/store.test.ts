@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { engineJob } from "../../../src/workers/engine-job";
+import { batchJob, engineJob } from "../../../src/workers/engine-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -15,6 +15,7 @@ function makeStore() {
     existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
     close: async (id) => reg.close(id),
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
+    runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
@@ -171,5 +172,21 @@ describe("AppStore — projects and autosave", () => {
     expect(offer.text).toContain("1");
     offer.action!.run();
     expect(b.store.allLinks.value).toHaveLength(1);
+  });
+});
+
+describe("AppStore — batch linking", () => {
+  it("pairs every book with the base its title names, runs them all, and summarises per book", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB]);
+    expect(await store.runBatch("headings", store.sources.value[0]!.info.id)).toBe(true);
+    const run = store.run.value!;
+    const rows = new Map(run.batch!.map((r) => [r.source.title, r]));
+    expect(rows.get("תרגום אונקלוס על בראשית")!.target!.title).toBe("בראשית");
+    expect(rows.get("תרגום אונקלוס על בראשית")!.certain).toBeGreaterThan(50);
+    expect(rows.get("המאיר לארץ על ארצות החיים")!.target!.title).toBe("ארצות החיים");
+    expect(rows.get("בראשית")!.problem).toBeTruthy(); // a base book names no base
+    expect(run.result.suggestions.length).toBe(run.batch!.reduce((n, r) => n + r.suggestions, 0));
+    expect(store.approveSuggestions(store.pendingAtLeast("certain"))).toBeGreaterThan(50);
   });
 });

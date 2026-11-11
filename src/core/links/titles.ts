@@ -56,21 +56,28 @@ export function sourceTitleFromLinksFileName(fileName: string): string | null {
 
 const DEPENDENCY_TITLE_PREFIXES = ["תלמוד בבלי ", "תלמוד ירושלמי ", "מסכת ", "משנה ", "ספר "];
 
-/** True only when a dependant-style title ("X על <base>") explicitly names `baseTitle`. */
-export function titleDeclaresDependencyOn(dependantTitle: string, baseTitle: string): boolean {
+/** A title reduced for base-book matching: comparable, without prefixes like "מסכת " or "תלמוד בבלי ". */
+export function baseTitleKey(raw: string): string {
+  let v = comparableTitle(raw);
+  for (;;) {
+    const p = DEPENDENCY_TITLE_PREFIXES.find((x) => v.startsWith(x));
+    if (!p) return v;
+    v = v.slice(p.length).trim();
+  }
+}
+
+/** The base-title key a dependant title declares ("רש״י על מסכת ברכות" → "ברכות"), or null. */
+export function declaredBaseKey(dependantTitle: string): string | null {
   const d = comparableTitle(dependantTitle);
   const at = d.lastIndexOf(" על ");
   const declaredBase = at === -1 ? "" : d.slice(at + " על ".length);
-  if (!declaredBase.trim()) return false;
-  const key = (raw: string) => {
-    let v = comparableTitle(raw);
-    for (;;) {
-      const p = DEPENDENCY_TITLE_PREFIXES.find((x) => v.startsWith(x));
-      if (!p) return v;
-      v = v.slice(p.length).trim();
-    }
-  };
-  return key(declaredBase) === key(baseTitle);
+  return declaredBase.trim() ? baseTitleKey(declaredBase) : null;
+}
+
+/** True only when a dependant-style title ("X על <base>") explicitly names `baseTitle`. */
+export function titleDeclaresDependencyOn(dependantTitle: string, baseTitle: string): boolean {
+  const k = declaredBaseKey(dependantTitle);
+  return k !== null && k === baseTitleKey(baseTitle);
 }
 
 /**

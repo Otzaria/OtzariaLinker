@@ -8,7 +8,8 @@ import { validateLink, type LineFacts, type Problem, type ValidationContext } fr
 import { stripTags } from "../core/text/html";
 import { recordToLink } from "../formats/links-json/convert";
 import { storedKey } from "../core/links/stored-form";
-import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Suggestion } from "../linking/automatic";
+import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { pairByTitle, type BatchPair } from "../linking/batch";
 import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
@@ -57,10 +58,23 @@ export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
 /** One run of an automatic engine and the user's decisions on it. */
 export interface SuggestionRun {
   engine: EngineId;
-  source: BookRef;
-  target: BookRef;
+  /** "<source> ← <target>" or "אצווה: N ספרים" */
+  label: string;
   result: EngineResult;
   at: number;
+  /** a batch run: one summary row per book (paired or not) */
+  batch?: BatchRow[];
+}
+
+export interface BatchRow {
+  source: BookRef;
+  target: BookRef | null;
+  /** why the book was not run (unpaired) or failed */
+  problem?: string;
+  suggestions: number;
+  certain: number;
+  high: number;
+  review: number;
 }
 /** pending → the user has not decided; approved → a link exists for it; exists → the project already has that link */
 export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
@@ -369,12 +383,54 @@ export class AppStore {
     const result = await this.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, options, opts));
     if (!result) return false;
     batch(() => {
-      this.run.value = { engine, source, target, result, at: Date.now() };
+      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now() };
       this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
       this.sideTab.value = "suggestions";
     });
     const c = this.suggestionCounts.value;
     this.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
+    return true;
+  }
+
+  /**
+   * Batch linking (stage 8.4): every book of one open source (e.g. a folder of commentaries) against
+   * the base book its title names, among all open books. Unpaired books are listed with the reason.
+   */
+  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}): Promise<boolean> {
+    const src = this.sources.value.find((s) => s.info.id === sourceId);
+    if (!src) return false;
+    const commentaries = src.books.map((b) => this.refOf(b.key));
+    const bases = [...this.books.value.values()].map((b) => this.refOf(b.key));
+    const pairs = pairByTitle(commentaries, bases);
+    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
+    if (!runnable.length) {
+      this.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
+      return false;
+    }
+    const items = await this.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), options, opts));
+    if (!items) return false;
+    const suggestions: Suggestion[] = [];
+    const notes: Reason[] = [];
+    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.reason && { problem: p.reason }), suggestions: 0, certain: 0, high: 0, review: 0 }));
+    for (const it of items) {
+      const row = rows.find((r) => r.source.key === it.source.key)!;
+      if (it.error) row.problem = it.error;
+      for (const sg of it.result?.suggestions ?? []) {
+        suggestions.push(sg);
+        row.suggestions++;
+        if (sg.confidence === "certain") row.certain++;
+        else if (sg.confidence === "high") row.high++;
+        else row.review++;
+      }
+      for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
+    }
+    batch(() => {
+      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows };
+      this.currentSuggestion.value = suggestions[0]?.id ?? null;
+      this.sideTab.value = "suggestions";
+    });
+    const failed = rows.filter((r) => r.problem).length;
+    this.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
     return true;
   }
 

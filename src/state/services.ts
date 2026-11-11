@@ -34,6 +34,15 @@ export interface BooksService {
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
+  runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>, opts?: CallOptions): Promise<BatchResultItem[]>;
+}
+
+/** One pair of a batch run (mirrors workers/engine-job BatchItem). */
+export interface BatchResultItem {
+  source: BookRef;
+  target: BookRef;
+  result?: EngineResult;
+  error?: string;
 }
 
 /** Where a file the program makes goes (a download in the browser). */

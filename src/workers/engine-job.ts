@@ -14,3 +14,28 @@ export async function engineJob(registry: SourceRegistry, engine: EngineId, sour
   ctx.signal?.throwIfAborted();
   return runEngine(engine, s, t, options, ctx);
 }
+
+export interface BatchItem {
+  source: BookRef;
+  target: BookRef;
+  result?: EngineResult;
+  /** Hebrew message when this pair failed; the rest of the batch continues */
+  error?: string;
+}
+
+/** Runs one engine over many pairs, one pair in memory at a time. Progress counts pairs. */
+export async function batchJob(registry: SourceRegistry, engine: EngineId, pairs: readonly { source: BookRef; target: BookRef }[], options: Record<string, unknown>, ctx: EngineContext): Promise<BatchItem[]> {
+  const out: BatchItem[] = [];
+  for (const [i, p] of pairs.entries()) {
+    ctx.signal?.throwIfAborted();
+    ctx.progress?.(i, pairs.length);
+    try {
+      out.push({ ...p, result: await engineJob(registry, engine, p.source, p.target, options, { ...(ctx.signal && { signal: ctx.signal }) }) });
+    } catch (err) {
+      if (ctx.signal?.aborted) throw err;
+      out.push({ ...p, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  ctx.progress?.(pairs.length, pairs.length);
+  return out;
+}
