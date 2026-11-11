@@ -102,6 +102,53 @@ describe("mergeSuggestions — conflicts and coarser agreement", () => {
   });
 });
 
+describe("mergeSuggestions — a book pair whose engines mostly disagree", () => {
+  // positions 0..11: headings and dibur-hamatchil point at different lines (the Rif's own dapim read as the Talmud's)
+  const conflicting = Array.from({ length: 12 }, (_, i) => [H(i, i, "certain"), D(i, i + 40, "high")]).flat();
+  const agreeing = [H(20, 50, "certain", 60), D(20, 55, "high"), H(21, 50, "certain", 60), D(21, 56, "high")];
+  const alone = H(30, 70, "certain");
+
+  it("no single engine's 'certain' is trusted there: it drops to 'possible' with the reason", () => {
+    const { suggestions, stats } = mergeSuggestions([...conflicting, ...agreeing, alone]);
+    expect(stats.suspectPairs).toBe(1);
+    const s = suggestions.find((x) => x.source.line === 30)!;
+    expect(s.confidence).toBe("possible");
+    expect(s.rules).toContain("maxlink/pair-disagree");
+    expect(s.warnings.some((w) => w.text.includes("12"))).toBe(true);
+    // lines where the engines agree keep their level
+    expect(suggestions.find((x) => x.target.line === 20 || x.source.line === 55)!.confidence).toBe("high");
+  });
+
+  it("a few conflicts in a pair that mostly agrees change nothing", () => {
+    const many = Array.from({ length: 60 }, (_, i) => [H(100 + i, 100 + i, "certain", 100 + i + 2), D(100 + i, 101 + i, "high")]).flat();
+    const { suggestions, stats } = mergeSuggestions([...conflicting, ...many, alone]);
+    expect(stats.suspectPairs).toBe(0);
+    expect(suggestions.find((x) => x.source.line === 30)!.confidence).toBe("certain");
+  });
+});
+
+describe("mergeSuggestions — a book pair whose suggestions contradict the library's own links", () => {
+  // the library links commentary line i to base line i + 100; the engines (both fooled alike) say line i
+  const ours = Array.from({ length: 30 }, (_, i) => [H(i, i, "certain", i + 1), D(i, i, "certain")]).flat();
+  const libraryHas = (n: number) => Array.from({ length: n }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i + 100) }));
+
+  it("no suggestion of that pair is 'certain', even where two engines agree", () => {
+    const { suggestions, stats } = mergeSuggestions(ours, { reference: libraryHas(30) });
+    expect(stats.contradictedPairs).toBe(1);
+    expect(new Set(suggestions.map((s) => s.confidence))).toEqual(new Set(["possible"]));
+    expect(suggestions[0]!.rules).toContain("maxlink/contradicts-library");
+    expect(suggestions[0]!.warnings.at(-1)!.text).toContain("30");
+  });
+
+  it("too few library links, or links that agree, change nothing", () => {
+    expect(mergeSuggestions(ours, { reference: libraryHas(10) }).stats.contradictedPairs).toBe(0);
+    const agreeing = Array.from({ length: 30 }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i) }));
+    const { suggestions, stats } = mergeSuggestions(ours, { reference: agreeing });
+    expect(stats.contradictedPairs).toBe(0);
+    expect(suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+});
+
 describe("mergeSuggestions — already existing", () => {
   it("marks a link the database or the project already has, judged on the merged suggestion", () => {
     const db = new Set([linePairKey(H(5, 10, "certain").suggestion)]);

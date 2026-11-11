@@ -46,6 +46,11 @@ export type ExistingWhere = "db" | "project";
 export interface MergeOptions {
   /** where the link already exists, judged on the FINAL suggestion (its id included), or null */
   existing?: (s: Suggestion) => ExistingWhere | null;
+  /**
+   * linePairKey of links the library already has (the database's links of the books read). A book
+   * pair whose suggestions mostly CONTRADICT them is suspect (REFERENCE_DISAGREEMENT).
+   */
+  reference?: Iterable<string>;
 }
 
 export interface MergeStats {
@@ -65,6 +70,10 @@ export interface MergeStats {
   conflicts: number;
   /** outputs that already exist (db / project) at merge time */
   existing: number;
+  /** book pairs where the engines disagree on most lines (PAIR_DISAGREEMENT): no single-engine "certain" there */
+  suspectPairs: number;
+  /** book pairs whose suggestions mostly contradict the library's own links (REFERENCE_DISAGREEMENT): no "certain" there */
+  contradictedPairs: number;
 }
 
 export interface MergeResult {
@@ -149,6 +158,22 @@ function makeGroup(id: string, exact: Raw[]): Group {
   return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [] };
 }
 
+/**
+ * When, between the same two books, the lines on which two engines both spoke conflict this often, the
+ * pair is suspect. Measured on all commentaries of Bavli Berakhot in the full library: the Rif (its own
+ * dapim) — see AUTOMATION_ENGINE.md §5.6.
+ */
+export const PAIR_DISAGREEMENT = { minConflicts: 10, ratio: 0.25 } as const;
+/**
+ * When the library already links a book pair and our suggestions point elsewhere on this share of the
+ * lines it links (at least `minJudged` lines), the structure the engines read is not the base's. Measured
+ * on Bavli Berakhot: the Rif and the Ra'ah, numbered by the Rif's own dapim, contradict the database on
+ * most lines — both engines are fooled alike (dibur-hamatchil searches inside the same-named heading),
+ * so their agreement proves nothing there. Every other commentary stays far below (AUTOMATION_ENGINE.md §5.6).
+ */
+export const REFERENCE_DISAGREEMENT = { minJudged: 20, ratio: 0.25 } as const;
+const bookPair = (g: Group) => `${g.rep.fEnd.book.key}>${g.rep.oEnd.book.key}`;
+
 /** at least one member is "possible" or better: ambiguous and "none" give no support */
 const strong = (g: Group) => g.exact.some((x) => rank(x.s.confidence) <= POSSIBLE);
 
@@ -224,12 +249,53 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
         if (a !== b && !contains(a, b) && !contains(b, a) && (a.engines.some((e) => !b.engines.includes(e)) || b.engines.some((e) => !a.engines.includes(e)))) a.conflictWith.push(b);
   }
 
-  // 4. one suggestion per live group
-  const stats: MergeStats = { input: raws.length, output: 0, duplicates: 0, agreements: 0, raised: 0, consistent: 0, conflicts: 0, existing: 0 };
+  // 4. book pairs whose engines mostly disagree: one engine's structure does not fit (the Rif's own dapim
+  //    read as the Talmud's), so no single engine's "certain" there is trusted
+  //    counted per POSITION (a commentary line): engines in conflict there, or agreeing (exactly or by containment)
+  const perPair = new Map<string, { conflicts: number; support: number }>();
+  for (const at of byPos.values()) {
+    const live = at.filter((g) => !g.folded);
+    if (!live.length) continue;
+    const k = bookPair(live[0]!);
+    const c = perPair.get(k) ?? { conflicts: 0, support: 0 };
+    if (live.some((g) => g.conflictWith.length)) c.conflicts++;
+    else if (live.some((g) => g.engines.length > 1 || g.consistent.length)) c.support++;
+    perPair.set(k, c);
+  }
+  const suspect = new Set([...perPair].filter(([, c]) => c.conflicts >= PAIR_DISAGREEMENT.minConflicts && c.conflicts / (c.conflicts + c.support) >= PAIR_DISAGREEMENT.ratio).map(([k]) => k));
+
+  // 4b. the same against the links the library already has: per book pair, how many of the lines it
+  //     links do our suggestions send elsewhere
+  const refLines = new Map<string, number[]>(); // "<book>#<line>><other book>" → lines of the other book
+  for (const key of opts.reference ?? []) {
+    const [a, b] = key.split("|") as [string, string];
+    for (const [x, y] of [[a, b], [b, a]] as const) {
+      const at = y.lastIndexOf("#");
+      const k = `${x}>${y.slice(0, at)}`;
+      const list = refLines.get(k);
+      if (list) list.push(Number(y.slice(at + 1)));
+      else refLines.set(k, [Number(y.slice(at + 1))]);
+    }
+  }
+  const versus = new Map<string, { judged: number; contradicted: number }>();
+  if (refLines.size)
+    for (const g of groups) {
+      if (g.folded) continue;
+      const known = refLines.get(`${g.rep.fEnd.book.key}#${g.rep.fEnd.line}>${g.rep.oEnd.book.key}`);
+      if (!known) continue;
+      const v = versus.get(bookPair(g)) ?? { judged: 0, contradicted: 0 };
+      v.judged++;
+      if (!known.some((l) => l >= g.rep.oEnd.line && l <= endOf(g.rep.oEnd))) v.contradicted++;
+      versus.set(bookPair(g), v);
+    }
+  const contradicted = new Map([...versus].filter(([, v]) => v.judged >= REFERENCE_DISAGREEMENT.minJudged && v.contradicted / v.judged >= REFERENCE_DISAGREEMENT.ratio));
+
+  // 5. one suggestion per live group
+  const stats: MergeStats = { input: raws.length, output: 0, duplicates: 0, agreements: 0, raised: 0, consistent: 0, conflicts: 0, existing: 0, suspectPairs: suspect.size, contradictedPairs: contradicted.size };
   const out: MergedSuggestion[] = [];
   for (const g of groups) {
     if (g.folded) continue;
-    const s = finalize(g, stats, opts);
+    const s = finalize(g, stats, opts, suspect.has(bookPair(g)) ? perPair.get(bookPair(g))! : null, contradicted.get(bookPair(g)) ?? null);
     out.push(s);
   }
   out.sort((a, b) => {
@@ -245,7 +311,7 @@ const TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const engineTitle = (e: EngineId) => `"${TITLE.get(e) ?? e}"`;
 const r = (code: string, text: string): Reason => ({ code, text });
 
-function finalize(g: Group, stats: MergeStats, opts: MergeOptions): MergedSuggestion {
+function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { conflicts: number; support: number } | null, against: { judged: number; contradicted: number } | null): MergedSuggestion {
   const rep = g.rep.s;
   const reasons: Reason[] = [...rep.reasons];
   const warnings: Reason[] = [...rep.warnings];
@@ -280,6 +346,16 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions): MergedSugges
       seenAlt.add(k);
       alternatives.push({ target: x.oEnd, score: x.s.score, reasons: [r("maxlink/inner", `הצעה של ${engineTitle(x.s.engine)}.`)] });
     }
+  }
+  if (suspect && g.engines.length < 2 && !g.consistent.length && level < POSSIBLE) {
+    level = POSSIBLE;
+    rules.push("maxlink/pair-disagree");
+    warnings.push(r("maxlink/pair-disagree", `בין שני הספרים האלה השיטות סותרות זו את זו ב־${suspect.conflicts} מקומות, ומסכימות רק ב־${suspect.support}. ייתכן שהמבנה של אחד הספרים (למשל מספור דפים משלו) אינו של ספר הבסיס, ולכן הצעה של שיטה אחת כאן היא לבדיקה בלבד.`));
+  }
+  if (against && level < POSSIBLE) {
+    level = POSSIBLE;
+    rules.push("maxlink/contradicts-library");
+    warnings.push(r("maxlink/contradicts-library", `הספרייה כבר מקשרת ${against.judged} שורות בין שני הספרים האלה, וההצעות כאן מצביעות על מקום אחר ב־${against.contradicted} מהן. כנראה שהמבנה של הספר (למשל מספור דפים משלו) אינו של ספר הבסיס, ולכן אף הצעה כאן אינה "ודאית".`));
   }
   if (g.conflictWith.length) {
     stats.conflicts++;

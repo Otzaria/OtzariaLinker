@@ -116,6 +116,7 @@ export class MaxLinkState {
     const project = new Map<string, string[]>();
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") project.set(linePairKey(l), [...(project.get(linePairKey(l)) ?? []), l.id]);
     const merged = mergeSuggestions(items, {
+      reference: db,
       existing: (s) => (db.has(linePairKey(s)) ? "db" : project.get(linePairKey(s))?.some((id) => id !== `auto:${s.id}`) ? "project" : null),
     });
 
@@ -127,6 +128,12 @@ export class MaxLinkState {
         code: "maxlink/summary",
         text: `${st.input.toLocaleString("he")} הצעות מ־${outcomes.length.toLocaleString("he")} שלבים אוחדו ל־${st.output.toLocaleString("he")}: ${st.duplicates.toLocaleString("he")} כפילויות אוחדו, ${st.agreements.toLocaleString("he")} קישורים ששתי שיטות או יותר הגיעו אליהם, ${st.conflicts.toLocaleString("he")} סתירות בין שיטות (מסומנות "עמומה").`,
       },
+      ...(st.contradictedPairs
+        ? [{ code: "maxlink/contradicts-library", text: `ב־${st.contradictedPairs} זוגות ספרים ההצעות סותרות את הקישורים שכבר יש בספרייה ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה אינה "ודאית"; הן מסומנות לבדיקה.` }]
+        : []),
+      ...(st.suspectPairs
+        ? [{ code: "maxlink/pair-disagree", text: `ב־${st.suspectPairs} זוגות ספרים השיטות סותרות זו את זו ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה של שיטה אחת אינה "ודאית"; הן מסומנות לבדיקה.` }]
+        : []),
       ...(failed ? [{ code: "maxlink/errors", text: `${failed} שלבים נכשלו; שאר השלבים רצו. הפרטים ב"דוח הקישור המרבי".` }] : []),
     ];
     batch(() => {
