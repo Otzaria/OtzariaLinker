@@ -83,6 +83,11 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         )}
       </Menu>
       {inWorkspace && (
+        <button class="icon-btn" onClick={() => store.saveProject()} title="שמירת הפרויקט כקובץ (Ctrl+S) — כדי להמשיך מאוחר יותר" aria-label="שמירת פרויקט">
+          <Icon name="fl_save" />
+        </button>
+      )}
+      {inWorkspace && (
         <button class="btn filled" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json">
           <Icon name="oz_link_download" size={18} />
           ייצוא{count ? ` (${count.toLocaleString("he")})` : ""}

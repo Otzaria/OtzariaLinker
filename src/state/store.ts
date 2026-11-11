@@ -1,4 +1,5 @@
-import { batch, computed, signal } from "@preact/signals";
+import { batch, computed, effect, signal } from "@preact/signals";
+import { parseProject, serializeProject } from "../projects/project-format";
 import type { SourceBook } from "../core/books";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
@@ -13,7 +14,7 @@ import { parseLinksJson } from "../formats/links-json/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
 import { LineStore } from "./lines";
 import { loadPreferences, type Preferences } from "./preferences";
-import type { BooksService, InputFile, OpenedSource, Saver } from "./services";
+import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -161,7 +162,7 @@ export class AppStore {
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
     for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "project") this.notify("info", `"${d.path}" הוא פרויקט שמור. פתיחת פרויקטים תתווסף בשלב הבא.`);
+    for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);
@@ -451,10 +452,14 @@ export class AppStore {
     if (!s) return;
     batch(() => {
       this.currentSuggestion.value = id;
-      this.pick.source.value = { bookKey: s.source.book.key, line: s.source.line, ...(s.source.end !== undefined && { end: s.source.end }) };
-      this.pick.target.value = { bookKey: s.target.book.key, line: s.target.line, ...(s.target.end !== undefined && { end: s.target.end }) };
-      this.reveal("source", s.source.book.key, s.source.line);
-      this.reveal("target", s.target.book.key, s.target.line);
+      // show each end in the reader that already holds its book (a suggestion may run base → commentary)
+      const sideOf = (key: string, fallback: Side): Side => (this.view.source.value === key ? "source" : this.view.target.value === key ? "target" : fallback);
+      const a = sideOf(s.source.book.key, "source");
+      const b: Side = a === "source" ? "target" : "source";
+      for (const [side, end] of [[a, s.source], [b, s.target]] as const) {
+        this.pick[side].value = { bookKey: end.book.key, line: end.line, ...(end.end !== undefined && { end: end.end }) };
+        this.reveal(side, end.book.key, end.line);
+      }
     });
   }
 
@@ -534,6 +539,91 @@ export class AppStore {
     };
   }
 
+  /* ---------------- projects, autosave, recovery ---------------- */
+
+  projectText(): string {
+    const titleOf = (k: string | null) => (k ? this.refOf(k).title : null);
+    return serializeProject(
+      {
+        sources: this.sources.value.map((s) => ({ label: s.info.label, kind: s.info.kind, books: s.books.length })),
+        links: this.allLinks.value,
+        rejectedSuggestions: [...this.rejected.value],
+        view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
+      },
+      APP_VERSION,
+    );
+  }
+
+  saveProject(): void {
+    const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
+    this.saver.save(`${t}.otzlinker.json`, this.projectText(), "application/json");
+    this.savedRevision.value = this.linkState.value.revision;
+    this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
+  }
+
+  /** Opens a saved project, replacing the current links (one undo step back to what was there). */
+  openProject(path: string, text: string): void {
+    let p;
+    try {
+      p = parseProject(text, (b) => this.resolveTitle(b.title) ?? { key: `unresolved:${b.title}`, ...b });
+    } catch (err) {
+      return void this.notify("error", `"${path}": ${(err as Error).message}`);
+    }
+    const old = this.linkState.value.links;
+    const changes: Change[] = [...old.values()].map((l) => ({ id: l.id, before: l }));
+    for (const l of p.links) changes.push({ id: l.id, ...(old.get(l.id) && { before: old.get(l.id)! }), after: l });
+    batch(() => {
+      this.apply(`פתיחת פרויקט (${p.links.length.toLocaleString("he")} קישורים)`, changes.filter((c) => c.before !== c.after));
+      this.rejected.value = new Set(p.rejectedSuggestions);
+      this.savedRevision.value = this.linkState.value.revision;
+      const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
+      this.view.source.value = show(p.view.source) ?? this.view.source.value;
+      this.view.target.value = show(p.view.target) ?? this.view.target.value;
+      this.screen.value = "workspace";
+    });
+    const open = new Set(this.sources.value.map((s) => s.info.label));
+    const missing = p.sources.filter((s) => !open.has(s.label)).map((s) => s.label);
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.`);
+    if (missing.length) this.notify("info", `כדי לראות את הקישורים על הטקסט, פתחו שוב את המקורות: ${missing.join(", ")}. הקישורים יתחברו לספרים לפי השם.`);
+    if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
+  }
+
+  /**
+   * Saves the project to the browser a moment after every change, and offers to restore what a
+   * crash, refresh or closed tab left behind (stage 14). Returns a disposer.
+   */
+  startAutosave(kv: KeyValueStore, delayMs = 1500): () => void {
+    const KEY = "autosave:v1";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let first = true;
+    const stop = effect(() => {
+      const rev = this.linkState.value.revision;
+      if (first) return void (first = false);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const empty = this.linkState.peek().links.size === 0;
+        (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
+          /* storage blocked or full — autosave is best effort */
+        });
+      }, delayMs);
+      void rev;
+    });
+    void kv.get(KEY).then(
+      (text) => {
+        if (!text || this.linkState.peek().links.size) return;
+        let n = 0;
+        try {
+          n = (JSON.parse(text) as { links?: unknown[] }).links?.length ?? 0;
+        } catch {
+          return;
+        }
+        if (n) this.notify("info", `נמצאה עבודה שלא נשמרה מהפעם הקודמת (${n.toLocaleString("he")} קישורים).`, undefined, { label: "שחזור", run: () => this.openProject("שמירה אוטומטית", text) });
+      },
+      () => {},
+    );
+    return () => (clearTimeout(timer), stop());
+  }
+
   /* ---------------- notices and tasks ---------------- */
 
   notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): void {
@@ -569,6 +659,9 @@ export class AppStore {
   }
 }
 
+
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 export const TYPE_CHOICES = AUTHORABLE_TYPES.map((t) => t.toLowerCase());
 export const isKnownType = (raw: string): boolean => parseConnectionType(raw).known;

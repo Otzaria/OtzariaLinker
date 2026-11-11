@@ -8,6 +8,7 @@ import { applyTheme } from "../ui/theme/theme";
 import "../ui/theme/tokens.css";
 import "../ui/theme/app.css";
 import { RpcClient, type Port } from "../workers/rpc";
+import { idbStore } from "./idb-store";
 import type { SourcesApi } from "../workers/sources-api";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
 
@@ -38,6 +39,7 @@ const saver: Saver = {
 };
 
 const store = new AppStore(service, saver);
+store.startAutosave(idbStore());
 
 let stopTheme = () => {};
 effect(() => {

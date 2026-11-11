@@ -224,8 +224,8 @@ function useLineMarks(side: Side, bookKey: string): Marks {
     const st = store.suggestionState.value;
     for (const sg of run.result.suggestions) {
       if (st.get(sg.id) !== "pending") continue;
-      const end = side === "source" ? sg.source : sg.target;
-      if (end.book.key !== bookKey) continue;
+      const end = sg.source.book.key === bookKey ? sg.source : sg.target.book.key === bookKey ? sg.target : null;
+      if (!end) continue;
       for (let i = end.line; i <= (end.end ?? end.line) && i < end.line + 500; i++) {
         const cur = m.get(i);
         if (!cur || CONFIDENCE_ORDER.indexOf(sg.confidence) < CONFIDENCE_ORDER.indexOf(cur)) m.set(i, sg.confidence);
@@ -233,6 +233,7 @@ function useLineMarks(side: Side, bookKey: string): Marks {
     }
     return m;
   });
+  void side;
   return { project: project.value, suggested: suggested.value };
 }
 

@@ -128,3 +128,48 @@ describe("AppStore — automatic suggestions", () => {
     expect(store.suggestionState.value.get(certain[0]!)).toBe("rejected");
   });
 });
+
+describe("AppStore — projects and autosave", () => {
+  it("save → open in a new session binds links to the books by title", async () => {
+    const a = makeStore();
+    await a.store.openFiles([DB, COMMENTARY]);
+    const comm = [...a.store.books.value.values()].find((b) => b.title === "פירוש על בראשית")!;
+    const ber = [...a.store.books.value.values()].find((b) => b.title === "בראשית")!;
+    await a.store.lines.load(ber.key, 0, 5);
+    await a.store.lines.load(comm.key, 0, 2);
+    a.store.pickLine("source", comm.key, 1);
+    a.store.pickLine("target", ber.key, 2);
+    a.store.draftRef2.value = "Genesis 1:1";
+    a.store.createFromDraft();
+    a.store.saveProject();
+    const text = a.saved.at(-1)!.data as string;
+    expect(a.store.dirty.value).toBe(false);
+
+    const b = makeStore();
+    await b.store.openFiles([{ path: "work.otzlinker.json", blob: new Blob([text]) }]); // before the books: unresolved
+    expect(b.store.allLinks.value[0]!.source.book.key).toBe("unresolved:פירוש על בראשית");
+    await b.store.openFiles([DB, COMMENTARY]);
+    const comm2 = [...b.store.books.value.values()].find((x) => x.title === "פירוש על בראשית")!;
+    expect(b.store.linksOfBook(comm2.key)).toHaveLength(1);
+    const plan = (await b.store.prepareExport())!;
+    expect(plan.counts).toMatchObject({ new: 1, heldBack: 0 });
+  });
+
+  it("autosave writes after a change and offers recovery in a new session", async () => {
+    const mem = new Map<string, string>();
+    const kv = { get: async (k: string) => mem.get(k) ?? null, set: async (k: string, v: string) => void mem.set(k, v), delete: async (k: string) => void mem.delete(k) };
+    const a = makeStore();
+    a.store.startAutosave(kv, 0);
+    await a.store.openFiles([{ path: "פירוש על בראשית_links.json", blob: new Blob([JSON.stringify([{ line_index_1: 2, heRef_2: "x", path_2: "בראשית.txt", line_index_2: 3, "Conection Type": "commentary" }])]) }]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(mem.get("autosave:v1")).toContain("otzaria-linker-project");
+
+    const b = makeStore();
+    b.store.startAutosave(kv, 0);
+    await new Promise((r) => setTimeout(r, 10));
+    const offer = b.store.notices.value.find((n) => n.action?.label === "שחזור")!;
+    expect(offer.text).toContain("1");
+    offer.action!.run();
+    expect(b.store.allLinks.value).toHaveLength(1);
+  });
+});

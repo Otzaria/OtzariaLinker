@@ -40,3 +40,10 @@ export interface BooksService {
 export interface Saver {
   save(name: string, data: Uint8Array | string, mime: string): void;
 }
+
+/** Small persistent storage for autosave (IndexedDB in the browser). Every call may fail; callers cope. */
+export interface KeyValueStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}

@@ -20,7 +20,7 @@ export function App() {
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) (e.preventDefault(), store.undo());
       else if (k === "y" || (k === "z" && e.shiftKey)) (e.preventDefault(), store.redo());
-      else if (k === "s" && store.screen.value === "workspace") (e.preventDefault(), setExporting(true));
+      else if (k === "s") (e.preventDefault(), store.saveProject());
     };
     // warn before closing with links that were not exported
     const onUnload = (e: BeforeUnloadEvent) => {
