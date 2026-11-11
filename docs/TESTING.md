@@ -86,6 +86,45 @@ npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 מדויקים; התוצאות שנמדדו מסוכמות ב־[`AUTOMATION_ENGINE.md`](AUTOMATION_ENGINE.md). הריצה על ספרים שלמים
 לוקחת דקות (ה־timeout של כל בדיקה עד 10 דקות).
 
+## 4א. אימות מול נתונים אמיתיים (`npm run validate:real`)
+
+שמונה בדיקות שמשוות את הכלי לנתונים האמיתיים שבמחשב: המסד העדכני של אוצריא, עותק git של ספריית
+אוצריא ומסדים זרים. הן לא רצות ב־`npm test` (תצורה נפרדת, `vitest.validation.config.ts`), וכל אחת
+מדולגת בלי משתני הסביבה שלה. הממצאים והמספרים: [`validation/REAL_DATA_REPORT.md`](validation/REAL_DATA_REPORT.md).
+
+| משתנה | מה |
+|---|---|
+| `OTZARIA_DB` | `seforim.db` העדכני. נפתח לקריאה בלבד; כל בדיקה מוודאת בסוף שגודל הקובץ וזמן השינוי שלו לא השתנו |
+| `OTZARIA_LIBRARY` | שכפול git של `Otzaria/otzaria-library`. הקבצים נקראים **כפי שהם ב־commit** (`git cat-file`), לא מהעותק העובד: עם `core.autocrlf=true` בעותק העובד יש CRLF בכל קובץ |
+| `OTZARIA_EXTRA_DBS` | קבצים נוספים, מופרדים ב־`;` (מסדים זרים, מסדי האפליקציה, PDF) |
+| `VALIDATION_OUT` | לא חובה: תיקייה שאליה כל בדיקה כותבת את תוצאותיה כ־JSON (מהן נבנה הדוח) |
+| `PYTHON` | לא חובה: המפרש של האורקל (ברירת המחדל `py -3 -I` ב־Windows, `python3 -I` בשאר) |
+
+**האורקל** (`scripts/validation/db_oracle.py`) הוא קורא עצמאי: `sqlite3` של פייתון ו־libzstd (חבילת
+`zstandard`), במצב `mode=ro`. הבדיקות משוות אליו את מה שהקורא העצל של הכלי מחזיר. הפלט שלו נכתב
+לתיקייה זמנית ונמחק בסוף.
+
+| קובץ | בדיקה |
+|---|---|
+| `tests/validation/db-reading.test.ts` | 1. כל הספרים (כותרת, מקור, `isBaseBook`, קטגוריה, מספר שורות); מדגם של ~320 ספרים: כל שורה (טקסט ו־heRef), `line_note`, הכותרות מול `tocEntry`, alt_toc, והקישורים בשני חלונות של 40 שורות |
+| `tests/validation/anchors.test.ts` | 2. עוגני `link_anchor` מכל סוג מול מודל העוגנים; ועוגנים מקובצי הספרייה מול מה שנשמר |
+| `tests/validation/library-links.test.ts` | 3. כל `_links.json` בספרייה: ייבוא וייצוא בית־בבית, פסקי הבדיקה, והשוואה למה שהגנרטור שמר בפועל |
+| `tests/validation/library-texts.test.ts` | 4. ספרי ‎.txt מהספרייה מול אותם ספרים במסד |
+| `tests/validation/engines.test.ts` | 5. המנועים מול הקישורים שכבר במסד (ומול רשומות ההערות של הספרייה). מנוע חדש = רשומה אחת ב־`engine-harness.ts` |
+| `tests/validation/foreign-dbs.test.ts` | 6. מסדים זרים: מסד אוצריא, אשף המיפוי או סירוב מנומק; בלי כתיבה |
+| `tests/validation/performance.test.ts` | 7. זמנים וזיכרון על המסד האמיתי |
+| `tests/validation/browser/real-db.spec.ts` | 8. הקובץ הבנוי ב־Chrome פותח את המסד האמיתי דרך בוחר הקבצים (`npm run validate:browser`) |
+
+```powershell
+$env:OTZARIA_DB = "C:/ProgramData/otzaria/books/seforim.db"
+$env:OTZARIA_LIBRARY = "C:/Users/User/Documents/DEV/otzaria-library"
+$env:OTZARIA_EXTRA_DBS = "C:/ProgramData/otzaria/books/lexical.db;C:/ProgramData/otzaria/databases/user_books.db"
+$env:VALIDATION_OUT = "$env:TEMP/otzaria-validation"
+npm run validate:real                                                   # 1–7, כ־40 דקות
+npx vitest run --config vitest.validation.config.ts tests/validation/anchors.test.ts   # בדיקה אחת
+npm run build; npm run validate:browser                                 # 8
+```
+
 ## 5. Fixtures
 
 **רק נתונים אמיתיים**, וכל fixture מתעד את מקורו. אסור להמציא מבנה של סכמה. החריג היחיד הוא מסדים
