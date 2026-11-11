@@ -25,6 +25,13 @@ describe("detectKind — by content, not by extension", () => {
   it("CSV by extension", () => expect(detectKind(u8("a,b\n1,2"), "x.csv")).toBe("csv"));
   it("book text", () => expect(detectKind(u8("<h1>בראשית</h1>\nבראשית ברא"), "בראשית.txt")).toBe("text"));
   it("binary", () => expect(detectKind(new Uint8Array([1, 0, 2, 0, 0, 0, 7, 0, 0, 9]))).toBe("binary"));
+  it("a PDF is binary even with no NUL byte in its first KiB", () => {
+    // the first bytes of a real Otzaria PDF (תלמוד בבלי/ביצה.pdf): an ASCII header, a high-byte comment, then plain PDF syntax
+    const body = ["", "2 0 obj", "<<", "/Metadata 4 0 R", "/Outlines 5 0 R", ">>", "endobj", ""].join("\n");
+    const head = new Uint8Array([...u8("%PDF-1.6\n%"), 0xd0, 0xd5, 0xd1, 0x99, ...u8(body.repeat(20))]);
+    expect(head.includes(0)).toBe(false);
+    expect(detectKind(head, "ביצה.pdf")).toBe("binary");
+  });
   it("UTF-16LE text is not binary", () => {
     const b = new Uint8Array([0xff, 0xfe, 0xe9, 0x05, 0xdc, 0x05]);
     expect(detectKind(b, "x.txt")).toBe("text");
