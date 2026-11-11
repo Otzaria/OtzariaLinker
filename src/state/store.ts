@@ -25,6 +25,7 @@ import { BookFind } from "./book-find";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
+import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
 /*
@@ -207,6 +208,12 @@ export class AppStore {
     if (!files.length) return;
     const res = await this.runTask(`פותח ${files.length === 1 ? files[0]!.path : `${files.length} קבצים`}…`, (opts) => this.service.open(files, opts));
     if (!res) return;
+    this.log.info("open", `${files.length} files`, {
+      sources: res.sources.map((s) => ({ kind: s.info.kind, books: s.books.length, warnings: s.info.warnings.map((w) => w.code) })),
+      documents: res.documents.map((d) => d.kind),
+      skipped: res.skipped.length,
+      needsMapping: res.needsMapping?.length ?? 0,
+    });
     batch(() => {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
@@ -262,6 +269,7 @@ export class AppStore {
    * cancel). Its sources are gone; the project's links are not.
    */
   workerLost(reason: string): void {
+    this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
     batch(() => {
       this.sources.value = [];
       this.view.source.value = null;
@@ -1007,7 +1015,26 @@ export class AppStore {
 
   /* ---------------- notices and tasks ---------------- */
 
+  /** diagnostics (see diagnostics.ts): notices, tasks, worker restarts and uncaught errors */
+  readonly log = diagnosticsLog();
+
+  /** Saves the diagnostic log as JSONL, with a header describing the app and what is open (no book content). */
+  saveDiagnostics(): void {
+    const header = {
+      app: __APP_VERSION__,
+      commit: __APP_COMMIT__,
+      built: __APP_BUILD_DATE__,
+      savedAt: new Date().toISOString(),
+      userAgent: globalThis.navigator?.userAgent ?? "",
+      sources: this.sources.value.map((s) => ({ kind: s.info.kind, books: s.books.length })),
+      links: this.linkState.value.links.size,
+      prefs: { theme: this.prefs.theme.value, advanced: this.prefs.advanced.value, createMode: this.prefs.createMode.value, view: this.prefs.suggestionsView.value, layout: this.prefs.layout.value.preset },
+    };
+    this.saver.save(diagnosticsFileName(), diagnosticsFile(header, this.log.entries()), "application/x-ndjson");
+  }
+
   notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): void {
+    logNotice(this.log, kind, text, details);
     const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }) };
     this.notices.value = [...this.notices.value, n].slice(-6);
   }
@@ -1018,13 +1045,16 @@ export class AppStore {
 
   async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>): Promise<T | null> {
     const ac = new AbortController();
+    const logged = logTask(this.log, label);
     this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort() };
     try {
-      return await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      logged.ok();
+      return result;
     } catch (err) {
       const e = err as { code?: string; message?: string; name?: string };
-      if (e.code === "cancelled" || e.name === "AbortError") this.notify("info", "הפעולה בוטלה. שום דבר לא השתנה.");
-      else this.notify("error", e.message ?? String(err));
+      if (e.code === "cancelled" || e.name === "AbortError") (logged.cancelled(), this.notify("info", "הפעולה בוטלה. שום דבר לא השתנה."));
+      else (logged.failed(err), this.notify("error", e.message ?? String(err)));
       return null;
     } finally {
       this.task.value = null;

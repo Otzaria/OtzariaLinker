@@ -174,6 +174,6 @@ AppStore.prepareExport / runQualityCheck
 איכות; היסטוריית פעולות; פרויקטים, שמירה אוטומטית ושחזור; עזרה בתוך הכלי (המדריך עצמו, `ui/help/markdown.ts`); מבני כותרות אלטרנטיביים (`alt_toc`), דוח
 `_report.txt` ו־CSV בפורמט ספריא (`core/alt-toc/`, `formats/{alt-toc,report,sefaria-csv}/`, `state/alt-toc.ts`).
 
-לא ממומש: ייבוא JSON כללי, חיבור `diagnostics` לממשק. הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
+לא ממומש: ייבוא JSON כללי. (`diagnostics` מחובר: יומן אבחון ב־`state/diagnostics.ts`, נשמר מתפריט ההגדרות.) הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
 
 </div>

@@ -82,6 +82,24 @@ test("history list: newest first, jump back and forward, keyboard", async ({ pag
   await expect(source.locator(".mark.new")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "ביצוע חוזר" })).toBeDisabled();
 
+  // Ctrl+H opens the list, as in version 3
+  await page.keyboard.press("Control+h");
+  await expect(items).toHaveCount(4);
+  await page.keyboard.press("Escape");
+  await expect(items).toHaveCount(0);
+
+  // the diagnostic log: saved from the settings menu; tasks and notices, never book content
+  await page.getByRole("button", { name: "הגדרות" }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("menuitem", { name: /שמירת יומן אבחון/ }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^otzaria-linker-diagnostics-.*\.jsonl$/);
+  const lines = readFileSync(await file.path(), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  expect(lines[0].header.sources.map((s: { kind: string }) => s.kind).sort()).toEqual(["otzaria-db", "text-files"]);
+  expect(lines.some((e) => e.area === "task" && e.data?.outcome === "ok")).toBe(true);
+  expect(lines.some((e) => e.area === "open")).toBe(true);
+  expect(JSON.stringify(lines)).not.toContain("פירוש ראשון");
+
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });

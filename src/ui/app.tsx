@@ -31,6 +31,8 @@ export function App() {
       if (k === "z" && !e.shiftKey) (e.preventDefault(), store.undo());
       else if (k === "y" || (k === "z" && e.shiftKey)) (e.preventDefault(), store.redo());
       else if (k === "s") (e.preventDefault(), store.saveProject());
+      // the history list (v3 had Ctrl+H): opened through its own button, so focus and closing behave the same
+      else if (k === "h") (e.preventDefault(), document.querySelector<HTMLButtonElement>(".history-menu .menu > button.icon-btn")?.click());
     };
     // warn before closing with links that were not exported
     const onUnload = (e: BeforeUnloadEvent) => {
