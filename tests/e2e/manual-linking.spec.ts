@@ -48,6 +48,7 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeDisabled();
   await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
+  await expect(builder.locator(".stored-as")).toContainText("בראשית"); // shows how Otzaria will store it
   await shot(page, "3-builder");
   await page.keyboard.press("Control+Enter");
 
@@ -73,7 +74,7 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   const file = await download;
   expect(file.suggestedFilename()).toBe("פירוש על בראשית_links.json");
   const records = JSON.parse(readFileSync(await file.path(), "utf8")) as Record<string, unknown>[];
-  expect(records).toEqual([{ line_index_1: 2, heRef_2: "בראשית, א, א", path_2: "בראשית.txt", line_index_2: 3, ref_2: "Genesis 1:1", "Conection Type": "commentary" }]);
+  expect(records).toEqual([{ line_index_1: 2, heRef_2: "בראשית, א, א", path_2: "בראשית.txt", line_index_2: 3, ref_2: "Genesis 1:1", "Conection Type": "source" }]);
 
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);

@@ -22,6 +22,12 @@ function makeStore() {
   return { store, saved };
 }
 const DB = { path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) };
+const heb = (n: number) => ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י", "יא", "יב", "יג", "יד", "טו", "טז", "יז", "יח", "יט", "כ", "כא", "כב", "כג", "כד", "כה", "כו", "כז", "כח", "כט", "ל"][n]!;
+/** a commentary the database has no links for: chapter 1 of בראשית, verse by verse */
+const BIUR = {
+  path: "ביאור על בראשית.txt",
+  blob: new Blob([strToU8(["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...Array.from({ length: 30 }, (_, i) => [`<h3>פסוק ${heb(i + 1)}</h3>`, `ביאור לפסוק ${i + 1}`]).flat()].join(String.fromCharCode(10)))]),
+};
 const COMMENTARY = { path: "פירוש על בראשית.txt", blob: new Blob([strToU8("<h1>פירוש על בראשית</h1>\nבראשית - פירוש ראשון\nויאמר - פירוש שני")]) };
 
 describe("AppStore — the manual linking flow end to end (without UI)", () => {
@@ -40,7 +46,8 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     store.pickLine("target", bereshit.key, verse);
     expect(store.draftProblems.value.map((p) => p.code)).toContain("sefaria/ref2-required"); // Bereshit is a Sefaria book
     store.draftRef2.value = "Genesis 1:1";
-    expect(store.draft.value).toMatchObject({ declaredType: "commentary", source: { line: 1 }, target: { line: verse } });
+    // "פירוש על בראשית" names its base: the type follows the titles → "source" (stored base → commentary)
+    expect(store.draft.value).toMatchObject({ declaredType: "source", source: { line: 1 }, target: { line: verse } });
     expect(store.draft.value!.heRef2).toBe(store.lines.peek(bereshit.key, verse)!.heRef);
 
     const link = store.createFromDraft()!;
@@ -57,7 +64,7 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     expect(plan.counts).toMatchObject({ new: 1, heldBack: 0, files: 1 });
     store.saveExport(plan);
     expect(saved[0]!.name).toBe("פירוש על בראשית_links.json");
-    expect(JSON.parse(saved[0]!.data as string)[0]).toMatchObject({ line_index_1: 2, path_2: "בראשית.txt", line_index_2: verse + 1, "Conection Type": "commentary" });
+    expect(JSON.parse(saved[0]!.data as string)[0]).toMatchObject({ line_index_1: 2, path_2: "בראשית.txt", line_index_2: verse + 1, "Conection Type": "source" });
     expect(store.dirty.value).toBe(false);
   });
 
@@ -104,12 +111,12 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
 describe("AppStore — automatic suggestions", () => {
   it("run → approve all certain (one undo step) → undo returns them to pending → reject is remembered", async () => {
     const { store } = makeStore();
-    await store.openFiles([DB]);
-    const onkelos = [...store.books.value.values()].find((b) => b.title === "תרגום אונקלוס על בראשית")!;
+    await store.openFiles([DB, BIUR]);
+    const onkelos = [...store.books.value.values()].find((b) => b.title === "ביאור על בראשית")!;
     const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
     expect(await store.runEngine("headings", onkelos.key, bereshit.key)).toBe(true);
     const run = store.run.value!;
-    expect(run.result.suggestions.length).toBeGreaterThan(50);
+    expect(run.result.suggestions.length).toBe(30);
     const certain = store.pendingAtLeast("certain");
     expect(certain.length).toBeGreaterThan(0);
 
@@ -179,6 +186,7 @@ describe("AppStore — batch linking", () => {
   it("pairs every book with the base its title names, runs them all, and summarises per book", async () => {
     const { store } = makeStore();
     await store.openFiles([DB]);
+    await store.openFiles([BIUR]);
     expect(await store.runBatch("headings", store.sources.value[0]!.info.id)).toBe(true);
     const run = store.run.value!;
     const rows = new Map(run.batch!.map((r) => [r.source.title, r]));
@@ -187,23 +195,36 @@ describe("AppStore — batch linking", () => {
     expect(rows.get("המאיר לארץ על ארצות החיים")!.target!.title).toBe("ארצות החיים");
     expect(rows.get("בראשית")!.problem).toBeTruthy(); // a base book names no base
     expect(run.result.suggestions.length).toBe(run.batch!.reduce((n, r) => n + r.suggestions, 0));
-    expect(store.approveSuggestions(store.pendingAtLeast("certain"))).toBeGreaterThan(50);
+    expect(store.suggestionCounts.value.exists).toBeGreaterThan(50); // the library already has Onkelos
+    expect(await store.runBatch("headings", store.sources.value[1]!.info.id)).toBe(true);
+    expect(store.approveSuggestions(store.pendingAtLeast("certain"))).toBe(30);
   });
 });
 
 describe("AppStore — rejections survive a saved project", () => {
   it("a suggestion rejected in one session is still rejected after reopening the project", async () => {
     const a = makeStore();
-    await a.store.openFiles([DB]);
+    await a.store.openFiles([DB, BIUR]);
     const key = (s: ReturnType<typeof makeStore>, t: string) => [...s.store.books.value.values()].find((b) => b.title === t)!.key;
-    await a.store.runEngine("headings", key(a, "תרגום אונקלוס על בראשית"), key(a, "בראשית"));
+    await a.store.runEngine("headings", key(a, "ביאור על בראשית"), key(a, "בראשית"));
     const first = a.store.pendingAtLeast("certain")[0]!;
     a.store.rejectSuggestions([first]);
     a.store.saveProject();
 
     const b = makeStore();
-    await b.store.openFiles([{ path: "p.json", blob: new Blob([a.saved.at(-1)!.data as string]) }, { path: "other-name.db", blob: DB.blob }]);
-    await b.store.runEngine("headings", key(b, "תרגום אונקלוס על בראשית"), key(b, "בראשית"));
+    await b.store.openFiles([{ path: "p.json", blob: new Blob([a.saved.at(-1)!.data as string]) }, { path: "other-name.db", blob: DB.blob }, BIUR]);
+    await b.store.runEngine("headings", key(b, "ביאור על בראשית"), key(b, "בראשית"));
     expect(b.store.suggestionCounts.value.rejected).toBe(1);
+  });
+});
+
+describe("AppStore — suggestions the library already has", () => {
+  it("Onkelos → Bereshit links that the database already holds show as 'exists'", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB]);
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    await store.runEngine("headings", key("תרגום אונקלוס על בראשית"), key("בראשית"));
+    expect(store.dbLinkKeys.value.size).toBeGreaterThan(0);
+    expect(store.suggestionCounts.value.exists).toBeGreaterThan(0);
   });
 });

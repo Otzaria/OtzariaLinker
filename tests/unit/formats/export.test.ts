@@ -52,6 +52,19 @@ describe("planExport", () => {
     expect(plan.files[0]).toMatchObject({ name: "ספר ג_links.json", isNewFile: true });
   });
 
+  it("deleting every imported link of a book writes an empty file, so the deletions reach the library", () => {
+    const plan = planExport(imported.map((l) => ({ ...l, status: "deleted" as const })), ctx);
+    expect(plan.files).toEqual([expect.objectContaining({ name: "ספר א_links.json", text: "[]", records: 0, isNewFile: false })]);
+  });
+
+  it("an untouched imported record with an error is kept (dropping it would delete it from the library)", () => {
+    const bad = { ...imported[0]!, source: { ...imported[0]!.source, line: 0 } }; // line 0 is a heading in ctx
+    const plan = planExport([bad, imported[1]!], ctx);
+    expect(plan.heldBack).toEqual([]);
+    expect(plan.warned.map((w) => w.link.id)).toContain(bad.id);
+    expect(plan.files[0]!.records).toBe(2);
+  });
+
   it("db links are never written", () => {
     expect(planExport([mk("d", { provenance: "db", status: "existing" })], ctx).files).toEqual([]);
   });

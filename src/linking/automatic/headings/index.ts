@@ -27,7 +27,7 @@ import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from 
 export type { NumberingMode } from "./numbering";
 
 export interface HeadingsOptions {
-  /** "Conection Type" of every suggestion. Default "commentary". */
+  /** "Conection Type" of every suggestion. Default "source" (see below). */
   readonly declaredType?: string;
   /**
    * How numerals in structural headings are read. "lenient" (default, REUSE_MATRIX §5.1): letters are
@@ -68,7 +68,9 @@ interface Scored {
 
 export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, options: HeadingsOptions = {}, ctx: EngineContext = {}): EngineResult {
   const opts = {
-    declaredType: options.declaredType ?? "commentary",
+    // "source": the record sits in the commentary's file and the generator stores it base → commentary,
+    // which is how the app shows a commentary (compatibility review #1). "commentary" would be stored backwards.
+    declaredType: options.declaredType ?? "source",
     numbering: options.numbering ?? "lenient",
     inlineMarkers: options.inlineMarkers ?? "auto",
     untaggedHeadings: options.untaggedHeadings ?? true,

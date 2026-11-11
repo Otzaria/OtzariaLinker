@@ -1,5 +1,6 @@
 import { useEffect } from "preact/hooks";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
+import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
 import type { Pick, Side } from "../../state/store";
 import { TYPE_CHOICES } from "../../state/store";
@@ -50,7 +51,7 @@ export function Builder() {
 
       <label class="field">
         סוג הקשר
-        <select value={TYPE_CHOICES.includes(store.draftType.value) ? store.draftType.value : "__custom"} onChange={(e) => e.currentTarget.value !== "__custom" && (store.draftType.value = e.currentTarget.value)}>
+        <select value={TYPE_CHOICES.includes(store.draftType.value) ? store.draftType.value : "__custom"} onChange={(e) => e.currentTarget.value !== "__custom" && ((store.draftType.value = e.currentTarget.value), (store.draftTypeTouched.value = true))}>
           {TYPE_CHOICES.map((t) => (
             <option key={t} value={t}>
               {TYPE_LABELS[t.toUpperCase() as keyof typeof TYPE_LABELS]?.he ?? t}
@@ -60,6 +61,7 @@ export function Builder() {
         </select>
         <span class="muted">{TYPE_LABELS[parseConnectionType(store.draftType.value).type].hint}</span>
       </label>
+      {draft && <StoredAs />}
       {advanced && (
         <label class="field">
           מחרוזת הסוג כפי שתיכתב לקובץ
@@ -121,6 +123,24 @@ export function Builder() {
 
       <PickedLineLinks />
     </div>
+  );
+}
+
+/** What Otzaria will actually store and where it will show it — the user sees the result, not the file shape. */
+function StoredAs() {
+  const store = useStore();
+  const d = store.draft.value!;
+  const f = storedForm(d);
+  if (f.skipped) return null;
+  const panel = f.panel === "commentaries" ? "בפאנל המפרשים" : "בפאנל הקישורים";
+  return (
+    <p class="stored-as">
+      <Icon name="fl_info" size={16} />
+      <span>
+        באוצריא: <b>{f.storedTarget.book.title}</b> יופיע {panel} של <b>{f.storedSource.book.title}</b>
+        {f.stored !== f.declared && ` (כ"${TYPE_LABELS[f.stored].he}")`}.
+      </span>
+    </p>
   );
 }
 

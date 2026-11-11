@@ -21,6 +21,7 @@ async function runEngine(page: Page, source: string | RegExp, target: string | R
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: engine });
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await page.getByRole("button", { name: "הכול", exact: true }).click({ timeout: 30_000 }); // include "already exists"
   await expect(page.locator(".sug-table tbody tr").first()).toBeVisible({ timeout: 30_000 });
 }
 

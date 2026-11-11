@@ -1,6 +1,7 @@
+import { SOURCE_VIEW_TYPES } from "./connection-type";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
-import { isMergeableCompanionTitle, normalizeTitle } from "./titles";
+import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "./titles";
 
 /*
  * Will this link reach Otzaria as intended? Every rule below is a gate of the generator or of the
@@ -25,6 +26,8 @@ export interface LineFacts {
   heading: number | null;
   /** length of the anchor text (the string the generator counts offsets on) */
   anchorLength: number;
+  /** the line receives footnote bodies (schema 7 line_note / a merged "הערות על" companion) */
+  hasNotes?: boolean;
 }
 
 export interface ValidationContext {
@@ -47,9 +50,15 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   if (!f.knownType) add("warning", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
   if (f.downgraded)
     add("warning", "export/downgraded", `"${t.book.title}" הוא ספר בסיס ו"${s.book.title}" אינו בצורה "X על ${t.book.title}", ולכן הקישור יישמר כ"אחר" ולא יופיע בפאנל המפרשים.`);
+  // Compatibility review #1: a commentary file that says "commentary" toward its own base book is
+  // stored commentary → base, so the app shows the BASE in the commentary's commentary panel. Only
+  // Sefaria priority-list books are base books (isBaseBook), so the generator does not fix it.
+  if (!f.skipped && !f.flipped && SOURCE_VIEW_TYPES.has(f.stored) && titleDeclaresDependencyOn(f.storedSource.book.title, f.storedTarget.book.title))
+    add("warning", "export/reversed-dependency", `הקישור יישמר הפוך: "${f.storedTarget.book.title}" יופיע כמפרש של "${f.storedSource.book.title}". בקישור מפירוש אל הספר שעליו נכתב בחרו את הסוג "מקור" (source).`);
   if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
 
-  if (!link.heRef2.trim()) add("error", "export/heref-missing", "חסר שם המקום ביעד (heRef_2). זה שדה חובה, ובלעדיו כל הקובץ נדחה.");
+  // the key is required (its absence rejects the whole file — the parser catches that); an empty value is legal
+  if (!link.heRef2.trim()) add("warning", "export/heref-missing", "שם המקום ביעד (heRef_2) ריק. אוצריא תקבל את הקישור, אבל בלי שם מקום לתצוגה ובלי תווית עוגן.");
   if (t.book.origin === "unknown") add("warning", "export/target-unknown", `הספר "${t.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, הקישור יידחה.`);
   if (isMergeableCompanionTitle(t.book.title))
     add("warning", "export/companion-merged", `"${t.book.title}" מתחיל ב"הערות על". ספר כזה ממוזג לתוך ספר הבסיס, וכל הקישורים אליו נמחקים בשקט. שם בטוח: "הערות ל…".`);
@@ -87,6 +96,10 @@ function anchorChecks(link: Link, flipped: boolean, ctx: ValidationContext, add:
   if (!a) return;
   if (flipped) add("warning", "export/anchor-dropped-flip", "הקישור נשמר באוצריא בכיוון ההפוך (מקור/תלוי), ובכיוון הזה העוגן על המילה נזרק.");
   const facts = ctx.line(link.source.book, link.source.line);
+  // Compatibility review #3: an anchor on a line that receives merged notes cancels the whole
+  // "הערות על" merge in the generator (Generator.kt:937,1004-1008), and the offsets then shift.
+  if (facts?.hasNotes && link.source.book.origin !== "sefaria")
+    add("warning", "export/anchor-on-notes-line", "בשורה הזו משולבות הערות שוליים. עוגן כאן מבטל באוצריא את מיזוג ספר ההערות כולו, והמילים המסומנות יזוזו. עדיף קישור בלי עוגן.");
   if (a.rawStart < 0 || (facts && a.rawStart > facts.anchorLength))
     add("warning", "export/anchor-out-of-line", "העוגן מצביע מחוץ לטקסט השורה, ואוצריא תזרוק אותו (הקישור עצמו יישמר).");
   if (a.rawEnd !== undefined && (a.rawEnd < a.rawStart || (facts && a.rawEnd > facts.anchorLength)))

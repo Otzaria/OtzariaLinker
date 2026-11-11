@@ -81,7 +81,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {plan.warned.slice(0, 200).map(({ link, problems }) => (
                       <li key={link.id} class="warning">
                         <span>
-                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "warning").map((p) => p.message).join(" ")}
+                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity !== "info").map((p) => p.message).join(" ")}
                         </span>
                       </li>
                     ))}

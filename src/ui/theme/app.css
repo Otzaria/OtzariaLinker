@@ -154,6 +154,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .problems li.error { background: var(--error-container); color: var(--on-error-container); }
 .problems li.warning { background: var(--warning-container); color: var(--on-warning-container); }
 .problems li.info { background: var(--surface-container); color: var(--on-surface-variant); }
+.stored-as { margin: 0; display: flex; gap: 6px; align-items: start; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .adv-link { justify-self: start; font-size: var(--fs-sm); color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 
 /* links list */

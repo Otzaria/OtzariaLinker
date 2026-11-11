@@ -3,7 +3,7 @@ import { parseProject, serializeProject } from "../projects/project-format";
 import type { SourceBook } from "../core/books";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
-import { path2ForTitle, sourceTitleFromLinksFileName, titleFromPath2 } from "../core/links/titles";
+import { path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { stripTags } from "../core/text/html";
 import { recordToLink } from "../formats/links-json/convert";
@@ -91,6 +91,8 @@ export class AppStore {
   /** the reader that receives the next click in "click" create mode and keyboard focus */
   readonly activeSide = signal<Side>("source");
   readonly draftType = signal<string>("commentary");
+  /** the user chose the type; until then it follows the books (see autoType) */
+  readonly draftTypeTouched = signal(false);
   /** null = automatic (from the target line); a string = typed by the user */
   readonly draftHeRef = signal<string | null>(null);
   /** Sefaria English refs — required by the library's weekly sync when that side is a Sefaria book */
@@ -103,6 +105,8 @@ export class AppStore {
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
   readonly run = signal<SuggestionRun | null>(null);
+  /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
+  readonly dbLinkKeys = signal<ReadonlySet<string>>(new Set());
   /** the last quality report; null until the user runs the check */
   readonly qa = signal<QaReport | null>(null);
   /** the link revision the report was made on — a different revision means the report is stale */
@@ -279,11 +283,28 @@ export class AppStore {
     } else this.pick[side].value = { bookKey, line };
     if (side === "target") this.draftHeRef.value = this.editing.value ? this.draftHeRef.value : null;
     this.activeSide.value = side;
+    this.autoType();
+  }
+
+  /**
+   * A commentary linked to the book it is written on must be declared "source" (stored base →
+   * commentary, as the app expects); the reverse direction is "commentary". Decided by the titles
+   * ("X על Y"), and only while the user has not chosen a type.
+   */
+  private autoType(): void {
+    const s = this.pick.source.peek();
+    const t = this.pick.target.peek();
+    if (!s || !t || this.draftTypeTouched.peek() || this.editing.peek()) return;
+    const a = this.refOf(s.bookKey).title;
+    const b = this.refOf(t.bookKey).title;
+    if (titleDeclaresDependencyOn(a, b)) this.draftType.value = "source";
+    else if (titleDeclaresDependencyOn(b, a)) this.draftType.value = "commentary";
   }
 
   pickAnchor(side: Side, bookKey: string, line: number, anchor: Pick["anchor"]): void {
     this.pick[side].value = { bookKey, line, ...(anchor && { anchor }) };
     this.activeSide.value = side;
+    this.autoType();
   }
 
   clearPicks(): void {
@@ -291,6 +312,7 @@ export class AppStore {
       this.pick.source.value = null;
       this.pick.target.value = null;
       this.editing.value = null;
+      this.draftTypeTouched.value = false;
       this.draftHeRef.value = null;
       this.draftRef1.value = "";
       this.draftRef2.value = "";
@@ -353,6 +375,7 @@ export class AppStore {
       this.pick.source.value = { bookKey: sKey, line: l.source.line, ...(l.source.end !== undefined && { end: l.source.end }), ...(l.anchor && { anchor: { ...l.anchor, text: "" } }) };
       this.pick.target.value = { bookKey: tKey, line: l.target.line, ...(l.target.end !== undefined && { end: l.target.end }) };
       this.draftType.value = l.declaredType;
+      this.draftTypeTouched.value = true;
       this.draftHeRef.value = l.heRef2;
       this.draftRef1.value = l.ref1 ?? "";
       this.draftRef2.value = l.ref2 ?? "";
@@ -402,6 +425,7 @@ export class AppStore {
     const target = this.refOf(targetKey);
     const result = await this.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, options, opts));
     if (!result) return false;
+    await this.loadDbLinkKeys([source.key]);
     batch(() => {
       this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now() };
       this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
@@ -429,6 +453,7 @@ export class AppStore {
     }
     const items = await this.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), options, opts));
     if (!items) return false;
+    await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
     const suggestions: Suggestion[] = [];
     const notes: Reason[] = [];
     const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.reason && { problem: p.reason }), suggestions: 0, certain: 0, high: 0, review: 0 }));
@@ -454,6 +479,22 @@ export class AppStore {
     return true;
   }
 
+  /**
+   * The library may already have a suggested link (compatibility review #7): read the database links
+   * of the run's source books, so such suggestions show as "already exists" instead of as new.
+   */
+  private async loadDbLinkKeys(bookKeys: readonly string[]): Promise<void> {
+    const keys = new Set<string>();
+    for (const key of new Set(bookKeys)) {
+      try {
+        for (const l of await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
+      } catch {
+        /* a source without links (text files) or a read error: nothing to compare with */
+      }
+    }
+    this.dbLinkKeys.value = keys;
+  }
+
   readonly suggestionState = computed(() => {
     const run = this.run.value;
     const m = new Map<string, SuggestionState>();
@@ -461,10 +502,11 @@ export class AppStore {
     const links = this.linkState.value.links;
     const rejected = this.rejected.value;
     const existing = new Set<string>();
-    for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(storedKey(l));
+    for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(linePairKey(l));
+    for (const k of this.dbLinkKeys.value) existing.add(k);
     for (const s of run.result.suggestions) {
       const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(rejectionKey(s)) ? "rejected" : existing.has(storedKey(this.suggestionLink(s))) ? "exists" : "pending");
+      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(rejectionKey(s)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
     }
     return m;
   });
@@ -643,7 +685,7 @@ export class AppStore {
       line: (ref, index): LineFacts | undefined => {
         const b = this.bookOf(ref);
         const l = b && this.lines.peek(b.key, index);
-        return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length } : undefined;
+        return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
       },
     };
   }
@@ -768,6 +810,17 @@ export class AppStore {
   }
 }
 
+
+/**
+ * "These two lines are already linked": both ends, in either direction and of any type. A suggestion
+ * that only differs from an existing link by type (the library stores Onkelos as TARGUM) or by file
+ * direction adds nothing, so it shows as "already exists".
+ */
+export function linePairKey(l: { source: LinkSide; target: LinkSide }): string {
+  const a = `${l.source.book.key}#${l.source.line}`;
+  const b = `${l.target.book.key}#${l.target.line}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {

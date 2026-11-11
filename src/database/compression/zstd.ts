@@ -68,7 +68,8 @@ function module(): WebAssembly.Module {
   return wasmModule;
 }
 
-const utf8 = new TextDecoder("utf-8");
+// ignoreBOM: a line that starts with U+FEFF keeps it — the generator counts it (compatibility review #4)
+const utf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /** Decodes line values of one database. Create it once per open database, inside the DB worker. */
 export class LineContentCodec {

@@ -69,7 +69,7 @@ describe("headings engine — nesting", () => {
     expect(again.suggestions.map((s) => s.id)).toEqual(r.suggestions.map((s) => s.id));
     expect(at(r, 4)!.id).toBe("headings:c:rashi:4>b:torah:2");
     expect(at(r, 9)!.id).toBe("headings:c:rashi:9>b:torah:6-7");
-    expect(at(r, 4)!.declaredType).toBe("commentary");
+    expect(at(r, 4)!.declaredType).toBe("source");
     expect(runHeadingsEngine(rashi, TORAH, { declaredType: "targum" }).suggestions[0]!.declaredType).toBe("targum");
   });
 

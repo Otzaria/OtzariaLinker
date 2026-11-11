@@ -46,16 +46,23 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   const warned: ExportPlan["warned"] = [];
   for (const l of live) {
     const p = problems.get(l.id) ?? [];
-    if (!opts.includeErrors && p.some((x) => x.severity === "error")) heldBack.push({ link: l, problems: p });
+    // An imported record the user did not touch is already in the library: dropping it from the
+    // rewritten file would DELETE it there. It is kept as it was, with its problems as warnings.
+    const untouchedImport = l.provenance === "file" && l.status === "existing";
+    if (!opts.includeErrors && !untouchedImport && p.some((x) => x.severity === "error")) heldBack.push({ link: l, problems: p });
     else {
       written.push(l);
-      if (p.some((x) => x.severity === "warning")) warned.push({ link: l, problems: p });
+      if (p.some((x) => x.severity === "warning" || x.severity === "error")) warned.push({ link: l, problems: p });
     }
   }
 
   const bySource = new Map<string, Link[]>();
   for (const l of written) bySource.set(l.source.book.title, [...(bySource.get(l.source.book.title) ?? []), l]);
   const importedTitles = new Set(links.filter((l) => l.provenance === "file").map((l) => l.source.book.title));
+
+  // A book whose imported links were ALL deleted still needs its file — empty — or the library's
+  // old file would stay and the deletions would never happen (compatibility review #2).
+  for (const title of importedTitles) if (!bySource.has(title)) bySource.set(title, []);
 
   const files: ExportFile[] = [...bySource.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

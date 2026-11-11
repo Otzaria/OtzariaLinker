@@ -9,12 +9,18 @@ test("headings engine: run in the worker → table → approve all certain → c
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
+  const heb = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י", "יא", "יב", "יג", "יד", "טו", "טז", "יז", "יח", "יט", "כ"];
+  // a commentary the database has no links for (Onkelos is already linked there: it would show as "exists")
+  const biur = ["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...heb.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `ביאור לפסוק ${i + 1}`])].join(String.fromCharCode(10));
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "מסד נתונים", exact: true }).click();
-  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
+  ]);
 
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "תרגום אונקלוס על בראשית" }).getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
   await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -22,7 +28,7 @@ test("headings engine: run in the worker → table → approve all certain → c
   const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
   await expect(approveAll).toBeEnabled({ timeout: 30_000 });
   const n = Number((await approveAll.textContent())!.match(/\(([\d,]+)\)/)![1]!.replace(/,/g, ""));
-  expect(n).toBeGreaterThan(50);
+  expect(n).toBe(20);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/8-suggestions-table.png` });
 
   await approveAll.click();

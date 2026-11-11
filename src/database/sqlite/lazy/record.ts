@@ -28,9 +28,10 @@ function corrupt(what: string): LinkerError {
 }
 
 const DECODERS: Record<TextEncodingId, TextDecoder> = {
-  1: new TextDecoder("utf-8"),
-  2: new TextDecoder("utf-16le"),
-  3: new TextDecoder("utf-16be"),
+  // ignoreBOM: a value that starts with U+FEFF keeps it — the generator counts it (compatibility review #4)
+  1: new TextDecoder("utf-8", { ignoreBOM: true }),
+  2: new TextDecoder("utf-16le", { ignoreBOM: true }),
+  3: new TextDecoder("utf-16be", { ignoreBOM: true }),
 };
 
 /** Content size in bytes for a serial type. */

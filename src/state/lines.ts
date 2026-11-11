@@ -61,8 +61,13 @@ export class LineStore {
     const bump = () => (this.tick.value = this.tick.peek() + 1);
     this.lines = new ChunkCache(async (b, f, t) => {
       const got = await service.lines(b, f, t);
-      if (got.length < t - f + 1) this.counts.set(b, f + got.length);
-      return got;
+      // Place every line by its OWN index: a database may skip line numbers (the generator creates
+      // no row for an empty heading), so position-in-chunk is not the line number (compat review #6).
+      // A missing index stays a hole (undefined), which views show as "line not in the book".
+      const placed: SourceLine[] = [];
+      for (const l of got) placed[l.index - f] = l;
+      if (got.length < t - f + 1 && (!got.length || got.at(-1)!.index < t)) this.counts.set(b, got.length ? got.at(-1)!.index + 1 : f);
+      return placed;
     }, bump);
     this.existing = new ChunkCache((b, f, t) => service.existingLinks(b, f, t), bump);
   }
