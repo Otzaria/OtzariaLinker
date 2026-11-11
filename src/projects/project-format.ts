@@ -194,7 +194,7 @@ function copyData(o: Record<string, unknown>): Record<string, unknown> {
 }
 
 const STATUSES = new Set(["new", "edited", "existing", "deleted"]);
-const PROVENANCES = new Set(["file", "user", "auto"]);
+const PROVENANCES = new Set(["file", "user", "auto", "db-copy"]);
 const isInt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
 const isSide = (s: unknown): s is StoredSide => {
   const v = s as StoredSide;

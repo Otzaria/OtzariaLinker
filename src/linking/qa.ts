@@ -17,6 +17,8 @@ export type QaCategory =
   | "title"
   | "reference"
   | "unverified"
+  | "in-db"
+  | "db-copy"
   | "other";
 
 export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: string }>> = {
@@ -30,6 +32,8 @@ export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: s
   title: { title: "שם ספר", hint: "שם שאוצריא מנרמלת או ממזגת" },
   reference: { title: "שם המקום", hint: "heRef_2 חסר" },
   unverified: { title: "לא נבדק", hint: "השורה לא נטענה, ולכן לא נבדקה" },
+  "in-db": { title: "כבר במסד", hint: "המסד הפתוח כבר מכיל קישור בין אותן שורות (לפי כלל השוויון האחד, core/links/equality.ts)" },
+  "db-copy": { title: "הועתק מהמסד", hint: "קישורים שהועתקו מהמסד: מה ששוחזר, ומה חסר כדי לייצא אותם בבטחה" },
   other: { title: "אחר", hint: "" },
 };
 
@@ -54,6 +58,10 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/companion-merged": "title",
   "export/heref-missing": "reference",
   "export/line-not-verified": "unverified",
+  "export/in-db": "in-db",
+  "export/in-db-other-type": "in-db",
+  "export/db-copy": "db-copy",
+  "export/db-copy-no-file": "db-copy",
 };
 export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (code.startsWith("sefaria/") ? "sefaria" : "other");
 
