@@ -6,6 +6,8 @@ import { path2ForTitle, sourceTitleFromLinksFileName, titleFromPath2 } from "../
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { stripTags } from "../core/text/html";
 import { recordToLink } from "../formats/links-json/convert";
+import { storedKey } from "../core/links/stored-form";
+import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Suggestion } from "../linking/automatic";
 import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
@@ -48,7 +50,18 @@ export interface Task {
 }
 
 export type Screen = "home" | "workspace";
-export type SideTab = "builder" | "links" | "books";
+export type SideTab = "builder" | "links" | "suggestions" | "books";
+
+/** One run of an automatic engine and the user's decisions on it. */
+export interface SuggestionRun {
+  engine: EngineId;
+  source: BookRef;
+  target: BookRef;
+  result: EngineResult;
+  at: number;
+}
+/** pending → the user has not decided; approved → a link exists for it; exists → the project already has that link */
+export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -73,6 +86,11 @@ export class AppStore {
   /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
+  readonly run = signal<SuggestionRun | null>(null);
+  /** rejected suggestion ids — kept across re-runs, since suggestion ids are deterministic */
+  readonly rejected = signal<ReadonlySet<string>>(new Set());
+  /** the suggestion shown in the inline/card views */
+  readonly currentSuggestion = signal<string | null>(null);
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -335,6 +353,109 @@ export class AppStore {
   /** Links touching a book, from the project (not database links). */
   linksOfBook(bookKey: string): Link[] {
     return this.allLinks.value.filter((l) => this.sameBook(l.source.book, bookKey) || this.sameBook(l.target.book, bookKey));
+  }
+
+  /* ---------------- automatic suggestions ---------------- */
+
+  async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
+    const source = this.refOf(sourceKey);
+    const target = this.refOf(targetKey);
+    const result = await this.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, options, opts));
+    if (!result) return false;
+    batch(() => {
+      this.run.value = { engine, source, target, result, at: Date.now() };
+      this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
+      this.sideTab.value = "suggestions";
+    });
+    const c = this.suggestionCounts.value;
+    this.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
+    return true;
+  }
+
+  readonly suggestionState = computed(() => {
+    const run = this.run.value;
+    const m = new Map<string, SuggestionState>();
+    if (!run) return m;
+    const links = this.linkState.value.links;
+    const rejected = this.rejected.value;
+    const existing = new Set<string>();
+    for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(storedKey(l));
+    for (const s of run.result.suggestions) {
+      const own = links.get(`auto:${s.id}`);
+      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(s.id) ? "rejected" : existing.has(storedKey(this.suggestionLink(s))) ? "exists" : "pending");
+    }
+    return m;
+  });
+
+  readonly suggestionCounts = computed(() => {
+    const c: Record<Confidence | SuggestionState, number> = { certain: 0, high: 0, possible: 0, ambiguous: 0, none: 0, pending: 0, approved: 0, rejected: 0, exists: 0 };
+    const st = this.suggestionState.value;
+    for (const s of this.run.value?.result.suggestions ?? []) {
+      c[s.confidence]++;
+      c[st.get(s.id) ?? "pending"]++;
+    }
+    return c;
+  });
+
+  suggestionLink(s: Suggestion): Link {
+    return {
+      id: `auto:${s.id}`,
+      status: "new",
+      provenance: "auto",
+      source: s.source,
+      target: s.target,
+      declaredType: s.declaredType,
+      heRef2: s.heRef2,
+      ...(s.anchor && { anchor: s.anchor }),
+    };
+  }
+
+  approveSuggestions(ids: readonly string[]): number {
+    const run = this.run.value;
+    if (!run) return 0;
+    const st = this.suggestionState.value;
+    const want = new Set(ids);
+    const links = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists").map((s) => this.suggestionLink(s));
+    if (!links.length) return 0;
+    const ids2 = new Set(links.map((l) => l.id.slice(5)));
+    batch(() => {
+      this.apply(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
+      if ([...ids2].some((id) => this.rejected.value.has(id))) this.rejected.value = new Set([...this.rejected.value].filter((id) => !ids2.has(id)));
+    });
+    return links.length;
+  }
+
+  rejectSuggestions(ids: readonly string[]): void {
+    const approved = ids.map((id) => `auto:${id}`).filter((id) => this.linkState.value.links.has(id));
+    batch(() => {
+      if (approved.length) this.apply("ביטול אישור", approved.map((id) => ({ id, before: this.linkState.value.links.get(id)! })));
+      this.rejected.value = new Set([...this.rejected.value, ...ids]);
+    });
+  }
+
+  resetSuggestions(ids: readonly string[]): void {
+    const drop = new Set(ids);
+    this.rejected.value = new Set([...this.rejected.value].filter((id) => !drop.has(id)));
+  }
+
+  /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */
+  pendingAtLeast(level: Confidence): string[] {
+    const st = this.suggestionState.value;
+    const max = CONFIDENCE_ORDER.indexOf(level);
+    return (this.run.value?.result.suggestions ?? []).filter((s) => st.get(s.id) === "pending" && CONFIDENCE_ORDER.indexOf(s.confidence) <= max).map((s) => s.id);
+  }
+
+  /** Moves the inline/card view to a suggestion and shows both ends in the readers. */
+  showSuggestion(id: string): void {
+    const s = this.run.value?.result.suggestions.find((x) => x.id === id);
+    if (!s) return;
+    batch(() => {
+      this.currentSuggestion.value = id;
+      this.pick.source.value = { bookKey: s.source.book.key, line: s.source.line, ...(s.source.end !== undefined && { end: s.source.end }) };
+      this.pick.target.value = { bookKey: s.target.book.key, line: s.target.line, ...(s.target.end !== undefined && { end: s.target.end }) };
+      this.reveal("source", s.source.book.key, s.source.line);
+      this.reveal("target", s.target.book.key, s.target.line);
+    });
   }
 
   /* ---------------- import / export ---------------- */

@@ -23,6 +23,7 @@ const service: BooksService = {
   lines: (key, from, to, opts) => rpc.call("lines", [key, from, to], opts),
   existingLinks: (key, from, to, opts) => rpc.call("existingLinks", [key, from, to], opts),
   close: async (id) => void (await rpc.call("close", [id])),
+  runEngine: (engine, source, target, options, opts) => rpc.call("runEngine", [engine, source, target, options], opts),
 };
 
 const saver: Saver = {

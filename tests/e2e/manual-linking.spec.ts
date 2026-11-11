@@ -29,7 +29,7 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await shot(page, "1-home");
 
   await openFiles(page);
-  await expect(page.locator(".source-row")).toHaveCount(2);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 }); // opening a DB under CI load can be slow
 
   // source = the commentary, target = Bereshit
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");

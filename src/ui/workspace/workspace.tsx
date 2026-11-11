@@ -7,6 +7,7 @@ import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
 import { SourcesBody } from "./sources-panel";
+import { SuggestionsPanel } from "./suggestions-panel";
 
 /*
  * The workspace grid (ADR 0005 §2): panels in the order of the layout state, with draggable
@@ -133,6 +134,10 @@ function SidePanel() {
           <Icon name="oz_links" size={16} />
           קישורים <span class="count">{linkCount.toLocaleString("he")}</span>
         </button>
+        <button role="tab" aria-selected={current === "suggestions"} onClick={() => (store.sideTab.value = "suggestions")}>
+          <Icon name="oz_link_search" size={16} />
+          הצעות {store.run.value && <span class="count">{store.suggestionCounts.value.pending.toLocaleString("he")}</span>}
+        </button>
         {sourcesHidden && (
           <button role="tab" aria-selected={current === "books"} onClick={() => (store.sideTab.value = "books")}>
             <Icon name="oz_bookshelf" size={16} />
@@ -140,7 +145,7 @@ function SidePanel() {
           </button>
         )}
       </div>
-      <div class="panel-body">{current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : <SourcesBody />}</div>
+      <div class="panel-body">{current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : current === "suggestions" ? <SuggestionsPanel /> : <SourcesBody />}</div>
     </section>
   );
 }

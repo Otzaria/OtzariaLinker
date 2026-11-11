@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SourceLine } from "../../core/books";
 import type { Link } from "../../core/links/model";
 import { sanitizeBookHtml } from "../../core/text/sanitize";
+import { CONFIDENCE_LABELS, CONFIDENCE_ORDER, type Confidence } from "../../linking/automatic";
 import { CHUNK } from "../../state/lines";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
@@ -28,7 +29,7 @@ export function Reader({ side }: { side: Side }) {
   const [query, setQuery] = useState("");
 
   return (
-    <section class={`panel reader ${side}${book && /\sעל\s/.test(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`}>
+    <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`}>
       <ReaderHead side={side} title={book?.title} onChoose={() => setChoosing(!choosing)} />
       {choosing || !book ? (
         <div class="panel-body">
@@ -193,6 +194,8 @@ function BookView({ side, bookKey, lineCount }: { side: Side; bookKey: string; l
 
 interface Marks {
   project: Map<number, { new: number; file: number; deleted: number }>;
+  /** best confidence of a PENDING suggestion touching the line */
+  suggested: Map<number, Confidence>;
 }
 
 /** Per-line counts of the project's links touching this book on this side's role. */
@@ -214,8 +217,23 @@ function useLineMarks(side: Side, bookKey: string): Marks {
     }
     return m;
   });
-  void side;
-  return { project: project.value };
+  const suggested = useComputed(() => {
+    const m = new Map<number, Confidence>();
+    const run = store.run.value;
+    if (!run) return m;
+    const st = store.suggestionState.value;
+    for (const sg of run.result.suggestions) {
+      if (st.get(sg.id) !== "pending") continue;
+      const end = side === "source" ? sg.source : sg.target;
+      if (end.book.key !== bookKey) continue;
+      for (let i = end.line; i <= (end.end ?? end.line) && i < end.line + 500; i++) {
+        const cur = m.get(i);
+        if (!cur || CONFIDENCE_ORDER.indexOf(sg.confidence) < CONFIDENCE_ORDER.indexOf(cur)) m.set(i, sg.confidence);
+      }
+    }
+    return m;
+  });
+  return { project: project.value, suggested: suggested.value };
 }
 
 function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean }) {
@@ -246,7 +264,7 @@ function Chunk(props: { c: number; bookKey: string; active: boolean; io: Interse
       {lines.map((l, k) => {
         const i = from + k;
         if (!l) return <div key={i} class="ln" data-i={i}><span class="no">{i + 1}</span><span class="tx muted">…</span></div>;
-        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} />;
+        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} />;
       })}
     </div>
   );
@@ -260,7 +278,7 @@ function countDb(links: Link[] | undefined, bookKey: string, from: number, n: nu
   return m;
 }
 
-function Line({ l, picked, mark, db, dropOver, draggableNo }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; db: number; dropOver: boolean; draggableNo: boolean }) {
+function Line({ l, picked, mark, sug, db, dropOver, draggableNo }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean }) {
   const html = useMemo(() => sanitizeBookHtml(l.anchorText), [l.anchorText]);
   const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}`;
   return (
@@ -271,6 +289,7 @@ function Line({ l, picked, mark, db, dropOver, draggableNo }: { l: SourceLine; p
         {mark?.new ? <span class="mark new" title={`${mark.new} קישורים חדשים או ערוכים`}>{mark.new}</span> : null}
         {mark?.file ? <span class="mark file" title={`${mark.file} קישורים מקובץ שיובא`}>{mark.file}</span> : null}
         {mark?.deleted ? <span class="mark deleted" title={`${mark.deleted} קישורים שיימחקו`}>{mark.deleted}</span> : null}
+        {sug ? <span class={`mark sug conf-${sug}`} title={`הצעה ממתינה, ודאות ${CONFIDENCE_LABELS[sug]}`}>•</span> : null}
         {db ? <span class="mark db" title={`${db} קישורים קיימים במסד`}>{db}</span> : null}
       </span>
     </div>
@@ -294,4 +313,9 @@ function ReaderTools({ side, bookKey, count }: { side: Side; bookKey: string; co
       <span class="muted grow">{count !== undefined ? `${count.toLocaleString("he")} שורות` : ""}</span>
     </div>
   );
+}
+
+/** Commentaries are shown in Rashi script, as in the app's commentary panel; translations are not commentaries. */
+function isCommentaryTitle(title: string): boolean {
+  return /\sעל\s/.test(title) && !/^תרגום/.test(title);
 }

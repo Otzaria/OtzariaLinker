@@ -1,5 +1,6 @@
 import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
-import type { Link } from "../core/links/model";
+import type { BookRef, Link } from "../core/links/model";
+import type { EngineId, EngineResult } from "../linking/automatic";
 
 /*
  * What the state layer needs from the outside world, as interfaces (architecture rule 17). The app
@@ -32,6 +33,7 @@ export interface BooksService {
   lines(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<SourceLine[]>;
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
+  runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
 }
 
 /** Where a file the program makes goes (a download in the browser). */

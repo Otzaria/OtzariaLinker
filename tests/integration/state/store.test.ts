@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { engineJob } from "../../../src/workers/engine-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -13,6 +14,7 @@ function makeStore() {
     lines: (k, a, b) => reg.lines(k, a, b),
     existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
     close: async (id) => reg.close(id),
+    runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
@@ -95,5 +97,34 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     expect((await store.prepareExport())!.counts.deleted).toBe(1);
     store.undo();
     expect(store.linkState.value.links.get(id)!.status).toBe("existing");
+  });
+});
+
+describe("AppStore — automatic suggestions", () => {
+  it("run → approve all certain (one undo step) → undo returns them to pending → reject is remembered", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB]);
+    const onkelos = [...store.books.value.values()].find((b) => b.title === "תרגום אונקלוס על בראשית")!;
+    const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    expect(await store.runEngine("headings", onkelos.key, bereshit.key)).toBe(true);
+    const run = store.run.value!;
+    expect(run.result.suggestions.length).toBeGreaterThan(50);
+    const certain = store.pendingAtLeast("certain");
+    expect(certain.length).toBeGreaterThan(0);
+
+    const before = store.linkState.value.undo.length;
+    expect(store.approveSuggestions(certain)).toBe(certain.length);
+    expect(store.linkState.value.undo.length).toBe(before + 1);
+    expect(store.suggestionCounts.value.approved).toBe(certain.length);
+    expect(store.approveSuggestions(certain)).toBe(0); // approving twice creates nothing
+
+    store.undo();
+    expect(store.suggestionCounts.value.approved).toBe(0);
+    expect(store.pendingAtLeast("certain")).toEqual(certain);
+
+    store.rejectSuggestions([certain[0]!]);
+    expect(store.suggestionState.value.get(certain[0]!)).toBe("rejected");
+    expect(await store.runEngine("headings", onkelos.key, bereshit.key)).toBe(true); // a re-run keeps the decision
+    expect(store.suggestionState.value.get(certain[0]!)).toBe("rejected");
   });
 });

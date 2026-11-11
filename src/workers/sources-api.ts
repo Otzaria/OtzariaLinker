@@ -1,5 +1,6 @@
 import type { SourceLine } from "../core/books";
-import type { Link } from "../core/links/model";
+import type { BookRef, Link } from "../core/links/model";
+import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenResult } from "../sources/registry";
 
 /** The worker's operations, as the UI calls them through RpcClient. */
@@ -11,4 +12,6 @@ export interface SourcesApi {
   lines(bookKey: string, from: number, to: number): SourceLine[];
   existingLinks(bookKey: string, from: number, to: number): Link[];
   close(sourceId: string): void;
+  /** runs an automatic engine on two whole books (both read here, in the worker) */
+  runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;
 }

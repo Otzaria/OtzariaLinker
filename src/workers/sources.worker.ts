@@ -7,6 +7,7 @@
 import { LineContentCodec } from "../database/compression/zstd";
 import { loadSqlJs } from "../database/sqlite/sqljs-loader";
 import { SourceRegistry } from "../sources/registry";
+import { engineJob } from "./engine-job";
 import { serve, type ToWorker } from "./rpc";
 import type { SourcesApi } from "./sources-api";
 
@@ -30,6 +31,7 @@ const handle = serve<SourcesApi>(
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     close: (_ctx, sourceId) => registry.close(sourceId),
+    runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
   },
   (m) => self.postMessage(m),
 );

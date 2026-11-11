@@ -157,8 +157,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .adv-link { justify-self: start; font-size: var(--fs-sm); color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 
 /* links list */
-.tabs { display: flex; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }
-.tabs button { border: 0; background: none; padding: 10px 12px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--on-surface-variant); display: inline-flex; gap: 6px; align-items: center; }
+.tabs { display: flex; gap: 0; padding: 0 4px; overflow-x: auto; scrollbar-width: thin; border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }
+.tabs button { flex: none; border: 0; background: none; padding: 10px 8px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--on-surface-variant); display: inline-flex; gap: 6px; align-items: center; }
 .tabs button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .count { font-size: 11px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
 .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
@@ -176,6 +176,30 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .status.edited { background: var(--warning-container); color: var(--on-warning-container); }
 .status.existing { background: var(--secondary-container); color: var(--on-secondary-container); }
 .status.deleted { background: var(--error-container); color: var(--on-error-container); }
+
+/* suggestions */
+.sug-head { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--outline-variant); }
+.bulk { padding: 0 6px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.sug-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.sug-table th { position: sticky; top: 0; background: var(--surface-container-high); text-align: start; font-weight: 600; padding: 4px 6px; z-index: 1; }
+.sug-table td { padding: 3px 6px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
+.sug-table tr { cursor: pointer; }
+.sug-table tbody tr:hover { background: var(--surface-container); }
+.sug-table tr.st-approved { background: color-mix(in srgb, var(--tertiary-container) 50%, transparent); }
+.sug-table tr.st-rejected, .sug-table tr.st-exists { opacity: 0.55; }
+.sug-table .acts { white-space: nowrap; }
+.decide { display: inline-flex; }
+.decide .icon-btn { width: 28px; height: 28px; }
+.conf { font-size: 11px; padding: 0 7px; border-radius: var(--radius-full); white-space: nowrap; }
+.conf-certain { --c: var(--tertiary); --cc: var(--tertiary-container); --oc: var(--on-tertiary-container); }
+.conf-high { --c: var(--primary); --cc: var(--primary-container); --oc: var(--on-primary-container); }
+.conf-possible { --c: var(--warning); --cc: var(--warning-container); --oc: var(--on-warning-container); }
+.conf-ambiguous, .conf-none { --c: var(--error); --cc: var(--error-container); --oc: var(--on-error-container); }
+.conf { background: var(--cc); color: var(--oc); }
+.chip[class*="conf-"][aria-pressed="true"] { background: var(--cc); color: var(--oc); border-color: var(--c); }
+.mark.sug { background: var(--cc); color: var(--c); font-size: 14px; line-height: 14px; }
+.rot-left { transform: rotate(-90deg); }
+.rot-right { transform: rotate(90deg); }
 
 /* ---------- dialogs ---------- */
 dialog { border: 0; border-radius: 12px; padding: 0; background: var(--surface-container-high); color: var(--on-surface); box-shadow: var(--elev-3); width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }

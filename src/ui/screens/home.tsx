@@ -17,7 +17,7 @@ interface TaskDef {
 }
 
 const TASKS: TaskDef[] = [
-  { icon: "oz_book_link", title: "קישור ספר לפירוש", hint: "ספר בסיס ופירוש עליו — לפי כותרות ודיבור המתחיל", pick: {}, soon: "הזיהוי האוטומטי בדרך; הקישור הידני כבר עובד" },
+  { icon: "oz_book_link", title: "קישור ספר לפירוש", hint: "ספר בסיס ופירוש עליו — לפי כותרות (דיבור המתחיל בדרך)", pick: {} },
   { icon: "oz_link_marker", title: "קישור הערות שוליים", hint: "מספרי ההערות בספר מול ספר ההערות", pick: {}, soon: "הזיהוי האוטומטי בדרך" },
   { icon: "oz_search_in_folder", title: "קישור תיקייה שלמה", hint: "ספרים רבים מתיקייה מול ספריית אוצריא", pick: { folder: true }, soon: "הקישור האצוותי בדרך" },
   { icon: "oz_library_link", title: "קישור בין מסדים", hint: "שני מסדי SQLite, אישיים או של אוצריא", pick: { accept: ".db,.sqlite,.sqlite3" } },
