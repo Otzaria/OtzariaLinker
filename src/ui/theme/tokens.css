@@ -1,0 +1,101 @@
+/*
+ * Design tokens. The palette is Otzaria's own — generated from
+ * ColorScheme.fromSeed(seedColor: #2C1B02, dynamicSchemeVariant: tonalSpot), the exact call the app
+ * makes in lib/theme/app_theme_data.dart (ported unchanged from v3, legacy §A1).
+ * No hard-coded colour anywhere else: for an in-between shade use color-mix() on a token.
+ *
+ * Theme selection: <html data-theme="light|dark">, set by src/ui/theme/theme.ts from the user's
+ * setting; "system" follows prefers-color-scheme (v3 only had the explicit switch).
+ */
+:root {
+  color-scheme: light dark;
+
+  /* M3 colour roles — light */
+  --primary: #805610;               --on-primary: #ffffff;
+  --primary-container: #ffddb3;     --on-primary-container: #633f00;
+  --secondary: #6f5b40;             --on-secondary: #ffffff;
+  --secondary-container: #fbdebc;   --on-secondary-container: #56442a;
+  --tertiary: #51643f;              --on-tertiary: #ffffff;
+  --tertiary-container: #d4eabb;    --on-tertiary-container: #3a4c2a;
+  --error: #ba1a1a;                 --on-error: #ffffff;
+  --error-container: #ffdad6;       --on-error-container: #93000a;
+  --outline: #817567;               --outline-variant: #d3c4b4;
+  --surface: #fff8f4;               --on-surface: #201b13;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #fff1e5;
+  --surface-container: #f9ecdf;
+  --surface-container-high: #f3e6da;
+  --surface-container-highest: #ede0d4;
+  --on-surface-variant: #4f4539;
+  --inverse-surface: #362f27;       --on-inverse-surface: #fcefe2;
+  --inverse-primary: #f4bd6f;
+
+  /* Otzaria AppSurfaces.panelBackground (light) */
+  --app-bg: #f6ede5;
+  /* semantics outside ColorScheme */
+  --warning: #8a5a00;               --on-warning-container: #4a3000;
+  --warning-container: #ffdfa8;
+  --highlight: #ffe08a;
+  --scrim: rgb(0 0 0 / 0.32);
+  --outline-card: var(--outline-variant);
+  --elev-3: 0 6px 16px rgb(0 0 0 / 0.18), 0 2px 4px rgb(0 0 0 / 0.1);
+
+  /* shape — AppTokens.radius = 8 everywhere */
+  --radius-xs: 4px;
+  --radius: 8px;
+  --radius-full: 999px;
+
+  /* spacing — AppTokens.spaceXS..XL */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
+
+  /* typography — AppTokens.fontSM..XL; system fonts only (no network) */
+  --font-ui: "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Hebrew", sans-serif;
+  --font-book: "FrankRuehl CLM", "Frank Ruhl Libre", "Taamey Frank CLM", David, "Noto Serif Hebrew", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 18px;
+  /* user font scale (settings) multiplies the book text size */
+  --font-scale: 1;
+
+  /* motion — AppTokens.animFast/Normal */
+  --dur-fast: 150ms; --dur-normal: 250ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* density (settings; four levels) */
+  --row-pad: 6px 10px;
+  --line-fs: calc(17px * var(--font-scale));
+  --line-lh: 1.65;
+}
+
+/* src/ui/theme/theme.ts always resolves the setting (system | light | dark) to an explicit
+   data-theme, following prefers-color-scheme live — so the dark block is written once. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --outline-card: #5c5245;
+  --primary: #f4bd6f;               --on-primary: #452b00;
+  --primary-container: #633f00;     --on-primary-container: #ffddb3;
+  --secondary: #ddc2a1;             --on-secondary: #3e2d16;
+  --secondary-container: #56442a;   --on-secondary-container: #fbdebc;
+  --tertiary: #b8cea1;              --on-tertiary: #243515;
+  --tertiary-container: #3a4c2a;    --on-tertiary-container: #d4eabb;
+  --error: #ffb4ab;                 --on-error: #690005;
+  --error-container: #93000a;       --on-error-container: #ffdad6;
+  --outline: #9c8f80;               --outline-variant: #4f4539;
+  --surface: #18120b;               --on-surface: #ede0d4;
+  --surface-container-lowest: #120d07;
+  --surface-container-low: #201b13;
+  --surface-container: #251f17;
+  --surface-container-high: #2f2921;
+  --surface-container-highest: #3b342b;
+  --on-surface-variant: #d3c4b4;
+  --inverse-surface: #ede0d4;       --on-inverse-surface: #362f27;
+  --inverse-primary: #805610;
+  --app-bg: #000000;
+  --warning: #ffc46b;               --warning-container: #4a3000;
+  --on-warning-container: #ffdfa8;
+  --highlight: #7a5f1c;
+  --elev-3: 0 6px 16px rgb(0 0 0 / 0.6);
+}
+
+:root[data-density="spacious"] { --row-pad: 10px 12px; --line-fs: calc(18px * var(--font-scale)); --line-lh: 1.85; }
+:root[data-density="compact"]  { --row-pad: 3px 8px;   --line-fs: calc(15px * var(--font-scale)); --line-lh: 1.5; }
+:root[data-density="dense"]    { --row-pad: 1px 6px;   --line-fs: calc(14px * var(--font-scale)); --line-lh: 1.35; }
