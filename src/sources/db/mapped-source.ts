@@ -2,7 +2,7 @@ import type { DbMapping } from "../../core/db-mapping";
 import { canonicalTypeString, connectionTypeFromId, parseConnectionType } from "../../core/links/connection-type";
 import type { BookRef, Link } from "../../core/links/model";
 import { MappedDbReader, type MappedLink, type ReadContext } from "../../database/generic/mapped-reader";
-import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
+import { bufferedSource, type ByteSource } from "../../database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../database/sqlite/lazy/sqlite-file";
 import type { BookSource, SourceBook, SourceInfo, SourceLine } from "../book-source";
 
@@ -19,7 +19,8 @@ export class MappedDbSource implements BookSource {
   ) {}
 
   static async open(id: string, label: string, src: ByteSource, mapping: DbMapping, ctx: ReadContext = {}): Promise<MappedDbSource> {
-    const file = await SqliteFile.open(src);
+    // read ahead: without an index the lines table is scanned once, page after page
+    const file = await SqliteFile.open(bufferedSource(src));
     const reader = await MappedDbReader.open(file, mapping, ctx);
     const warnings = [...reader.warnings];
     if (file.header.wal) warnings.push({ code: "db/wal", message: "המסד במצב WAL. שינויים שעדיין לא נכתבו לקובץ הראשי (קובץ ‎-wal לידו) לא ייראו." });
