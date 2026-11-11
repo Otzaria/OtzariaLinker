@@ -18,7 +18,8 @@ export type ErrorCode =
   | "db/not-sqlite"
   | "db/wal"
   | "db/no-books"
-  | "db/schema-newer";
+  | "db/schema-newer"
+  | "source/closed";
 
 export class LinkerError extends Error {
   override readonly name = "LinkerError";

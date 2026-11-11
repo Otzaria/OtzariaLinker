@@ -1,19 +1,18 @@
 import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import DbWorker from "../workers/db.worker.ts?worker&inline";
+import { RpcClient, type Port } from "../workers/rpc";
+import type { SourcesApi } from "../workers/sources-api";
+import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
 
 /** Temporary shell (Milestone B). The real UI lands in Milestone F. */
 function App() {
   const [engine, setEngine] = useState("בודק…");
   useEffect(() => {
-    const w = new DbWorker();
-    w.onmessage = (e: MessageEvent) => {
-      const r = e.data as { ok: boolean; result?: { sqlite: string; zstd: string }; error?: string };
-      setEngine(r.ok ? `SQLite ${r.result?.sqlite} · ${r.result?.zstd}` : `שגיאה: ${r.error}`);
-      (globalThis as Record<string, unknown>).__diagnostics = r;
-      w.terminate();
-    };
-    w.postMessage({ id: 1, op: "ping" });
+    const w = new SourcesWorker();
+    new RpcClient<SourcesApi>(w as unknown as Port).call("ping", []).then(
+      (r) => setEngine(`SQLite ${r.sqlite} · ${r.zstd}`),
+      (e: Error) => setEngine(`שגיאה: ${e.message}`),
+    );
   }, []);
   return (
     <main style="font-family: system-ui, sans-serif; padding: 24px">
