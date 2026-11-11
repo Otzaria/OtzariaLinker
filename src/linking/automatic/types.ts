@@ -59,7 +59,8 @@ export interface Suggestion {
   readonly warnings: readonly Reason[];
 }
 
-export type EngineId = "headings" | "footnotes" | "dibur-hamatchil";
+/** "citations" is a SINGLE-BOOK engine: it reads one source and links into whatever books are open (workers/citations-job.ts). */
+export type EngineId = "headings" | "footnotes" | "dibur-hamatchil" | "citations";
 
 /** The minimal per-line facts an engine needs (a subset of SourceLine, so engines stay in `linking`). */
 export interface EngineLine {
