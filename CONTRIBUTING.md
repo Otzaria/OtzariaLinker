@@ -9,18 +9,18 @@ AI: גם [`AGENTS.md`](AGENTS.md), שכלליו מחייבים כל שינוי.
 
 - Node.js 22 ומעלה.
 - `npm ci` (הגרסאות נעולות: `.npmrc` עם `save-exact`, ו־`package-lock.json`).
-- לבדיקות E2E: Chrome ו־Edge מותקנים במחשב. Playwright משתמש בהם ישירות, בלי להוריד דפדפנים.
+- לבדיקות E2E: Chrome ו־Edge מותקנים במחשב (Playwright משתמש בהם ישירות), ו־Firefox של Playwright: `npx playwright install firefox`. CI מריץ את שלושתם.
 
 ## פקודות
 
 | פקודה | מה היא עושה |
 |---|---|
 | `npm run dev` | שרת פיתוח של Vite, לעבודה על הממשק |
-| `npm run build` | בונה את `dist/OtzariaLinker.html` (ועותק עם גרסה, ו־`SHA256SUMS`) ובודקת שאין בו משאב רשת |
+| `npm run build` | בונה את `dist/OtzariaLinker.html` (ועותק עם גרסה, ו־`SHA256SUMS`), ובודקת שאין בו משאב רשת או ממשק רשת (`fetch` ודומיו) ושהוא בתוך תקציב הגודל |
 | `npm run typecheck` | TypeScript במצב strict |
 | `npm test` | בדיקות unit, integration ו־contract (Vitest) |
 | `npx vitest run <קובץ>` | קובץ בדיקה אחד |
-| `npm run test:e2e` | בונה, ומריץ Playwright על הקובץ הבנוי, אופליין, ב־Chrome וב־Edge |
+| `npm run test:e2e` | בונה, ומריץ Playwright על הקובץ הבנוי, אופליין, ב־Chrome, ב־Edge וב־Firefox |
 | `npm run test:legacy` | 93 הבדיקות העצמיות של גרסה 3 (בסיס רגרסיה) |
 | `npm run check` | typecheck, `npm test` ו־E2E |
 

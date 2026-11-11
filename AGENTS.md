@@ -32,7 +32,11 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 `@import` או `url()` לרשת, `importScripts` מרשת, פונט או אייקון מ־CDN, ופונט אייקונים בכלל.
 (בגרסה ישנה פונט אייקונים מ־Google Fonts הציג בלי רשת את שמות האייקונים כטקסט.)
 נאכף בשלוש שכבות:
-- `scripts/package-release.mjs` סורק את התוצר ונכשל על כל אחד מהדפוסים האלה;
+- `scripts/package-release.mjs` סורק את התוצר בביטויים רגולריים ונכשל על: `<script src>` שאינו `data:`/`blob:`,
+  `<link href>` ל־`http(s)`, `@import` ו־`url()` ל־`http(s)`, `importScripts`, קריאה חשופה ל־`fetch(`
+  (שיטה בשם `fetch`, כמו `this.fetch`, מותרת), `XMLHttpRequest`, `WebSocket`, `EventSource` ו־`sendBeacon`.
+  פונט או אייקון מ־CDN נתפסים רק אם הם נטענים באחד מהאופנים האלה (`@import`, `url()`, `<link>`), ופונט אייקונים
+  בכלל אינו נסרק. הסקריפט גם מכשיל תוצר מעל 1.5MiB (`BUDGET`);
 - ה־CSP שב־`index.html` (`default-src 'none'`, `connect-src blob: data:`);
 - כל בדיקות ה־E2E רצות עם `offline: true` ומוודאות שאין אף בקשה שאינה `file:`/`data:`/`blob:` (`tests/e2e/helpers.ts`).
 
@@ -125,7 +129,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 | מנוע אוטומטי | `src/linking/automatic/types.ts` ([`docs/AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md)) |
 | זיהוי זוגות באצווה | `src/linking/batch.ts` (`pairByTitle`) |
 | קישור מרבי: תכנון, איחוד, דוח | `src/linking/plan.ts`, `src/linking/merge.ts`, `src/linking/maxlink-report.ts` ([`AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md) §5) |
-| יישור שורות בין שתי מהדורות (בלי ממשק עדיין) | `src/matching/line-diff.ts` |
+| יישור שורות בין שתי מהדורות; תכנון העברת קישורים | `src/matching/line-diff.ts`, `src/linking/relink.ts` (הממשק: `src/ui/dialogs/relink-dialog.tsx`) |
 | ספר ושורה כפי שכל מקור מחזיר | `src/core/books.ts`, `src/sources/book-source.ts` |
 | state ← עולם חיצוני | `src/state/services.ts` |
 | פעולות ה־Worker | `src/workers/sources-api.ts` |
@@ -139,7 +143,7 @@ npm ci
 npm run typecheck
 npx vitest run tests/unit/<area>/<file>.test.ts     # רק הבדיקות הקשורות לשינוי
 npm test                                           # כל ה־unit/integration/contract
-npm run build && npx playwright test               # E2E על הקובץ הבנוי, אופליין, Chrome + Edge
+npm run build && npx playwright test               # E2E על הקובץ הבנוי, אופליין, Chrome + Edge + Firefox
 npm run check                                      # הכול
 ```
 
