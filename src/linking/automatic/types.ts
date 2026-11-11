@@ -69,6 +69,8 @@ export interface EngineLine {
   readonly text: string;
   /** 1–6 when the generator treats the line as a heading */
   readonly heading: number | null;
+  /** the database's display reference for this line (e.g. "בראשית א, ג"), when the source has one */
+  readonly heRef?: string | null;
 }
 
 export interface EngineBook {
