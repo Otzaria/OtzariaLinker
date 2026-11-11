@@ -253,7 +253,8 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
     for (const a of at)
       for (const b of at)
         if (a !== b && !a.folded && !b.folded && contains(a, b)) {
-          a.inner.push(...b.exact);
+          // everything b holds moves with it — what it absorbed in the first pass too, or that would be lost
+          a.inner.push(...b.exact, ...b.consistent, ...b.inner);
           b.folded = true;
         }
     const live = at.filter((g) => !g.folded);
@@ -396,7 +397,9 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   }
   const confidence = CONFIDENCE_ORDER[level]!;
   const score = Math.max(...g.exact.map((x) => x.s.score));
-  const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner].map((x) => ({ suggestion: x.s, focus: x.focus }));
+  // a raw suggestion can reach a group by more than one path (containment is transitive): list it once
+  const seen = new Set<string>();
+  const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner].filter((x) => !seen.has(x.s.id) && seen.add(x.s.id)).map((x) => ({ suggestion: x.s, focus: x.focus }));
   const merged: MergedSuggestion = { ...rep, id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
   const where = opts.existing?.(merged) ?? null;
   if (!where) return merged;

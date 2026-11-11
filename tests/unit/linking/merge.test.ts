@@ -243,3 +243,20 @@ describe("mergeSuggestions — citations (a single-book engine)", () => {
     expect(suggestions.every((s) => s.confidence === "certain")).toBe(true);
   });
 });
+
+describe("mergeSuggestions — regression: nothing absorbed on the way is lost", () => {
+  it("a range absorbed by a precise line, which is then folded into a supported range, survives as a member", () => {
+    // found by the property test (seed 324744211): [0-1] certain, [1-2] ambiguous and [1] none from one line
+    const T = { key: "t:1", title: "ביאור על בראשית", origin: "otzaria" as const };
+    const D = { key: "d:1", title: "בראשית", origin: "otzaria" as const };
+    const at = (line: number, end: number | undefined, confidence: Confidence, score: number): MergeItem => ({
+      suggestion: { id: `headings:t:1#3>d:1#${line}-${end ?? ""}`, engine: "headings", source: { book: T, line: 3 }, target: { book: D, line, ...(end !== undefined && { end }) }, declaredType: "source", heRef2: "", score, confidence, reasons: [{ code: "headings/r", text: "x" }], rules: ["headings/rule"], alternatives: [], warnings: [] },
+      focus: T.key,
+    });
+    const items = [at(0, 1, "certain", 1), at(1, 2, "ambiguous", 0.8), at(1, undefined, "none", 0.3)];
+    const { suggestions } = mergeSuggestions(items);
+    const ids = mergeItems(suggestions).map((m) => m.suggestion.id);
+    for (const it of items) expect(ids).toContain(it.suggestion.id);
+    expect(new Set(ids).size).toBe(ids.length); // each once
+  });
+});
