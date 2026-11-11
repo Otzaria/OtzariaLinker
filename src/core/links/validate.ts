@@ -2,7 +2,7 @@ import { SOURCE_VIEW_TYPES } from "./connection-type";
 import type { LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
-import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "./titles";
+import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn, unsafeFileTitle } from "./titles";
 
 /*
  * Will this link reach Otzaria as intended? Every rule below is a gate of the generator or of the
@@ -49,6 +49,9 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const add = (severity: Severity, code: string, message: string) => out.push({ code, severity, message });
   const { source: s, target: t } = link;
 
+  // the source title is the file name: one that is not a plain file name is never written (A4)
+  const unsafe = unsafeFileTitle(s.book.title);
+  if (unsafe) add("error", "export/unsafe-title", `אי אפשר לכתוב קובץ קישורים בשם "${s.book.title}": ${unsafe}. שנו את שם הספר במקור שלו.`);
   if (link.provenance === "db")
     add("error", "export/db-link", "זה קישור קיים מהמסד. אי אפשר לכתוב אותו חזרה לקובץ קישורים כאילו נכתב שם (המידע המקורי שלו לא נשמר במסד).");
   if (link.provenance === "db-copy") {

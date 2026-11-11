@@ -11,7 +11,7 @@ import { recordToLink } from "../formats/links-json/convert";
 import { storedKey } from "../core/links/stored-form";
 import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
-import { planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
+import { assertSafeExportPaths, planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { parseLinksCsv } from "../formats/links-csv/parse";
 import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
@@ -959,8 +959,13 @@ export class AppStore {
       ...bundle.altToc.files.map((f) => ({ path: `alt_toc/${f.name}`, text: f.text, mime: "application/json" })),
     ];
     if (!data.length) return;
-    if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
-    else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
+    try {
+      assertSafeExportPaths(data);
+      if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
+      else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
+    } catch (err) {
+      return void this.notify("error", (err as Error).message);
+    }
     this.savedRevision.value = this.linkState.value.revision;
     const alt = bundle.altToc.files.length;
     this.notify("success", `יוצאו ${(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length).toLocaleString("he")} קישורים ב־${csv ? csv.length : plan.files.length} קבצים${alt ? `, ומבני כותרות ל־${alt} ספרים` : ""}.`);
