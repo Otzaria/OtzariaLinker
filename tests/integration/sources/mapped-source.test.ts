@@ -35,6 +35,12 @@ describe("SourceRegistry — databases that need a mapping", () => {
     expect(await r.existingLinks(again.books[1]!.key, 0, 5)).toEqual([]);
   });
 
+  it("tables named book/line without Otzaria's columns are mapped, not read as an empty Otzaria database", async () => {
+    const res = await new SourceRegistry().open([file("compressed.db"), { path: "bracket.db", blob: new Blob([readFileSync("tests/fixtures/db/hostile/bracket.db")]) }]);
+    expect(res.sources).toEqual([]);
+    expect(res.needsMapping!.map((p) => [p.label, p.guess?.lines.table ?? null])).toEqual([["compressed.db", "line"], ["bracket.db", null]]);
+  });
+
   it("a database with no usable text still gets the wizard (with no guess)", async () => {
     const res = await new SourceRegistry().open([file("no-text.db")]);
     expect(res.needsMapping![0]!.guess).toBeNull();

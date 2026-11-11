@@ -56,7 +56,8 @@ export async function detectCapabilities(file: SqliteFile): Promise<DbCapabiliti
   const declaredSchema = declaredRaw !== undefined && /^\d+$/.test(declaredRaw) ? Number(declaredRaw) : null;
 
   const lineText = col("line", "content") ? "line.content" : has("line_content") ? "line_content" : null;
-  const isOtzaria = has("book") && has("line");
+  // tables named book/line are common in any database; every Otzaria schema (0–7) also has these columns
+  const isOtzaria = has("book") && has("line") && col("book", "title") && col("line", "bookId") && col("line", "lineIndex");
   let inferredSchema: number | null = null;
   if (isOtzaria) {
     if (has("line_note") || col("book", "contentHash")) inferredSchema = 7;
@@ -87,7 +88,7 @@ export async function detectCapabilities(file: SqliteFile): Promise<DbCapabiliti
   if (isOtzaria && !lineText)
     warnings.push({ code: "db/no-line-text", message: "במסד לא נמצא טקסט שורות (לא line.content ולא line_content). אפשר לראות את רשימת הספרים, אבל לא את התוכן." });
   if (!isOtzaria)
-    warnings.push({ code: "db/generic", message: "זה אינו מסד במבנה של אוצריא (חסרות הטבלאות book/line). כשפותחים אותו, הכלי מציג את הטבלאות שלו ומבקש לבחור איפה הספרים ואיפה השורות (אשף המיפוי)." });
+    warnings.push({ code: "db/generic", message: "זה אינו מסד במבנה של אוצריא (חסרות הטבלאות book/line, או העמודות book.title, line.bookId, line.lineIndex). כשפותחים אותו, הכלי מציג את הטבלאות שלו ומבקש לבחור איפה הספרים ואיפה השורות (אשף המיפוי)." });
 
   return {
     kind,

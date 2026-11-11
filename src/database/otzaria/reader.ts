@@ -46,7 +46,7 @@ export class OtzariaDbReader {
     const caps = await detectCapabilities(file);
     const book = await file.table("book");
     const line = await file.table("line");
-    if (!book || !line) throw new LinkerError("db/no-books", "במסד אין טבלאות ספרים ושורות במבנה של אוצריא. פתחו אותו בגרירה לחלון או מכפתור הקבצים: הכלי יציג את הטבלאות שלו ויבקש לבחור איפה הספרים ואיפה השורות.");
+    if (!book || !line || caps.inferredSchema === null) throw new LinkerError("db/no-books", "במסד אין טבלאות ספרים ושורות במבנה של אוצריא. פתחו אותו בגרירה לחלון או מכפתור הקבצים: הכלי יציג את הטבלאות שלו ויבקש לבחור איפה הספרים ואיפה השורות.");
     const dicts: Uint8Array[] = [];
     if (caps.compressed) {
       for await (const r of file.scan((await file.table("zstd_dict"))!)) {
