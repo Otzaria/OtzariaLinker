@@ -1,7 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { Link } from "../../../src/core/links/model";
-import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type LinkState } from "../../../src/state/history";
+import type { AltTocBook } from "../../../src/core/alt-toc/model";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type LinkState } from "../../../src/state/history";
 
 const book = { key: "s1:1", title: "א", origin: "otzaria" as const };
 const mk = (id: string, over: Partial<Link> = {}): Link => ({
@@ -63,5 +64,33 @@ describe("link history", () => {
         expect(s.links).toEqual(snapshots[0]);
       }),
     );
+  });
+});
+
+describe("history — alt_toc changes share the undo stack with links", () => {
+  const book = (n: number): AltTocBook => ({ title: "בראשית", origin: "user", structures: [{ key: "Parasha", entries: Array.from({ length: n }, (_, i) => ({ heTitle: `${i}`, line: i + 1, level: 0 })) }] });
+  it("set → change → drop, each one undoable and redoable", () => {
+    let s = emptyLinkState();
+    s = commit(s, "a", [], 1, [altTocChange(s, "בראשית", book(1))]);
+    s = commit(s, "b", [], 2, [altTocChange(s, "בראשית", book(2))]);
+    s = commit(s, "c", [], 3, [altTocChange(s, "בראשית", null)]);
+    expect(s.altToc.size).toBe(0);
+    expect(s.undo.map((c) => c.label)).toEqual(["a", "b", "c"]);
+    s = undo(s);
+    expect(s.altToc.get("בראשית")!.structures[0]!.entries).toHaveLength(2);
+    s = undo(s);
+    expect(s.altToc.get("בראשית")!.structures[0]!.entries).toHaveLength(1);
+    s = redo(s);
+    expect(s.altToc.get("בראשית")!.structures[0]!.entries).toHaveLength(2);
+    expect(s.links.size).toBe(0);
+  });
+  it("one action may change links and alt_toc together; a no-op creates no entry", () => {
+    let s = emptyLinkState();
+    s = commit(s, "open", addChanges([mk("x")]), 1, [altTocChange(s, "בראשית", book(1))]);
+    expect([s.links.size, s.altToc.size, s.undo.length]).toEqual([1, 1, 1]);
+    const same = commit(s, "noop", [], 2, [{ title: "בראשית", before: s.altToc.get("בראשית")!, after: s.altToc.get("בראשית")! }]);
+    expect(same).toBe(s);
+    s = undo(s);
+    expect([s.links.size, s.altToc.size]).toEqual([0, 0]);
   });
 });

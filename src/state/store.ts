@@ -10,10 +10,15 @@ import { recordToLink } from "../formats/links-json/convert";
 import { storedKey } from "../core/links/stored-form";
 import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
-import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
+import { planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { parseLinksCsv } from "../formats/links-csv/parse";
-import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { AltTocState } from "./alt-toc";
+import type { AltTocExportPlan } from "../formats/alt-toc/export";
+import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-report";
+import { planSefariaCsv, type SefariaCsvFile } from "../formats/sefaria-csv/write";
+import type { BookHeading } from "../core/books";
 import { CHUNK, LineStore } from "./lines";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
@@ -57,6 +62,11 @@ export interface Task {
 export type Screen = "home" | "workspace";
 export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
 
+/** What the export dialog shows and saves: the links plan and the alt_toc files. */
+export interface ExportBundle extends ExportPlan {
+  altToc: AltTocExportPlan;
+}
+
 /** One run of an automatic engine and the user's decisions on it. */
 export interface SuggestionRun {
   engine: EngineId;
@@ -84,6 +94,8 @@ export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 export class AppStore {
   readonly prefs: Preferences;
   readonly lines: LineStore;
+  /** alternative TOC structures (alt_toc) of the project */
+  readonly altToc: AltTocState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -181,6 +193,7 @@ export class AppStore {
   ) {
     this.prefs = prefs ?? loadPreferences();
     this.lines = new LineStore(service);
+    this.altToc = new AltTocState(this, service);
   }
 
   /* ---------------- sources ---------------- */
@@ -195,6 +208,7 @@ export class AppStore {
     });
     for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
+    for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
@@ -632,7 +646,7 @@ export class AppStore {
   /* ---------------- moving links to a new edition (stage 11) ---------------- */
 
   /** a dialog opened from inside a panel */
-  readonly dialog = signal<"relink" | null>(null);
+  readonly dialog = signal<"relink" | "alt-toc" | null>(null);
   readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number> } | null>(null);
 
   async planRelinkFor(oldKey: string, newKey: string): Promise<boolean> {
@@ -730,10 +744,42 @@ export class AppStore {
     return ok === true;
   }
 
-  /** Loads every line the export must check (ends of every link) and returns the plan. */
-  async prepareExport(): Promise<ExportPlan | null> {
+  /** Loads every line the export must check (ends of every link, alt_toc lines) and returns the plan. */
+  async prepareExport(): Promise<ExportBundle | null> {
     if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
-    return planExport(this.allLinks.value, this.validation());
+    await this.altToc.loadLines();
+    return { ...planExport(this.allLinks.value, this.validation()), altToc: this.altToc.plan() };
+  }
+
+  /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */
+  async prepareSefariaCsv(plan: ExportPlan): Promise<SefariaCsvFile[] | null> {
+    const dropped = new Set(["export/heading-line", "export/line-out-of-range", "export/line-not-in-db"]);
+    const bad = new Set(plan.warned.filter((w) => w.problems.some((p) => dropped.has(p.code))).map((w) => w.link.id));
+    const links = plan.written.filter((l) => !bad.has(l.id));
+    const headings = new Map<string, BookHeading[]>();
+    const ok = await this.runTask("קורא את כותרות הספרים למראי המקום…", async (opts) => {
+      const keys = new Set(links.flatMap((l) => [this.bookOf(l.source.book)?.key, l.heRef2 ? undefined : this.bookOf(l.target.book)?.key]).filter((k): k is string => !!k));
+      let done = 0;
+      for (const key of keys) {
+        headings.set(key, await this.service.headings(key, opts));
+        opts.onProgress?.(++done, keys.size);
+      }
+      return true;
+    });
+    if (!ok) return null;
+    return planSefariaCsv(links, (ref) => {
+      const b = this.bookOf(ref);
+      return b && headings.get(b.key);
+    });
+  }
+
+  /** `_report.txt` for a plan (and the CSV files, when exporting as CSV). */
+  exportReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): string {
+    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc });
+  }
+
+  saveReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): void {
+    this.saver.save(REPORT_FILE_NAME, this.exportReport(plan, csv), "text/plain;charset=utf-8");
   }
 
   async runQualityCheck(): Promise<QaReport | null> {
@@ -750,11 +796,23 @@ export class AppStore {
     if (this.qa.value) this.saver.save(`בדיקת-קישורים-${new Date().toISOString().slice(0, 10)}.csv`, qaCsv(this.qa.value), "text/csv");
   }
 
-  saveExport(plan: ExportPlan): void {
-    if (plan.files.length === 1) this.saver.save(plan.files[0]!.name, plan.files[0]!.text, "application/json");
-    else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipExport(plan), "application/zip");
+  /**
+   * Saves the export. One file alone downloads as that file; anything more is one ZIP laid out like
+   * the library — links/, alt_toc/ — with `_report.txt` at its root. `csv` replaces the links files
+   * with Sefaria-layout CSV files.
+   */
+  saveExport(plan: ExportPlan | ExportBundle, csv?: readonly SefariaCsvFile[]): void {
+    const bundle: ExportBundle = "altToc" in plan ? plan : { ...plan, altToc: { files: [], heldBack: [] } };
+    const data = [
+      ...(csv ? csv.map((f) => ({ path: f.name, text: f.text, mime: "text/csv;charset=utf-8" })) : plan.files.map((f) => ({ path: `links/${f.name}`, text: f.text, mime: "application/json" }))),
+      ...bundle.altToc.files.map((f) => ({ path: `alt_toc/${f.name}`, text: f.text, mime: "application/json" })),
+    ];
+    if (!data.length) return;
+    if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
+    else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
     this.savedRevision.value = this.linkState.value.revision;
-    this.notify("success", `יוצאו ${plan.written.length.toLocaleString("he")} קישורים ב־${plan.files.length} קבצים.`);
+    const alt = bundle.altToc.files.length;
+    this.notify("success", `יוצאו ${(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length).toLocaleString("he")} קישורים ב־${csv ? csv.length : plan.files.length} קבצים${alt ? `, ומבני כותרות ל־${alt} ספרים` : ""}.`);
   }
 
   validation(): ValidationContext {
@@ -781,6 +839,7 @@ export class AppStore {
         links: this.allLinks.value,
         rejectedSuggestions: [...this.rejected.value],
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
+        altToc: this.altToc.list.value,
       },
       APP_VERSION,
     );
@@ -804,8 +863,12 @@ export class AppStore {
     const old = this.linkState.value.links;
     const changes: Change[] = [...old.values()].map((l) => ({ id: l.id, before: l }));
     for (const l of p.links) changes.push({ id: l.id, ...(old.get(l.id) && { before: old.get(l.id)! }), after: l });
+    // the project's alt_toc replaces the current one, in the same undoable action
+    const ls = this.linkState.value;
+    const altChanges: AltTocChange[] = [...ls.altToc.keys()].filter((t) => !p.altToc.some((b) => b.title === t)).map((t) => altTocChange(ls, t, null));
+    for (const b of p.altToc) altChanges.push(altTocChange(ls, b.title, b));
     batch(() => {
-      this.apply(`פתיחת פרויקט (${p.links.length.toLocaleString("he")} קישורים)`, changes.filter((c) => c.before !== c.after));
+      this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${p.links.length.toLocaleString("he")} קישורים)`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges);
       this.rejected.value = new Set(p.rejectedSuggestions);
       this.savedRevision.value = this.linkState.value.revision;
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
@@ -833,7 +896,7 @@ export class AppStore {
       if (first) return void (first = false);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const empty = this.linkState.peek().links.size === 0;
+        const empty = this.linkState.peek().links.size === 0 && this.linkState.peek().altToc.size === 0;
         (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
           /* storage blocked or full — autosave is best effort */
         });
@@ -842,10 +905,11 @@ export class AppStore {
     });
     void kv.get(KEY).then(
       (text) => {
-        if (!text || this.linkState.peek().links.size) return;
+        if (!text || this.linkState.peek().links.size || this.linkState.peek().altToc.size) return;
         let n = 0;
         try {
-          n = (JSON.parse(text) as { links?: unknown[] }).links?.length ?? 0;
+          const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[] };
+          n = (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0);
         } catch {
           return;
         }
