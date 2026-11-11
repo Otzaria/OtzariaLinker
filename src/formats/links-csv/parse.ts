@@ -41,7 +41,10 @@ export function parseLinksCsv(text: string, fileName: string): CsvLinksResult {
     const source = String(rec.source_title ?? fromName ?? "");
     delete rec.source_title;
     if (!source) return void problems.push(`שורה ${r + 2}: לא ידוע מהו ספר המקור (אין עמודת source_title, ושם הקובץ אינו "<ספר>_links.csv").`);
-    bySource.set(source, [...(bySource.get(source) ?? []), rec]);
+    // push, not spread: a sheet of one book can have 100k rows, and a copy per row is quadratic
+    const list = bySource.get(source);
+    if (list) list.push(rec);
+    else bySource.set(source, [rec]);
   });
   return { files: [...bySource].map(([sourceTitle, recs]) => ({ sourceTitle, text: JSON.stringify(recs, null, 2), rows: recs.length })), problems };
 }
