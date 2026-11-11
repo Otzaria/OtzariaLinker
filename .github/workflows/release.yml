@@ -29,7 +29,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chrome msedge
+      - run: npx playwright install --with-deps chrome msedge firefox
       - name: E2E against the built file, offline
         run: npx playwright test
       - name: Attach assets

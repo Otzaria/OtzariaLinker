@@ -22,7 +22,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Install browsers for E2E
-        run: npx playwright install --with-deps chrome msedge
+        run: npx playwright install --with-deps chrome msedge firefox
       - run: npx playwright test
       - name: Build is reproducible
         run: |

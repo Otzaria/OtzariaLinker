@@ -2,8 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 /*
  * E2E runs against the BUILT single file (dist/OtzariaLinker.html) opened from file://, with the
- * network switched off — exactly how users run it. Uses the installed Chrome and Edge
- * (channel), so no browser download is needed.
+ * network switched off — exactly how users run it. Chrome and Edge are the installed browsers
+ * (channel); Firefox is Playwright's own build (`npx playwright install firefox`).
  */
 export default defineConfig({
   testDir: "tests/e2e",
@@ -14,5 +14,6 @@ export default defineConfig({
   projects: [
     { name: "chrome", use: { channel: "chrome" } },
     { name: "edge", use: { channel: "msedge" } },
+    { name: "firefox", use: { browserName: "firefox" }, testIgnore: /legacy-baseline/ },
   ],
 });

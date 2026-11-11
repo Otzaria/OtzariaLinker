@@ -45,8 +45,21 @@ export function pickFiles(opts: { folder?: boolean; accept?: string } = {}): Pro
     input.multiple = true;
     if (opts.folder) input.webkitdirectory = true;
     if (opts.accept) input.accept = opts.accept;
-    input.addEventListener("change", () => resolve(fromFileList(input.files)), { once: true });
-    input.addEventListener("cancel", () => resolve([]), { once: true });
+    // Firefox fires no "change" on a file input that is not in the document, so attach it (hidden)
+    input.hidden = true;
+    document.body.append(input);
+    let settled = false;
+    const done = (files: InputFile[]) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(files);
+    };
+    input.addEventListener("change", () => done(fromFileList(input.files)), { once: true });
+    // Firefox can fire "cancel" BEFORE "change" for a real choice (seen with large files), so a
+    // cancel never settles the pick: a real cancel simply never resolves, which callers treat as
+    // "nothing chosen". The hidden input is cleaned up a while later.
+    input.addEventListener("cancel", () => setTimeout(() => !settled && input.remove(), 120_000), { once: true });
     input.click();
   });
 }
