@@ -74,6 +74,8 @@ export interface Link {
   readonly keyOrder?: readonly string[];
   /** path_2 exactly as imported (it may carry a folder); kept while it still names target.book */
   readonly targetPath?: string;
+  /** position of the record in its imported links file — keeps the file's order on export */
+  readonly fileIndex?: number;
 }
 
 export const isRange = (s: LinkSide): boolean => s.end !== undefined && s.end > s.line;

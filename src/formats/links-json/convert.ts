@@ -62,6 +62,7 @@ export function recordToLink(
     ...(Object.keys(rec.extras).length > 0 && { passthrough: rec.extras }),
     keyOrder: rec.keyOrder,
     targetPath: rec.path_2,
+    fileIndex: index,
   };
   return { link, issues };
 }
