@@ -118,9 +118,7 @@ export class CitationScanner {
   ) {
     this.ibidOn = options.ibid ?? true;
     this.window = options.ibidWindow ?? 6;
-    const on = / על (.+)$/.exec(sourceTitle.replace(/[״]/g, '"'));
-    const base = on ? aliases.lookup(on[1]!)?.targets.find((t) => t.tier === "title" && t.collection === "bavli") : undefined;
-    this.base = base ?? null;
+    this.base = baseOf(aliases, sourceTitle);
   }
 
   /** Feeds one line (in book order). Heading lines are not linked but break the ibid chain. */
@@ -206,7 +204,25 @@ export class CitationScanner {
    */
   private relative(toks: readonly Tok[], i: number, line: number): number | null {
     const t = toks[i]!;
-    if (!this.base || t.gershayim || t.geresh || !RELATIVE.test(t.text)) return null;
+    if (!this.base || t.gershayim || t.geresh) return null;
+    // a commentary on the Shulchan Aruch: "בסימן רפ"ו ס"ג", "וכדלקמן בסימן ש"כ" — a siman of the base
+    if (this.base.collection === "sa") {
+      const at = RELATIVE.test(t.text) ? i + 1 : i;
+      const addr = parseAddress(toks, at);
+      const e = addr?.elems[0];
+      if (!addr || !e || e.kind !== "siman" || !e.explicit || addr.elems.some((x) => x.kind === "sk")) return null;
+      // "ובמ"א סימן ז'", "הט"ז לקמן בסימן ח'", "בסימן מ"ח במ"ב סק"א": another book named right before
+      // or after the siman is the one meant — not the base
+      // (two words back, past "לקמן"/"כמ"ש": "הט"ז לקמן בסימן ח'", "רש"ל בתשובה סימן צ"ז", "לבוש בסימן נ"ח")
+      const named = (x: Tok | undefined) => !!x && x.kind === "word" && !RELATIVE.test(x.text) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && (((x.gershayim || x.geresh) && !numeralOf(x)) || OTHER_WORK.test(x.text));
+      const titled = (back: number) => {
+        const x = before(toks, i, back);
+        return !!x && x.kind === "word" && this.aliases.matchAt(toks, toks.indexOf(x)).length > 0;
+      };
+      if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(1) || titled(2) || named(toks[addr.to]) || named(toks[addr.to + 1])) return this.drop("siman-of-another-book");
+      return this.emit(toks, line, { from: i, to: addr.to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false });
+    }
+    if (!RELATIVE.test(t.text)) return null;
     const addr = parseAddress(toks, i + 1, { enclosed: opensBefore(toks, i) });
     if (!addr) return null;
     const e = addr.elems[0]!;
@@ -345,6 +361,35 @@ export class CitationScanner {
 }
 
 const keyOfName = (s: string): string => unifyFinals(s.replace(/["'׳״]/g, "")).replace(/\s+/g, " ").trim();
+
+/** the commentaries on the Shulchan Aruch whose titles do not say so */
+const SA_COMMENTARY_BASE: Readonly<Record<string, string>> = {
+  "משנה ברורה": "שולחן ערוך, אורח חיים",
+  "מגן אברהם": "שולחן ערוך, אורח חיים",
+  "ביאור הלכה": "שולחן ערוך, אורח חיים",
+  "שער הציון": "שולחן ערוך, אורח חיים",
+};
+
+/**
+ * The book a commentary is on — the target of "לעיל/לקמן <daf>" (a tractate) and of a bare "סימן"
+ * (the Shulchan Aruch): "… על גיטין" → גיטין; "… על שולחן ערוך אורח חיים" → "שולחן ערוך, אורח חיים".
+ */
+function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
+  const title = sourceTitle.replace(/[״]/g, '"');
+  const on = / על (.+)$/.exec(title)?.[1];
+  const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, SA_COMMENTARY_BASE[title]];
+  for (const n of names) {
+    if (!n) continue;
+    const t = aliases.lookup(n)?.targets.find((x) => x.tier === "title" && (x.collection === "bavli" || x.collection === "sa"));
+    if (t) return t;
+  }
+  return null;
+}
+
+/** quoted abbreviations of running text that name no book ("כמ"ש בסימן…", "ע"ש") */
+const COMMON_ABBREVIATIONS = new Set(['כמ"ש', 'וכמ"ש', 'כמש"כ', 'וכמש"כ', 'ע"ש', 'וע"ש', 'עיי"ש', "וכו'", "כו'", 'א"כ', 'מ"מ', 'הנ"ל', 'כנ"ל', 'ז"ל', 'ע"פ', "עי'", "ועי'", 'ס"ל', 'דס"ל', 'וכ"כ', 'כ"כ', "כדאי'", "עיין", 'ר"ל', 'ג"כ', 'וכ"ש', 'כ"ש', "אפי'", "ואפי'"]);
+/** words that name another work before a siman ("בתשובה סימן צ"ז") */
+const OTHER_WORK = /^[וב]{0,2}(?:תשובה|תשובות|תשו|ספר|ס|שו"ת|שות)$/;
 
 /** "לעיל", "לקמן", with a prefix ("ולקמן", "דלעיל", "כדלקמן") */
 const RELATIVE = /^(?:[ודכ]{0,2})(?:לעיל|לקמן|להלן)$/;

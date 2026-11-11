@@ -13,7 +13,7 @@ import type { Confidence, Suggestion } from "../../../../src/linking/automatic";
  *                 lines are equal;
  *   • wrong     — the database links that line to that book, but somewhere else;
  *   • unconfirmed — the database has no link from that line to that book (a LINKER miss, or our
- *                 error: sampled by hand, see docs/AUTOMATION_ENGINE.md §5).
+ *                 error: sampled by hand, see docs/AUTOMATION_ENGINE.md §6).
  * Recall counts LINKER links only (REFERENCE/QUOTATION are not all explicit citations).
  */
 

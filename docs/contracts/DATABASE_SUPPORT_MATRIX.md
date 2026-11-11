@@ -257,7 +257,9 @@
    - official: אין library_id ב־schema_meta, יש link ו־connection_type, ובדרך כלל source='Sefaria'.
    - PDC / מצורף: schema_meta.library_id (+library_name, author) ו/או טבלת external_link.
    - user_books: יש user_link / user_import_file / book.isPersonal, ואין schema_meta.
-7. דחיסה: יש zstd_dict → טוענים את כל השורות. ממפים dictID→מילון לפי **כותרת המילון** (magic
+7. דחיסה: יש zstd_dict → טוענים את כל השורות, ומציעים אותם גם ל**מאגר המילונים של ה־Worker** (`DictionaryPool`):
+   מסד בלי המילון, או קובץ מילון שנפתח (זיהוי לפי magic), משתמשים במילון שהגיע מכל מקור. מילון המסד עצמו
+   קודם; שני מילונים שונים עם אותו dictID פוסלים את ה־id מהמאגר (לא מנחשים). ממפים dictID→מילון לפי **כותרת המילון** (magic
    EC30A437 LE, ואז dictID ב־u32 LE בבתים 4-7), לא לפי zstd_dict.id. מפענחים **לכל ערך בנפרד**:
    - TEXT → כמו שהוא.
    - BLOB עם magic 28B52FFD → zstd.
@@ -392,5 +394,23 @@
    - אינדקס `line` של ספר אחד הוא כמה עמודים בודדים.
    - קריאת ספר של 1,500 שורות: כ־1,500 seeks ב־`line_content`. כדאי למיין לפי rowid ולקרוא ברצף.
 7. **אין צורך ב־`sqlite_stat*`.** אין גם תמיכה בכתיבה, journal או WAL.
+
+## 8. עובדות שנמדדו באימות מול המסד (2026-11-11)
+
+נמדד על `seforim.db` של המחשב (4,492,886,016 בתים, `db_schema_version=7`) בבדיקות של `tests/validation/`
+(הדוח: [`validation/REAL_DATA_REPORT.md`](../validation/REAL_DATA_REPORT.md)):
+
+- **`lineIndex` רציף.** בכל 8,154 הספרים השורות הן 0…n-1 בלי חורים, ו־`book.totalLines` שווה למספר שורות
+  `line` של הספר.
+- **`link.targetLineIndex` המשוכפל** שווה ל־`line.lineIndex` של `targetLineId` בכל 68,484 הקישורים שנבדקו.
+- **`link_anchor` רק בארבעה סוגים:** LINKER (2,488,652 קישורים מעוגנים), COMMENTARY (177,681), QUOTATION
+  (6,440, לרוב בצד 1 ועם `charEnd`) ו־OTHER (3). לעוגני COMMENTARY אין `charEnd`.
+- **`tocEntry.level`:** בספרי ספריא הוא קטן באחד מרמת ה־`<hN>` של אותה שורה (`<h1>` ⇐ 0); בספרי אוצריא
+  הוא שווה לה. בספרי ספריא יש גם רשומות `tocEntry` על שורות שאינן כותרת (`שמות רבה`: 517 רשומות מול 53
+  שורות `<hN>`). ב־11 ספרי אוצריא במדגם `tocText` שונה מטקסט הכותרת: בלי ניקוד, ומקף (־) הופך לרווח. הכלי מציג את שורות ה־`<hN>`
+  עצמן, כמו שהגנרטור מחליט מה כותרת.
+- **`line_note`:** 630 ספרים. בספר שאוחד אליו "הערות על X", השורה במסד היא שורת ה־‎.txt עם
+  `<sup class="footnote-marker">` במקום `<sup>`, וגוף ההערה עובר ל־`line_note`; אחרי השחזור
+  (`rehydrateLine`) הגוף עומד מיד אחרי ה־`</sup>` של הסמן ב־16,793 מתוך 16,833 שורות כאלה שנבדקו.
 
 </div>

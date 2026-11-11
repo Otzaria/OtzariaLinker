@@ -55,7 +55,7 @@ export interface CitationsOptions {
 const ENGINE = "citations" as const;
 const PROGRESS_EVERY = 2000;
 
-/* ---------- the confidence ladder (calibrated on the real library, docs/AUTOMATION_ENGINE.md §5) ---------- */
+/* ---------- the confidence ladder (calibrated on the real library, docs/AUTOMATION_ENGINE.md §6) ---------- */
 
 const TIER_SCORE = { title: 1, derived: 0.99, acronym: 0.95, secondary: 0.9 } as const;
 const PENALTY = {
@@ -289,6 +289,8 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
   "commentator-not-in-library": "הפניה לפירוש שאינו פתוח בכלי",
   "dibur-without-commentator": 'ד"ה בלי שם הפירוש',
   "ibid-shape": '"שם" שאי אפשר להשלים',
+  "ibid-other-book": '"שם" אחרי שם של ספר אחר',
+  "siman-of-another-book": "סימן של ספר אחר שנזכר לידו",
 };
 
 /** The score of one reading: the name's strength minus everything that makes the reading less sure. */

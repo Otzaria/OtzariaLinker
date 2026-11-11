@@ -22,6 +22,15 @@ const IMPORTED = JSON.stringify([
 const imported = parseLinksJson(IMPORTED).records.map((r, i) => recordToLink(r, i, A, () => B, `f${i}`).link);
 
 describe("planExport", () => {
+  it("plans one book with 100,000 links in linear time (the library has a 112,905-record file)", () => {
+    // regression: grouping by source book copied the list for every link — 259 s for that real file
+    const many = Array.from({ length: 100_000 }, (_, i) => mk(`n${i}`, { source: { book: A, line: 1 + (i % 90) }, target: { book: B, line: 1 + ((i * 7) % 90) } }));
+    const t0 = performance.now();
+    const plan = planExport(many, { lineCount: () => 100, line: () => undefined });
+    expect(plan.files).toHaveLength(1);
+    expect(plan.written).toHaveLength(100_000);
+    expect(performance.now() - t0).toBeLessThan(15_000);
+  }, 60_000);
   it("re-exporting an untouched imported file gives back the same bytes", () => {
     const plan = planExport(imported, ctx);
     expect(plan.files).toHaveLength(1);

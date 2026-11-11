@@ -91,6 +91,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
             <div class="label">יצירת קישור</div>
             <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
             <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
+            <MenuItem icon="fl_arrow_download" onSelect={() => (store.saveDiagnostics(), close())}>שמירת יומן אבחון (לצירוף לדיווח על תקלה)</MenuItem>
             <div class="label" dir="ltr" style="text-align:start">OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}</div>
           </>
         )}

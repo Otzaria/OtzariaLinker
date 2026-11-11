@@ -59,6 +59,9 @@ const service: BooksService = {
   altToc: (key, opts) => call("altToc", [key], opts),
   headings: (key, opts) => call("headings", [key], opts),
   runCitations: (source, options, opts) => call("runCitations", [source, options], opts),
+  dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
+  dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
+  runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
 };
 
 const saver: Saver = {
@@ -90,6 +93,9 @@ void rpc.call("ping", []).then(
 );
 // debugging and E2E hook (no data leaves the page)
 (globalThis as { __linker?: AppStore }).__linker = store;
+// uncaught errors go to the diagnostic log (saved from the settings menu), never to the network
+addEventListener("error", (e) => store.log.error("app.uncaught", e.message, { at: `${String(e.filename ?? "").split("/").pop()}:${e.lineno}:${e.colno}` }));
+addEventListener("unhandledrejection", (e) => store.log.error("app.unhandled", String((e.reason as Error | undefined)?.message ?? e.reason)));
 
 render(
   <StoreContext.Provider value={store}>

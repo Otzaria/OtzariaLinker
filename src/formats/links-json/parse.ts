@@ -130,6 +130,7 @@ export function parseLinksJson(text: string): ParseResult {
 
     records.push({
       line_index_1: li1!, line_index_2: li2!, heRef_2: heRef2!, path_2: path2!, connectionType,
+      ...(typeRaw === null && { typeNull: true }),
       ...(li1e !== undefined && { line_index_1_end: li1e }),
       ...(li2e !== undefined && { line_index_2_end: li2e }),
       ...(start !== undefined && { start }),

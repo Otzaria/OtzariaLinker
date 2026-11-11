@@ -4,6 +4,7 @@ import { AltTocDialog } from "./dialogs/alt-toc-dialog";
 import { DbMappingDialog } from "./dialogs/db-mapping-dialog";
 import { ExportDialog } from "./dialogs/export-dialog";
 import { HelpDialog } from "./dialogs/help-dialog";
+import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
 import { Home } from "./screens/home";
@@ -31,6 +32,8 @@ export function App() {
       if (k === "z" && !e.shiftKey) (e.preventDefault(), store.undo());
       else if (k === "y" || (k === "z" && e.shiftKey)) (e.preventDefault(), store.redo());
       else if (k === "s") (e.preventDefault(), store.saveProject());
+      // the history list (v3 had Ctrl+H): opened through its own button, so focus and closing behave the same
+      else if (k === "h") (e.preventDefault(), document.querySelector<HTMLButtonElement>(".history-menu .menu > button.icon-btn")?.click());
     };
     // warn before closing with links that were not exported
     const onUnload = (e: BeforeUnloadEvent) => {
@@ -63,6 +66,7 @@ export function App() {
       {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onClose={() => (store.dialog.value = null)} />}
       {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => (store.dialog.value = null)} />}
       <DbMappingDialog />
+      <RecordsDialog />
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

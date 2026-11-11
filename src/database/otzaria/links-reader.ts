@@ -30,6 +30,27 @@ export interface DbLinkRow {
   suppressedSides: (0 | 1)[];
 }
 
+/**
+ * Every link of one book in both stored directions, as parallel arrays — compact enough to hold
+ * 235,000 links of בראשית (a few MB) for counting, filtering and paging without re-reading.
+ * Nothing about lines, anchors or ranges: those are read only for the page shown (DbLinksReader.byIds).
+ */
+export interface BookLinkRows {
+  ids: Int32Array;
+  /** 0 = the book is the stored source, 1 = the stored target */
+  dir: Uint8Array;
+  /** book id at the other end (the book itself for a link inside one book) */
+  other: Int32Array;
+  /** index into CONNECTION_TYPES (unknown stored names count as OTHER) */
+  type: Uint8Array;
+  /** line id at the listed book's end */
+  ownLine: Int32Array;
+  /** "index": through the book indexes of `link`; "scan": a full scan (the database has no such index) */
+  method: "index" | "scan";
+}
+
+const LINK_BATCH = 20_000;
+
 export class DbLinksReader {
   private constructor(
     private readonly file: SqliteFile,
@@ -64,6 +85,65 @@ export class DbLinksReader {
   /** Whether reading by line can use indexes (false → a full scan of `link`, slow on a big database). */
   get indexed(): boolean {
     return !!(this.ix.out && this.ix.in);
+  }
+
+  /**
+   * Every link of a book, out (stored source) and in (stored target), from idx_link_source_book and
+   * idx_link_target_book — present in every schema 0–7 (LINK_SCHEMA_MATRIX §1.1) — and one ordered
+   * walk of `link` for those ids, in batches so a long read reports progress and can be cancelled.
+   * A link inside one book is listed once, as "out".
+   */
+  async bookLinks(bookId: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<BookLinkRows> {
+    const [ixOut, ixIn] = [await this.file.findIndex("link", ["sourceBookId"]), await this.file.findIndex("link", ["targetBookId"])];
+    const L = (n: string) => col(this.t.link, n);
+    const [sb, tb, sl, tl, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("connectionTypeId"), L("connectionType")];
+    const rows: { id: number; v: readonly unknown[] }[] = [];
+    let method: BookLinkRows["method"] = "index";
+    if (ixOut && ixIn) {
+      const ids = new Set<number>();
+      for await (const rec of this.file.seekIndex(ixOut, [bookId])) ids.add(Number(rec.at(-1)));
+      for await (const rec of this.file.seekIndex(ixIn, [bookId])) ids.add(Number(rec.at(-1)));
+      const sorted = [...ids].sort((a, b) => a - b);
+      for (let i = 0; i < sorted.length; i += LINK_BATCH) {
+        ctx.signal?.throwIfAborted();
+        for (const [id, r] of await this.file.getMany(this.t.link, sorted.slice(i, i + LINK_BATCH))) rows.push({ id, v: r.values });
+        ctx.progress?.(Math.min(i + LINK_BATCH, sorted.length), sorted.length);
+      }
+    } else {
+      method = "scan";
+      let n = 0;
+      for await (const r of this.file.scan(this.t.link)) {
+        if (++n % 50_000 === 0) ctx.signal?.throwIfAborted();
+        if (Number(r.values[sb]) === bookId || Number(r.values[tb]) === bookId) rows.push({ id: Number(r.rowid), v: r.values });
+      }
+    }
+    const out: BookLinkRows = {
+      ids: new Int32Array(rows.length),
+      dir: new Uint8Array(rows.length),
+      other: new Int32Array(rows.length),
+      type: new Uint8Array(rows.length),
+      ownLine: new Int32Array(rows.length),
+      method,
+    };
+    rows.forEach(({ id, v }, i) => {
+      const isOut = Number(v[sb]) === bookId;
+      const name = cti >= 0 ? (this.typeNames.get(Number(v[cti])) ?? "") : String(v[ctText] ?? "");
+      out.ids[i] = id;
+      out.dir[i] = isOut ? 0 : 1;
+      out.other[i] = Number(v[isOut ? tb : sb]);
+      out.type[i] = CONNECTION_TYPES.indexOf(this.typeOf(name));
+      out.ownLine[i] = Number(v[isOut ? sl : tl]);
+    });
+    return out;
+  }
+
+  /** Full rows (both ends' lines, anchors, ranges, suppressed sides) of the given link ids. */
+  byIds(linkIds: Iterable<number>): Promise<DbLinkRow[]> {
+    return this.rows(new Set(linkIds));
+  }
+
+  private typeOf(name: string): ConnectionType {
+    return (CONNECTION_TYPES as readonly string[]).includes(name) ? (name as ConnectionType) : parseConnectionType(name).type;
   }
 
   async atLines(lineIds: Iterable<number>): Promise<DbLinkRow[]> {
@@ -103,7 +183,7 @@ export class DbLinksReader {
     for (const [id, r] of links) {
       const v = r.values;
       const name = cti >= 0 ? (this.typeNames.get(Number(v[cti])) ?? "") : String(v[ctText] ?? "");
-      const type = (CONNECTION_TYPES as readonly string[]).includes(name) ? (name as ConnectionType) : parseConnectionType(name).type;
+      const type = this.typeOf(name);
       out.push({
         id,
         type,

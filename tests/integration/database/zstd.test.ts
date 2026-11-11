@@ -5,7 +5,9 @@ import initSqlJs from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LinkerError } from "../../../src/core/errors";
 import { stripNikud } from "../../../src/core/text/hebrew";
-import { LineContentCodec, dictionaryId, frameHeader, isZstdFrame } from "../../../src/database/compression/zstd";
+import { DictionaryPool, LineContentCodec, dictionaryId, frameHeader, isZstdFrame } from "../../../src/database/compression/zstd";
+import { detectKind } from "../../../src/sources/detect";
+import { SourceRegistry } from "../../../src/sources/registry";
 
 /* Real data: tests/fixtures/db/seforim-v7-mini.db (scripts/fixtures/make_mini_db.py) carries the
    official dictionary and real compressed rows. Node's zlib (zstd) makes frames for edge cases. */
@@ -61,8 +63,42 @@ describe("zstd line codec — rules", () => {
   });
   it("a missing dictionary, a non-zstd blob and a conflicting dictionary are coded errors", () => {
     const withDict = new Uint8Array(zstdCompressSync(enc.encode("x"), { dictionary: dict } as never));
-    expect(codeOf(() => new LineContentCodec([]).decode(withDict))).toBe("db/compressed-unknown-dictionary");
+    expect(codeOf(() => new LineContentCodec([], new DictionaryPool()).decode(withDict))).toBe("db/compressed-unknown-dictionary");
     expect(codeOf(() => new LineContentCodec([]).decode(new Uint8Array([1, 2, 3])))).toBe("db/value-not-text");
     expect(codeOf(() => new LineContentCodec([dict, dict.slice()]))).toBe("db/dictionary-conflict");
+  });
+});
+
+describe("zstd dictionaries shared across open databases and files", () => {
+  const enc = new TextEncoder();
+  it("a database without the dictionary reads frames once another database (or a file) brought it", () => {
+    const pool = new DictionaryPool();
+    const frame = new Uint8Array(zstdCompressSync(enc.encode("שורה אישית"), { dictionary: dict } as never));
+    const personal = new LineContentCodec([], pool);
+    expect(codeOf(() => personal.decode(frame))).toBe("db/compressed-unknown-dictionary");
+    new LineContentCodec([dict], pool, "seforim.db"); // the official database is opened too
+    expect(personal.decode(frame)).toBe("שורה אישית");
+  });
+  it("a database's own dictionary wins; codecs without an origin never feed the pool", () => {
+    const pool = new DictionaryPool();
+    new LineContentCodec([dict], pool);
+    expect(pool.get(32768)).toBeUndefined();
+  });
+  it("two different dictionaries with one id are never guessed between", () => {
+    const pool = new DictionaryPool();
+    const other = dict.slice();
+    other[100] = other[100]! ^ 0xff;
+    expect(pool.add(dict, "a")).toBe(32768);
+    expect(pool.add(other, "b")).toBe(32768);
+    expect(pool.get(32768)).toBeUndefined();
+    expect(pool.isConflicted(32768)).toBe(true);
+    const frame = new Uint8Array(zstdCompressSync(enc.encode("x"), { dictionary: dict } as never));
+    expect(codeOf(() => new LineContentCodec([], pool).decode(frame))).toBe("db/compressed-unknown-dictionary");
+  });
+  it("a dictionary file is recognised by content and reported by the registry", async () => {
+    expect(detectKind(dict.subarray(0, 4096), "whatever.bin")).toBe("zstd-dict");
+    const res = await new SourceRegistry().open([{ path: "otzaria.dict", blob: new Blob([new Uint8Array(dict)]) }]);
+    expect(res.dictionaries).toEqual([{ path: "otzaria.dict", id: 32768 }]);
+    expect(res.skipped).toEqual([]);
   });
 });

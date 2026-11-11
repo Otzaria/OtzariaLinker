@@ -25,7 +25,14 @@ import { BookFind } from "./book-find";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
+import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
+import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
+import { DbLinksState } from "./db-links";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
+import { MaxLinkState, type MaxLinkRunOptions, type MaxLinkScope } from "./maxlink";
+import type { MaxLinkRunInfo } from "../linking/maxlink-report";
+import { linePairKey } from "../linking/merge";
+import type { MaxLinkPlan } from "../linking/plan";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -78,6 +85,8 @@ export interface SuggestionRun {
   at: number;
   /** a batch run: one summary row per book (paired or not) */
   batch?: BatchRow[];
+  /** a max-link run: the plan, every step's outcome and the merge counts (state/maxlink.ts) */
+  maxlink?: MaxLinkRunInfo;
 }
 
 export interface BatchRow {
@@ -100,6 +109,10 @@ export class AppStore {
   readonly find: Record<Side, BookFind>;
   /** alternative TOC structures (alt_toc) of the project */
   readonly altToc: AltTocState;
+  /** links the open databases already have: list, per-line view, copying into the project (stage 10) */
+  readonly dbLinks: DbLinksState;
+  /** max-link: plan, run and report (state/maxlink.ts) */
+  readonly maxLink: MaxLinkState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -128,7 +141,7 @@ export class AppStore {
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
-  readonly intent = signal<{ engine?: EngineId; batch?: boolean } | null>(null);
+  readonly intent = signal<{ engine?: EngineId; batch?: boolean; maxlink?: boolean } | null>(null);
   /** the last quality report; null until the user runs the check */
   readonly qa = signal<QaReport | null>(null);
   /** the link revision the report was made on — a different revision means the report is stale */
@@ -184,7 +197,9 @@ export class AppStore {
   });
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
-    return d ? validateLink(d, this.validation()) : [];
+    // editing a copied database link is fine; only its EXPORT waits for the book's links file
+    const { linksFile: _f, ...ctx } = this.validation();
+    return d ? validateLink(d, ctx) : [];
   });
 
   private noticeSeq = 0;
@@ -199,6 +214,8 @@ export class AppStore {
     this.lines = new LineStore(service);
     this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
     this.altToc = new AltTocState(this, service);
+    this.dbLinks = new DbLinksState(this, service);
+    this.maxLink = new MaxLinkState(this, service, saver);
   }
 
   /* ---------------- sources ---------------- */
@@ -207,15 +224,24 @@ export class AppStore {
     if (!files.length) return;
     const res = await this.runTask(`פותח ${files.length === 1 ? files[0]!.path : `${files.length} קבצים`}…`, (opts) => this.service.open(files, opts));
     if (!res) return;
+    this.log.info("open", `${files.length} files`, {
+      sources: res.sources.map((s) => ({ kind: s.info.kind, books: s.books.length, warnings: s.info.warnings.map((w) => w.code) })),
+      documents: res.documents.map((d) => d.kind),
+      skipped: res.skipped.length,
+      needsMapping: res.needsMapping?.length ?? 0,
+    });
     batch(() => {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
     for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
+    for (const d of res.documents) if (d.kind === "records") this.offerRecords(d.path, d.text);
     for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
+    for (const d of res.dictionaries ?? [])
+      this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);
@@ -247,6 +273,7 @@ export class AppStore {
     const s = this.sources.value.find((x) => x.info.id === id);
     if (!s) return;
     await this.service.close(id);
+    this.dbLinks.forgetSummary();
     batch(() => {
       this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
       for (const side of ["source", "target"] as const) {
@@ -262,6 +289,7 @@ export class AppStore {
    * cancel). Its sources are gone; the project's links are not.
    */
   workerLost(reason: string): void {
+    this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
     batch(() => {
       this.sources.value = [];
       this.view.source.value = null;
@@ -271,6 +299,7 @@ export class AppStore {
       this.task.value = null;
     });
     this.lines.forgetAll();
+    this.dbLinks.forgetSummary();
     this.notify("warning", `${reason} הקישורים בפרויקט לא נפגעו — פתחו שוב את הספרים כדי להמשיך.`);
   }
 
@@ -584,12 +613,15 @@ export class AppStore {
     if (!run) return m;
     const links = this.linkState.value.links;
     const rejected = this.rejected.value;
+    // every other link counts — also one approved from ANOTHER run (another engine, a max-link run), which
+    // would otherwise be approved twice; only this run's own approvals are left out
+    const ownIds = new Set(run.result.suggestions.map((s) => `auto:${s.id}`));
     const existing = new Set<string>();
-    for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(linePairKey(l));
+    for (const l of links.values()) if (l.status !== "deleted" && !ownIds.has(l.id)) existing.add(linePairKey(l));
     for (const k of this.dbLinkKeys.value) existing.add(k);
     for (const s of run.result.suggestions) {
       const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(rejectionKey(s)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
+      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejectionKeys(s).some((k) => rejected.has(k)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
     }
     return m;
   });
@@ -627,7 +659,7 @@ export class AppStore {
     const ids2 = new Set(links.map((l) => l.id.slice(5)));
     batch(() => {
       this.apply(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
-      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).map(rejectionKey));
+      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys));
       if ([...keys].some((k) => this.rejected.value.has(k))) this.rejected.value = new Set([...this.rejected.value].filter((k) => !keys.has(k)));
     });
     return links.length;
@@ -648,7 +680,7 @@ export class AppStore {
 
   private keysOf(ids: readonly string[]): string[] {
     const want = new Set(ids);
-    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).map(rejectionKey);
+    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).flatMap(rejectionKeys);
   }
 
   /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */
@@ -673,6 +705,16 @@ export class AppStore {
         this.reveal(side, end.book.key, end.line);
       }
     });
+  }
+
+  /** Max-link: the plan for a scope (books, engines, reasons) — nothing runs yet. */
+  planMaxLink(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
+    return this.maxLink.plan(scope, engines);
+  }
+
+  /** Max-link: runs a plan; its merged suggestions become the current run. */
+  runMaxLink(plan: MaxLinkPlan, scopeLabel: string, options?: MaxLinkRunOptions): Promise<boolean> {
+    return this.maxLink.run(plan, scopeLabel, options);
   }
 
   /* ---------------- databases in someone else's schema (mapping wizard) ---------------- */
@@ -787,6 +829,7 @@ export class AppStore {
     const parsed = parseLinksJson(text);
     const sourceRef = this.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
     const fileKey = `${sourceTitle}#${this.linkSeq++}`;
+    this.dbLinks.noteImportedFile(sourceTitle);
     const issues = [...parsed.issues];
     const links = parsed.records.map((r, i) => {
       const { link, issues: more } = recordToLink(r, i, sourceRef, (t) => this.resolveTitle(t), `file:${fileKey}:${i}`);
@@ -806,6 +849,8 @@ export class AppStore {
   /** A spreadsheet of links (CSV/TSV): one links file per source book, through the same import. */
   importLinksCsv(path: string, text: string): void {
     const r = parseLinksCsv(text, path);
+    // a sheet whose columns are not the library's names: let the user map them instead of failing
+    if (!r.files.length && r.problems.some((p) => p.startsWith("חסרה עמודה"))) return this.offerRecords(path, text);
     if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${path}": ${r.problems.length} בעיות בגיליון.`, r.problems.slice(0, 100));
     for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
   }
@@ -831,6 +876,8 @@ export class AppStore {
     }
     const total = [...need.values()].reduce((n, s) => n + s.size, 0);
     const ok = await this.runTask(label, async (opts) => {
+      // database links around the project's own links: validation reports "already in the database"
+      await this.dbLinks.loadAround(this.allLinks.value);
       let done = 0;
       for (const [key, chunks] of need)
         for (const c of chunks) {
@@ -925,6 +972,8 @@ export class AppStore {
         const l = b && this.lines.peek(b.key, index);
         return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
       },
+      linksFile: (title) => this.dbLinks.linksFile(title),
+      existing: (l) => this.dbLinks.matchDb(l),
     };
   }
 
@@ -1026,7 +1075,51 @@ export class AppStore {
 
   /* ---------------- notices and tasks ---------------- */
 
+  /* ---------------- links in someone else's layout (JSON, JSON Lines, CSV with other columns) ---------------- */
+
+  /** files waiting for the field-mapping dialog, first one shown */
+  readonly pendingRecords = signal<{ path: string; table: RecordsTable; mapping: RecordsMapping }[]>([]);
+
+  offerRecords(path: string, text: string): void {
+    const table = parseRecords(text, path);
+    if (!table) return void this.notify("error", `"${path}": לא נמצאו בקובץ רשומות קישורים (מערך של אובייקטים, JSON Lines או טבלה עם שורת כותרות).`);
+    this.pendingRecords.value = [...this.pendingRecords.value, { path, table, mapping: guessRecordsMapping(table) }];
+  }
+
+  /** Imports the first waiting file with the user's mapping, through the ordinary links-file import. */
+  importRecords(mapping: RecordsMapping): void {
+    const [first, ...rest] = this.pendingRecords.value;
+    if (!first) return;
+    const r = recordsToLinksFiles(first.table, mapping, first.path);
+    this.pendingRecords.value = rest;
+    if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${first.path}": ${r.problems.length} רשומות לא יובאו.`, r.problems);
+    for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
+  }
+
+  skipRecords(): void {
+    this.pendingRecords.value = this.pendingRecords.value.slice(1);
+  }
+
+  /** diagnostics (see diagnostics.ts): notices, tasks, worker restarts and uncaught errors */
+  readonly log = diagnosticsLog();
+
+  /** Saves the diagnostic log as JSONL, with a header describing the app and what is open (no book content). */
+  saveDiagnostics(): void {
+    const header = {
+      app: __APP_VERSION__,
+      commit: __APP_COMMIT__,
+      built: __APP_BUILD_DATE__,
+      savedAt: new Date().toISOString(),
+      userAgent: globalThis.navigator?.userAgent ?? "",
+      sources: this.sources.value.map((s) => ({ kind: s.info.kind, books: s.books.length })),
+      links: this.linkState.value.links.size,
+      prefs: { theme: this.prefs.theme.value, advanced: this.prefs.advanced.value, createMode: this.prefs.createMode.value, view: this.prefs.suggestionsView.value, layout: this.prefs.layout.value.preset },
+    };
+    this.saver.save(diagnosticsFileName(), diagnosticsFile(header, this.log.entries()), "application/x-ndjson");
+  }
+
   notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): void {
+    logNotice(this.log, kind, text, details);
     const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }) };
     this.notices.value = [...this.notices.value, n].slice(-6);
   }
@@ -1037,13 +1130,16 @@ export class AppStore {
 
   async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>): Promise<T | null> {
     const ac = new AbortController();
+    const logged = logTask(this.log, label);
     this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort() };
     try {
-      return await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      logged.ok();
+      return result;
     } catch (err) {
       const e = err as { code?: string; message?: string; name?: string };
-      if (e.code === "cancelled" || e.name === "AbortError") this.notify("info", "הפעולה בוטלה. שום דבר לא השתנה.");
-      else this.notify("error", e.message ?? String(err));
+      if (e.code === "cancelled" || e.name === "AbortError") (logged.cancelled(), this.notify("info", "הפעולה בוטלה. שום דבר לא השתנה."));
+      else (logged.failed(err), this.notify("error", e.message ?? String(err)));
       return null;
     } finally {
       this.task.value = null;
@@ -1061,20 +1157,34 @@ export class AppStore {
 
 
 /**
- * "These two lines are already linked": both ends, in either direction and of any type. A suggestion
- * that only differs from an existing link by type (the library stores Onkelos as TARGUM) or by file
- * direction adds nothing, so it shows as "already exists".
+ * "These two lines are already linked": both ends, in either direction and of any type — the
+ * "same-lines" level of the ONE equality rule (core/links/equality.ts), shared with the worker
+ * through linking/merge.ts. Kept under this name for existing callers.
  */
-export function linePairKey(l: { source: LinkSide; target: LinkSide }): string {
-  const a = `${l.source.book.key}#${l.source.line}`;
-  const b = `${l.target.book.key}#${l.target.line}`;
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
+export { linePairKey };
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {
   const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
   return `${s.engine}|${end(s.source)}${s.anchor ? `@${s.anchor.rawStart}` : ""}>${end(s.target)}`;
+}
+
+/**
+ * Every key a rejection of this suggestion is stored and recognised under. A merged (max-link)
+ * suggestion also has the key of each raw suggestion it was made of — so a rejection made in a
+ * single-engine run still holds — and one without engine or direction, which survives a re-run whose
+ * representative record comes from another engine. (Its anchor counts only where one engine gave
+ * several links between the same two lines — footnote markers — and the merge kept them apart.)
+ */
+export function rejectionKeys(s: Suggestion): string[] {
+  const members = (s as { members?: readonly { suggestion: Suggestion }[] }).members;
+  if (!members?.length) return [rejectionKey(s)];
+  const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
+  const pair = (x: Suggestion) => [end(x.source), end(x.target)].sort().join("<>");
+  const own = pair(s);
+  const exact = members.filter((m) => pair(m.suggestion) === own).map((m) => rejectionKey(m.suggestion));
+  const split = s.id.includes("@") && s.anchor ? `@${end(s.source)}:${s.anchor.rawStart}` : "";
+  return [...new Set([rejectionKey(s), ...exact])].concat(`*|${own}${split}`);
 }
 
 declare const __APP_VERSION__: string;

@@ -278,6 +278,13 @@ export class AliasIndex {
 
   private prune(): void {
     for (const [key, e] of this.byKey) {
+      // a name that is a title or a canonical form of some book never ALSO points at a database name's book
+      // ("חושן משפט" is the Shulchan Aruch, not a gloss whose book_acronym says so)
+      if (e.targets.some((t) => t.tier === "title" || t.tier === "derived") && e.targets.some((t) => t.tier === "acronym")) {
+        const keep = e.targets.filter((t) => t.tier !== "acronym");
+        this.dropped += e.targets.length - keep.length;
+        e.targets.splice(0, e.targets.length, ...keep);
+      }
       const books = new Set(e.targets.map((t) => t.book.key));
       if (!e.targets.length) {
         this.byKey.delete(key);
@@ -527,8 +534,8 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
       const part = title.slice("שולחן ערוך, ".length);
       for (const p of SA_PARTS[part] ?? [part]) {
         for (const n of [...SA_NAMES, 'רמ"א', 'הרמ"א']) out.push({ name: `${n} ${p}` });
-        // "או"ח סי' א" alone is the Shulchan Aruch (the Tur needs its own name before it)
-        if (p.includes('"')) out.push({ name: p });
+        // "או"ח סי' א", "בחושן משפט סי' ק"צ" alone are the Shulchan Aruch (the Tur needs its own name before it)
+        out.push({ name: p });
       }
       break;
     }

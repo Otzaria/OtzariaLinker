@@ -111,6 +111,22 @@ export class LineStore {
     return s?.status === "ready" ? s.items : undefined;
   }
 
+  /** Loads the existing database links of the chunks holding lines [from, to] (errors: nothing to compare). */
+  async loadExisting(bookKey: string, from: number, to: number): Promise<void> {
+    const jobs: Promise<void>[] = [];
+    for (let c = Math.floor(from / CHUNK); c <= Math.floor(to / CHUNK); c++) jobs.push(this.existing.ensure(bookKey, c));
+    await Promise.all(jobs);
+  }
+
+  /**
+   * The existing database links of the chunk holding `index`, if loaded — without starting a load
+   * (for validation inside computeds). The array is the same object until the chunk is reloaded.
+   */
+  existingPeek(bookKey: string, index: number): Link[] | undefined {
+    const s = this.existing.state(bookKey, Math.floor(index / CHUNK));
+    return s?.status === "ready" ? s.items : undefined;
+  }
+
   forgetAll(): void {
     this.counts.clear();
     this.lines.drop("");

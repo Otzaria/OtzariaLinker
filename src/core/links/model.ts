@@ -50,8 +50,11 @@ export type LinkStatus = "new" | "edited" | "existing" | "deleted";
 /**
  * Where the link came from. Only "file" links (and the user's own) may be written back to a links
  * file: a "db" link cannot be turned into an identical record (LINK_FORMATS §4.4) and is read-only.
+ * "db-copy" is a project link the user copied from a database link ("העתקה לפרויקט",
+ * src/core/links/from-db.ts): an ordinary, editable, exportable link whose record was RECONSTRUCTED,
+ * so the export insists that its book's links file is loaded first (validate.ts).
  */
-export type Provenance = "file" | "db" | "user" | "auto";
+export type Provenance = "file" | "db" | "user" | "auto" | "db-copy";
 
 export interface Link {
   readonly id: string;
@@ -68,10 +71,14 @@ export interface Link {
   readonly ref2?: string;
   readonly anchor?: RawAnchor;
   readonly dbAnchors?: readonly DbAnchor[];
+  /** database links only: stored sides Sefaria hides (link_suppressed_side) — not expressible in a file */
+  readonly dbSuppressed?: readonly (0 | 1)[];
   /** Pipeline fields (anchor_src_hash, anchor_context) and unknown keys, kept for a lossless round-trip. */
   readonly passthrough?: Readonly<Record<string, unknown>>;
   /** Key order of the imported record — re-exported unchanged for a minimal diff. */
   readonly keyOrder?: readonly string[];
+  /** the imported record had `"Conection Type": null` — written back as null while the type stays empty */
+  readonly typeNull?: boolean;
   /** path_2 exactly as imported (it may carry a folder); kept while it still names target.book */
   readonly targetPath?: string;
   /** position of the record in its imported links file — keeps the file's order on export */

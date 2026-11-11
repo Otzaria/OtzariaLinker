@@ -14,6 +14,15 @@ describe("DbBookSource on a real schema-7 slice", () => {
     const b = (await src.books()).find((x) => x.title === "בראשית")!;
     expect(b).toMatchObject({ key: "db1:1", origin: "sefaria", isBaseBook: true, sourceName: "Sefaria" });
   });
+  it("books carry the base books the database declares (book_base_text) and dependenceType", async () => {
+    const books = await src.books();
+    const of = (t: string) => books.find((x) => x.title === t)!;
+    expect(of('רש"י על בראשית')).toMatchObject({ bases: ["db1:1"], dependence: "commentary" });
+    expect(of("תרגום אונקלוס על בראשית")).toMatchObject({ bases: ["db1:1"], dependence: "targum" });
+    // משנה ברורה is declared on שולחן ערוך (id 382), which is not in this slice: kept, so the planner can say so
+    expect(of("משנה ברורה")).toMatchObject({ bases: ["db1:382"], dependence: "commentary" });
+    expect(of("בראשית").bases).toBeUndefined();
+  });
   it("lines carry heading level and the generator's anchor text", async () => {
     const [first] = await src.lines("db1:1", 0, 0);
     expect(first).toMatchObject({ index: 0, text: "<h1>בראשית</h1>", heading: 1, existsInDb: true });

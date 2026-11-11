@@ -4,14 +4,18 @@ import type { DbMapping, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
+import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
+import { parseRecords } from "../formats/records/records";
 import { stripTags } from "../core/text/html";
+import { sharedDictionaries } from "../database/compression/zstd";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
 import { MappedDbSource } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
+import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
 import { TextFilesSource, type TextFile } from "./text/text-source";
 
@@ -36,11 +40,13 @@ export interface OpenedSource {
 export interface OpenResult {
   sources: OpenedSource[];
   /** links files and project files, as decoded text — imported by the state layer */
-  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project" | "records"; text: string }[];
   /** files that were not opened, each with a reason the user can act on */
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema: opened through openMapped once the user maps them */
   needsMapping?: PendingDb[];
+  /** zstd dictionaries opened as files: books compressed with them can now be read (see DictionaryPool) */
+  dictionaries?: { path: string; id: number }[];
 }
 
 const HEAD = 4096;
@@ -53,6 +59,8 @@ export class SourceRegistry {
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
   private readonly pending = new Map<string, { blob: Blob; label: string }>();
   private seq = 0;
+  /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
+  private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
@@ -132,9 +140,38 @@ export class SourceRegistry {
     return s.heRefs ? s.heRefs(bookKey) : null;
   }
 
+  /** Counts of a book's existing links by type and by the other book, or why it has none (stage 10). */
+  async dbLinkSummary(bookKey: string, ctx: ListingContext = {}): Promise<DbLinkSummary | DbLinksUnavailable> {
+    const l = await this.listing(bookKey, ctx);
+    if (typeof l === "string") return { bookKey, reason: l };
+    const books = new Map((await this.of(bookKey).books()).map((b) => [b.key, b]));
+    return l.summary((k) => ({ title: books.get(k)?.title ?? k, origin: books.get(k)?.origin ?? "unknown" }));
+  }
+
+  /** One page of a book's existing links, filtered (stage 10). */
+  async dbLinksPage(bookKey: string, query: DbLinkQuery, ctx: ListingContext = {}): Promise<DbLinkPage> {
+    const l = await this.listing(bookKey, ctx);
+    return typeof l === "string" ? { total: 0, offset: query.offset, links: [] } : l.page(query);
+  }
+
+  private async listing(bookKey: string, ctx: ListingContext): Promise<LinkListing | string> {
+    const s = this.of(bookKey);
+    if (s.linkListing) return s.linkListing(bookKey, ctx);
+    if (s.info.kind === "text-files") return "לספרים מקובצי טקסט אין קישורים קיימים במסד. קישורים שלהם נטענים מקובצי ‎_links.json.";
+    let p = this.fallbackListings.get(bookKey);
+    if (!p) {
+      const t0 = performance.now();
+      p = s.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER).then((links) => listingFromLinks(bookKey, links, Math.round(performance.now() - t0)));
+      this.fallbackListings.set(bookKey, p);
+      p.catch(() => this.fallbackListings.delete(bookKey));
+    }
+    return p;
+  }
+
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
+    for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
   private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[]): Promise<void> {
@@ -164,12 +201,30 @@ export class SourceRegistry {
         } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
         return;
       case "json":
-        return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאינו קובץ קישורים של אוצריא. ייבוא JSON אחר דורש מיפוי שדות (מצב מתקדם, בקרוב)." });
+        // other JSON (an array of records, an object holding one, JSON Lines): the user maps its fields
+        if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
+        {
+          const text = decodeText(new Uint8Array(await f.blob.arrayBuffer())).text;
+          if (!parseRecords(text, f.path)) return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאין בו רשומות קישורים (מערך של אובייקטים, אובייקט שמכיל מערך כזה, או JSON Lines)." });
+          result.documents.push({ path: f.path, kind: "records", text });
+        }
+        return;
       case "csv":
       case "tsv":
         if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
         result.documents.push({ path: f.path, kind: "links-csv", text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
         return;
+      case "zstd-dict": {
+        if (f.blob.size > 2 * 1024 ** 2) return void result.skipped.push({ path: f.path, reason: "קובץ מילון דחיסה גדול מ־2MB: מפענח הדפדפן אינו תומך בו." });
+        try {
+          const id = sharedDictionaries.add(new Uint8Array(await f.blob.arrayBuffer()), f.path);
+          if (id === null) return void result.skipped.push({ path: f.path, reason: "הקובץ נראה כמו מילון דחיסה, אבל אין לו מזהה." });
+          (result.dictionaries ??= []).push({ path: f.path, id });
+        } catch (err) {
+          result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את מילון הדחיסה.") });
+        }
+        return;
+      }
       case "binary":
         return void result.skipped.push({ path: f.path, reason: "קובץ בינארי שאינו מסד SQLite או ZIP." });
     }
@@ -220,6 +275,8 @@ export class SourceRegistry {
     return `s${++this.seq}`;
   }
 }
+
+type ListingContext = { signal?: AbortSignal; progress?: (done: number, total: number) => void };
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;
 

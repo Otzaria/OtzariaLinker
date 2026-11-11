@@ -11,6 +11,7 @@ import { citationsJob } from "./citations-job";
 import { batchJob, diffJob, engineJob } from "./engine-job";
 import { serve, type ToWorker } from "./rpc";
 import { searchJob } from "./search-job";
+import { maxlinkJob } from "./maxlink-job";
 import type { SourcesApi } from "./sources-api";
 
 /** A tiny zstd frame of "בדיקת zstd": proves the decoder's WASM starts in this environment. */
@@ -42,6 +43,9 @@ const handle = serve<SourcesApi>(
     altToc: (_ctx, bookKey) => registry.altToc(bookKey),
     headings: (_ctx, bookKey) => registry.headings(bookKey),
     runCitations: (ctx, source, options) => citationsJob(registry, source, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
+    dbLinkSummary: (ctx, bookKey) => registry.dbLinkSummary(bookKey, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
+    dbLinksPage: (ctx, bookKey, query) => registry.dbLinksPage(bookKey, query, { signal: ctx.signal }),
+    runMaxLink: (ctx, steps, options) => maxlinkJob(registry, steps, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
   },
   (m) => self.postMessage(m),
 );

@@ -68,6 +68,43 @@ function module(): WebAssembly.Module {
   return wasmModule;
 }
 
+/**
+ * Dictionaries known to the whole worker, by dictID. A personal database is often compressed with
+ * the OFFICIAL dictionary without carrying it in its own zstd_dict; it can be read as soon as the
+ * dictionary is available from anywhere — another open database (seforim.db) or a dictionary file
+ * the user opens. A database's own dictionaries always win; the pool is only a fallback.
+ * Two different dictionaries with the same id make that id unusable from the pool (never guess).
+ */
+export class DictionaryPool {
+  private readonly byId = new Map<number, { dict: Uint8Array; origin: string } | "conflict">();
+
+  /** Adds a trained dictionary; returns its id, or null when it is not one (raw content). */
+  add(dict: Uint8Array, origin: string): number | null {
+    const id = dictionaryId(dict);
+    if (id === null) return null;
+    if (dict.length > MAX_DICT_BYTES)
+      throw new LinkerError("db/dictionary-too-large", `מילון הדחיסה "${origin}" גדול מ־2MB (${dict.length} בתים), ומפענח הדפדפן אינו תומך בו עדיין.`, { size: dict.length });
+    const had = this.byId.get(id);
+    if (had === undefined) this.byId.set(id, { dict, origin });
+    else if (had !== "conflict" && !sameBytes(had.dict, dict)) this.byId.set(id, "conflict");
+    return id;
+  }
+
+  get(id: number): Uint8Array | undefined {
+    const e = this.byId.get(id);
+    return e && e !== "conflict" ? e.dict : undefined;
+  }
+
+  isConflicted(id: number): boolean {
+    return this.byId.get(id) === "conflict";
+  }
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** The worker's pool (each worker has its own module instance). */
+export const sharedDictionaries = new DictionaryPool();
+
 // ignoreBOM: a line that starts with U+FEFF keeps it — the generator counts it (compatibility review #4)
 const utf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
@@ -76,14 +113,18 @@ export class LineContentCodec {
   private readonly decoders = new Map<number, InstanceType<typeof ZstdDecoder>>();
   private readonly dictionaries = new Map<number, Uint8Array>();
 
-  /** `dictionaries` = every zstd_dict.dict of the database (any order). */
-  constructor(dictionaries: readonly Uint8Array[]) {
+  /**
+   * `dictionaries` = every zstd_dict.dict of the database (any order). They are also offered to
+   * `pool`, and a frame whose dictionary the database lacks is decoded with the pool's.
+   */
+  constructor(dictionaries: readonly Uint8Array[], private readonly pool: DictionaryPool = sharedDictionaries, origin = "") {
     for (const d of dictionaries) {
       const id = dictionaryId(d);
       if (id === null) continue; // raw-content dictionaries are never produced by Otzaria
       if (this.dictionaries.has(id))
         throw new LinkerError("db/dictionary-conflict", `במסד יש שני מילוני דחיסה עם אותו מזהה (${id}). המסד פגום או שנבנה בצורה לא תקינה.`, { dictId: id });
       this.dictionaries.set(id, d);
+      if (origin) pool.add(d, origin);
     }
   }
 
@@ -112,9 +153,15 @@ export class LineContentCodec {
     if (d) return d;
     let dictionary: Uint8Array | undefined;
     if (dictId !== 0) {
-      dictionary = this.dictionaries.get(dictId);
+      dictionary = this.dictionaries.get(dictId) ?? this.pool.get(dictId);
       if (!dictionary)
-        throw new LinkerError("db/compressed-unknown-dictionary", `שורה במסד דחוסה במילון ${dictId}, שאינו קיים בטבלה zstd_dict. אם זה מסד אישי, ייתכן שהמילון לא הועתק אליו. פתחו את המסד שממנו הוא נוצר, או צרו אותו מחדש עם המילון.`, { dictId });
+        throw new LinkerError(
+          "db/compressed-unknown-dictionary",
+          this.pool.isConflicted(dictId)
+            ? `שורה במסד דחוסה במילון ${dictId}, ונפתחו שני מילונים שונים עם המזהה הזה. סגרו את הכלי ופתחו רק את המסד ואת המילון הנכון.`
+            : `שורה במסד דחוסה במילון ${dictId}, שאינו קיים במסד הזה. אם זה מסד אישי, הוא כנראה דחוס במילון של הספרייה הרשמית: פתחו גם את seforim.db של אוצריא (או קובץ המילון עצמו), והספרים ייקראו.`,
+          { dictId },
+        );
       if (dictionary.length > MAX_DICT_BYTES)
         throw new LinkerError("db/dictionary-too-large", `מילון הדחיסה במסד גדול מ־2MB (${dictionary.length} בתים), ומפענח הדפדפן אינו תומך בו עדיין.`, { size: dictionary.length });
     }

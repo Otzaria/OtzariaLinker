@@ -4,7 +4,7 @@ import { AliasIndex, CitationScanner, mergeIbid, type Citation } from "../../../
 
 /*
  * Citation detection on lines written the way the library writes them (the spans are taken from
- * LINKER anchors of the official seforim.db, see docs/AUTOMATION_ENGINE.md §5). Titles are the
+ * LINKER anchors of the official seforim.db, see docs/AUTOMATION_ENGINE.md §6). Titles are the
  * database's own.
  */
 const book = (key: string, title: string, origin: BookOrigin = "sefaria", aliases: string[] = []) => ({ book: { key, title, origin }, aliases });
@@ -154,7 +154,7 @@ describe("citations: mergeIbid", () => {
   });
 });
 
-describe("citations: guards found on the real library (docs/AUTOMATION_ENGINE.md §5.8)", () => {
+describe("citations: guards found on the real library (docs/AUTOMATION_ENGINE.md §6.8)", () => {
   it("words and abbreviations that only look like locations", () => {
     expect(scan(["ירמוז לב' דברים, א' שהם בעלי מלחמות"]).every((c) => c.candidates[0]!.book.key !== "ex")).toBe(true);
     expect(scan(["ובכל בו כ' מנהגים שונים"])).toHaveLength(0); // כ' = כתב
@@ -178,5 +178,30 @@ describe("citations: guards found on the real library (docs/AUTOMATION_ENGINE.md
   it("a part after the name may carry a ב", () => {
     const t = one('ומ"ש הטור בח"מ סי\' רמ"ב');
     expect(t.candidates[0]!.section).toBe("חושן משפט");
+  });
+});
+
+describe("citations: a bare siman in a commentary on the Shulchan Aruch", () => {
+  const mb = (line: string) => scan([line], "משנה ברורה", "mb");
+  it("is a siman of the Shulchan Aruch part the commentary is on", () => {
+    const c = mb('וכדלקמן בסימן ש"כ ס"א דהתם');
+    expect(c).toHaveLength(1);
+    expect(books(c[0]!)).toEqual(["sa-oc"]);
+    expect(loc(c[0]!)).toBe("siman:320 seif:1");
+  });
+  it("unless another book is named next to it, or the location is a ס\"ק", () => {
+    expect(mb('ואם צריך עמידה, עיין בסימן מ"ח במ"ב סק"א')).toHaveLength(0);
+    expect(mb('ובמ"א סימן ז\' סתר דבריו')).toHaveLength(0);
+    expect(mb('עיין לעיל סימן ג ס"ק ד')).toHaveLength(0);
+    expect(scan(['עיין בסימן ש"כ ס"א'], "ספר כלשהו")).toHaveLength(0); // no base: a siman of the book itself
+  });
+});
+
+describe("citations: a bare siman next to another book's name", () => {
+  const mb = (line: string) => scan([line], "משנה ברורה", "mb");
+  it("is that book's siman, not the base's", () => {
+    expect(mb('אבל כבר כתב הט"ז לקמן בסימן ח\' דבזמנינו')).toHaveLength(0);
+    expect(mb('כתב רש"ל בתשובה סימן צ"ז מי שאכל')).toHaveLength(0);
+    expect(mb('וכמ"ש בסימן רצ"ו ס"ב וקידוש')).toHaveLength(1);
   });
 });

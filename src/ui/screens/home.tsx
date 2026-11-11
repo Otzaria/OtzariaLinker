@@ -16,7 +16,7 @@ interface TaskDef {
   hint: string;
   pick: { folder?: boolean; accept?: string };
   /** where the workspace should start (guided tasks — UX review suggestion 1) */
-  then?: { tab: SideTab; engine?: EngineId; batch?: boolean; dialog?: "relink" };
+  then?: { tab: SideTab; engine?: EngineId; batch?: boolean; maxlink?: boolean; dialog?: "relink" };
   soon?: string;
 }
 
@@ -24,6 +24,7 @@ const TASKS: TaskDef[] = [
   { icon: "oz_book_link", title: "קישור ספר לפירוש", hint: "ספר בסיס ופירוש עליו — לפי כותרות ודיבור המתחיל", pick: {}, then: { tab: "suggestions", engine: "headings" } },
   { icon: "oz_link_marker", title: "קישור הערות שוליים", hint: "מספרי ההערות בספר מול ספר ההערות", pick: {}, then: { tab: "suggestions", engine: "footnotes" } },
   { icon: "oz_search_in_folder", title: "קישור תיקייה שלמה", hint: "פירושים רבים מתיקייה, כל אחד מול הספר שבשמו", pick: { folder: true }, then: { tab: "suggestions", engine: "headings", batch: true } },
+  { icon: "oz_links", title: "קישור מרבי", hint: "כל השיטות על כל הספרים שבוחרים — פירושים, ספרי הערות ועוד — ברשימה אחת בלי כפילויות", pick: {}, then: { tab: "suggestions", maxlink: true } },
   { icon: "oz_library_link", title: "קישור בין מסדים", hint: "שני מסדי SQLite, אישיים או של אוצריא", pick: { accept: ".db,.sqlite,.sqlite3" } },
   { icon: "oz_link_edit", title: "עריכת קישורים קיימים", hint: "קובצי ‎_links.json — בדיקה, תיקון וייצוא מחדש", pick: { accept: ".json,.zip" }, then: { tab: "links" } },
   { icon: "oz_text_compare", title: "תיקון קישורים אחרי שינוי ספר", hint: "המהדורה הישנה, החדשה וקובץ הקישורים — הקישורים עוברים לשורות הנכונות", pick: {}, then: { tab: "links", dialog: "relink" } },
@@ -39,7 +40,7 @@ export function Home() {
     if (!files.length) return;
     await store.openFiles(files);
     if (then && store.screen.value === "workspace") {
-      store.intent.value = { ...(then.engine && { engine: then.engine }), ...(then.batch && { batch: true }) };
+      store.intent.value = { ...(then.engine && { engine: then.engine }), ...(then.batch && { batch: true }), ...(then.maxlink && { maxlink: true }) };
       store.sideTab.value = then.tab;
       if (then.dialog) store.dialog.value = then.dialog;
     }

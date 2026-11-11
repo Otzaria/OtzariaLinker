@@ -3,15 +3,37 @@ import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-ty
 import type { Link, LinkStatus } from "../../core/links/model";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { DbLinksPanel } from "./db-links-panel";
 
 /*
  * Every link of the project, filterable by status and book, with jump/edit/delete. Long lists are
  * rendered in pages so a 30k-link import stays responsive.
  */
 const STATUS_LABEL: Record<LinkStatus, string> = { new: "חדש", edited: "ערוך", existing: "מקורי", deleted: "יימחק" };
+/** a link copied from the database says so, instead of a plain "new" */
+const statusLabel = (l: Link) => (l.provenance === "db-copy" && l.status === "new" ? "הועתק מהמסד" : STATUS_LABEL[l.status]);
 const PAGE = 300;
 
+/** The links tab: the project's links, or the links the open database already has (stage 10). */
 export function LinksPanel() {
+  const store = useStore();
+  const tab = store.dbLinks.tab.value;
+  return (
+    <>
+      <div class="filters" role="tablist" aria-label="אילו קישורים">
+        <button role="tab" class="chip" aria-selected={tab === "project"} aria-pressed={tab === "project"} onClick={() => (store.dbLinks.tab.value = "project")}>
+          <Icon name="oz_links" size={14} /> קישורי הפרויקט <span class="count">{store.allLinks.value.length.toLocaleString("he")}</span>
+        </button>
+        <button role="tab" class="chip" aria-selected={tab === "db"} aria-pressed={tab === "db"} onClick={() => (store.dbLinks.tab.value = "db")} title="הקישורים שכבר יש במסד הפתוח לספר שבקורא — לקריאה, לבדיקה ולהעתקה לפרויקט">
+          <Icon name="oz_library_link" size={14} /> קישורים מהמסד
+        </button>
+      </div>
+      {tab === "db" ? <DbLinksPanel /> : <ProjectLinksPanel />}
+    </>
+  );
+}
+
+function ProjectLinksPanel() {
   const store = useStore();
   const [status, setStatus] = useState<LinkStatus | "all">("all");
   const [onlyBook, setOnlyBook] = useState(true);
@@ -102,7 +124,7 @@ export function LinkItem({ l }: { l: Link }) {
   return (
     <li class={`link-item${l.status === "deleted" ? " deleted" : ""}`} onClick={() => store.revealLink(l)} title="הצגת שני צדי הקישור">
       <div class="ends">
-        <span class={`status ${l.status}`}>{STATUS_LABEL[l.status]}</span>
+        <span class={`status ${l.status}`} title={l.provenance === "db-copy" ? "קישור שהועתק מהמסד ושוחזר ממנו לקובץ קישורים. אפשר לערוך ולייצא אותו" : undefined}>{statusLabel(l)}</span>
         <span>
           {l.source.book.title} {where(l.source.line, l.source.end)}
         </span>

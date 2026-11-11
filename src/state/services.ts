@@ -2,9 +2,12 @@ import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { DbMapping, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
+import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
 import type { BookSearchResult } from "../core/text/find";
+import type { MaxLinkJobResult } from "../linking/maxlink-report";
+import type { PlanStep } from "../linking/plan";
 
 /*
  * What the state layer needs from the outside world, as interfaces (architecture rule 17). The app
@@ -23,10 +26,12 @@ export interface OpenedSource {
 
 export interface OpenResult {
   sources: OpenedSource[];
-  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project" | "records"; text: string }[];
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema, waiting for the mapping wizard */
   needsMapping?: PendingDb[];
+  /** zstd dictionaries opened as files (books compressed with them become readable) */
+  dictionaries?: { path: string; id: number }[];
 }
 
 export interface CallOptions {
@@ -50,6 +55,17 @@ export interface BooksService {
   headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
   /** the citations engine (single book): references in one book, linked into all open books */
   runCitations(source: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
+  /**
+   * A book's existing database links, counted and paged (stage 10). Optional so that test fakes
+   * without databases need not implement it; the links panel then says the list is unavailable.
+   */
+  dbLinkSummary?(bookKey: string, opts?: CallOptions): Promise<DbLinkSummary | DbLinksUnavailable>;
+  dbLinksPage?(bookKey: string, query: DbLinkQuery, opts?: CallOptions): Promise<DbLinkPage>;
+  /**
+   * Runs the steps of a max-link plan in the worker (workers/maxlink-job.ts). Optional so that
+   * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
+   */
+  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>> }, opts?: CallOptions): Promise<MaxLinkJobResult>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */
