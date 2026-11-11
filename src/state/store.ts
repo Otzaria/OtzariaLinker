@@ -235,11 +235,23 @@ export class AppStore {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
-    for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "records") this.offerRecords(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
+    // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
+    // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
+    const each = (kind: string, run: (path: string, text: string) => void) => {
+      for (const d of res.documents)
+        if (d.kind === kind)
+          try {
+            run(d.path, d.text);
+          } catch (err) {
+            this.log.error("open", "document failed", { kind, error: String((err as Error)?.name ?? err) });
+            this.notify("error", `"${d.path}" לא נטען: ${(err as Error)?.message ?? String(err)}. שאר הקבצים נטענו.`);
+          }
+    };
+    each("links-json", (p, t) => this.importLinksFile(p, t));
+    each("links-csv", (p, t) => this.importLinksCsv(p, t));
+    each("records", (p, t) => this.offerRecords(p, t));
+    each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
+    each("project", (p, t) => this.openProject(p, t));
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);

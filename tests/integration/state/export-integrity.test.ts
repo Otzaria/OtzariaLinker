@@ -46,3 +46,30 @@ describe("A4: a book title never becomes a path outside the export folder", () =
   });
 });
 
+
+describe("A7: one failing document of a drop does not lose the others", () => {
+  it("a document that throws is a notice; the rest are imported", async () => {
+    const service = {
+      open: async () => ({
+        sources: [],
+        skipped: [],
+        documents: [
+          { kind: "alt-toc-json", path: "ספר_alt_toc.json", text: "[]" },
+          { kind: "links-json", path: "א_links.json", text: JSON.stringify([{ line_index_1: 1, heRef_2: "ב 1", path_2: "ב.txt", line_index_2: 1, "Conection Type": "reference" }]) },
+        ],
+      }),
+      lines: async () => [],
+      existingLinks: async () => [],
+      close: async () => {},
+      headings: async () => [],
+      altToc: async () => null,
+    } as unknown as BooksService;
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    store.altToc.importFile = () => {
+      throw new RangeError("Maximum call stack size exceeded");
+    };
+    await store.openFiles([{ path: "x", blob: new Blob([]) }]);
+    expect(store.allLinks.value).toHaveLength(1);
+    expect(store.notices.value.some((n) => n.kind === "error" && n.text.includes("ספר_alt_toc.json"))).toBe(true);
+  });
+});
