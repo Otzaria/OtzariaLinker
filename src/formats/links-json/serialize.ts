@@ -18,7 +18,7 @@ export function recordToObject(r: LinksRecord): Record<string, unknown> {
     ref_2: r.ref_2,
     start: r.start,
     end: r.end,
-    [CONNECTION_TYPE_KEY]: r.connectionType,
+    [CONNECTION_TYPE_KEY]: typeValue(r),
     ...r.extras,
   };
   const present = (k: string) => values[k] !== undefined;
@@ -44,6 +44,18 @@ export function recordToObject(r: LinksRecord): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of order) out[k] = values[k];
   return out;
+}
+
+/**
+ * An imported record whose type was missing or null gets it back the same way while the type is still
+ * empty: missing, null and "" all mean OTHER to the generator, and writing "" instead rewrote every
+ * such record of an untouched file (259 library files have null types, e.g. the live
+ * MoreBooks/links/סידור אשכנז_links.json with 491; 2 have none — real-data validation, check 3).
+ */
+function typeValue(r: LinksRecord): string | null | undefined {
+  if (r.connectionType !== "" || !r.keyOrder.length) return r.connectionType;
+  if (!r.keyOrder.includes(CONNECTION_TYPE_KEY)) return undefined;
+  return r.typeNull ? null : "";
 }
 
 export function serializeLinksJson(records: readonly LinksRecord[]): string {

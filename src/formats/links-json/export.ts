@@ -57,7 +57,13 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   }
 
   const bySource = new Map<string, Link[]>();
-  for (const l of written) bySource.set(l.source.book.title, [...(bySource.get(l.source.book.title) ?? []), l]);
+  // push, not spread: one book's file can hold 100k+ records (the library's largest has 112,905),
+  // and copying the list for every link made planning quadratic — 259 s for that one file
+  for (const l of written) {
+    const list = bySource.get(l.source.book.title);
+    if (list) list.push(l);
+    else bySource.set(l.source.book.title, [l]);
+  }
   const importedTitles = new Set(links.filter((l) => l.provenance === "file").map((l) => l.source.book.title));
 
   // A book whose imported links were ALL deleted still needs its file — empty — or the library's

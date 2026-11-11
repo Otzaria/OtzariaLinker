@@ -16,12 +16,16 @@ export type DetectedKind =
   | "binary";
 
 const SQLITE_MAGIC = "SQLite format 3\u0000";
+// A PDF usually has no NUL byte in its first KiB (an ASCII header, then a comment of high bytes), so
+// the NUL test below took it for text, and it was refused as "a text file that is not .txt".
+const PDF_MAGIC = "%PDF-";
 
 /** `head` = the first few KiB of the file (4 KiB is enough). */
 export function detectKind(head: Uint8Array, fileName = ""): DetectedKind {
   if (startsWithAscii(head, SQLITE_MAGIC)) return "sqlite";
   if (head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05)) return "zip";
   if (head[0] === 0x37 && head[1] === 0xa4 && head[2] === 0x30 && head[3] === 0xec) return "zstd-dict";
+  if (startsWithAscii(head, PDF_MAGIC)) return "binary";
   if (looksBinary(head)) return "binary";
 
   const text = new TextDecoder("utf-8").decode(head).replace(/^﻿/, "").trimStart();

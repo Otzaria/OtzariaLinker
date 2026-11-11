@@ -77,6 +77,8 @@ export interface Link {
   readonly passthrough?: Readonly<Record<string, unknown>>;
   /** Key order of the imported record — re-exported unchanged for a minimal diff. */
   readonly keyOrder?: readonly string[];
+  /** the imported record had `"Conection Type": null` — written back as null while the type stays empty */
+  readonly typeNull?: boolean;
   /** path_2 exactly as imported (it may carry a folder); kept while it still names target.book */
   readonly targetPath?: string;
   /** position of the record in its imported links file — keeps the file's order on export */

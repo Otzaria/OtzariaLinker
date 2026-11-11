@@ -78,6 +78,10 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
 
   // the key is required (its absence rejects the whole file — the parser catches that); an empty value is legal
   if (!link.heRef2.trim()) add("warning", "export/heref-missing", "שם המקום ביעד (heRef_2) ריק. אוצריא תקבל את הקישור, אבל בלי שם מקום לתצוגה ובלי תווית עוגן.");
+  // The source title is the links file's name: when no book has it, the generator matches nothing
+  // and drops the WHOLE file (seen in the library: "וזה לשונו - שובבי׳׳ם_links.json", whose book is
+  // "…שובבי״ם" in the database — real-data validation, check 3).
+  if (s.book.origin === "unknown") add("warning", "export/source-unknown", `ספר המקור "${s.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, אוצריא תדלג על כל קובץ הקישורים שלו.`);
   if (t.book.origin === "unknown") add("warning", "export/target-unknown", `הספר "${t.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, הקישור יידחה.`);
   if (isMergeableCompanionTitle(t.book.title))
     add("warning", "export/companion-merged", `"${t.book.title}" מתחיל ב"הערות על". ספר כזה ממוזג לתוך ספר הבסיס, וכל הקישורים אליו נמחקים בשקט. שם בטוח: "הערות ל…".`);
