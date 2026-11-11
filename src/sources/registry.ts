@@ -48,12 +48,22 @@ export class SourceRegistry {
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
     const texts: TextFile[] = [];
+    const notUtf8: string[] = [];
     for (const f of files) {
       signal?.throwIfAborted();
       const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, texts);
+      await this.route(f, kind, result, texts, notUtf8);
     }
-    if (texts.length) result.sources.push(await this.add(new TextFilesSource(this.nextId(), labelForTexts(texts), texts)));
+    if (texts.length) {
+      const src = new TextFilesSource(this.nextId(), labelForTexts(texts), texts);
+      // decided at open time: a warning added on first read (inside the source) never reached the UI
+      if (notUtf8.length)
+        src.info.warnings.push({
+          code: "source/not-utf8",
+          message: `${notUtf8.length} קבצים אינם שמורים ב־UTF-8: ${notUtf8.slice(0, 5).join(", ")}${notUtf8.length > 5 ? "…" : ""}. הכלי מציג אותם נכון, אבל הגנרטור של אוצריא קורא כל ספר כ־UTF-8 — שמרו אותם מחדש ב־UTF-8 לפני שליחה לספרייה.`,
+        });
+      result.sources.push(await this.add(src));
+    }
     return result;
   }
 
@@ -70,7 +80,7 @@ export class SourceRegistry {
     this.sources.delete(sourceId);
   }
 
-  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[]): Promise<void> {
+  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[]): Promise<void> {
     switch (kind) {
       case "sqlite":
         try {
@@ -87,8 +97,11 @@ export class SourceRegistry {
         result.documents.push({ path: f.path, kind, text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
         return;
       case "text":
-        if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()) });
-        else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
+        if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
+          texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()) });
+          const enc = decodeText(new Uint8Array(await f.blob.slice(0, 64 * 1024).arrayBuffer())).encoding;
+          if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
+        } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
         return;
       case "json":
         return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאינו קובץ קישורים של אוצריא. ייבוא JSON אחר דורש מיפוי שדות (מצב מתקדם, בקרוב)." });

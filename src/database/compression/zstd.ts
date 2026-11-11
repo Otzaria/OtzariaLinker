@@ -114,7 +114,7 @@ export class LineContentCodec {
     if (dictId !== 0) {
       dictionary = this.dictionaries.get(dictId);
       if (!dictionary)
-        throw new LinkerError("db/compressed-unknown-dictionary", `שורה במסד דחוסה במילון ${dictId}, שאינו קיים בטבלה zstd_dict. אם זה מסד אישי, ייתכן שהמילון לא הועתק אליו — אפשר לטעון את מילון הספרייה הרשמית בהגדרות המסד.`, { dictId });
+        throw new LinkerError("db/compressed-unknown-dictionary", `שורה במסד דחוסה במילון ${dictId}, שאינו קיים בטבלה zstd_dict. אם זה מסד אישי, ייתכן שהמילון לא הועתק אליו. פתחו את המסד שממנו הוא נוצר, או צרו אותו מחדש עם המילון.`, { dictId });
       if (dictionary.length > MAX_DICT_BYTES)
         throw new LinkerError("db/dictionary-too-large", `מילון הדחיסה במסד גדול מ־2MB (${dictionary.length} בתים), ומפענח הדפדפן אינו תומך בו עדיין.`, { size: dictionary.length });
     }

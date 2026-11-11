@@ -63,7 +63,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
 
       <span class="grow" />
 
-      <label class="switch" title="מצב מתקדם: ספים, נרמול, שדות ספריא, מיפוי שדות ועוד">
+      <label class="switch" title="מצב מתקדם: עריכת מחרוזת הסוג הגולמית ושדות ספריא; בהמשך גם ספי ודאות וכללי נרמול">
         <input type="checkbox" checked={prefs.advanced.value} onChange={(e) => (prefs.advanced.value = e.currentTarget.checked)} />
         <span>מצב מתקדם</span>
       </label>
@@ -86,6 +86,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
             <div class="label">יצירת קישור</div>
             <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
             <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
+            <div class="label" dir="ltr" style="text-align:start">OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}</div>
           </>
         )}
       </Menu>

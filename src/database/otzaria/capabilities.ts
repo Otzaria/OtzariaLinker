@@ -87,7 +87,7 @@ export async function detectCapabilities(file: SqliteFile): Promise<DbCapabiliti
   if (isOtzaria && !lineText)
     warnings.push({ code: "db/no-line-text", message: "במסד לא נמצא טקסט שורות (לא line.content ולא line_content). אפשר לראות את רשימת הספרים, אבל לא את התוכן." });
   if (!isOtzaria)
-    warnings.push({ code: "db/generic", message: "זה אינו מסד במבנה של אוצריא (חסרות הטבלאות book/line). אפשר לטעון אותו דרך מיפוי טבלאות ידני." });
+    warnings.push({ code: "db/generic", message: "זה אינו מסד במבנה של אוצריא (חסרות הטבלאות book/line). הגרסה הזו של הכלי קוראת רק מסדים במבנה של אוצריא (מיפוי טבלאות ידני — בגרסה הבאה)." });
 
   return {
     kind,

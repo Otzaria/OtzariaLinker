@@ -57,3 +57,11 @@ describe("SourceRegistry — files are classified by content, not by name", () =
     await expect(r.lines(res.sources[0]!.books[0]!.key, 0, 0)).rejects.toMatchObject({ code: "source/closed" });
   });
 });
+
+describe("SourceRegistry — encoding warnings reach the UI", () => {
+  it("a windows-1255 book is flagged when it is opened, not only when first read", async () => {
+    const cp1255 = new Uint8Array([0xf9, 0xec, 0xe5, 0xed, 0x20, 0xf2, 0xec, 0xe9, 0xeb, 0xed]); // "שלום עליכם"
+    const res = await new SourceRegistry().open([{ path: "old.txt", blob: new Blob([cp1255]) }]);
+    expect(res.sources[0]!.info.warnings.map((w) => w.code)).toContain("source/not-utf8");
+  });
+});
