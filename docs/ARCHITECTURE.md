@@ -58,8 +58,8 @@
 | `sources` | "דלת אחת" לכל מה שהמשתמש פתח: זיהוי לפי תוכן, ZIP בטוח, ספרים מקובצי טקסט, ספרים ממסד | `registry.ts`, `detect.ts`, `archives/safe-unzip.ts`, `text/text-source.ts`, `db/db-source.ts`, `book-source.ts` |
 | `projects` | קובץ הפרויקט: כתיבה, קריאה ואימות | `project-format.ts` |
 | `diagnostics` | יומן מובנה וחסום בגודל, בלי טקסט ספרים. **עדיין לא מחובר לשום מקום ב־HEAD** | `log.ts` |
-| `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, ואצווה של זוגות (זוג אחד בזיכרון בכל פעם) | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `engine-job.ts` |
-| `state` | `AppStore`; היסטוריה עם undo/redo; מטמון שורות; העדפות ופריסה; ממשקי השירותים | `store.ts`, `history.ts`, `lines.ts`, `preferences.ts`, `services.ts` |
+| `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, ואצווה של זוגות (זוג אחד בזיכרון בכל פעם); חיפוש בטקסט של ספר, בנתחים | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `engine-job.ts`, `search-job.ts` |
+| `state` | `AppStore`; היסטוריה עם undo/redo ומעבר לכל נקודה בה; מטמון שורות; חיפוש בכל קורא; העדפות ופריסה; ממשקי השירותים | `store.ts`, `history.ts`, `lines.ts`, `book-find.ts`, `preferences.ts`, `services.ts` |
 | `ui` | המסכים: מסך פתיחה, סרגל עליון, סביבת עבודה, קוראים, בונה, רשימות, הצעות, בדיקה, חלון ייצוא; ערכת נושא ואייקונים | `app.tsx`, `screens/home.tsx`, `workspace/*.tsx`, `dialogs/export-dialog.tsx`, `theme/`, `icons/` |
 | `app` | נקודת ההרכבה: יוצר את ה־Worker ומחליף אותו כשהוא קורס או נתקע, מתאים אותו ל־`BooksService`, `Saver` של הורדות, אחסון IndexedDB לשמירה האוטומטית, ומרנדר | `main.tsx`, `idb-store.ts` |
 
@@ -158,9 +158,9 @@ AppStore.prepareExport / runQualityCheck
 
 ## 7. מה ממומש ומה לא (HEAD)
 
-ממומש: פתיחת מסדי אוצריא (0–7), קובצי טקסט, תיקיות ו־ZIP; קריאה עצלה; בונה ידני עם ולידציה חיה; שלושה
-מנועים אוטומטיים, לזוג ספרים או באצווה; ייבוא וייצוא `_links.json`; בדיקת איכות; פרויקטים, שמירה
-אוטומטית ושחזור.
+ממומש: פתיחת מסדי אוצריא (0–7), קובצי טקסט, תיקיות ו־ZIP; קריאה עצלה; חיפוש בטקסט הספר (ב־Worker,
+`search-job.ts`); בונה ידני עם ולידציה חיה; שלושה מנועים אוטומטיים, לזוג ספרים או באצווה; ייבוא וייצוא
+`_links.json`; בדיקת איכות; היסטוריית פעולות; פרויקטים, שמירה אוטומטית ושחזור.
 
 לא ממומש: מיפוי מסדי SQLite כלליים, ייבוא CSV/TSV ו־JSON כללי, קישור מחדש אחרי שינוי ספר (יש רק
 המודול `matching/line-diff.ts`, בלי ממשק), חיבור `diagnostics` לממשק, `alt_toc`. הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
