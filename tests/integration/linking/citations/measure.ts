@@ -1,4 +1,5 @@
 import type { Link } from "../../../../src/core/links/model";
+import { countVisibleChars } from "../../../../src/core/text/offsets";
 import type { Confidence, Suggestion } from "../../../../src/linking/automatic";
 
 /*
@@ -32,7 +33,8 @@ export function goldOf(links: readonly Link[], sourceKey: string): GoldLink[] {
   const out: GoldLink[] = [];
   for (const l of links) {
     if (!GOLD_TYPES.has(l.declaredType)) continue;
-    const [mine, other] = l.source.book.key === sourceKey ? [l.source, l.target] : l.target.book.key === sourceKey ? [l.target, l.source] : [null, null];
+    // LINKER is one-way (source = the citing line): a LINKER link INTO this book is another book's citation
+    const [mine, other] = l.source.book.key === sourceKey ? [l.source, l.target] : l.target.book.key === sourceKey && l.declaredType !== "linker" ? [l.target, l.source] : [null, null];
     if (!mine || !other || other.book.key === sourceKey) continue;
     out.push({ line: mine.line, bookKey: other.book.key, bookTitle: other.book.title, from: other.line, to: other.end ?? other.line, type: l.declaredType, link: l });
   }
@@ -47,7 +49,14 @@ export interface Judged {
   exact: boolean;
 }
 
-export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLink[]): { judged: Judged[]; found: Set<GoldLink>; linkerTotal: number } {
+/**
+ * `lineText` (the source line's anchor text) makes the judge span-aware: a suggestion is WRONG only
+ * when a LINKER citation of the same words (overlapping anchor) points elsewhere in that book; when
+ * the database links that line to that book only from other words, or only by REFERENCE/QUOTATION
+ * (no span), the suggestion is a mention it did not link — unconfirmed. Without `lineText` any
+ * disagreement on the line counts as wrong.
+ */
+export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLink[], lineText?: (line: number) => string | undefined): { judged: Judged[]; found: Set<GoldLink>; linkerTotal: number } {
   const byLine = new Map<string, GoldLink[]>();
   for (const g of gold) {
     const k = `${g.line}|${g.bookKey}`;
@@ -61,7 +70,23 @@ export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLin
     const to = s.target.end ?? s.target.line;
     const hits = list.filter((g) => g.from <= to && from <= g.to);
     for (const h of hits) found.add(h);
-    judged.push({ s, verdict: hits.length ? "correct" : list.length ? "wrong" : "unconfirmed", exact: hits.some((h) => h.from === from) });
+    let verdict: Verdict = hits.length ? "correct" : list.length ? "wrong" : "unconfirmed";
+    const span = /@(\d+)-(\d+)>/.exec(s.id);
+    const text = lineText?.(s.source.line);
+    if (verdict === "wrong" && span && text !== undefined) {
+      const a = countVisibleChars(text, Number(span[1]));
+      const b = countVisibleChars(text, Number(span[2]));
+      // only a LINKER citation on the SAME words can contradict us; a REFERENCE/QUOTATION link (no
+      // span: Sefaria's quotations, or another book citing this line) or a LINKER citation of other
+      // words in the line says nothing about this mention
+      const sameWords = list.some((g) => {
+        if (g.type !== "linker") return false;
+        const x = g.link.dbAnchors?.find((y) => y.side === 0);
+        return !x || (x.charStart < b && a < (x.charEnd ?? x.charStart + 1));
+      });
+      if (!sameWords) verdict = "unconfirmed";
+    }
+    judged.push({ s, verdict, exact: hits.some((h) => h.from === from) });
   }
   return { judged, found, linkerTotal: gold.filter((g) => g.type === "linker").length };
 }

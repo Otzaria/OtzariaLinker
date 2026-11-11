@@ -182,7 +182,7 @@ function resolveRefs(book: BookRef, root: Node, isDaf: boolean, elems: readonly 
     if (e.maybeAmud) nums.push({ n: e.maybeAmud, kind: "?" });
   }
   if (!nums.length) return null;
-  if (SECOND_LEVEL.has(nums[0]!.kind) && collection !== "other") return null;
+  if (SECOND_LEVEL.has(nums[0]!.kind)) return null;
   let rangeEnd: Node | null = null;
   for (const [i, x] of nums.entries()) {
     const next = node.children.get(`n${x.n}`);
@@ -201,9 +201,13 @@ function resolveRefs(book: BookRef, root: Node, isDaf: boolean, elems: readonly 
   return { book, line: node.first, end, leaf: node.children.size === 0 && !rangeEnd, wholeDaf: false, amudFromBareLetter: false, label: `${book.title} ${label.join(", ")}`, via: "heref", daf: false };
 }
 
-function resolveDaf(book: BookRef, node: Node, elems: readonly AddrElem[], label: string[]): Resolution | null {
+function resolveDaf(book: BookRef, node: Node, elemsIn: readonly AddrElem[], label: string[]): Resolution | null {
+  // "פ"ק דכתובות דף ט"ו": the chapter before a daf is context — the daf says where
+  const elems = elemsIn[0]?.kind === "perek" && elemsIn.length > 1 ? elemsIn.slice(1) : elemsIn;
   const e = elems[0]!;
   if (e.kind !== "daf" && e.kind !== "?") return null;
+  // "פ' ד'" is a chapter (or verse), never a daf
+  if (e.kind === "?" && e.explicit) return null;
   if (e.to !== undefined) return null;
   let amud = e.amud ?? e.maybeAmud;
   let fromLetter = e.amud === undefined;

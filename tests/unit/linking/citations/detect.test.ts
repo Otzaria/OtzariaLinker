@@ -153,3 +153,30 @@ describe("citations: mergeIbid", () => {
     expect(mergeIbid([e("?", 1)], [e("?", 2), e("?", 3)])).toBeNull();
   });
 });
+
+describe("citations: guards found on the real library (docs/AUTOMATION_ENGINE.md §5.8)", () => {
+  it("words and abbreviations that only look like locations", () => {
+    expect(scan(["ירמוז לב' דברים, א' שהם בעלי מלחמות"]).every((c) => c.candidates[0]!.book.key !== "ex")).toBe(true);
+    expect(scan(["ובכל בו כ' מנהגים שונים"])).toHaveLength(0); // כ' = כתב
+    expect(scan(["בששי בשבת כ\"ח יום לשבט"])).toHaveLength(0); // a date three words on
+    expect(scan(['וכתב בפרק יו"ד מה\' ביכורים'])).toHaveLength(0); // יו"ד = 10, מה' = מהלכות
+  });
+
+  it("compact markers in context", () => {
+    expect(loc(one('כמ"ש (תהילים קי"ט: פ"ט)'))).toBe("?:119 ?:89");
+    const c = one('יעו\' בפ"ד דברכות מ"ד במ"ש הרע"ב');
+    expect(loc(c)).toBe("perek:4 mishna:4");
+    expect(loc(one('ועיין ברכות פ"ח ע"א'))).toBe("daf:88a");
+    expect(loc(one('ועי\' גיטין פ"ח: יצא'))).toBe("daf:88b");
+  });
+
+  it("ibid after a book we do not know is not our ibid", () => {
+    expect(scan(["דכתיב (בראשית א, ב) ועוד", 'הביאו הפ"ת שם סק"ט'])).toHaveLength(1);
+    expect(scan(["דכתיב (בראשית א, ב) ועוד", "(שם שם ד)"]).map((c) => loc(c))).toEqual(["?:1 ?:2", "?:1 ?:4"]);
+  });
+
+  it("a part after the name may carry a ב", () => {
+    const t = one('ומ"ש הטור בח"מ סי\' רמ"ב');
+    expect(t.candidates[0]!.section).toBe("חושן משפט");
+  });
+});

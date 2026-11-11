@@ -68,7 +68,12 @@ const PENALTY = {
   ibidPartial: 0.1,
   ibidBook: 0.06,
   commentator: 0.03,
-  headings: 0.05,
+  /** located by the target's headings, not its references: weaker evidence of the right unit */
+  headings: 0.1,
+  /** a title that is also an everyday word ("דברים", "שבת"), with one number and nothing else */
+  commonTitle: 0.07,
+  /** "תהלים פ"ו": chapter 6 or Psalm 86 */
+  compactOrNumber: 0.12,
   numericName: 0.05,
   otherCollection: 0.06,
   commonNumeral: 0.05,
@@ -146,6 +151,9 @@ export class CitationRun {
           continue;
         }
         const res = index.resolve(p.citation.elems, t.collection, t.section);
+        // book_acronym is too noisy to trust without the target's own references: a database name
+        // located only by headings ("בתרא" → a commentary's headings) is not a reading
+        if (res && res.via === "headings" && t.tier === "acronym") continue;
         if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
       }
     }
@@ -199,13 +207,17 @@ export class CitationRun {
       const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: res.line };
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
-      const id = `${ENGINE}:${this.source.key}:${c.line}${anchor ? `@${c.rawStart}` : ""}>${res.book.key}:${target.line}${target.end !== undefined ? `-${target.end}` : ""}`;
-      // two citations of the same place in one line, without anchors, are one link
-      if (seen.has(id)) {
+      // the id names the span (raw offsets in the line) even without an anchor, so a measure or a
+      // reviewer can tell two mentions in one line apart; two mentions of the same place in one line
+      // without anchors are still ONE link
+      const where = `${res.book.key}:${target.line}${target.end !== undefined ? `-${target.end}` : ""}`;
+      const id = `${ENGINE}:${this.source.key}:${c.line}@${c.rawStart}-${c.rawEnd}>${where}`;
+      const pairKey = anchor ? id : `${c.line}>${where}`;
+      if (seen.has(pairKey)) {
         counts.duplicate++;
         continue;
       }
-      seen.add(id);
+      seen.add(pairKey);
       counts.resolved++;
       const { reasons, warnings, rules } = explain(c, best.target, res, ranged, anchor !== undefined, allowAnchor, this.notesLines.has(c.line));
       if (rival && confidence === "ambiguous") warnings.push({ code: "citations/ambiguous", text: `השם "${c.name}" מתאים גם ל${rival.target.book.title}, ושם המקום קיים גם כן` });
@@ -291,6 +303,8 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution): number {
   if (c.ibid === "book") s -= PENALTY.ibidBook;
   if (c.commentator) s -= PENALTY.commentator;
   if (r.via === "headings") s -= PENALTY.headings;
+  if (COMMON_TITLES.has(t.book.title) && c.ibid === "none" && !c.bracketed && c.elems.length === 1 && !c.elems[0]!.explicit && c.elems[0]!.amud === undefined) s -= PENALTY.commonTitle;
+  if (c.elems[0]?.alsoNumber !== undefined && !r.daf) s -= PENALTY.compactOrNumber;
   if (c.numericName) s -= PENALTY.numericName;
   // a book outside the known corpora, read positionally from bare numbers
   if (t.collection === "other" && !r.daf && c.elems.some((e) => e.kind === "?")) s -= PENALTY.otherCollection;
@@ -300,6 +314,11 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution): number {
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   return Math.max(0, Math.min(1, s));
 }
+
+/** titles that are everyday words: "לב' דברים, א'" is "two things", "בשבת כ"ח" may be a date */
+const COMMON_TITLES: ReadonlySet<string> = new Set([
+  "דברים", "שמות", "במדבר", "שופטים", "עזרא", "יונה", "רות", "שבת", "ברכות", "ביצה", "סוכה", "תמיד", "מכות", "נדרים", "חולין", "מנחות", "ערכין", "כריתות", "נזיר", "שבועות", "גיטין", "תענית", "מגילה", "חגיגה", "סוטה", "תמורה", "מעילה", "נדה", "בכורות", "זבחים", "פסחים",
+]);
 
 const TALMUDIC: ReadonlySet<Collection> = new Set(["bavli", "mishna", "yerushalmi", "tosefta"]);
 

@@ -1,6 +1,6 @@
 import { closesAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
 import { SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
-import { strictValue } from "./numbers";
+import { numeralOf, strictValue } from "./numbers";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
 /*
@@ -189,7 +189,7 @@ export class CitationScanner {
     j = m.to;
     const elems: AddrElem[] = [{ kind: "perek", n: head.n, explicit: true, numeral: { n: head.n, form: "gershayim", common: false } }];
     let to = j;
-    const rest = parseAddress(toks, j);
+    const rest = parseAddress(toks, j, { after: "perek" });
     if (rest && !rest.elems.some((e) => e.kind === "perek")) {
       elems.push(...rest.elems);
       to = rest.to;
@@ -220,8 +220,13 @@ export class CitationScanner {
   private ibid(toks: readonly Tok[], i: number, line: number): number | null {
     const t = toks[i]!;
     if (!this.last || t.text !== "שם" || t.gershayim || t.geresh) return null;
+    // "הפ"ת שם סק"ט": "שם" after a name we do not know refers to THAT book, not to our last citation
+    const prev = toks[i - 1];
+    if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !this.aliases.matchAt(toks, i - 1).length) return this.drop("ibid-other-book");
     const inBracket = toks[i - 1]?.kind === "punct" && "([".includes(toks[i - 1]!.text);
-    const addr = parseAddress(toks, i + 1, { enclosed: inBracket });
+    // "(שם שם לב)": the same book and the same chapter — the numbers replace the deepest level
+    const twice = isWord(toks[i + 1], "שם") ? 1 : 0;
+    const addr = parseAddress(toks, i + 1 + twice, { enclosed: inBracket });
     if (!addr) {
       // only "(שם)" — a bare "שם" in running text is the word "there"/"name"
       if (inBracket && closesAt(toks, i + 1)) return this.emit(toks, line, { from: i, to: i + 1, candidates: this.last.c.candidates, name: "שם", elems: this.last.elems, evidence: "strong", bracketed: true, ibid: "full", ibidOf: this.last.c.seq, form: "forward", numericName: false });
@@ -339,7 +344,7 @@ export class CitationScanner {
   }
 }
 
-const keyOfName = (s: string): string => unifyFinals(s.replace(/["'׳״]/g, "")).replace(/s+/g, " ").trim();
+const keyOfName = (s: string): string => unifyFinals(s.replace(/["'׳״]/g, "")).replace(/\s+/g, " ").trim();
 
 /** "לעיל", "לקמן", with a prefix ("ולקמן", "דלעיל", "כדלקמן") */
 const RELATIVE = /^(?:[ודכ]{0,2})(?:לעיל|לקמן|להלן)$/;
@@ -358,7 +363,9 @@ function tractateOfTitle(title: string, coll: Collection): string | null {
 function sectionAt(toks: readonly Tok[], i: number): { part: string; next: number } | null {
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
-  const one = wordShape(t);
+  // "ב"ח בח"מ סי' רמ"ב": the part may carry a ב
+  const shape = wordShape(t);
+  const one = /^ב./.test(shape) && Object.values(SA_PARTS).some((n) => n.includes(shape.slice(1))) ? shape.slice(1) : shape;
   const two = toks[i + 1]?.kind === "word" ? `${one} ${wordShape(toks[i + 1]!)}` : "";
   for (const [part, names] of Object.entries(SA_PARTS)) {
     if (two && names.includes(two)) return { part, next: i + 2 };
@@ -371,8 +378,10 @@ function sectionAt(toks: readonly Tok[], i: number): { part: string; next: numbe
 function withSection(cands: readonly AliasTarget[], part: string): AliasTarget[] {
   const out: AliasTarget[] = [];
   for (const c of cands) {
-    if (c.collection === "sa") {
-      if (c.book.title.endsWith(part)) out.push(c);
+    // a book named for one part (שולחן ערוך, יורה דעה; ש"ך על … יורה דעה) must be THAT part
+    const named = Object.keys(SA_PARTS).find((p) => c.book.title.includes(p));
+    if (named) {
+      if (named === part) out.push(c);
     } else out.push({ ...c, section: part });
   }
   return out;
@@ -384,9 +393,13 @@ const isWord = (t: Tok | undefined, text: string): boolean => t?.kind === "word"
 
 /** "בשבת ט"ו בשבט", "ר"ה תש"פ": a date, not a citation */
 function isDate(toks: readonly Tok[], i: number): boolean {
-  const t = toks[i];
-  if (!t || t.kind !== "word") return false;
-  return MONTHS.has(t.key) || (t.key.length > 2 && MONTHS.has(t.key.slice(1)));
+  // "בשבת כ"ח יום לשבט": a month within the next three words
+  for (let j = i; j < i + 3; j++) {
+    const t = toks[j];
+    if (!t || t.kind !== "word") return false;
+    if (MONTHS.has(t.key) || (t.key.length > 2 && MONTHS.has(t.key.slice(1)))) return true;
+  }
+  return false;
 }
 
 /** "ד"ה" (dibur hamatchil) right after the location */

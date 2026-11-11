@@ -101,10 +101,22 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["בבא מציעא", 'ב"מ'],
   ["בבא בתרא", 'ב"ב'],
   ["עבודה זרה", 'ע"ז'],
-  ["מועד קטן", 'מו"ק'],
+  ["מועד קטן", 'מו"ק', 'מ"ק'],
   ["ראש השנה", 'ר"ה'],
   ["עירובין", "ערובין"],
   ["קידושין", "קדושין"],
+  ["גיטין", "גטין"],
+  ["בראשית רבה", 'ב"ר', 'בר"ר'],
+  ["שמות רבה", 'ש"ר', 'שמו"ר'],
+  ["ויקרא רבה", 'ו"ר', 'ויק"ר'],
+  ["במדבר רבה", 'במ"ר', 'במד"ר', 'במדב"ר'],
+  ["דברים רבה", 'ד"ר', 'דב"ר'],
+  ["שיר השירים רבה", 'שהש"ר', 'שה"ש רבה'],
+  ["רות רבה", 'רו"ר'],
+  ["איכה רבה", 'איכ"ר'],
+  ["קהלת רבה", 'קה"ר', 'קהל"ר'],
+  ["אסתר רבה", 'אס"ר', 'אסת"ר'],
+  ["בבא מציעא", "מציעא"],
   ["נדה", "נידה"],
   ["מגילה", "מגלה"],
 ];
@@ -175,7 +187,11 @@ export class AliasIndex {
       const title = normTitle(c.book.title);
       ix.add(title, { book: c.book, tier: "title", collection: coll });
       for (const d of derivedNames(title, coll, byTitle)) ix.add(d.name, { book: c.book, tier: d.secondary ? "secondary" : "derived", collection: coll, ...(d.section && { section: d.section }) });
-      for (const a of c.aliases ?? []) ix.add(normTitle(a), { book: c.book, tier: "acronym", collection: coll }, true);
+      for (const a of c.aliases ?? []) {
+        const name = normTitle(a);
+        if (plausibleAcronym(name, title)) ix.add(name, { book: c.book, tier: "acronym", collection: coll }, true);
+        else ix.dropped++;
+      }
       const on = / על (.+)$/.exec(title);
       if (on) {
         const author = title.slice(0, title.length - on[0].length);
@@ -184,6 +200,7 @@ export class AliasIndex {
         ix.commentariesOn.set(on[1]!, list);
       }
     }
+    ix.dropAuthorNames();
     ix.prune();
     for (const list of ix.byFirst.values()) list.sort((a, b) => b.words.length - a.words.length);
     for (const c of catalog) {
@@ -204,6 +221,12 @@ export class AliasIndex {
     if (!words) return;
     const one = words.length === 1 ? words[0]! : null;
     if (guarded && one && !one.gershayimFromEnd && !one.geresh && one.key.length <= 3) {
+      this.dropped++;
+      return;
+    }
+    // a database name that ends in a number ("במדבר א") would swallow the location's first number
+    const lastWord = words[words.length - 1]!;
+    if (guarded && words.length > 1 && lastWord.key.length <= 2 && strictValue(lastWord.key) !== null && !normTitle(target.book.title).endsWith(` ${lastWord.key}`)) {
       this.dropped++;
       return;
     }
@@ -228,9 +251,40 @@ export class AliasIndex {
    * A database name shared by more than MAX_SHARED books ("רמב"ם" → 61 books, "תוספות", "ירושלמי") names
    * a collection, not a book: it is dropped. Titles and derived names are never pruned.
    */
+  /**
+   * "הראב"ד" in book_acronym points at ONE of the many "השגות הראב"ד על …" books: it names the author,
+   * not a book. A database name whose only book is "<author> על <base>", when the author has several
+   * such books and the name says nothing of the base, is dropped.
+   */
+  private dropAuthorNames(): void {
+    const works = new Map<string, number>();
+    for (const list of this.commentariesOn.values()) for (const x of list) works.set(x.author, (works.get(x.author) ?? 0) + 1);
+    for (const e of this.byKey.values()) {
+      const keep = e.targets.filter((t) => {
+        if (t.tier !== "acronym") return true;
+        const m = / על (.+)$/.exec(normTitle(t.book.title));
+        if (!m) return true;
+        const author = normTitle(t.book.title).slice(0, -m[0].length);
+        if ((works.get(author) ?? 0) < 2) return true;
+        const baseKeys = new Set((nameWords(m[1]!) ?? []).map((w) => w.key));
+        return e.words.some((w) => baseKeys.has(w.key));
+      });
+      if (keep.length !== e.targets.length) {
+        this.dropped += e.targets.length - keep.length;
+        e.targets.splice(0, e.targets.length, ...keep);
+      }
+    }
+  }
+
   private prune(): void {
     for (const [key, e] of this.byKey) {
       const books = new Set(e.targets.map((t) => t.book.key));
+      if (!e.targets.length) {
+        this.byKey.delete(key);
+        const list = this.byFirst.get(e.words[0]!.key)!;
+        list.splice(list.indexOf(e), 1);
+        continue;
+      }
       if (books.size <= MAX_SHARED) continue;
       const keep = e.targets.filter((t) => t.tier !== "acronym");
       if (keep.length === e.targets.length) continue;
@@ -289,6 +343,39 @@ export class AliasIndex {
     const w = nameWords(normTitle(name));
     return w ? this.byKey.get(wordsKey(w)) : undefined;
   }
+}
+
+/** words that start many titles: alone they name a genre, not a book ("תשובות רמ"א" is not the Radbaz) */
+const GENERIC_WORDS = new Set(["תוס'", "תוספות", "תוספ'", "תשובות", "תשובה", 'שו"ת', "שות", "חידושי", "חדושי", "ספר", "פירוש", "הגהות", "ביאור", "באור", "שאלות", "דרשות", "ליקוטי", "לקוטי", "קונטרס", "הלכות", "מסכת", "פרק", "ילקוט", "מדרש", "אגרת", "אגרות", "סדר", "תורת", "שער", "ספרי", "מאמר"]);
+
+/** common abbreviations that are never a book's name ("חלק א", "עמוד א", "דיבור המתחיל") */
+const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל']);
+
+/**
+ * book_acronym is machine-made and noisy (42K names; "מלכות" for a commentary on הלכות שביתת יום
+ * טוב, "ריב"ש" for אבן האזל). A name is kept only when it can come from the title: an unquoted single
+ * word must be a word of the title (or the start of one); a quoted acronym's letters must appear in the
+ * title's letters in order (a leading ה aside). Multi-word names are kept (they rarely collide).
+ */
+export function plausibleAcronym(name: string, title: string): boolean {
+  if (NOT_NAMES.has(name)) return false;
+  if (GENERIC_WORDS.has(name)) return false;
+  const words = nameWords(name);
+  if (!words) return false;
+  const titleKeys = (nameWords(title) ?? []).map((w) => w.key);
+  if (words.length > 1) return true;
+  const w = words[0]!;
+  // an unquoted single word must START the title ("חתם" no, "שמואל" for "אגרת שמואל על רות" no)
+  if (!w.gershayimFromEnd && !w.geresh) return titleKeys.length > 0 && (titleKeys[0] === w.key || (w.key.length >= 4 && titleKeys[0]!.startsWith(w.key)));
+  const letters = titleKeys.join("");
+  const want = w.key.replace(/^ה/, "");
+  let at = 0;
+  for (const ch of want) {
+    at = letters.indexOf(ch, at);
+    if (at < 0) return false;
+    at++;
+  }
+  return true;
 }
 
 /** a database name shared by more books than this names a collection, not a book */
@@ -351,6 +438,34 @@ function matchWords(words: readonly AliasWord[], toks: readonly Tok[], i: number
 
 /* ---------- derived names ---------- */
 
+const firstWordsCache = new WeakMap<ReadonlyMap<string, readonly BookRef[]>, Map<string, number>>();
+
+/** how many Rambam topics start with each word */
+function rambamFirstWords(byTitle: ReadonlyMap<string, readonly BookRef[]>): Map<string, number> {
+  let m = firstWordsCache.get(byTitle);
+  if (!m) {
+    m = new Map();
+    for (const t of byTitle.keys()) {
+      const x = /^משנה תורה, הלכות (\S+)/.exec(t);
+      if (x) m.set(x[1]!, (m.get(x[1]!) ?? 0) + 1);
+    }
+    firstWordsCache.set(byTitle, m);
+  }
+  return m;
+}
+
+/**
+ * Plene/defective spellings of a Rambam topic as books write it: "מלווה ולווה" / "מלוה ולוה",
+ * "גירושין" / "גרושין". Only doubled ו/י collapsed, and a י after the first letter of a long word dropped.
+ */
+function spellingVariants(topic: string): string[] {
+  const out = new Set([topic]);
+  const collapsed = topic.replace(/וו/g, "ו").replace(/יי/g, "י");
+  out.add(collapsed);
+  out.add(collapsed.split(" ").map((w) => (w.length >= 5 && w[1] === "י" ? w[0] + w.slice(2) : w)).join(" "));
+  return [...out];
+}
+
 interface Derived {
   name: string;
   secondary?: boolean;
@@ -389,10 +504,20 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
       const m = /^משנה תורה, (הלכות )?(.+)$/.exec(title);
       if (m) {
         const topic = m[2]!;
+        // "הל' זכיה" for "זכייה ומתנה", "הל' רוצח" for "רוצח ושמירת נפש": the first word alone, when no other
+        // topic starts with it ("שביתת עשור" / "שביתת יום טוב" share theirs)
+        const first = topic.split(" ")[0]!;
+        // …and not the start of another topic's first word ("מעשר" / "מעשרות")
+        const words = rambamFirstWords(byTitle);
+        const alone = topic.includes(" ") && first.length >= 4 && words.get(first) === 1 && ![...words.keys()].some((w) => w !== first && w.startsWith(first));
+        const topics = alone ? [topic, first] : [topic];
         for (const lead of ['רמב"ם', 'הרמב"ם', "משנה תורה", "יד החזקה", ""]) {
-          for (const hl of m[1] ? ["הלכות", "הל'", "הלכ'"] : [""]) {
-            const name = [lead, hl, topic].filter(Boolean).join(" ");
-            if (name !== topic) out.push({ name });
+          for (const hl of m[1] ? ["הלכות", "הל'", "הלכ'", "ה'"] : [""]) {
+            for (const t of topics.flatMap(spellingVariants)) {
+              const name = [lead, hl, t].filter(Boolean).join(" ");
+              // "ה' שבת" alone is too close to the divine name: only with a lead word
+              if (name !== t && !(hl === "ה'" && !lead && t.split(" ").length < 2)) out.push({ name });
+            }
           }
         }
       }
@@ -401,7 +526,7 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
     case "sa": {
       const part = title.slice("שולחן ערוך, ".length);
       for (const p of SA_PARTS[part] ?? [part]) {
-        for (const n of SA_NAMES) out.push({ name: `${n} ${p}` });
+        for (const n of [...SA_NAMES, 'רמ"א', 'הרמ"א']) out.push({ name: `${n} ${p}` });
         // "או"ח סי' א" alone is the Shulchan Aruch (the Tur needs its own name before it)
         if (p.includes('"')) out.push({ name: p });
       }
@@ -416,6 +541,5 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
   // "X א" titles are often cited "X א'"
   const last = /^(.+) ([אבגד])$/.exec(title);
   if (last) out.push({ name: `${last[1]} ${last[2]}'` });
-  void byTitle;
   return out;
 }

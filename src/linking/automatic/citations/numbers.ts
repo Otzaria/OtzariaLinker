@@ -30,7 +30,7 @@ export const MAX_NUMERAL = 999;
  */
 const COMMON_WORDS = new Set(
   ["לא", "לב", "לד", "לה", "לו", "מה", "מו", "מט", "נא", "נד", "נו", "נח", "סב", "עד", "עז", "פה", "פז", "צד", "צו", "יד", "כב", "כד", "כה", "כו",
-   "קח", "קל", "קם", "קנ", "רב", "רם", "רע", "רצ", "שא", "שב", "שד", "של", "שם", "שנ", "שח", "תו", "תל", "תם", "תנ"].map(unifyFinals),
+   "קח", "קל", "קם", "קנ", "רב", "רם", "רע", "רצ", "שא", "שב", "שד", "של", "שם", "שנ", "שח", "תו", "תל", "תם", "תנ", "שלח"].map(unifyFinals),
 );
 
 /** The canonical letters of n with final forms unified ("טו", "טז" for 15, 16). */
@@ -65,8 +65,8 @@ export function numeralOf(t: Tok | undefined): Numeral | null {
   const n = strictValue(t.text);
   if (n === null) return null;
   const form: NumeralForm = t.gershayim ? "gershayim" : t.geresh ? "geresh" : "bare";
-  // "ה'" is far more often the divine name than 5
-  return { n, form, common: (form === "bare" && COMMON_WORDS.has(t.key)) || (form === "geresh" && t.key === "ה") };
+  // "ה'" is far more often the divine name than 5, "כו'" is "וכולי", "מה'" is "מהלכות", "כ'" is "כתב"
+  return { n, form, common: (form === "bare" && COMMON_WORDS.has(t.key)) || (form === "geresh" && (t.key === "ה" || t.key === "כו" || t.key === "מה" || t.key === "כ")) };
 }
 
 /** A numeral written as one (quote marks or digits) — never an ordinary word. */

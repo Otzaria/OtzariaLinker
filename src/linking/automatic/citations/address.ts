@@ -28,6 +28,10 @@ export interface AddrElem {
   readonly maybeAmud?: 1 | 2;
   /** the amud came from a "."/":" glued to the numeral — for a book without dafim it is punctuation */
   readonly amudGlued?: boolean;
+  /** read from a compact marker word (פ"ט, ה"א) */
+  readonly compact?: boolean;
+  /** a compact "פ"ו" that is also the plain number 86 (for a book of chapters, either may be meant) */
+  readonly alsoNumber?: number;
 }
 
 export interface Address {
@@ -45,7 +49,8 @@ export interface Address {
 }
 
 const WORD_MARKERS: Readonly<Record<string, Kind>> = {
-  פרק: "perek", "פ'": "perek", "פר'": "perek", פרקים: "perek",
+  // "פ'" is פרק or פסוק (אבן עזרא: "שם פ' י"): a number without a kind, but written as a location
+  פרק: "perek", "פ'": "?", "פר'": "perek", פרקים: "perek",
   פסוק: "pasuk", "פס'": "pasuk", פסוקים: "pasuk",
   סימן: "siman", "סי'": "siman", "סימ'": "siman", סימנים: "siman",
   סעיף: "seif", "סע'": "seif", "סעי'": "seif", סעיפים: "seif",
@@ -72,11 +77,18 @@ const shape = (t: Tok): string => {
 function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number } | null {
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
-  const s = shape(t);
-  const two = toks[i + 1]?.kind === "word" ? WORD_MARKERS[`${s} ${shape(toks[i + 1]!)}`] : undefined;
-  if (two) return { kind: two, width: 2 };
-  const one = WORD_MARKERS[s];
-  return one ? { kind: one, width: 1 } : null;
+  const full = shape(t);
+  // "בסימן", "ובסעיף", "בדף": a ב/ו/ד glued to the marker word
+  for (let p = 0; p <= 2; p++) {
+    if (p && !/^[ובד]$/.test(full[p - 1]!)) break;
+    const s = full.slice(p);
+    if (p && s.length < 3) break;
+    const two = toks[i + 1]?.kind === "word" ? WORD_MARKERS[`${s} ${shape(toks[i + 1]!)}`] : undefined;
+    if (two) return { kind: two, width: 2 };
+    const one = WORD_MARKERS[s];
+    if (one) return { kind: one, width: 1 };
+  }
+  return null;
 }
 
 /**
@@ -94,6 +106,8 @@ function compactAt(t: Tok | undefined, prev: Kind | null): { kind: Kind; n: numb
   };
   return (
     tryPrefix("פ", "perek") ??
+    // "הל"א" is הלכה א, not ה + ל"א
+    tryPrefix("הל", "halacha") ??
     tryPrefix("ה", "halacha") ??
     tryPrefix("סק", "sk") ??
     (prev === "perek" ? tryPrefix("מ", "mishna") : null) ??
@@ -122,7 +136,7 @@ const CLOSE = ")]}";
  * Reads an address starting at toks[i]. Returns null when there is no location there, or when the
  * only evidence is one bare numeral outside brackets (a word like "שמות ה'" or "בראשית ברא").
  */
-export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?: boolean } = {}): Address | null {
+export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?: boolean; after?: Kind } = {}): Address | null {
   let j = i;
   let bracketed = false;
   if (isPunct(toks[j], OPEN)) {
@@ -130,7 +144,8 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     j++;
   } else if (isPunct(toks[j], ",") && toks[j + 1]?.kind !== "punct") j++; // "שבת, דף כג"
   const elems: AddrElem[] = [];
-  let lastKind: Kind | null = null;
+  // "פ"ד דסוכה מ"ד": after a chapter given before the name, a compact מ"ד is mishna 4
+  let lastKind: Kind | null = opts.after ?? null;
   let separators = 0;
   let to = j;
   for (;;) {
@@ -150,13 +165,23 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     }
     const e = readElem(toks, j, lastKind);
     if (!e) break;
-    elems.push(e.elem);
+    // "תהילים קי"ט: פ"ט": after a number, a compact "פ"ט" is the number 89, not a chapter
+    const asNumber = e.elem.compact && e.elem.kind === "perek" && elems.length ? numeralOf(toks[j]) : null;
+    if (asNumber) elems.push({ kind: "?", n: asNumber.n, explicit: false, numeral: asNumber });
+    else if (e.elem.compact && e.elem.kind === "perek" && !elems.length && numeralOf(toks[j])) elems.push({ ...e.elem, alsoNumber: numeralOf(toks[j])!.n });
+    else elems.push(e.elem);
     lastKind = e.elem.kind === "?" ? lastKind : e.elem.kind;
     j = e.next;
     to = j;
     if (elems.length >= 4) break;
   }
   if (!elems.length) return null;
+  // "תהילים פ"ט: ט'": a compact "פ"ט" followed by a plain number is the number 89, not "פרק ט"
+  const f = elems[0]!;
+  if (f.compact && f.kind === "perek" && elems[1]?.kind === "?") {
+    const asNumber = numeralOf(toks[parsedFrom(toks, i)]);
+    if (asNumber) elems[0] = { kind: "?", n: asNumber.n, explicit: false, numeral: asNumber };
+  }
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
   const commonOnly = elems.every((e) => e.numeral.common && !e.explicit);
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
@@ -171,16 +196,23 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
   return { elems, from: i, to, bracketed, closed, evidence };
 }
 
+/** the first token of the location (after an opening bracket or a comma) */
+function parsedFrom(toks: readonly Tok[], i: number): number {
+  return isPunct(toks[i], OPEN) || isPunct(toks[i], ",") ? i + 1 : i;
+}
+
 /** One element at toks[j]: a marker + numeral, a compact marker, a daf, or a bare numeral. */
 function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: AddrElem; next: number } | null {
   const t = toks[j];
   if (!t) return null;
   // "פ"ח ע"א" after a tractate is daf 88, not chapter 8
   // and "ס"ק" is a marker word, not seif 100
-  const compact = (amudAt(toks, j + 1) && numeralOf(t)) || markerAt(toks, j) ? null : compactAt(t, prev);
+  // likewise "פ"ח:" (a "." or ":" glued after it)
+  const gluedSide = isPunct(toks[j + 1], ".:") && toks[j + 1]!.glued && !(toks[j + 2]?.glued && numeralOf(toks[j + 2]));
+  const compact = ((amudAt(toks, j + 1) || gluedSide) && numeralOf(t)) || markerAt(toks, j) ? null : compactAt(t, prev);
   if (compact) {
     const numeral: Numeral = { n: compact.n, form: "gershayim", common: false };
-    return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral });
+    return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral, compact: true });
   }
   const m = markerAt(toks, j);
   // "ד' ע"א" is daf 4 side a, not "דף ע"א"
@@ -196,12 +228,23 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
   // glued "." / ":" right after a bare numeral (or digits) is an amud (כג. / כג:), unless another
   // numeral is glued after it ("ח:ח", Sefaria's chapter:verse)
   const after = toks[j + 1];
-  if ((num.form === "bare" || num.form === "digits") && isPunct(after, ".:") && after!.glued) {
+  if (sideMark(num, after)) {
     const glueNext = toks[j + 2];
-    if (!(glueNext?.glued && numeralOf(glueNext))) return readDaf(toks, j, num, false);
+    // a ":" after a quoted numeral and before another numeral is a separator ("קי"ט: פ"ט")
+    const separator = glueNext && numeralOf(glueNext) && (glueNext.glued || (after!.text === ":" && num.form !== "bare" && num.form !== "digits"));
+    if (!separator) return readDaf(toks, j, num, false);
   }
   if (amudAt(toks, j + 1)) return readDaf(toks, j, num, false);
   return withRange(toks, j + 1, { kind: "?", n: num.n, explicit: false, numeral: num });
+}
+
+/**
+ * A "." / ":" glued to a numeral marks the amud: after a bare numeral both do ("כג.", "כג:"); after a
+ * quoted one only ":" ("מ"א:", "ט':"), since "כ"ג." is far more often the end of a sentence.
+ */
+function sideMark(num: Numeral, after: Tok | undefined): boolean {
+  if (!after || !after.glued || !isPunct(after, ".:")) return false;
+  return num.form === "bare" || num.form === "digits" || after.text === ":";
 }
 
 /** A daf numeral at toks[k] and its side: "כג." "כג:" "כ"ג ע"א" "כג עמוד ב" "כ ב" "ל"ד א'". */
@@ -211,7 +254,7 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
   let maybeAmud: 1 | 2 | undefined;
   let glued = false;
   const after = toks[next];
-  if ((num.form === "bare" || num.form === "digits") && isPunct(after, ".:") && after!.glued) {
+  if (sideMark(num, after)) {
     amud = after!.text === "." ? 1 : 2;
     glued = true;
     next++;
