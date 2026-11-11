@@ -91,12 +91,12 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
       <h3 style="margin:0">קישור אוטומטי</h3>
       <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
         <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
-        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => setMode("batch")}>ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), engine === "footnotes" && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
       </div>
       <label class="field">
         שיטה
         <select value={engine} onChange={(e) => setEngine(e.currentTarget.value as EngineId)}>
-          {ENGINES.map((e) => (
+          {ENGINES.filter((e) => mode === "pair" || e.id !== "footnotes").map((e) => (
             <option key={e.id} value={e.id}>{e.title}</option>
           ))}
         </select>

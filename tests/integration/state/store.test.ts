@@ -250,3 +250,12 @@ describe("AppStore — moving links to a new edition", () => {
     expect(store.allLinks.value.map((l) => [l.source.book.key, l.source.line])).toEqual([[newB!.key, 2], [newB!.key, 3], [newB!.key, 4]]);
   });
 });
+
+describe("AppStore — links from a spreadsheet", () => {
+  it("a CSV with a source_title column imports links per book, like links files", async () => {
+    const { store } = makeStore();
+    const csv = ["source_title,line_index_1,heRef_2,path_2,line_index_2,Conection Type", "פירוש א,2,בראשית א,בראשית.txt,3,source", "פירוש ב,5,בראשית ב,בראשית.txt,7,source"].join(String.fromCharCode(10));
+    await store.openFiles([{ path: "links.csv", blob: new Blob([csv]) }]);
+    expect(store.allLinks.value.map((l) => l.source.book.title).sort()).toEqual(["פירוש א", "פירוש ב"]);
+  });
+});

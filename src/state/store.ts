@@ -12,6 +12,7 @@ import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, ty
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
+import { parseLinksCsv } from "../formats/links-csv/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
 import { CHUNK, LineStore } from "./lines";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
@@ -193,6 +194,7 @@ export class AppStore {
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
     for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
+    for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
@@ -686,6 +688,13 @@ export class AppStore {
     else if (issues.length) this.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.`, details);
     else this.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".`);
     if (sourceRef.origin === "unknown") this.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
+  }
+
+  /** A spreadsheet of links (CSV/TSV): one links file per source book, through the same import. */
+  importLinksCsv(path: string, text: string): void {
+    const r = parseLinksCsv(text, path);
+    if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${path}": ${r.problems.length} בעיות בגיליון.`, r.problems.slice(0, 100));
+    for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
   }
 
   resolveTitle(title: string): BookRef | null {

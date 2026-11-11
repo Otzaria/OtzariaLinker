@@ -11,5 +11,6 @@
 | [0002](0002-build-stack.md) | Vite + TypeScript, Workers קלאסיים ו־WASM מוטמע | התקבל |
 | [0003](0003-ui-framework.md) | Preact + Signals לממשק | התקבל |
 | [0004](0004-testing-stack.md) | Vitest, fast-check ו־Playwright על הדפדפנים המותקנים | התקבל |
+| [0005](0005-ui-decisions.md) | החלטות הממשק (Milestone F) | התקבל |
 
 </div>

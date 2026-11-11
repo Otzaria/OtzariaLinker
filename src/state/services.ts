@@ -20,7 +20,7 @@ export interface OpenedSource {
 
 export interface OpenResult {
   sources: OpenedSource[];
-  documents: { path: string; kind: "links-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "project"; text: string }[];
   skipped: { path: string; reason: string }[];
 }
 

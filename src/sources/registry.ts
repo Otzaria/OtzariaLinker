@@ -31,7 +31,7 @@ export interface OpenedSource {
 export interface OpenResult {
   sources: OpenedSource[];
   /** links files and project files, as decoded text — imported by the state layer */
-  documents: { path: string; kind: "links-json" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "project"; text: string }[];
   /** files that were not opened, each with a reason the user can act on */
   skipped: { path: string; reason: string }[];
 }
@@ -107,7 +107,9 @@ export class SourceRegistry {
         return void result.skipped.push({ path: f.path, reason: "קובץ JSON שאינו קובץ קישורים של אוצריא. ייבוא JSON אחר דורש מיפוי שדות (מצב מתקדם, בקרוב)." });
       case "csv":
       case "tsv":
-        return void result.skipped.push({ path: f.path, reason: "ייבוא CSV/TSV עדיין לא נתמך בגרסה הזו." });
+        if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
+        result.documents.push({ path: f.path, kind: "links-csv", text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
+        return;
       case "binary":
         return void result.skipped.push({ path: f.path, reason: "קובץ בינארי שאינו מסד SQLite או ZIP." });
     }

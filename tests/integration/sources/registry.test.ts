@@ -46,7 +46,7 @@ describe("SourceRegistry — files are classified by content, not by name", () =
       { path: "broken.zip", blob: new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])]) },
     ]);
     expect(res.sources).toEqual([]);
-    expect(res.skipped.map((s) => s.path)).toEqual(["a.json", "a.csv", "a.png", "broken.zip"]);
+    expect(res.skipped.map((s) => s.path)).toEqual(["a.json", "a.png", "broken.zip"]);
     for (const s of res.skipped) expect(s.reason.length).toBeGreaterThan(10);
   });
 
