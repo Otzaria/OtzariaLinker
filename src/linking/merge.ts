@@ -133,6 +133,8 @@ interface Group {
   position: string;
   /** coarser suggestions folded into this one */
   consistent: Raw[];
+  /** finer but weak (ambiguous) suggestions inside this one's range, kept as alternatives */
+  inner: Raw[];
   folded: boolean;
   conflictWith: Group[];
 }
@@ -144,8 +146,11 @@ function makeGroup(id: string, exact: Raw[]): Group {
   const rep = [...exact].sort(better)[0]!;
   const engines = [...new Set(exact.map((r) => r.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
   const position = `${endKey(rep.fEnd)}${rep.fAnchor ? `@${rep.fAnchor.rawStart}` : ""}>${rep.oEnd.book.key}`;
-  return { id, exact, rep, engines, position, consistent: [], folded: false, conflictWith: [] };
+  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [] };
 }
+
+/** at least one member is "possible" or better: ambiguous and "none" give no support */
+const strong = (g: Group) => g.exact.some((x) => rank(x.s.confidence) <= POSSIBLE);
 
 /** a's other end strictly contains b's (same book is implied by the shared position) */
 const contains = (a: Group, b: Group) => {
@@ -199,11 +204,19 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   for (const g of groups) byPos.set(g.position, [...(byPos.get(g.position) ?? []), g]);
   for (const at of byPos.values()) {
     if (at.length < 2) continue;
+    // a precise suggestion with support absorbs the coarse range around it…
     for (const a of at)
       for (const b of at)
-        if (a !== b && contains(a, b)) {
+        if (a !== b && contains(a, b) && (strong(b) || !strong(a))) {
           b.consistent.push(...a.exact); // containment is transitive: b also meets every group that contains a
           a.folded = true;
+        }
+    // …but an ambiguous one inside a supported range does not replace it: it becomes its alternative
+    for (const a of at)
+      for (const b of at)
+        if (a !== b && !a.folded && !b.folded && contains(a, b)) {
+          a.inner.push(...b.exact);
+          b.folded = true;
         }
     const live = at.filter((g) => !g.folded);
     for (const a of live)
@@ -257,6 +270,17 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions): MergedSugges
   }
   const alternatives: Candidate[] = [];
   const seenAlt = new Set<string>([endKey(g.rep.oEnd)]);
+  if (g.inner.length) {
+    const ie = [...new Set(g.inner.map((x) => x.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
+    rules.push("maxlink/inner");
+    reasons.push(r("maxlink/inner", `${ie.map(engineTitle).join(", ")} ${ie.length > 1 ? "הציעו" : "הציעה"} מקום מדויק בתוך הטווח הזה, אבל בלי ודאות; הוא מוצג כמועמד חלופי.`));
+    for (const x of [...g.inner].sort(better)) {
+      const k = endKey(x.oEnd);
+      if (seenAlt.has(k)) continue;
+      seenAlt.add(k);
+      alternatives.push({ target: x.oEnd, score: x.s.score, reasons: [r("maxlink/inner", `הצעה של ${engineTitle(x.s.engine)}.`)] });
+    }
+  }
   if (g.conflictWith.length) {
     stats.conflicts++;
     rules.push("maxlink/conflict");
@@ -283,7 +307,7 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions): MergedSugges
   }
   const confidence = CONFIDENCE_ORDER[level]!;
   const score = Math.max(...g.exact.map((x) => x.s.score));
-  const members: MergeItem[] = [...g.exact, ...g.consistent].map((x) => ({ suggestion: x.s, focus: x.focus }));
+  const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner].map((x) => ({ suggestion: x.s, focus: x.focus }));
   const merged: MergedSuggestion = { ...rep, id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
   const where = opts.existing?.(merged) ?? null;
   if (!where) return merged;

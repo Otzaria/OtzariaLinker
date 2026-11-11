@@ -91,6 +91,15 @@ describe("mergeSuggestions — conflicts and coarser agreement", () => {
     expect(stats).toMatchObject({ consistent: 1, duplicates: 1, conflicts: 0 });
     expect(mergeSuggestions([H(5, 10, "high", 20), D(5, 15, "high")]).suggestions[0]!.confidence).toBe("high");
   });
+
+  it("an ambiguous line inside a supported range does not replace it: the range stays, the line is its alternative", () => {
+    const { suggestions } = mergeSuggestions([H(5, 10, "certain", 20), D(5, 15, "ambiguous")]);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]!).toMatchObject({ engine: "headings", confidence: "certain" });
+    expect(suggestions[0]!.rules).toContain("maxlink/inner");
+    expect(suggestions[0]!.alternatives[0]!.target).toEqual(side(B, 15));
+    expect(suggestions[0]!.members).toHaveLength(2);
+  });
 });
 
 describe("mergeSuggestions — already existing", () => {
