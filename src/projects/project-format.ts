@@ -1,3 +1,4 @@
+import { parseSavedDbMappings, type SavedDbMapping } from "../core/db-mapping";
 import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
 
 /*
@@ -40,6 +41,11 @@ export interface ProjectFile {
   links: StoredLink[];
   rejectedSuggestions: string[];
   view: { source: string | null; target: string | null };
+  /**
+   * Optional (added in 2.0 without a version bump: older readers ignore it): how databases in
+   * someone else's schema were mapped, by schema fingerprint, so reopening one skips the wizard.
+   */
+  dbMappings?: SavedDbMapping[];
 }
 
 export interface ProjectData {
@@ -48,6 +54,7 @@ export interface ProjectData {
   rejectedSuggestions: string[];
   /** book titles shown when saved */
   view: { source: string | null; target: string | null };
+  dbMappings?: SavedDbMapping[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -67,6 +74,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date()):
     links: p.links.filter((l) => l.provenance !== "db").map((l) => ({ ...l, source: storeSide(l.source), target: storeSide(l.target) })),
     rejectedSuggestions: p.rejectedSuggestions,
     view: p.view,
+    ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
   };
   return JSON.stringify(file);
 }
@@ -104,6 +112,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     links,
     rejectedSuggestions: Array.isArray(f.rejectedSuggestions) ? f.rejectedSuggestions.filter((x) => typeof x === "string") : [],
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
+    dbMappings: parseSavedDbMappings(f.dbMappings),
     skipped,
   };
 }
