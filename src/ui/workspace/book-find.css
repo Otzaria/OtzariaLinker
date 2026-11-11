@@ -1,0 +1,27 @@
+/* The search box of a reader (book-find.tsx). Colours only from tokens.css. */
+.find { border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-low); }
+.find-bar { display: flex; align-items: center; gap: 2px; padding: 4px 8px; }
+.find-bar input { flex: 1; min-width: 6em; min-height: 28px; padding: 2px 8px; }
+.find-bar .icon-btn { width: 28px; height: 28px; }
+.find-count { font-size: var(--fs-sm); color: var(--on-surface-variant); min-width: 5.5em; max-width: 14em; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-inline: 4px; }
+.find-count.error { color: var(--error); }
+.find-progress { display: block; width: 100%; height: 3px; border: 0; }
+.find-list { list-style: none; margin: 0; padding: 0 0 4px; max-height: 40vh; overflow: auto; border-top: 1px solid var(--outline-variant); }
+.find-hit-row { display: grid; grid-template-columns: 3.4em 1fr auto; gap: 6px; width: 100%; padding: 4px 8px 4px 0; border: 0; border-inline-start: 3px solid transparent; background: none; text-align: start; cursor: pointer; color: inherit; font: inherit; }
+.find-hit-row:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
+.find-hit-row[aria-current="true"] { background: var(--secondary-container); color: var(--on-secondary-container); border-inline-start-color: var(--primary); }
+.find-hit-row .no { font: 11px/2 var(--font-mono); color: var(--outline); text-align: center; }
+.find-hit-row .snip { font-family: var(--font-book); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.find-hit-row mark { background: var(--highlight); color: inherit; border-radius: var(--radius-xs); }
+.find-hit-row .times { font-size: var(--fs-sm); color: var(--on-surface-variant); align-self: center; }
+.find-more { padding: 6px 12px; font-size: var(--fs-sm); }
+
+/* hit lines in the reader: a mark at the line's edge; the current one also tinted */
+.ln.find-hit { border-inline-start-color: color-mix(in srgb, var(--highlight) 80%, var(--outline)); }
+.ln.find-current { border-inline-start-color: var(--primary); background: color-mix(in srgb, var(--highlight) 35%, transparent); }
+/* the matched words (CSS Custom Highlight API; browsers without it show only the line marks) */
+::highlight(find-source), ::highlight(find-target) { background-color: color-mix(in srgb, var(--highlight) 70%, transparent); }
+::highlight(find-source-current), ::highlight(find-target-current) { background-color: var(--highlight); text-decoration: underline 2px; text-decoration-color: var(--primary); }
+
+/* a vertical mirror (a graphic shape, so physical, not logical) */
+.flip-v { transform: scaleY(-1); }
