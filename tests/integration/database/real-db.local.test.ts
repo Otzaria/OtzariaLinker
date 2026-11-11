@@ -2,6 +2,7 @@ import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ByteSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { OtzariaDbReader } from "../../../src/database/otzaria/reader";
 
 /*
  * Runs only on a machine with a real Otzaria database:
@@ -21,10 +22,13 @@ const source: ByteSource | null = path
     }
   : null;
 
+afterAll(() => {
+  if (path) closeSync(fd);
+});
+
 describe.runIf(path)("real seforim.db (read-only)", () => {
   let file: SqliteFile;
   beforeAll(async () => { file = await SqliteFile.open(source!); });
-  afterAll(() => closeSync(fd));
 
   it("reads the header and schema_meta", async () => {
     expect(file.header.wal).toBe(false);
@@ -58,6 +62,29 @@ describe.runIf(path)("real seforim.db (read-only)", () => {
     expect(entries.map((e) => e[1])).toEqual([...entries.map((e) => e[1] as number)].sort((a, b) => a - b));
     expect(pages).toBeLessThan(200);
   });
+});
+
+describe.runIf(path)("real seforim.db through OtzariaDbReader (read-only)", () => {
+  it("opens, lists every book and reads whole books quickly", async () => {
+    const t0 = performance.now();
+    const reader = await OtzariaDbReader.open(source!);
+    const books = await reader.books();
+    const tBooks = performance.now() - t0;
+    expect(reader.caps).toMatchObject({ kind: "official", inferredSchema: 7, compressed: true });
+    expect(books.length).toBeGreaterThan(8000);
+    const timings: string[] = [`open+books ${books.length}: ${tBooks.toFixed(0)} ms`];
+    for (const title of ["בראשית", "משנה ברורה", "שער הציון"]) {
+      const b = books.find((x) => x.title === title)!;
+      const before = reader.file.pagesRead;
+      const t1 = performance.now();
+      const lines = await reader.lines(b.id);
+      const ms = performance.now() - t1;
+      expect(lines.length).toBe(b.totalLines);
+      expect(lines.every((l, i) => l.index === i)).toBe(true);
+      timings.push(`${title}: ${lines.length} lines, ${reader.file.pagesRead - before} pages, ${ms.toFixed(0)} ms`);
+    }
+    console.log(timings.join(" | "));
+  }, 120_000);
 });
 
 async function collect<T>(it: AsyncIterable<T>): Promise<T[]> {

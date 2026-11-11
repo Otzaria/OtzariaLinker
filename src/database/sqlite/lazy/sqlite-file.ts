@@ -120,10 +120,68 @@ export class SqliteFile {
     return { name: e.name, rootPage: e.rootPage, ...parseCreateTable(e.sql) };
   }
 
+  /**
+   * Indexes of a table, including SQLite's automatic ones (sqlite_autoindex_<table>_<n>, stored with
+   * no SQL). An automatic index #1 of a table whose PRIMARY KEY is not the rowid covers the key
+   * columns; other automatic indexes (UNIQUE constraints) are listed but not seekable.
+   */
   async indexesOf(table: string): Promise<IndexInfo[]> {
+    const t = await this.table(table);
     return (await this.schema())
-      .filter((x) => x.type === "index" && x.tblName.toLowerCase() === table.toLowerCase() && x.sql && x.rootPage)
-      .map((x) => ({ name: x.name, rootPage: x.rootPage, ...parseCreateIndex(x.sql!) }));
+      .filter((x) => x.type === "index" && x.tblName.toLowerCase() === table.toLowerCase() && x.rootPage)
+      .map((x): IndexInfo => {
+        if (x.sql) return { name: x.name, rootPage: x.rootPage, ...parseCreateIndex(x.sql) };
+        const pkIsKey = !!t && !t.withoutRowid && t.primaryKey.length > 0 && !t.columns.some((c) => c.rowidAlias);
+        const first = /^sqlite_autoindex_.+_1$/.test(x.name);
+        return { name: x.name, rootPage: x.rootPage, table: x.tblName, columns: first && pkIsKey ? [...t!.primaryKey] : [], seekable: first && pkIsKey };
+      });
+  }
+
+  /** The first seekable index whose leading columns are exactly `columns` (case-insensitive). */
+  async findIndex(table: string, columns: readonly string[]): Promise<IndexInfo | null> {
+    const want = columns.map((c) => c.toLowerCase());
+    return (await this.indexesOf(table)).find((ix) => ix.seekable && want.every((c, i) => ix.columns[i]?.toLowerCase() === c)) ?? null;
+  }
+
+  /**
+   * Many rows by rowid in one ordered walk: each page is visited at most once and only subtrees that
+   * contain a wanted rowid are entered. Missing rowids are simply absent from the result.
+   */
+  async getMany(t: TableInfo, rowids: Iterable<number>): Promise<Map<number, Row>> {
+    const ids = [...new Set(rowids)].sort((a, b) => a - b);
+    const out = new Map<number, Row>();
+    if (ids.length) await this.collectRows(t, t.rootPage, ids, 0, ids.length, out);
+    return out;
+  }
+
+  private async collectRows(t: TableInfo, pageNo: number, ids: number[], lo: number, hi: number, out: Map<number, Row>): Promise<void> {
+    const page = await this.page(pageNo);
+    if (page.type === PageType.TableLeaf) {
+      let k = lo;
+      for (const off of page.cells) {
+        if (k >= hi) return;
+        const [size, n1] = readVarint(page.data, off);
+        const [rowid, n2] = readVarint(page.data, off + n1);
+        while (k < hi && ids[k]! < rowid) k++;
+        if (k < hi && ids[k] === rowid) {
+          const payload = await this.payload(page.data, off + n1 + n2, size, false);
+          out.set(rowid, { rowid, values: this.alignRow(t.columns, rowid, decodeRecord(payload, this.header.encoding)) });
+          k++;
+        }
+      }
+      return;
+    }
+    if (page.type !== PageType.TableInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד טבלה.`);
+    let k = lo;
+    for (const off of page.cells) {
+      if (k >= hi) return;
+      const [key] = readVarint(page.data, off + 4);
+      let j = k;
+      while (j < hi && ids[j]! <= key) j++;
+      if (j > k) await this.collectRows(t, readU32(page.data, off), ids, k, j, out);
+      k = j;
+    }
+    if (k < hi) await this.collectRows(t, page.rightChild, ids, k, hi, out);
   }
 
   // ---- table access ----------------------------------------------------------------------
@@ -207,10 +265,28 @@ export class SqliteFile {
     const page = await this.page(pageNo);
     const leaf = page.type === PageType.IndexLeaf;
     if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
-    for (const off of page.cells) {
+    const record = async (i: number) => {
+      const off = page.cells[i]!;
       const at = leaf ? off : off + 4;
       const [size, n] = readVarint(page.data, at);
-      const rec = decodeRecord(await this.payload(page.data, at + n, size, true), this.header.encoding);
+      return decodeRecord(await this.payload(page.data, at + n, size, true), this.header.encoding);
+    };
+    // With a prefix, binary-search the first cell whose key is >= prefix: every earlier cell (and
+    // its left subtree) holds only smaller keys. This keeps a seek at O(log cells) decodes per page.
+    let first = 0;
+    if (prefix) {
+      let lo = 0;
+      let hi = page.cells.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (comparePrefix(await record(mid), prefix) < 0) lo = mid + 1;
+        else hi = mid;
+      }
+      first = lo;
+    }
+    for (let i = first; i < page.cells.length; i++) {
+      const off = page.cells[i]!;
+      const rec = await record(i);
       const cmp = prefix ? comparePrefix(rec, prefix) : 0;
       if (!leaf && cmp >= 0) {
         // entries in the left child are <= this key, so they may still match
