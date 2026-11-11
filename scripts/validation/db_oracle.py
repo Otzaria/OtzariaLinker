@@ -290,16 +290,29 @@ def cmd_presence(db, out, infile):
             f.write(json.dumps(res, ensure_ascii=False) + "\n")
 
 
-def cmd_pairs(db, out, n=36, max_commentary=12000, max_base=30000, min_gold=30):
+STRIDE = 7919
+
+
+def cmd_pairs(db, out, n=36, max_commentary=12000, max_base=30000, min_gold=30, stride=STRIDE):
     """
     Commentary pairs for the engines: book_base_text, plus "X על Y" titles whose base Y exists and is
     not already listed. Deterministic: candidates sorted by (commentary id, base id), stratified by
     (top category of the commentary, Sefaria or not, where the pair came from), evenly spaced; a pair
     is kept when both books are within the size limits and the database links them with at least
     `min_gold` COMMENTARY links (in either stored direction).
+
+    `stride`: the fixed step through each group. The default gives the main sample; any other value
+    gives a HELD-OUT sample (engine tuning is checked on pairs it was not tuned on), with every pair of
+    the main sample left out.
     """
-    c = connect(db)
-    n, max_commentary, max_base, min_gold = int(n), int(max_commentary), int(max_base), int(min_gold)
+    picked, groups, cands = pick_pairs(connect(db), int(n), int(max_commentary), int(max_base), int(min_gold), int(stride))
+    json.dump({"candidates": cands, "groups": groups, "stride": int(stride), "pairs": picked}, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+
+
+def pick_pairs(c, n, max_commentary, max_base, min_gold, stride):
+    exclude = set()
+    if stride != STRIDE:
+        exclude = {(p["commentary"], p["base"]) for p in pick_pairs(c, n, max_commentary, max_base, min_gold, STRIDE)[0]}
     path = category_paths(c)
     books = {bid: (title, src, cat, cnt) for bid, title, src, cat, cnt in c.execute(
         "select b.id, b.title, s.name, b.categoryId, b.totalLines from book b left join source s on s.id = b.sourceId")}
@@ -330,7 +343,9 @@ def cmd_pairs(db, out, n=36, max_commentary=12000, max_base=30000, min_gold=30):
         for j in range(len(g)):
             if took >= per or tried >= per * 4:
                 break
-            a, b = g[(j * 7919) % len(g)]  # a fixed stride through the group
+            a, b = g[(j * stride) % len(g)]  # a fixed stride through the group
+            if (a, b) in exclude:
+                continue
             tried += 1
             gold = c.execute("select count(*) from link where sourceBookId = ? and targetBookId = ? and connectionTypeId = ?", (a, b, commentary_id)).fetchone()[0]
             gold += c.execute("select count(*) from link where sourceBookId = ? and targetBookId = ? and connectionTypeId = ?", (b, a, commentary_id)).fetchone()[0]
@@ -339,7 +354,7 @@ def cmd_pairs(db, out, n=36, max_commentary=12000, max_base=30000, min_gold=30):
                                "titles": [books[a][0], books[b][0]], "lines": [books[a][3], books[b][3]]})
                 took += 1
     picked.sort(key=lambda p: (p["commentary"], p["base"]))
-    json.dump({"candidates": len(cands), "groups": len(keys), "pairs": picked}, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+    return picked, len(keys), len(cands)
 
 
 def cmd_gold(db, out, pairs_file):

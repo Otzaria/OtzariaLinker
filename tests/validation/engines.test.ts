@@ -22,9 +22,12 @@ import { cleanupTmp, DB, fileBlob, fingerprint, gitBlobs, gitFiles, LIBRARY, ms,
  *
  *   OTZARIA_DB=… npx vitest run --config vitest.validation.config.ts tests/validation/engines.test.ts
  *   VALIDATE_ENGINES=headings,dibur-hamatchil   (default: every case in ENGINE_CASES)
+ *   VALIDATE_PAIRS_STRIDE=104729   a HELD-OUT sample: another fixed stride through the same groups,
+ *                                  without the main sample's pairs (results go to engine-<id>-heldout)
  */
 const ONLY = process.env.VALIDATE_ENGINES?.split(",");
 const FOOTNOTE_PAIRS = 12;
+const STRIDE = process.env.VALIDATE_PAIRS_STRIDE;
 const SINGLE_BOOKS = (process.env.VALIDATE_CITATION_BOOKS ?? "משנה ברורה;ספר החינוך;מסילת ישרים").split(";");
 
 interface Pair { commentary: number; base: number; origin: string; top: string; sefaria: boolean; gold: number; titles: [string, string]; lines: [number, number] }
@@ -45,7 +48,7 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
     registry = new SourceRegistry();
     const opened = await registry.open([{ path: "seforim.db", blob: await fileBlob(DB!) }]);
     byId = new Map(opened.sources[0]!.books.map((b) => [idOf(b.key), b]));
-    pairs = (JSON.parse(readFileSync(oracle("pairs", "pairs.json"), "utf8")) as { pairs: Pair[] }).pairs;
+    pairs = (JSON.parse(readFileSync(STRIDE ? oracle("pairs", "pairs.json", "36", "12000", "30000", "30", STRIDE) : oracle("pairs", "pairs.json"), "utf8")) as { pairs: Pair[] }).pairs;
     const singles = SINGLE_BOOKS.map((t) => [...byId.values()].find((b) => b.title === t)).filter((b): b is SourceBook => !!b).map((b) => [idOf(b.key), null]);
     const q = join(tmpDir(), "gold-pairs.json");
     writeFileSync(q, JSON.stringify([...pairs.map((p) => [p.commentary, p.base]), ...(ENGINE_CASES.some((c) => c.pairs === "single-book") ? singles : [])]));
@@ -118,8 +121,9 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
       }
     for (const t of Object.values(total)) t.precision = pct(t.correct, t.judged);
     const goldLines = rows.reduce((n, r) => n + r.goldLines, 0);
-    const summary = record(`engine-${c.id}`, {
+    const summary = record(`engine-${c.id}${STRIDE && c.pairs === "pair" ? "-heldout" : ""}`, {
       engine: c.id,
+      ...(STRIDE && c.pairs === "pair" && { stride: Number(STRIDE) }),
       goldTypes: c.goldTypes,
       ...extra,
       pairs: rows.length,
