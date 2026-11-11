@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { useStore } from "./context";
+import { AltTocDialog } from "./dialogs/alt-toc-dialog";
 import { ExportDialog } from "./dialogs/export-dialog";
 import { HelpDialog } from "./dialogs/help-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
@@ -59,6 +60,7 @@ export function App() {
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {store.dialog.value === "relink" && <RelinkDialog onClose={() => (store.dialog.value = null)} />}
       {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onClose={() => (store.dialog.value = null)} />}
+      {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => (store.dialog.value = null)} />}
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

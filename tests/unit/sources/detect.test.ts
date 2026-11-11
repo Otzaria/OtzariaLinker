@@ -46,3 +46,12 @@ describe("decodeText", () => {
     expect(decodeText(new Uint8Array([0xf9, 0xec, 0xe5, 0xed]))).toMatchObject({ text: "שלום", encoding: "windows-1255" });
   });
 });
+
+describe("detectKind — alt_toc files", () => {
+  it("by content (key + nodes) or by the _alt_toc.json name; never mistaken for links", () => {
+    expect(detectKind(u8('﻿[{"key": "Parasha", "heTitle": "פרשה", "nodes": []}]'), "x.json")).toBe("alt-toc-json");
+    expect(detectKind(u8("[]"), "בראשית_alt_toc.json")).toBe("alt-toc-json");
+    expect(detectKind(u8("[]"), "x.json")).toBe("json");
+    expect(detectKind(u8('[{"line_index_1": 1, "path_2": "x.txt"}]'), "בראשית_alt_toc.json")).toBe("links-json");
+  });
+});

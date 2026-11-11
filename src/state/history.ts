@@ -1,3 +1,4 @@
+import type { AltTocBook } from "../core/alt-toc/model";
 import type { Link } from "../core/links/model";
 
 /*
@@ -15,15 +16,26 @@ export interface Change {
   readonly after?: Link;
 }
 
+/** A change of one book's alternative TOC structures (keyed by book title); absent = not in the project. */
+export interface AltTocChange {
+  readonly title: string;
+  readonly before?: AltTocBook;
+  readonly after?: AltTocBook;
+}
+
 export interface Command {
   /** Hebrew, shown in the history list and in the undo tooltip ("יצירת קישור", "ייבוא 120 קישורים") */
   readonly label: string;
   readonly changes: readonly Change[];
+  /** alt_toc changes of the same action (alt_toc editing is undoable like links) */
+  readonly altToc?: readonly AltTocChange[];
   readonly at: number;
 }
 
 export interface LinkState {
   readonly links: ReadonlyMap<string, Link>;
+  /** alternative TOC structures of the project, by book title */
+  readonly altToc: ReadonlyMap<string, AltTocBook>;
   readonly undo: readonly Command[];
   readonly redo: readonly Command[];
   /** bumps on every change; autosave and "unsaved changes" compare against it */
@@ -32,7 +44,7 @@ export interface LinkState {
 
 export const HISTORY_LIMIT = 500;
 
-export const emptyLinkState = (): LinkState => ({ links: new Map(), undo: [], redo: [], revision: 0 });
+export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), undo: [], redo: [], revision: 0 });
 
 function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change[], dir: "after" | "before"): Map<string, Link> {
   const next = new Map(links);
@@ -44,13 +56,26 @@ function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change
   return next;
 }
 
+function applyAltToc(books: ReadonlyMap<string, AltTocBook>, changes: readonly AltTocChange[] | undefined, dir: "after" | "before"): ReadonlyMap<string, AltTocBook> {
+  if (!changes?.length) return books;
+  const next = new Map(books);
+  for (const c of changes) {
+    const v = c[dir];
+    if (v) next.set(c.title, v);
+    else next.delete(c.title);
+  }
+  return next;
+}
+
 /** Applies a new user action. Empty or no-op changes are dropped and do not create a history entry. */
-export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now()): LinkState {
+export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now(), altToc: readonly AltTocChange[] = []): LinkState {
   const real = changes.filter((c) => c.before !== c.after);
-  if (!real.length) return s;
-  const cmd: Command = { label, changes: real, at };
+  const realAlt = altToc.filter((c) => c.before !== c.after);
+  if (!real.length && !realAlt.length) return s;
+  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), at };
   return {
     links: applyChanges(s.links, real, "after"),
+    altToc: applyAltToc(s.altToc, realAlt, "after"),
     undo: [...s.undo, cmd].slice(-HISTORY_LIMIT),
     redo: [],
     revision: s.revision + 1,
@@ -60,13 +85,19 @@ export function commit(s: LinkState, label: string, changes: readonly Change[], 
 export function undo(s: LinkState): LinkState {
   const cmd = s.undo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyAltToc(s.altToc, cmd.altToc, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
 }
 
 export function redo(s: LinkState): LinkState {
   const cmd = s.redo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyAltToc(s.altToc, cmd.altToc, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
+}
+
+/** Setting (or, with null, dropping) one book's structures, as a change. */
+export function altTocChange(s: LinkState, title: string, after: AltTocBook | null): AltTocChange {
+  const before = s.altToc.get(title);
+  return { title, ...(before && { before }), ...(after && { after }) };
 }
 
 /* ---- the link operations users perform, expressed as Changes ---- */
@@ -100,7 +131,7 @@ export function restoreChange(s: LinkState, id: string): Change | null {
 export interface HistoryEntry {
   readonly label: string;
   readonly at: number;
-  /** how many links the action changed */
+  /** how many links and alt_toc books the action changed */
   readonly changes: number;
   /** the history position right after this action: going "to" the entry applies it and everything before it */
   readonly position: number;
@@ -114,7 +145,7 @@ export const historyPosition = (s: LinkState): number => s.undo.length;
 /** Every action the history holds, oldest first: the applied ones, then the undone ones in redo order. */
 export function timeline(s: LinkState): HistoryEntry[] {
   const all = [...s.undo, ...[...s.redo].reverse()];
-  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length, position: i + 1, applied: i < s.undo.length }));
+  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0), position: i + 1, applied: i < s.undo.length }));
 }
 
 /** Undoes or redoes, one action at a time, until `position` actions are applied. */

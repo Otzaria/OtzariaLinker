@@ -1,4 +1,5 @@
-import type { SourceLine } from "../core/books";
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
+import type { BookHeading, SourceLine } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenResult } from "../sources/registry";
@@ -23,4 +24,6 @@ export interface SourcesApi {
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>): BatchItem[];
   /** lines of one book that contain a query (capped), with snippets; progress counts lines */
   searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
+  altToc(bookKey: string): LibraryAltTocStructure[] | null;
+  headings(bookKey: string): BookHeading[];
 }

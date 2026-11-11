@@ -1,3 +1,4 @@
+import type { AltTocBook, AltTocEntry, AltTocOrigin, AltTocStructure } from "../core/alt-toc/model";
 import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
 
 /*
@@ -9,6 +10,9 @@ import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
  * Book keys inside a session ("s3:1234") are not stable across sessions, so links are stored with
  * book TITLES and bound again on load. "format" is the first key: the file detector looks for it
  * in the first KiB.
+ *
+ * `altToc` (alternative TOC structures, by book title) was added later as an OPTIONAL field of
+ * version 1: older project files simply have none, and nothing else changed.
  */
 export const PROJECT_FORMAT = "otzaria-linker-project";
 export const PROJECT_VERSION = 1;
@@ -40,6 +44,7 @@ export interface ProjectFile {
   links: StoredLink[];
   rejectedSuggestions: string[];
   view: { source: string | null; target: string | null };
+  altToc?: AltTocBook[];
 }
 
 export interface ProjectData {
@@ -48,6 +53,8 @@ export interface ProjectData {
   rejectedSuggestions: string[];
   /** book titles shown when saved */
   view: { source: string | null; target: string | null };
+  /** alternative TOC structures of the project (absent in files saved before they existed) */
+  altToc?: AltTocBook[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -67,6 +74,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date()):
     links: p.links.filter((l) => l.provenance !== "db").map((l) => ({ ...l, source: storeSide(l.source), target: storeSide(l.target) })),
     rejectedSuggestions: p.rejectedSuggestions,
     view: p.view,
+    ...(p.altToc?.length && { altToc: p.altToc }),
   };
   return JSON.stringify(file);
 }
@@ -78,7 +86,7 @@ export class ProjectError extends Error {
 }
 
 /** Parses and validates a project file; `bind` turns a stored book back into a BookRef of this session. */
-export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { savedAt: string; skipped: number } {
+export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; savedAt: string; skipped: number } {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -93,6 +101,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
 
   const links: Link[] = [];
   let skipped = 0;
+  const altToc = rebuildAltToc(f.altToc);
   for (const l of f.links) {
     const link = isStoredLink(l) ? rebuildLink(l, bind) : null;
     if (link) links.push(link);
@@ -104,9 +113,38 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     links,
     rejectedSuggestions: Array.isArray(f.rejectedSuggestions) ? f.rejectedSuggestions.filter((x) => typeof x === "string") : [],
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
-    skipped,
+    altToc: altToc.books,
+    skipped: skipped + altToc.skipped,
   };
 }
+
+/* ---- alt_toc: rebuilt field by field, like links (untrusted input) ---- */
+const ALT_ORIGINS = new Set<AltTocOrigin>(["user", "file", "db"]);
+function rebuildAltToc(raw: unknown): { books: AltTocBook[]; skipped: number } {
+  if (!Array.isArray(raw)) return { books: [], skipped: 0 };
+  const books: AltTocBook[] = [];
+  const titles = new Set<string>();
+  let skipped = 0;
+  for (const b of raw as Record<string, unknown>[]) {
+    if (!b || typeof b !== "object" || !str(b.title) || titles.has(b.title) || !Array.isArray(b.structures)) {
+      skipped++;
+      continue;
+    }
+    const structures: AltTocStructure[] = [];
+    for (const s of b.structures as Record<string, unknown>[]) {
+      const entries = s && Array.isArray(s.entries) ? (s.entries as Record<string, unknown>[]).filter(isEntry).map((e): AltTocEntry => ({ heTitle: e.heTitle as string, line: e.line as number, level: e.level as number })) : null;
+      if (!s || !str(s.key) || !entries || entries.length !== (s.entries as unknown[]).length) {
+        skipped++;
+        continue;
+      }
+      structures.push({ key: s.key, ...(str(s.title) && { title: s.title }), ...(str(s.heTitle) && { heTitle: s.heTitle }), entries });
+    }
+    titles.add(b.title);
+    books.push({ title: b.title, origin: ALT_ORIGINS.has(b.origin as AltTocOrigin) ? (b.origin as AltTocOrigin) : "user", structures });
+  }
+  return { books, skipped };
+}
+const isEntry = (e: Record<string, unknown>): boolean => !!e && typeof e === "object" && str(e.heTitle) && Number.isInteger(e.line) && Number.isInteger(e.level);
 
 /*
  * A project file is untrusted input (it may also come from the browser's autosave, which other local

@@ -35,12 +35,23 @@ export function LinksPanel() {
     return c;
   }, [all]);
 
+  const altToc = store.altToc.count.value;
+  const altTocButton = (
+    <button class="btn text" onClick={() => (store.dialog.value = "alt-toc")} title="חלוקה שנייה של ספר לצד תוכן העניינים הרגיל (פרשות ועליות, ימי לימוד…) — נכתבת לקובץ alt_toc">
+      <Icon name="oz_text_bullet_list_tree" size={16} />
+      מבני כותרות{altToc ? ` (${altToc.toLocaleString("he")})` : ""}
+    </button>
+  );
+
   if (!all.length)
     return (
-      <div class="empty">
-        <Icon name="oz_links" size={40} />
-        <span>עדיין אין קישורים בפרויקט. צרו קישור בבונה, או גררו לכאן קובץ ‎_links.json קיים כדי לערוך אותו.</span>
-      </div>
+      <>
+        <div class="bulk" style="padding:6px 6px 0">{altTocButton}</div>
+        <div class="empty">
+          <Icon name="oz_links" size={40} />
+          <span>עדיין אין קישורים בפרויקט. צרו קישור בבונה, או גררו לכאן קובץ ‎_links.json קיים כדי לערוך אותו.</span>
+        </div>
+      </>
     );
 
   return (
@@ -50,6 +61,7 @@ export function LinksPanel() {
           <Icon name="oz_text_compare" size={16} />
           מעבר למהדורה חדשה של ספר
         </button>
+        {altTocButton}
       </div>
       <div class="filters">
         {(["all", "new", "edited", "existing", "deleted"] as const).map((s) =>

@@ -112,6 +112,11 @@ const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
 
 /** One ZIP with every file under links/, as the library lays them out. Deterministic (fixed mtime). */
 export function zipExport(plan: ExportPlan): Uint8Array {
+  return zipBundle(plan.files.map((f) => ({ path: `links/${f.name}`, text: f.text })));
+}
+
+/** A ZIP of text files at the given paths (links/…, alt_toc/…, _report.txt). Deterministic (fixed mtime). */
+export function zipBundle(entries: readonly { path: string; text: string }[]): Uint8Array {
   const mtime = new Date("2000-01-01T00:00:00Z");
-  return zipSync(Object.fromEntries(plan.files.map((f) => [`links/${f.name}`, [strToU8(f.text), { mtime }]])), { level: 6 });
+  return zipSync(Object.fromEntries(entries.map((e) => [e.path, [strToU8(e.text), { mtime }]])), { level: 6 });
 }

@@ -61,3 +61,29 @@ describe("project file — hostile fields (security review #9)", () => {
     expect(parseProject(evil, bind).links[0]).not.toHaveProperty("evil");
   });
 });
+
+describe("project file — alt_toc (optional field of version 1)", () => {
+  const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ key: b.title, title: b.title, origin: b.origin });
+  const altToc = [{ title: "בראשית", origin: "db" as const, structures: [{ key: "Parasha", heTitle: "פרשה", entries: [{ heTitle: "בראשית", line: 1, level: 0 }, { heTitle: "עליה א", line: 1, level: 1 }] }] }];
+  const text = serializeProject({ sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null }, altToc }, "x");
+
+  it("round-trips", () => {
+    expect(JSON.parse(text).version).toBe(1);
+    expect(parseProject(text, bind).altToc).toEqual(altToc);
+  });
+  it("is absent from a project without structures, and an older file without it still opens", () => {
+    expect(serializeProject({ sources: [], links, rejectedSuggestions: [], view: { source: null, target: null } }, "x")).not.toContain("altToc");
+    const old = JSON.stringify({ format: "otzaria-linker-project", version: 1, savedAt: "", app: "2.0.0-alpha.0", sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null } });
+    expect(parseProject(old, bind)).toMatchObject({ altToc: [], skipped: 0 });
+  });
+  it("rebuilds field by field and skips damaged structures and books", () => {
+    const evil = JSON.parse(text);
+    evil.altToc[0].evil = 1;
+    evil.altToc[0].origin = "hacker";
+    evil.altToc[0].structures.push({ key: 5, entries: [] }, { key: "X", entries: [{ heTitle: "x", line: "1", level: 0 }] });
+    evil.altToc.push({ title: 7, structures: [] }, { title: "בראשית", structures: [] });
+    const p = parseProject(JSON.stringify(evil), bind);
+    expect(p.altToc).toEqual([{ ...altToc[0], origin: "user" }]);
+    expect(p.skipped).toBe(4);
+  });
+});

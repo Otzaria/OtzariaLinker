@@ -267,3 +267,10 @@ dialog.help-dialog .dlg { height: 100%; }
 .help-content kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--outline); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
 .help-content a { color: var(--primary); }
 @media (max-width: 760px) { .help-layout { grid-template-columns: 1fr; } .help-nav { display: none; } }
+
+/* alt_toc editor */
+.alt-toc label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.alt-toc .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.alt-rows { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.alt-row { display: grid; grid-template-columns: 64px 1fr 90px auto auto; gap: 6px; align-items: center; }
+.alt-row.bad input { border-color: var(--error); }

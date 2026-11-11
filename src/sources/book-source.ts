@@ -1,3 +1,4 @@
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { Link } from "../core/links/model";
 
@@ -24,5 +25,7 @@ export interface BookSource {
    * pages through lines(); a source implements it when it can read a whole book more cheaply.
    */
   scan?(bookKey: string, chunk: number): AsyncIterable<LineChunk>;
+  /** alternative TOC structures the source already has for a book; null = the source cannot have any */
+  altToc?(bookKey: string): Promise<LibraryAltTocStructure[] | null>;
   close(): void;
 }

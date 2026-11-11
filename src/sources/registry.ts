@@ -1,8 +1,10 @@
-import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
+import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
 import { decodeText } from "../core/text/decode";
+import { stripTags } from "../core/text/html";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
@@ -31,7 +33,7 @@ export interface OpenedSource {
 export interface OpenResult {
   sources: OpenedSource[];
   /** links files and project files, as decoded text — imported by the state layer */
-  documents: { path: string; kind: "links-json" | "links-csv" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
   /** files that were not opened, each with a reason the user can act on */
   skipped: { path: string; reason: string }[];
 }
@@ -86,6 +88,20 @@ export class SourceRegistry {
     }
   }
 
+  /** The alternative TOC structures the book's source already has (null: the source cannot have any). */
+  async altToc(bookKey: string): Promise<LibraryAltTocStructure[] | null> {
+    const s = this.of(bookKey);
+    return s.altToc ? s.altToc(bookKey) : null;
+  }
+
+  /** Every heading line of a book, in order (reads the whole book here, in the worker). */
+  async headings(bookKey: string): Promise<BookHeading[]> {
+    const out: BookHeading[] = [];
+    for (const l of await this.of(bookKey).lines(bookKey, 0, Number.MAX_SAFE_INTEGER))
+      if (l.heading !== null) out.push({ line: l.index, level: l.heading, text: stripTags(l.text) });
+    return out;
+  }
+
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
@@ -103,6 +119,7 @@ export class SourceRegistry {
       case "zip":
         return this.openZip(f, result);
       case "links-json":
+      case "alt-toc-json":
       case "project":
         if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
         result.documents.push({ path: f.path, kind, text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
@@ -141,7 +158,7 @@ export class SourceRegistry {
     for (const e of entries) {
       const path = `${nameOf(f.path)}/${e.path}`;
       const kind = detectKind(e.bytes.subarray(0, HEAD), e.path);
-      if (kind === "links-json" || kind === "project") result.documents.push({ path, kind, text: decodeText(e.bytes).text });
+      if (kind === "links-json" || kind === "alt-toc-json" || kind === "project") result.documents.push({ path, kind, text: decodeText(e.bytes).text });
       else if (kind === "text" && /\.txt$/i.test(e.path)) texts.push({ path: e.path, read: async () => e.bytes });
       else result.skipped.push({ path, reason: "קובץ בתוך הארכיון שאינו ספר ‎.txt או קובץ קישורים." });
     }

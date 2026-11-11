@@ -1,4 +1,5 @@
-import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
+import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
@@ -21,7 +22,7 @@ export interface OpenedSource {
 
 export interface OpenResult {
   sources: OpenedSource[];
-  documents: { path: string; kind: "links-json" | "links-csv" | "project"; text: string }[];
+  documents: { path: string; kind: "links-json" | "links-csv" | "alt-toc-json" | "project"; text: string }[];
   skipped: { path: string; reason: string }[];
 }
 
@@ -39,6 +40,10 @@ export interface BooksService {
   diffBooks(oldKey: string, newKey: string, opts?: CallOptions): Promise<{ to: number[]; fate: LineFate[]; stats: Record<string, number> }>;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>, opts?: CallOptions): Promise<BatchResultItem[]>;
   searchBook(bookKey: string, query: string, options: { limit?: number }, opts?: CallOptions): Promise<BookSearchResult>;
+  /** alt_toc structures the book's database already has (null: its source cannot have any) */
+  altToc(bookKey: string, opts?: CallOptions): Promise<LibraryAltTocStructure[] | null>;
+  /** every heading line of a book, in order */
+  headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */
