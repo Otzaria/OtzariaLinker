@@ -16,6 +16,7 @@ export interface DbLinkEnd {
   lineIndex: number;
   /** inclusive last lineIndex of a range on this side */
   endIndex?: number;
+  heRef: string | null;
 }
 
 export interface DbLinkRow {
@@ -86,15 +87,17 @@ export class DbLinksReader {
     const L = (n: string) => col(this.t.link, n);
     const [sb, tb, sl, tl, tli, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("targetLineIndex"), L("connectionTypeId"), L("connectionType")];
 
-    // line indexes of every end (targetLineIndex is denormalized on link when the column exists)
+    // both ends' line rows: lineIndex (targetLineIndex is also denormalized on link) and heRef
     const needLines = new Set<number>();
     for (const r of links.values()) {
       needLines.add(Number(r.values[sl]));
-      if (tli < 0) needLines.add(Number(r.values[tl]));
+      needLines.add(Number(r.values[tl]));
     }
     const lineRows = await this.file.getMany(this.t.line, needLines);
     const li = col(this.t.line, "lineIndex");
+    const hr = col(this.t.line, "heRef");
     const indexOf = (lineId: number) => Number(lineRows.get(lineId)?.values[li] ?? -1);
+    const heRefOf = (lineId: number) => (hr < 0 ? null : ((lineRows.get(lineId)?.values[hr] as string | null | undefined) ?? null));
 
     const out: DbLinkRow[] = [];
     for (const [id, r] of links) {
@@ -105,8 +108,8 @@ export class DbLinksReader {
         id,
         type,
         typeName: name,
-        source: { bookId: Number(v[sb]), lineId: Number(v[sl]), lineIndex: indexOf(Number(v[sl])) },
-        target: { bookId: Number(v[tb]), lineId: Number(v[tl]), lineIndex: tli >= 0 ? Number(v[tli]) : indexOf(Number(v[tl])) },
+        source: { bookId: Number(v[sb]), lineId: Number(v[sl]), lineIndex: indexOf(Number(v[sl])), heRef: heRefOf(Number(v[sl])) },
+        target: { bookId: Number(v[tb]), lineId: Number(v[tl]), lineIndex: tli >= 0 ? Number(v[tli]) : indexOf(Number(v[tl])), heRef: heRefOf(Number(v[tl])) },
         anchors: [],
         suppressedSides: [],
       });

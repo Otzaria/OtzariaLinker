@@ -8,6 +8,12 @@ describe("כותרות ועוגן (legacy §10)", () => {
     expect(isHeading("טקסט")).toBe(false);
     expect(headingLevel("<H3 class=x>א</H3>")).toBe(3);
   });
+  it("only a line that STARTS with <hN is a heading (generator detectHeaderLevel)", () => {
+    expect(headingLevel(" <h2>א</h2>")).toBeNull();
+    expect(headingLevel("<b><h2>א</h2></b>")).toBeNull();
+    expect(headingLevel("טקסט <h2>א</h2>")).toBeNull();
+    expect(headingLevel("<h2x>")).toBe(2);
+  });
   it('חילוץ סמן מ-heRef ("… אות ג" → ג)', () => {
     expect(anchorLabelFromHeRef("שער הציון, סימן א אות ג")).toBe("ג");
   });
