@@ -245,9 +245,17 @@ const HEADING_KIND: Readonly<Partial<Record<Kind, string>>> = {
 /** A book with headings (פרק / סימן / דף…) as a target. Lines are the whole book, in order. */
 export function buildHeadingsIndex(book: BookRef, lines: readonly EngineLine[]): TargetIndex {
   const s = analyzeBook({ book, lines }, { numbering: "lenient", untaggedHeadings: true });
-  const units = buildUnits(s).filter((u) => !u.marker);
   const isDaf = s.kinds.has("daf");
-  const numbered = units.map((u) => ({ u, path: u.path.filter((e) => e.kind !== "name") }));
+  // line indexes resolved now, so the index keeps no line text (it may be cached between runs)
+  const units = buildUnits(s)
+    .filter((u) => !u.marker)
+    .map((u) => ({ path: u.path.filter((e) => e.kind !== "name"), line: lines[u.start]!.index, end: lines[u.end]!.index, leaf: !u.hasSubunits, label: `${book.title} ${u.path.map((e) => e.label).join(", ")}` }))
+    .filter((u) => u.path.length > 0);
+  const byLast = new Map<number, typeof units>();
+  for (const u of units) {
+    const n = u.path.at(-1)!.n!;
+    byLast.set(n, [...(byLast.get(n) ?? []), u]);
+  }
   return {
     book,
     via: units.length ? "headings" : "none",
@@ -255,21 +263,14 @@ export function buildHeadingsIndex(book: BookRef, lines: readonly EngineLine[]):
     resolve(elems) {
       const want = expand(elems);
       if (!want) return null;
-      const hits = numbered.filter(({ path }) => path.length === want.length && path.every((e, i) => same(e, want[i]!)));
+      const last = want.at(-1)!;
+      const cands = (byLast.get(last.n) ?? []).filter((u) => u.path.length === want.length && u.path.every((e, i) => same(e, want[i]!)));
+      const wholeDaf = last.kind === "daf" && last.amud === undefined;
+      // "דף ב" with no amud: the one or two sides of that daf under the same parent
+      const hits = wholeDaf && cands.length === 2 && cands.every((u) => u.path.at(-1)!.amud !== undefined) ? [{ ...cands[0]!, end: Math.max(cands[0]!.end, cands[1]!.end), line: Math.min(cands[0]!.line, cands[1]!.line), leaf: false }] : cands;
       if (hits.length !== 1) return null; // none, or several units with that path (several חלקים): no guess
-      const u = hits[0]!.u;
-      const wholeDaf = want.at(-1)!.kind === "daf" && want.at(-1)!.amud === undefined;
-      return {
-        book,
-        line: lines[u.start]!.index,
-        end: lines[u.end]!.index,
-        leaf: !u.hasSubunits,
-        wholeDaf,
-        amudFromBareLetter: false,
-        label: `${book.title} ${u.path.map((e) => e.label).join(", ")}`,
-        via: "headings",
-        daf: isDaf,
-      };
+      const u = hits[0]!;
+      return { book, line: u.line, end: u.end, leaf: u.leaf, wholeDaf, amudFromBareLetter: false, label: u.label, via: "headings", daf: isDaf };
     },
   };
 }
@@ -298,7 +299,7 @@ function expand(elems: readonly AddrElem[]): Want[] | null {
 }
 
 function same(e: PathElement, w: Want): boolean {
-  if (e.kind === "daf") return w.kind === "daf" && e.n === w.n && (w.amud === undefined ? e.amud === undefined : e.amud === w.amud);
+  if (e.kind === "daf") return w.kind === "daf" && e.n === w.n && (w.amud === undefined || e.amud === undefined || e.amud === w.amud);
   if (w.kind === "daf") return false;
   if (e.n !== w.n) return false;
   return w.kind === "?" || e.kind === "?" || e.kind === w.kind;

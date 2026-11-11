@@ -132,6 +132,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       r.found += [...found].filter((x) => x.type === "linker").length;
       recall.set(group, r);
       timings.push(`${title}: ${ms.toFixed(0)} ms, ${result.suggestions.length} suggestions, gold linker ${linkerTotal}, found ${[...found].filter((x) => x.type === "linker").length}`);
+      console.log(timings.at(-1));
     }
     const lines: string[] = [];
     lines.push("level      n      correct  wrong  unconf  strict   judged   exact");
