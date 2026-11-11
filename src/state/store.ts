@@ -15,6 +15,7 @@ import { parseLinksJson } from "../formats/links-json/parse";
 import { parseLinksCsv } from "../formats/links-csv/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
 import { CHUNK, LineStore } from "./lines";
+import { BookFind } from "./book-find";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
@@ -84,6 +85,8 @@ export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 export class AppStore {
   readonly prefs: Preferences;
   readonly lines: LineStore;
+  /** the search box of each reader */
+  readonly find: Record<Side, BookFind>;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -181,6 +184,7 @@ export class AppStore {
   ) {
     this.prefs = prefs ?? loadPreferences();
     this.lines = new LineStore(service);
+    this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
   }
 
   /* ---------------- sources ---------------- */

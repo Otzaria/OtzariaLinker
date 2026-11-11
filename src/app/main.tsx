@@ -54,6 +54,7 @@ const service: BooksService = {
   runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
   runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
   diffBooks: (oldKey, newKey, opts) => call("diffBooks", [oldKey, newKey], opts),
+  searchBook: (key, query, options, opts) => call("searchBook", [key, query, options], opts),
 };
 
 const saver: Saver = {
