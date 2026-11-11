@@ -136,17 +136,18 @@ export class OtzariaDbReader {
   private async notesOf(lineIds: number[]): Promise<Map<number, NoteAt[]>> {
     const t = this.t.note!;
     const [charPos, hasMarker, body] = ["charPos", "hasMarker", "body"].map((n) => colIndex(t, n));
+    const lineIdAt = colIndex(t, "lineId");
     const out = new Map<number, NoteAt[]>();
-    for (const id of lineIds) {
-      for await (const r of this.file.seekPrimaryKey(t, [id])) {
-        const list = out.get(id) ?? [];
-        list.push({
-          charPos: Number(r.values[charPos!]),
-          hasMarker: Number(r.values[hasMarker!]) === 1,
-          body: this.codec.decode(r.values[body!] ?? null) ?? "",
-        });
-        out.set(id, list);
-      }
+    // one ordered walk for all lines; rows come in (lineId, noteIndex) order
+    for (const r of await this.file.seekPrimaryKeyMany(t, lineIds.map((id) => [id]))) {
+      const id = Number(r.values[lineIdAt]);
+      const list = out.get(id) ?? [];
+      list.push({
+        charPos: Number(r.values[charPos!]),
+        hasMarker: Number(r.values[hasMarker!]) === 1,
+        body: this.codec.decode(r.values[body!] ?? null) ?? "",
+      });
+      out.set(id, list);
     }
     return out;
   }

@@ -118,6 +118,18 @@ describe.each([
     expect(two).toEqual(rowsOf(db, "SELECT bookId, lineIndex, id FROM line WHERE bookId = 3 AND lineIndex = 7 ORDER BY id"));
   });
 
+  it("seekIndexMany equals SQL for many keys at once (keys spanning pages, missing keys, duplicates in the input)", async () => {
+    const [ix] = await file.indexesOf("line");
+    const keys = [[8], [3], [1], [3], [999], [5], [-1]];
+    const got = await file.seekIndexMany(ix!, keys);
+    expect(got).toEqual(rowsOf(db, "SELECT bookId, lineIndex, id FROM line WHERE bookId IN (1, 3, 5, 8) ORDER BY bookId, lineIndex, id"));
+    const pairs = await file.seekIndexMany(ix!, [[3, 7], [1, 0], [7, 399]]);
+    expect(pairs).toEqual(rowsOf(db, "SELECT bookId, lineIndex, id FROM line WHERE (bookId, lineIndex) IN ((1, 0), (3, 7), (7, 399)) ORDER BY bookId, lineIndex, id"));
+    const t = (await file.table("line_note"))!;
+    const notes = await file.seekPrimaryKeyMany(t, Array.from({ length: 60 }, (_, i) => [i]));
+    expect(notes.map((r) => r.values)).toEqual(rowsOf(db, "SELECT lineId, noteIndex, content FROM line_note WHERE lineId < 60 ORDER BY lineId, noteIndex"));
+  });
+
   it("WITHOUT ROWID table: scan and primary-key prefix seek, columns in declared order", async () => {
     const t = (await file.table("line_note"))!;
     expect(t.withoutRowid).toBe(true);

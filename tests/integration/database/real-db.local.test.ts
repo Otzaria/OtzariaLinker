@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ByteSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
 import { OtzariaDbReader } from "../../../src/database/otzaria/reader";
+import { DbLinksReader } from "../../../src/database/otzaria/links-reader";
 
 /*
  * Runs only on a machine with a real Otzaria database:
@@ -83,6 +84,12 @@ describe.runIf(path)("real seforim.db through OtzariaDbReader (read-only)", () =
       expect(lines.every((l, i) => l.index === i)).toBe(true);
       timings.push(`${title}: ${lines.length} lines, ${reader.file.pagesRead - before} pages, ${ms.toFixed(0)} ms`);
     }
+    const links = (await DbLinksReader.open(reader.file, reader.caps))!;
+    const first50 = (await reader.lines(1, 0, 49)).map((l) => l.lineId);
+    const t2 = performance.now();
+    const rows = await links.atLines(first50);
+    timings.push(`links at בראשית 0–49: ${rows.length} links (${rows.filter((r) => r.anchors.length).length} anchored), ${(performance.now() - t2).toFixed(0)} ms`);
+    expect(rows.length).toBeGreaterThan(100);
     console.log(timings.join(" | "));
   }, 120_000);
 });

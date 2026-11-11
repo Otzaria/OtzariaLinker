@@ -216,6 +216,59 @@ export class SqliteFile {
     yield* this.walkIndex(ix.rootPage, prefix);
   }
 
+  /**
+   * Index entries for MANY key prefixes in one ordered walk (each page visited at most once, only
+   * subtrees that can hold a wanted key are entered). Much cheaper than one seekIndex per key when
+   * the keys are many — e.g. the anchors of 27,000 links.
+   */
+  async seekIndexMany(ix: IndexInfo, prefixes: SqlValue[][]): Promise<SqlValue[][]> {
+    if (!ix.seekable) throw new Error(`index ${ix.name} is not seekable (collation/DESC/expression)`);
+    return this.seekManyAt(ix.rootPage, prefixes);
+  }
+
+  /** seekIndexMany for a WITHOUT ROWID table (its b-tree is an index keyed by the primary key). */
+  async seekPrimaryKeyMany(t: TableInfo, prefixes: SqlValue[][]): Promise<Row[]> {
+    if (!t.withoutRowid) throw new Error("seekPrimaryKeyMany is for WITHOUT ROWID tables");
+    return (await this.seekManyAt(t.rootPage, prefixes)).map((rec) => ({ rowid: null, values: this.withoutRowidRow(t, rec) }));
+  }
+
+  private async seekManyAt(root: number, prefixes: SqlValue[][]): Promise<SqlValue[][]> {
+    if (prefixes.some((p) => p.length !== prefixes[0]!.length)) throw new Error("all prefixes of one seek must have the same length");
+    const keys = dedupeSorted(prefixes);
+    const out: SqlValue[][] = [];
+    if (keys.length) await this.seekManyInner(root, keys, 0, keys.length, out);
+    return out;
+  }
+
+  private async seekManyInner(pageNo: number, keys: SqlValue[][], lo: number, hi: number, out: SqlValue[][]): Promise<void> {
+    const page = await this.page(pageNo);
+    const leaf = page.type === PageType.IndexLeaf;
+    if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
+    const record = async (i: number) => {
+      const off = page.cells[i]!;
+      const at = leaf ? off : off + 4;
+      const [size, n] = readVarint(page.data, at);
+      return decodeRecord(await this.payload(page.data, at + n, size, true), this.header.encoding);
+    };
+    // skip the cells (and their left subtrees) that are below the smallest wanted key
+    let a = 0;
+    let b = page.cells.length;
+    while (a < b) {
+      const mid = (a + b) >> 1;
+      if (comparePrefix(await record(mid), keys[lo]!) < 0) a = mid + 1;
+      else b = mid;
+    }
+    for (let i = a; i < page.cells.length && lo < hi; i++) {
+      const rec = await record(i);
+      let j = lo;
+      while (j < hi && comparePrefix(rec, keys[j]!) >= 0) j++; // keys[lo..j) are <= this entry
+      if (!leaf && j > lo) await this.seekManyInner(readU32(page.data, page.cells[i]!), keys, lo, j, out);
+      if (j > lo && comparePrefix(rec, keys[j - 1]!) === 0) out.push(rec);
+      while (lo < j && comparePrefix(rec, keys[lo]!) > 0) lo++; // keys below this entry are finished
+    }
+    if (!leaf && lo < hi) await this.seekManyInner(page.rightChild, keys, lo, hi, out);
+  }
+
   private alignRow(columns: ColumnDef[], rowid: number, rec: SqlValue[]): SqlValue[] {
     return columns.map((c, i) => (c.rowidAlias ? rowid : i < rec.length ? rec[i]! : c.defaultValue));
   }
@@ -361,6 +414,18 @@ export class SqliteFile {
 
 function readU32(b: Uint8Array, at: number): number {
   return ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
+}
+
+function dedupeSorted(prefixes: SqlValue[][]): SqlValue[][] {
+  const cmp = (x: SqlValue[], y: SqlValue[]) => {
+    for (let i = 0; i < Math.min(x.length, y.length); i++) {
+      const c = compareValues(x[i]!, y[i]!);
+      if (c) return c;
+    }
+    return x.length - y.length;
+  };
+  const sorted = [...prefixes].sort(cmp);
+  return sorted.filter((k, i) => i === 0 || cmp(sorted[i - 1]!, k) !== 0);
 }
 
 function comparePrefix(rec: SqlValue[], prefix: SqlValue[]): number {
