@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { buildInfo } from "./build/plugins/build-info.ts";
+import { licenseNotice } from "./build/plugins/license-notice.ts";
 import { wasmBase64 } from "./build/plugins/wasm-base64.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
@@ -15,7 +16,11 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 export default defineConfig({
   base: "./",
   define: buildInfo(pkg.version),
-  plugins: [wasmBase64(), viteSingleFile({ removeViteModuleLoader: true })],
+  plugins: [
+    wasmBase64(),
+    viteSingleFile({ removeViteModuleLoader: true }),
+    licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "sql.js", "fflate"] }),
+  ],
   worker: { format: "iife", plugins: () => [wasmBase64()] },
   build: {
     target: "es2022",
