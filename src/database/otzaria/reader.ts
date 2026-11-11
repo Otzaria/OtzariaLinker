@@ -21,6 +21,8 @@ export interface DbBook {
   isBaseBook: boolean | null;
   /** as declared by the database; count lines with lineEntries() for the truth */
   totalLines: number | null;
+  /** book.dependenceType (schema 2+), verbatim; null when absent */
+  dependenceType: string | null;
 }
 
 export interface DbLine {
@@ -70,7 +72,7 @@ export class OtzariaDbReader {
       for await (const r of this.file.scan(this.t.source)) sources.set(Number(r.rowid), String(r.values[nameAt]));
     }
     const c = (name: string) => colIndex(this.t.book, name);
-    const [title, sourceId, categoryId, orderIndex, isBase, total] = ["title", "sourceId", "categoryId", "orderIndex", "isBaseBook", "totalLines"].map(c);
+    const [title, sourceId, categoryId, orderIndex, isBase, total, dependence] = ["title", "sourceId", "categoryId", "orderIndex", "isBaseBook", "totalLines", "dependenceType"].map(c);
     const out: DbBook[] = [];
     for await (const r of this.file.scan(this.t.book)) {
       const v = r.values;
@@ -83,7 +85,25 @@ export class OtzariaDbReader {
         orderIndex: num(at(orderIndex)),
         isBaseBook: at(isBase) === null ? null : Number(at(isBase)) === 1,
         totalLines: num(at(total)),
+        dependenceType: at(dependence) === null ? null : String(at(dependence)),
       });
+    }
+    return out;
+  }
+
+  /**
+   * book_base_text (schema 2+): bookId → the base books it is written on, as Sefaria declares them.
+   * A small table (5.4K rows in the full library), scanned once. Empty when the table is absent.
+   */
+  async baseTexts(): Promise<Map<number, number[]>> {
+    const out = new Map<number, number[]>();
+    const t = await this.file.table("book_base_text");
+    if (!t) return out;
+    const [b, base] = [colIndex(t, "bookId"), colIndex(t, "baseBookId")];
+    if (b < 0 || base < 0) return out;
+    for await (const r of this.file.scan(t)) {
+      const id = Number(r.values[b]);
+      out.set(id, [...(out.get(id) ?? []), Number(r.values[base])]);
     }
     return out;
   }

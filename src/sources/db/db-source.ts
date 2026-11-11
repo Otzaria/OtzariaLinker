@@ -15,6 +15,8 @@ import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "
  */
 export class DbBookSource implements BookSource {
   private booksById = new Map<number, DbBook>();
+  /** book_base_text, read once at open */
+  private bases = new Map<number, number[]>();
 
   private constructor(
     readonly info: SourceInfo,
@@ -30,6 +32,7 @@ export class DbBookSource implements BookSource {
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links);
     for (const b of await reader.books()) s.booksById.set(b.id, b);
+    s.bases = await reader.baseTexts();
     return s;
   }
 
@@ -45,6 +48,8 @@ export class DbBookSource implements BookSource {
       ...(b.isBaseBook !== null && { isBaseBook: b.isBaseBook }),
       ...(b.totalLines !== null && { lineCount: b.totalLines }),
       ...(b.source !== null && { sourceName: b.source }),
+      ...(this.bases.has(b.id) && { bases: this.bases.get(b.id)!.map((id) => this.keyOf(id)) }),
+      ...(b.dependenceType !== null && { dependence: b.dependenceType }),
     }));
   }
 
