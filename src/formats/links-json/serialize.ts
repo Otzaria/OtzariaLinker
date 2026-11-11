@@ -1,3 +1,4 @@
+import { stringifyInLayout, type JsonLayout } from "./layout";
 import { CANONICAL_ORDER, CONNECTION_TYPE_KEY, type LinksRecord } from "./record";
 
 /*
@@ -58,6 +59,7 @@ function typeValue(r: LinksRecord): string | null | undefined {
   return r.typeNull ? null : "";
 }
 
-export function serializeLinksJson(records: readonly LinksRecord[]): string {
-  return JSON.stringify(records.map(recordToObject), null, 2);
+/** `layout`: the imported file's own layout (layout.ts), so an unchanged file comes back byte-identical. */
+export function serializeLinksJson(records: readonly LinksRecord[], layout?: JsonLayout): string {
+  return stringifyInLayout(records.map(recordToObject), layout);
 }

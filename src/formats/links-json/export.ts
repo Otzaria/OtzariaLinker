@@ -3,6 +3,7 @@ import type { Link } from "../../core/links/model";
 import { storedKey } from "../../core/links/stored-form";
 import { validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
+import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
 
 /*
@@ -36,6 +37,8 @@ export interface ExportPlan {
 export interface ExportOptions {
   /** also write links with errors (expert mode) — default false */
   includeErrors?: boolean;
+  /** the text layout of each book's imported file (formats/links-json/layout.ts); new files get the default */
+  layouts?: (sourceTitle: string) => JsonLayout | undefined;
 }
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
@@ -77,7 +80,7 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
       return {
         name: `${title}_links.json`,
         sourceTitle: title,
-        text: serializeLinksJson(ordered.map(linkToRecord)),
+        text: serializeLinksJson(ordered.map(linkToRecord), opts.layouts?.(title)),
         records: ordered.length,
         isNewFile: !importedTitles.has(title),
       };

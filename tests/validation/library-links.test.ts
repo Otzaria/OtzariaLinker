@@ -8,6 +8,7 @@ import { sourceTitleFromLinksFileName, titleFromPath2 } from "../../src/core/lin
 import { decodeText } from "../../src/core/text/decode";
 import { recordToLink } from "../../src/formats/links-json/convert";
 import { planExport } from "../../src/formats/links-json/export";
+import { detectLayout } from "../../src/formats/links-json/layout";
 import { parseLinksJson } from "../../src/formats/links-json/parse";
 import { runQa } from "../../src/linking/qa";
 import { SourceRegistry } from "../../src/sources/registry";
@@ -145,7 +146,7 @@ describe.runIf(LIBRARY)("check 3: every _links.json of the library", () => {
       }
 
       // export exactly as the tool would (untouched imports, original order) and compare bytes
-      const plan = planExport(links, ctx(false));
+      const plan = planExport(links, ctx(false), { layouts: () => detectLayout(text) }); // as the store does: the file's own layout
       const out = plan.files[0]?.text ?? "";
       const kind = roundTripKind(bytes, out);
       results.push({ path: rel, live, records: links.length, roundTrip: kind.startsWith("LOSS") ? "LOSS" : kind, ...(kind.startsWith("LOSS") && { detail: kind }), rejectsFile: parsed.generatorRejectsFile });

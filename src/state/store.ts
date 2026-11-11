@@ -26,6 +26,7 @@ import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
+import { detectLayout, type JsonLayout } from "../formats/links-json/layout";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
@@ -804,12 +805,16 @@ export class AppStore {
 
   /* ---------------- import / export ---------------- */
 
+  /** the text layout of each book's imported links file, reused when it is written back (minimal library diff) */
+  private readonly fileLayouts = new Map<string, JsonLayout>();
+
   importLinksFile(path: string, text: string): void {
     const sourceTitle = sourceTitleFromLinksFileName(path);
     if (!sourceTitle) return void this.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו ספר המקור.`);
     const parsed = parseLinksJson(text);
     const sourceRef = this.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
     const fileKey = `${sourceTitle}#${this.linkSeq++}`;
+    this.fileLayouts.set(sourceTitle, detectLayout(text));
     this.dbLinks.noteImportedFile(sourceTitle);
     const issues = [...parsed.issues];
     const links = parsed.records.map((r, i) => {
@@ -875,7 +880,7 @@ export class AppStore {
   async prepareExport(): Promise<ExportBundle | null> {
     if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
     await this.altToc.loadLines();
-    return { ...planExport(this.allLinks.value, this.validation()), altToc: this.altToc.plan() };
+    return { ...planExport(this.allLinks.value, this.validation(), { layouts: (t) => this.fileLayouts.get(t) }), altToc: this.altToc.plan() };
   }
 
   /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */

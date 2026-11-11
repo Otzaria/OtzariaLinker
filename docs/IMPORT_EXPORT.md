@@ -144,7 +144,10 @@
 
 ### 3.3 הבטחות הלוך־חזור
 
-- קובץ שיובא ולא שונה יוצא **byte-identical** (`tests/unit/formats/export.test.ts`), וכל רשומה אמיתית
+- קובץ שיובא ולא שונה יוצא **byte-identical** (`tests/unit/formats/export.test.ts`), גם כשהוא כתוב בצורה
+  שאינה ברירת המחדל. `formats/links-json/layout.ts` מזהה את הצורה של כל קובץ מיובא (הזחה, שורה אחת, הרווחים של
+  פייתון, שורה חדשה בסוף, `\uXXXX`) והייצוא שומר עליה. על הספרייה האמיתית 750 מ־752 הקבצים החיים יוצאים זהים
+  בית־בבית (`docs/validation/REAL_DATA_REPORT.md`). קובץ חדש נכתב כ־`JSON.stringify(…, 2)`. כל רשומה אמיתית
   מהספרייה עוברת הלוך־חזור בלי אובדן (`tests/contracts/links-json.contract.test.ts`).
 - שינוי ברשומה אחת משנה רק אותה ב־diff.
 - אותו קלט נותן תמיד אותם בתים, כולל ה־ZIP.
