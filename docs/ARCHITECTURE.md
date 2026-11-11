@@ -163,6 +163,7 @@ AppStore.prepareExport / runQualityCheck
 אוטומטית ושחזור.
 
 לא ממומש: מיפוי מסדי SQLite כלליים, ייבוא CSV/TSV ו־JSON כללי, קישור מחדש אחרי שינוי ספר (יש רק
-המודול `matching/line-diff.ts`, בלי ממשק), חיבור `diagnostics` לממשק, `alt_toc`. הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
+המודול `matching/line-diff.ts`, בלי ממשק), חיבור `diagnostics` לממשק. (`alt_toc`, `_report.txt` ו־CSV בפורמט
+ספריא ממומשים: `core/alt-toc/`, `formats/{alt-toc,report,sefaria-csv}/`, `state/alt-toc.ts`.) הרשימה למשתמש: [`USER_GUIDE.md`](USER_GUIDE.md#מגבלות-ידועות).
 
 </div>
