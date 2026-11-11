@@ -175,7 +175,7 @@ export class SourceRegistry {
       case "alt-toc-json":
       case "project":
         if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
-        result.documents.push({ path: f.path, kind, text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
+        result.documents.push({ path: f.path, kind, text: documentText(new Uint8Array(await f.blob.arrayBuffer())) });
         return;
       case "text":
         if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
@@ -237,7 +237,7 @@ export class SourceRegistry {
     for (const e of entries) {
       const path = `${nameOf(f.path)}/${e.path}`;
       const kind = detectKind(e.bytes.subarray(0, HEAD), e.path);
-      if (kind === "links-json" || kind === "alt-toc-json" || kind === "project") result.documents.push({ path, kind, text: decodeText(e.bytes).text });
+      if (kind === "links-json" || kind === "alt-toc-json" || kind === "project") result.documents.push({ path, kind, text: documentText(e.bytes) });
       else if (kind === "text" && /\.txt$/i.test(e.path)) texts.push({ path: e.path, read: async () => e.bytes });
       else result.skipped.push({ path, reason: "קובץ בתוך הארכיון שאינו ספר ‎.txt או קובץ קישורים." });
     }
@@ -268,6 +268,15 @@ function labelForTexts(files: readonly TextFile[]): string {
   const roots = new Set(files.map((f) => (f.path.includes("/") ? f.path.split("/")[0]! : "")));
   if (roots.size === 1 && !roots.has("")) return [...roots][0]!;
   return files.length === 1 ? nameOf(files[0]!.path) : `${files.length} קובצי טקסט`;
+}
+
+/**
+ * A links/project document as text. A UTF-8 BOM is kept (as U+FEFF) so the links-file parser can warn
+ * about it: the weekly library sync rejects such a file (validation: the warning never reached the user).
+ */
+function documentText(bytes: Uint8Array): string {
+  const d = decodeText(bytes);
+  return d.hadBom && d.encoding === "utf-8" ? String.fromCharCode(0xfeff) + d.text : d.text;
 }
 
 function reasonOf(err: unknown, fallback: string): string {

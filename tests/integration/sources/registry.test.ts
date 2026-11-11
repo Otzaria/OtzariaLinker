@@ -65,3 +65,13 @@ describe("SourceRegistry — encoding warnings reach the UI", () => {
     expect(res.sources[0]!.info.warnings.map((w) => w.code)).toContain("source/not-utf8");
   });
 });
+
+describe("a links file with a BOM", () => {
+  it("keeps the BOM for the parser, so the user is warned (the weekly sync rejects such a file)", async () => {
+    const { parseLinksJson } = await import("../../../src/formats/links-json/parse");
+    const json = '[{"line_index_1":1,"heRef_2":"א","path_2":"א.txt","line_index_2":1,"Conection Type":"commentary"}]';
+    const res = await new SourceRegistry().open([{ path: "x_links.json", blob: new Blob([new Uint8Array([0xef, 0xbb, 0xbf]), json]) }]);
+    expect(res.documents[0]!.kind).toBe("links-json");
+    expect(parseLinksJson(res.documents[0]!.text).issues.map((i) => i.code)).toContain("file/bom");
+  });
+});

@@ -13,8 +13,16 @@ let seq = 0;
  * the mapping wizard. The file handle is kept under a token so openMapped can read it later.
  */
 export async function pendingMapping(path: string, label: string, blob: Blob, pending: Map<string, { blob: Blob; label: string }>): Promise<PendingDb> {
-  const preview = await previewSchema(await SqliteFile.open(blobSource(blob)));
-  if (!preview.tables.length) throw new LinkerError("db/no-books", "במסד אין אף טבלה שאפשר לקרוא ממנה ספרים.");
+  const file = await SqliteFile.open(blobSource(blob));
+  const preview = await previewSchema(file);
+  if (!preview.tables.length)
+    throw new LinkerError(
+      "db/no-books",
+      file.header.wal
+        ? // validation: an app database whose every table still sits in its -wal file (personal_notes.db)
+          "בקובץ הראשי של המסד אין אף טבלה. המסד במצב WAL, ונראה שכל הנתונים שלו עדיין בקובץ ‎-wal שלידו, שהדפדפן לא יכול לקרוא. סגרו את התוכנה שמשתמשת במסד (כדי שתמזג את הקובץ) ונסו שוב."
+        : "במסד אין אף טבלה שאפשר לקרוא ממנה ספרים.",
+    );
   const token = `m${++seq}`;
   pending.set(token, { blob, label });
   while (pending.size > MAX_PENDING) pending.delete(pending.keys().next().value as string);

@@ -62,3 +62,21 @@ describe("SourceRegistry — databases that need a mapping", () => {
     expect(res.skipped[0]!.reason.length).toBeGreaterThan(10);
   });
 });
+
+describe("a database whose tables are all still in its -wal file", () => {
+  it("is refused with the WAL reason, not just 'no tables'", async () => {
+    const initSqlJs = (await import("sql.js")).default;
+    const SQL = await initSqlJs();
+    const db = new SQL.Database();
+    db.run("PRAGMA user_version = 1"); // an empty schema, but a real header page
+    const bytes = db.export();
+    db.close();
+    const plain = await new SourceRegistry().open([{ path: "empty.db", blob: new Blob([new Uint8Array(bytes)]) }]);
+    expect(plain.skipped[0]!.reason).toBe("במסד אין אף טבלה שאפשר לקרוא ממנה ספרים.");
+    const wal = new Uint8Array(bytes);
+    wal[18] = 2; // file format write/read version 2 = WAL mode
+    wal[19] = 2;
+    const res = await new SourceRegistry().open([{ path: "personal_notes.db", blob: new Blob([wal]) }]);
+    expect(res.skipped[0]!.reason).toContain("‎-wal");
+  });
+});
