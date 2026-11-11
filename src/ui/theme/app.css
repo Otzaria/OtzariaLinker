@@ -241,3 +241,10 @@ details.held summary { cursor: pointer; font-weight: 600; }
   .workspace > .stack-col:has(.side-panel) { position: sticky; bottom: 0; z-index: 6; order: 8; height: 46vh; min-height: 0; box-shadow: var(--elev-3); }
   .workspace > .stack-col:has(.sources-panel) { order: 9; }
 }
+
+/* alt_toc editor */
+.alt-toc label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.alt-toc .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.alt-rows { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.alt-row { display: grid; grid-template-columns: 64px 1fr 90px auto auto; gap: 6px; align-items: center; }
+.alt-row.bad input { border-color: var(--error); }
