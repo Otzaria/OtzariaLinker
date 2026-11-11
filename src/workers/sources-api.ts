@@ -9,6 +9,8 @@ export interface SourcesApi {
   [op: string]: (...args: never[]) => unknown;
   /** proves sql.js and the zstd WASM start in this environment (file://, CSP) */
   ping(): { sqlite: string; zstd: string };
+  /** cheap liveness probe for the watchdog */
+  alive(): true;
   open(files: InputFile[]): OpenResult;
   lines(bookKey: string, from: number, to: number): SourceLine[];
   existingLinks(bookKey: string, from: number, to: number): Link[];

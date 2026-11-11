@@ -43,3 +43,21 @@ describe("project file", () => {
     expect(p.links).toHaveLength(1);
   });
 });
+
+describe("project file — hostile fields (security review #9)", () => {
+  const text = serializeProject({ sources: [], links: [links[0]!], rejectedSuggestions: [], view: { source: null, target: null } }, "x");
+  const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ key: `k:${b.title}`, title: b.title, origin: b.origin });
+  it("a stored book key never overrides the session key", () => {
+    const evil = text.replace('"book":{"title":"רש\\"י על בראשית"', '"book":{"key":"s1:1","title":"רש\\"י על בראשית"');
+    expect(evil).not.toBe(text);
+    expect(parseProject(evil, bind).links[0]!.source.book.key).toBe('k:רש"י על בראשית');
+  });
+  it("a malformed keyOrder skips that link instead of crashing the export later", () => {
+    const evil = text.replace('"heRef2"', '"keyOrder":5,"heRef2"');
+    expect(parseProject(evil, bind)).toMatchObject({ links: [], skipped: 1 });
+  });
+  it("unknown fields are dropped", () => {
+    const evil = text.replace('"heRef2"', '"dbAnchors":[{"x":1}],"evil":1,"heRef2"');
+    expect(parseProject(evil, bind).links[0]).not.toHaveProperty("evil");
+  });
+});

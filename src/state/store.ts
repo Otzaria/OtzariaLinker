@@ -209,6 +209,23 @@ export class AppStore {
     this.lines.forgetSource(id);
   }
 
+  /**
+   * The worker that held the open sources had to be restarted (it crashed, or stayed busy after a
+   * cancel). Its sources are gone; the project's links are not.
+   */
+  workerLost(reason: string): void {
+    batch(() => {
+      this.sources.value = [];
+      this.view.source.value = null;
+      this.view.target.value = null;
+      this.pick.source.value = null;
+      this.pick.target.value = null;
+      this.task.value = null;
+    });
+    this.lines.forgetAll();
+    this.notify("warning", `${reason} הקישורים בפרויקט לא נפגעו — פתחו שוב את הספרים כדי להמשיך.`);
+  }
+
   /** A BookRef for a key of an open book (or an unresolved link book). */
   refOf(bookKey: string): BookRef {
     const b = this.books.value.get(bookKey);
@@ -657,7 +674,7 @@ export class AppStore {
   openProject(path: string, text: string): void {
     let p;
     try {
-      p = parseProject(text, (b) => this.resolveTitle(b.title) ?? { key: `unresolved:${b.title}`, ...b });
+      p = parseProject(text, (b) => this.resolveTitle(b.title) ?? { key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) });
     } catch (err) {
       return void this.notify("error", `"${path}": ${(err as Error).message}`);
     }

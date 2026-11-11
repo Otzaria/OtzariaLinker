@@ -66,3 +66,20 @@ describe("safeUnzip", () => {
     expect(codeOf(() => safeUnzip(broken))).toBe("archive/corrupt");
   });
 });
+
+describe("safeUnzip — data-descriptor bombs (security review #5)", () => {
+  it("an entry whose declared size is 0 is still stopped by the ratio of bytes actually consumed", async () => {
+    const { Zip, ZipDeflate } = await import("fflate");
+    const parts: Uint8Array[] = [];
+    const zip = new Zip((err, chunk) => { if (err) throw err; parts.push(chunk); });
+    const f = new ZipDeflate("bomb.txt", { level: 9 });
+    zip.add(f);
+    const mb = new Uint8Array(1024 ** 2);
+    for (let i = 0; i < 64; i++) f.push(mb, i === 63);
+    zip.end();
+    const data = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) (data.set(p, o), (o += p.length));
+    expect(() => safeUnzip(data)).toThrow(expect.objectContaining({ code: "archive/suspicious-ratio" }));
+  });
+});

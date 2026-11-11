@@ -94,11 +94,9 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
   const links: Link[] = [];
   let skipped = 0;
   for (const l of f.links) {
-    if (!isStoredLink(l)) {
-      skipped++;
-      continue;
-    }
-    links.push({ ...l, source: { ...l.source, book: bind(l.source.book) }, target: { ...l.target, book: bind(l.target.book) } } as Link);
+    const link = isStoredLink(l) ? rebuildLink(l, bind) : null;
+    if (link) links.push(link);
+    else skipped++;
   }
   return {
     savedAt: typeof f.savedAt === "string" ? f.savedAt : "",
@@ -108,6 +106,44 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
     skipped,
   };
+}
+
+/*
+ * A project file is untrusted input (it may also come from the browser's autosave, which other local
+ * pages can write). Links are REBUILT field by field from checked values — nothing is spread from
+ * the file — so an odd field can neither crash the export later nor alias another book (review #9).
+ */
+const ORIGINS = new Set<BookOrigin>(["otzaria", "sefaria", "personal", "unknown"]);
+const str = (x: unknown): x is string => typeof x === "string";
+function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | null {
+  const book = (b: StoredBook): StoredBook => ({ title: b.title, origin: ORIGINS.has(b.origin) ? b.origin : "unknown", ...(typeof b.isBaseBook === "boolean" && { isBaseBook: b.isBaseBook }) });
+  const side = (s: StoredSide) => ({ book: bind(book(s.book)), line: s.line, ...(s.end !== undefined && { end: s.end }) });
+  const a = l.anchor as unknown as Record<string, unknown> | undefined;
+  if (a !== undefined && (!a || !isInt(a.rawStart) || (a.rawEnd !== undefined && !isInt(a.rawEnd)) || (a.label !== undefined && !str(a.label)))) return null;
+  if (l.keyOrder !== undefined && !(Array.isArray(l.keyOrder) && l.keyOrder.every(str))) return null;
+  const pass = l.passthrough as unknown;
+  if (pass !== undefined && (typeof pass !== "object" || pass === null || Array.isArray(pass))) return null;
+  return {
+    id: l.id,
+    status: l.status,
+    provenance: l.provenance,
+    source: side(l.source),
+    target: side(l.target),
+    declaredType: l.declaredType,
+    heRef2: l.heRef2,
+    ...(str(l.ref1) && { ref1: l.ref1 }),
+    ...(str(l.ref2) && { ref2: l.ref2 }),
+    ...(a && { anchor: { rawStart: a.rawStart as number, ...(a.rawEnd !== undefined && { rawEnd: a.rawEnd as number }), ...(a.label !== undefined && { label: a.label as string }), ...(str(a.contentHash) && { contentHash: a.contentHash }) } }),
+    ...(pass !== undefined && { passthrough: copyData(pass as Record<string, unknown>) }),
+    ...(l.keyOrder !== undefined && { keyOrder: [...l.keyOrder] }),
+    ...(str(l.targetPath) && { targetPath: l.targetPath }),
+    ...(isInt(l.fileIndex) && { fileIndex: l.fileIndex }),
+  };
+}
+function copyData(o: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(o)) Object.defineProperty(out, k, { value: o[k], enumerable: true, writable: true, configurable: true });
+  return out;
 }
 
 const STATUSES = new Set(["new", "edited", "existing", "deleted"]);

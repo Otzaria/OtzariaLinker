@@ -103,9 +103,23 @@ export class RpcClient<A extends Api> {
     return new Promise((resolve, reject) => {
       if (opts.signal?.aborted) return reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(opts.onProgress && { onProgress: opts.onProgress }) });
-      opts.signal?.addEventListener("abort", () => this.port.postMessage({ kind: "cancel", id }), { once: true });
+      // reject at once: the UI must never wait on a worker that does not stop (security review #6)
+      opts.signal?.addEventListener(
+        "abort",
+        () => {
+          this.port.postMessage({ kind: "cancel", id });
+          if (this.pending.delete(id)) reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
+        },
+        { once: true },
+      );
       this.port.postMessage({ kind: "call", id, op, args: args as unknown[] });
     });
+  }
+
+  /** Rejects every pending call — the worker died or was replaced. */
+  failAll(code: string, message: string): void {
+    for (const p of this.pending.values()) p.reject(new RpcFailure(code, message));
+    this.pending.clear();
   }
 
   private receive(m: FromWorker) {

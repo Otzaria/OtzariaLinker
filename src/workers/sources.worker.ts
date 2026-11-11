@@ -27,6 +27,7 @@ const handle = serve<SourcesApi>(
       db.close();
       return { sqlite, zstd: new LineContentCodec([]).decode(ZSTD_PROBE) ?? "" };
     },
+    alive: () => true as const,
     open: (ctx, files) => registry.open(files, ctx.signal),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),

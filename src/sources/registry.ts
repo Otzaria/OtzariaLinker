@@ -38,6 +38,8 @@ export interface OpenResult {
 
 const HEAD = 4096;
 const MAX_TEXT_DOC = 256 * 1024 ** 2;
+/** a ZIP is read whole into memory to be inflated, so its size is capped first */
+const MAX_ZIP = 512 * 1024 ** 2;
 
 export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
@@ -99,6 +101,8 @@ export class SourceRegistry {
   }
 
   private async openZip(f: InputFile, result: OpenResult): Promise<void> {
+    if (f.blob.size > MAX_ZIP)
+      return void result.skipped.push({ path: f.path, reason: "הארכיון גדול מ־512MB, ולכן לא נפתח בדפדפן. חלצו אותו במחשב ובחרו את התיקייה." });
     let entries;
     try {
       entries = safeUnzip(new Uint8Array(await f.blob.arrayBuffer()), { include: (p) => /\.(txt|json)$/i.test(p) });

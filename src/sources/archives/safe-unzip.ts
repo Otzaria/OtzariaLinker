@@ -19,8 +19,9 @@ export interface UnzipLimits {
 
 export const DEFAULT_UNZIP_LIMITS: UnzipLimits = {
   maxEntries: 50_000,
-  maxTotalBytes: 2 * 1024 ** 3,
-  maxEntryBytes: 512 * 1024 ** 2,
+  // everything extracted is held in the worker's memory, so the totals stay well under a GB
+  maxTotalBytes: 512 * 1024 ** 2,
+  maxEntryBytes: 128 * 1024 ** 2,
   maxRatio: 200,
 };
 
@@ -50,6 +51,8 @@ export function safeUnzip(
   let entries = 0;
   let total = 0;
   let failure: LinkerError | null = null;
+  /** compressed bytes handed to the inflater so far */
+  let fed = 0;
 
   const fail = (e: LinkerError, file?: UnzipFile): void => {
     failure ??= e;
@@ -77,8 +80,12 @@ export function safeUnzip(
       total += chunk.length;
       if (size > limits.maxEntryBytes || total > limits.maxTotalBytes)
         return fail(new LinkerError("archive/too-large", "תוכן הארכיון גדול מדי לפתיחה בדפדפן. חלצו אותו במחשב ובחרו את התיקייה במקום את הקובץ.", { path, size, total }), file);
-      if (size > 1024 ** 2 && file.size && size / file.size > limits.maxRatio)
-        return fail(new LinkerError("archive/suspicious-ratio", `הקובץ "${path}" בארכיון נראה כמו "פצצת ZIP" (יחס דחיסה חריג), ולכן לא נפתח.`, { path, ratio: size / file.size }), file);
+      // The entry's declared size is 0 when the archive uses data descriptors, so the ratio is also
+      // checked against the compressed bytes actually consumed so far (security review #5).
+      const ratio = file.size ? size / file.size : 0;
+      const overall = total / Math.max(fed, 1);
+      if ((size > 1024 ** 2 && ratio > limits.maxRatio) || (total > 8 * 1024 ** 2 && overall > limits.maxRatio))
+        return fail(new LinkerError("archive/suspicious-ratio", `הקובץ "${path}" בארכיון נראה כמו "פצצת ZIP" (יחס דחיסה חריג), ולכן לא נפתח.`, { path, ratio: Math.max(ratio, overall) }), file);
       chunks.push(chunk);
       if (final) out.push({ path, bytes: concat(chunks, size) });
     };
@@ -90,6 +97,7 @@ export function safeUnzip(
   try {
     for (let i = 0; i < data.length && !failure; i += step) {
       const end = Math.min(i + step, data.length);
+      fed = end;
       unzip.push(data.subarray(i, end), end === data.length);
     }
   } catch (err) {

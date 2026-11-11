@@ -19,7 +19,8 @@ export type ErrorCode =
   | "db/wal"
   | "db/no-books"
   | "db/schema-newer"
-  | "source/closed";
+  | "source/closed"
+  | "db/corrupt";
 
 export class LinkerError extends Error {
   override readonly name = "LinkerError";

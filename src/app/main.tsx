@@ -16,16 +16,43 @@ import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
  * Composition root: the only place that knows about every layer. It creates the worker, adapts it
  * to the state layer's BooksService, provides a browser download Saver, and renders the UI.
  */
-const worker = new SourcesWorker();
-const rpc = new RpcClient<SourcesApi>(worker as unknown as Port);
+/*
+ * The worker host: one sources worker, replaced when it crashes or when it does not answer a
+ * liveness probe a few seconds after a cancel (a cancelled job that keeps running would otherwise
+ * block every later request). Replacing it loses the open sources, never the project's links.
+ */
+let worker!: Worker;
+let rpc!: RpcClient<SourcesApi>;
+let onLost: (reason: string) => void = () => {};
+function startWorker() {
+  worker = new SourcesWorker();
+  rpc = new RpcClient<SourcesApi>(worker as unknown as Port);
+  worker.onerror = (e) => (e.preventDefault(), restartWorker("מנוע הקריאה קרס (ייתכן שקובץ פגום)."));
+}
+function restartWorker(reason: string) {
+  worker.terminate();
+  rpc.failAll("worker/restarted", reason);
+  startWorker();
+  onLost(reason);
+}
+function watchdog() {
+  const timer = setTimeout(() => restartWorker("הפעולה שבוטלה לא נעצרה, ולכן מנוע הקריאה הופעל מחדש."), 4000);
+  void rpc.call("alive", []).then(() => clearTimeout(timer), () => {});
+}
+startWorker();
+
+const call = <K extends keyof SourcesApi & string>(op: K, args: Parameters<SourcesApi[K]>, opts?: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => {
+  opts?.signal?.addEventListener("abort", watchdog, { once: true });
+  return rpc.call(op, args, opts);
+};
 
 const service: BooksService = {
-  open: (files, opts) => rpc.call("open", [files], opts),
-  lines: (key, from, to, opts) => rpc.call("lines", [key, from, to], opts),
-  existingLinks: (key, from, to, opts) => rpc.call("existingLinks", [key, from, to], opts),
-  close: async (id) => void (await rpc.call("close", [id])),
-  runEngine: (engine, source, target, options, opts) => rpc.call("runEngine", [engine, source, target, options], opts),
-  runBatch: (engine, pairs, options, opts) => rpc.call("runBatch", [engine, pairs, options], opts),
+  open: (files, opts) => call("open", [files], opts),
+  lines: (key, from, to, opts) => call("lines", [key, from, to], opts),
+  existingLinks: (key, from, to, opts) => call("existingLinks", [key, from, to], opts),
+  close: async (id) => void (await call("close", [id])),
+  runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
+  runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
 };
 
 const saver: Saver = {
@@ -40,6 +67,7 @@ const saver: Saver = {
 };
 
 const store = new AppStore(service, saver);
+onLost = (reason) => store.workerLost(reason);
 store.startAutosave(idbStore());
 
 let stopTheme = () => {};

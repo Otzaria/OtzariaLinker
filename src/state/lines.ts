@@ -106,6 +106,12 @@ export class LineStore {
     return s?.status === "ready" ? s.items : undefined;
   }
 
+  forgetAll(): void {
+    this.counts.clear();
+    this.lines.drop("");
+    this.existing.drop("");
+  }
+
   forgetSource(sourceId: string): void {
     this.lines.drop(`${sourceId}:`);
     this.existing.drop(`${sourceId}:`);

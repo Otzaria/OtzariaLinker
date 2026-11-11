@@ -34,7 +34,13 @@ function tokenize(sql: string): Tok[] {
     if (c === "/" && sql[i + 1] === "*") { const e = sql.indexOf("*/", i + 2); i = e === -1 ? sql.length : e + 2; continue; }
     if (c === "'" ) { const [text, next] = quoted(sql, i, "'"); out.push({ kind: "str", text }); i = next; continue; }
     if (c === '"' || c === "`") { const [text, next] = quoted(sql, i, c); out.push({ kind: "word", text }); i = next; continue; }
-    if (c === "[") { const e = sql.indexOf("]", i); out.push({ kind: "word", text: sql.slice(i + 1, e) }); i = e + 1; continue; }
+    if (c === "[") {
+      // an unterminated [ used to reset i to 0 and loop forever (security review #3)
+      const e = sql.indexOf("]", i);
+      out.push({ kind: "word", text: sql.slice(i + 1, e === -1 ? sql.length : e) });
+      i = e === -1 ? sql.length : e + 1;
+      continue;
+    }
     if (/[0-9.]/.test(c) || ((c === "-" || c === "+") && /[0-9.]/.test(sql[i + 1] ?? ""))) {
       const m = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/.exec(sql.slice(i))!;
       out.push({ kind: "num", text: m[0] }); i += m[0].length; continue;

@@ -124,8 +124,9 @@ export function parseLinksJson(text: string): ParseResult {
     if (!t.known) rec("warning", "record/unknown-type", `סוג הקשר "${connectionType}" אינו מוכר לגנרטור, והקישור יישמר כ"אחר".`);
     if (t.type === "LINKER") rec("warning", "record/linker-skipped", 'רשומות מסוג "linker" אינן מיובאות לאוצריא כלל.');
 
+    // defineProperty: a key named "__proto__" is kept as data, not taken as the object's prototype
     const extras: Record<string, unknown> = {};
-    for (const k of Object.keys(r)) if (!KNOWN_KEYS.has(k)) extras[k] = r[k];
+    for (const k of Object.keys(r)) if (!KNOWN_KEYS.has(k)) Object.defineProperty(extras, k, { value: r[k], enumerable: true, writable: true, configurable: true });
 
     records.push({
       line_index_1: li1!, line_index_2: li2!, heRef_2: heRef2!, path_2: path2!, connectionType,

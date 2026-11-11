@@ -9,11 +9,16 @@ import { LinkerError } from "../../core/errors";
  *   • Dictionaries live in zstd_dict(id, dict). Like the app (line_content_codec.dart), a frame's
  *     dictionary is chosen by the dictID in the FRAME HEADER, matched against the dictID in each
  *     DICTIONARY HEADER — never by zstd_dict.id.
- *   • A frame without a content size, or decoding to more than 16 MiB, is treated as corrupt.
+ *   • A frame without a content size, decoding to more than 9 MiB, or longer than 2 MiB compressed, is
+ *     treated as corrupt (see MAX_LINE_BYTES).
  * Decoder: zstd-wasm-decoder (one instance per dictionary; it caps a dictionary at 2 MiB, which is
  * exactly the size of the official one — see the matrix §3.5).
  */
-export const MAX_LINE_BYTES = 16 * 1024 * 1024;
+// 9 MiB: above ~9.4 MB of declared content (or a 2 MiB input) zstd-wasm-decoder switches to its
+// streaming path, which decodes EVERY concatenated frame with no output cap — a 95 KB value could
+// expand to gigabytes. Staying under both limits keeps the bounded one-shot path (security review #1).
+export const MAX_LINE_BYTES = 9 * 1024 * 1024;
+const MAX_COMPRESSED_BYTES = 2 * 1024 * 1024 - 1;
 const FRAME_MAGIC = [0x28, 0xb5, 0x2f, 0xfd] as const;
 const DICT_MAGIC = [0x37, 0xa4, 0x30, 0xec] as const;
 const MAX_DICT_BYTES = 2 * 1024 * 1024;
@@ -93,8 +98,8 @@ export class LineContentCodec {
     if (!(value instanceof Uint8Array) || !isZstdFrame(value))
       throw new LinkerError("db/value-not-text", "בשדה הטקסט נמצא ערך בינארי שאינו טקסט דחוס. ייתכן שהמסד אינו מסד אוצריא או שהוא פגום.");
     const { dictId, contentSize } = frameHeader(value);
-    if (contentSize === null || contentSize > MAX_LINE_BYTES)
-      throw new LinkerError("db/compressed-corrupt", "שורה דחוסה במסד פגומה (גודל לא מוצהר או גדול מ־16MB).", { contentSize });
+    if (contentSize === null || contentSize > MAX_LINE_BYTES || value.length > MAX_COMPRESSED_BYTES)
+      throw new LinkerError("db/compressed-corrupt", "שורה דחוסה במסד פגומה או גדולה מדי (גודל לא מוצהר, או יותר מ־9MB).", { contentSize, compressed: value.length });
     const out = this.decoder(dictId).decompressSync(value, contentSize);
     if (out.length !== contentSize)
       throw new LinkerError("db/compressed-corrupt", "פענוח שורה דחוסה במסד החזיר אורך שגוי. המסד כנראה פגום.", { expected: contentSize, got: out.length });

@@ -186,3 +186,20 @@ describe("property: the anchor's visible text is exactly the marker (generator o
     });
   }
 });
+
+describe("custom patterns are bounded (security review #7)", () => {
+  it("unbounded quantifiers become bounded; escapes and classes are untouched", async () => {
+    const { boundQuantifiers } = await import("../../../../src/linking/automatic/footnotes/markers");
+    expect(boundQuantifiers(String.raw`\((\d+)\)`)).toBe(String.raw`\((\d{1,64})\)`);
+    expect(boundQuantifiers("[*+]x*?y{2,}")).toBe("[*+]x{0,64}?y{2,66}");
+    expect(boundQuantifiers(String.raw`\*+`)).toBe(String.raw`\*{1,64}`);
+  });
+  it("a polynomial pattern on a long line finishes quickly", async () => {
+    const { checkCustomPattern } = await import("../../../../src/linking/automatic/footnotes/markers");
+    const r = checkCustomPattern("a*a*b");
+    expect(r.ok).toBe(true);
+    const t0 = Date.now();
+    if (r.ok) "a".repeat(20_000).match(r.regex);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+});

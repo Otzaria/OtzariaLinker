@@ -1,3 +1,4 @@
+import { LinkerError } from "../../../core/errors";
 /*
  * SQLite record format (https://www.sqlite.org/fileformat2.html §2.1): varints and serial types.
  */
@@ -6,13 +7,24 @@ export type TextEncodingId = 1 | 2 | 3; // UTF-8, UTF-16le, UTF-16be
 
 /** Reads a SQLite varint (1–9 bytes, big-endian, 7 bits per byte, 9th byte full). Returns [value, bytesRead]. */
 export function readVarint(b: Uint8Array, at: number): [number, number] {
+  if (at < 0 || at >= b.length) throw corrupt("varint outside the page");
   let v = 0;
   for (let i = 0; i < 8; i++) {
-    const byte = b[at + i]!;
+    const byte = b[at + i];
+    if (byte === undefined) throw corrupt("varint runs past the end");
     v = v * 128 + (byte & 0x7f);
     if (!(byte & 0x80)) return [v, i + 1];
   }
-  return [v * 256 + b[at + 8]!, 9];
+  const last = b[at + 8];
+  if (last === undefined) throw corrupt("varint runs past the end");
+  return [v * 256 + last, 9];
+}
+
+/** SQLite's own limit on columns per table (SQLITE_MAX_COLUMN). */
+const MAX_COLUMNS = 32767;
+
+function corrupt(what: string): LinkerError {
+  return new LinkerError("db/corrupt", `המסד פגום (${what}). אי אפשר לקרוא אותו בבטחה.`);
 }
 
 const DECODERS: Record<TextEncodingId, TextDecoder> = {
@@ -30,10 +42,13 @@ export function serialSize(t: number): number {
 /** Decodes a full record payload into its values. */
 export function decodeRecord(p: Uint8Array, enc: TextEncodingId): SqlValue[] {
   const [headerSize, n0] = readVarint(p, 0);
+  // a hostile headerSize used to read "undefined" bytes as zeros until memory ran out (review #4)
+  if (headerSize > p.length || headerSize < n0) throw corrupt("record header larger than the record");
   const types: number[] = [];
   for (let at = n0; at < headerSize; ) {
     const [t, n] = readVarint(p, at);
     types.push(t);
+    if (types.length > MAX_COLUMNS) throw corrupt("too many columns in a record");
     at += n;
   }
   const view = new DataView(p.buffer, p.byteOffset, p.byteLength);
