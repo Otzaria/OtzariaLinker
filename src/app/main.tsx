@@ -8,8 +8,8 @@ function App() {
   useEffect(() => {
     const w = new DbWorker();
     w.onmessage = (e: MessageEvent) => {
-      const r = e.data as { ok: boolean; result?: { sqlite: string }; error?: string };
-      setEngine(r.ok ? `SQLite ${r.result?.sqlite}` : `שגיאה: ${r.error}`);
+      const r = e.data as { ok: boolean; result?: { sqlite: string; zstd: string }; error?: string };
+      setEngine(r.ok ? `SQLite ${r.result?.sqlite} · ${r.result?.zstd}` : `שגיאה: ${r.error}`);
       (globalThis as Record<string, unknown>).__diagnostics = r;
       w.terminate();
     };

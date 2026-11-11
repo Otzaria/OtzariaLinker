@@ -9,7 +9,16 @@ export type ErrorCode =
   | "archive/suspicious-ratio"
   | "archive/corrupt"
   | "archive/unsupported-compression"
-  | "text/undecodable";
+  | "text/undecodable"
+  | "db/value-not-text"
+  | "db/compressed-corrupt"
+  | "db/compressed-unknown-dictionary"
+  | "db/dictionary-conflict"
+  | "db/dictionary-too-large"
+  | "db/not-sqlite"
+  | "db/wal"
+  | "db/no-books"
+  | "db/schema-newer";
 
 export class LinkerError extends Error {
   override readonly name = "LinkerError";

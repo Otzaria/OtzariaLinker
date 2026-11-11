@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { buildInfo } from "./build/plugins/build-info.ts";
@@ -15,11 +16,18 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
  */
 export default defineConfig({
   base: "./",
+  resolve: {
+    alias: [
+      // The bare ZstdDecoder class. The package's browser entry also inlines its own WASM and a
+      // decoder pool we do not use; we embed the WASM once (wasm-b64) and compile it ourselves.
+      { find: /^zstd-wasm-decoder\/class$/, replacement: fileURLToPath(new URL("./node_modules/zstd-wasm-decoder/_esm/zstd-wasm.js", import.meta.url)) },
+    ],
+  },
   define: buildInfo(pkg.version),
   plugins: [
     wasmBase64(),
     viteSingleFile({ removeViteModuleLoader: true }),
-    licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "sql.js", "fflate"] }),
+    licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "sql.js", "fflate", "zstd-wasm-decoder"] }),
   ],
   worker: { format: "iife", plugins: () => [wasmBase64()] },
   build: {

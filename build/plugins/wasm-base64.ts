@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import type { Plugin } from "vite";
 
 /**
@@ -19,7 +20,10 @@ export function wasmBase64(): Plugin {
     },
     load(id) {
       if (!id.startsWith("\0" + PREFIX)) return null;
-      const file = require.resolve(id.slice(PREFIX.length + 1).replace(/\.b64$/, ""));
+      const spec = id.slice(PREFIX.length + 1).replace(/\.b64$/, "");
+      // A file outside a package's "exports" map cannot be require.resolve()d; read it from node_modules.
+      const direct = join(process.cwd(), "node_modules", spec);
+      const file = existsSync(direct) ? direct : require.resolve(spec);
       return `export default ${JSON.stringify(readFileSync(file).toString("base64"))};`;
     },
   };
