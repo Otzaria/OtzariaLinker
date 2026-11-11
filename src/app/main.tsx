@@ -58,6 +58,7 @@ const service: BooksService = {
   searchBook: (key, query, options, opts) => call("searchBook", [key, query, options], opts),
   altToc: (key, opts) => call("altToc", [key], opts),
   headings: (key, opts) => call("headings", [key], opts),
+  runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
 };
 
 const saver: Saver = {

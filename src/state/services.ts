@@ -5,6 +5,8 @@ import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
 import type { BookSearchResult } from "../core/text/find";
+import type { MaxLinkJobResult } from "../linking/maxlink-report";
+import type { PlanStep } from "../linking/plan";
 
 /*
  * What the state layer needs from the outside world, as interfaces (architecture rule 17). The app
@@ -48,6 +50,11 @@ export interface BooksService {
   altToc(bookKey: string, opts?: CallOptions): Promise<LibraryAltTocStructure[] | null>;
   /** every heading line of a book, in order */
   headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
+  /**
+   * Runs the steps of a max-link plan in the worker (workers/maxlink-job.ts). Optional so that
+   * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
+   */
+  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>> }, opts?: CallOptions): Promise<MaxLinkJobResult>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */
