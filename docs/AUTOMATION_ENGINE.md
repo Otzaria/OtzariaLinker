@@ -49,8 +49,8 @@ DEFAULT_THRESHOLDS = { certain: 0.95, high: 0.85, possible: 0.6, ambiguityMargin
 `confidenceOf(score, runnerUp)`: מתחת ל־0.6 → `none`; מועמד שני בטווח של 0.05 מהטוב → `ambiguous`;
 מ־0.95 → `certain`; מ־0.85 → `high`; אחרת `possible`. **רק `certain` מאושר ב"אישור כל הוודאיות".**
 
-לכל מנוע יש אפשרות `thresholds` (או בדרך אחרת), אבל **הממשק עדיין לא חושף אפשרויות של מנועים**:
-`SuggestionsPanel` קורא ל־`runEngine` ול־`runBatch` בלי אפשרויות, וכל ריצה משתמשת בברירות המחדל.
+לכל מנוע יש אפשרות `thresholds` (ואפשרויות נוספות משלו). במצב מתקדם הממשק חושף אותן ב"הגדרות השיטה",
+ואחרת כל ריצה משתמשת בברירות המחדל (§1.2.1).
 
 ### 1.2 הרישום (`src/linking/automatic/index.ts`)
 

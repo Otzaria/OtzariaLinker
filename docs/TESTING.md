@@ -13,9 +13,9 @@
 | חוזה | `tests/contracts/` | Vitest, על רשומות אמיתיות מהספרייה | כן |
 | Property | בתוך בדיקות Vitest | fast-check | כן |
 | ארכיטקטורה | `tests/unit/architecture.test.ts` | Vitest, סריקת `import` | כן |
-| E2E | `tests/e2e/` | Playwright, Chrome ו־Edge המותקנים | לא: `npx playwright test` |
+| E2E | `tests/e2e/` | Playwright: Chrome ו־Edge המותקנים, ו־Firefox של Playwright | לא: `npx playwright test` |
 | בסיס רגרסיה של v3 | `tests/e2e/legacy-baseline.spec.ts` | Playwright | לא: `npm run test:legacy` |
-| מול מסד אמיתי | `tests/integration/**/real-db.local.test.ts` | Vitest | רק עם `OTZARIA_DB` |
+| מול מסד אמיתי | `tests/integration/**/*.local.test.ts` (§4) | Vitest | רק עם `OTZARIA_DB` |
 
 ## 2. הרצה
 
@@ -32,46 +32,76 @@ npm run check                                       # typecheck + npm test + E2E
 ```
 
 **E2E רץ על התוצר, לא על שרת הפיתוח.** `playwright.config.ts` פותח את `dist/OtzariaLinker.html`
-מ־`file://`, עם `offline: true` ו־`locale: "he-IL"`, ב־Chrome וב־Edge (`channel`), בלי להוריד דפדפנים.
-לכן אחרי שינוי בקוד צריך `npm run build` לפני `npx playwright test`. המטריצה: Chrome ו־Edge (המותקנים במחשב) ו־Firefox (של Playwright: `npx playwright install firefox`).
+מ־`file://`, עם `offline: true` ו־`locale: "he-IL"`. לכן אחרי שינוי בקוד צריך `npm run build` לפני
+`npx playwright test`. המטריצה היא שלושה פרויקטים: `chrome` ו־`edge` (`channel`: הדפדפנים המותקנים במחשב,
+`npx playwright install chrome msedge` אם חסרים) ו־`firefox` (הבנייה של Playwright: `npx playwright install firefox`).
+`legacy-baseline.spec.ts` לא רץ ב־Firefox (`testIgnore`). כל מפרט רץ אפוא בשלושה דפדפנים; לדפדפן אחד:
+`--project=chrome`.
 
 כל בדיקת E2E משתמשת ב־`watchPage` (`tests/e2e/helpers.ts`) ונכשלת על **כל** בקשה שאינה `file:`, `data:`
 או `blob:`, ועל כל שגיאה לא מטופלת בדף.
 
 | קובץ E2E | מה הוא בודק |
 |---|---|
-| `offline-single-file.spec.ts` | הקובץ עולה אופליין, וה־Worker קורא בקורא ה־SQLite העצל וב־zstd תחת ה־CSP |
+| `offline-single-file.spec.ts` | הקובץ עולה אופליין מ־`file://`, וה־Worker קורא בקורא ה־SQLite העצל וב־zstd תחת ה־CSP (`data-engine`) |
 | `manual-linking.spec.ts` | פתיחת מסד וקובץ, בחירה, יצירה, undo/redo, ייצוא; ערכה כהה ומסך צר |
 | `automatic-linking.spec.ts` | מנוע הכותרות ב־Worker, טבלה, "אישור כל הוודאיות", כרטיס, undo |
-| `engines.spec.ts` | מנוע ההערות על זוג טקסטים, מנוע הד"ה על רש"י ובראשית מהמסד האמיתי החלקי, וקישור באצווה |
-| `robustness.spec.ts` | מסד עם מעגל בעץ העמודים נדחה עם הודעה, והקובץ הבא עדיין נפתח |
+| `engines.spec.ts` | מנוע ההערות על זוג טקסטים; הגדרות המנוע במצב מתקדם (תגית מותאמת עוברת ל־Worker, ביטוי רגולרי מסוכן חוסם את ההרצה); מנוע הד"ה על רש"י ובראשית מהמסד האמיתי החלקי; וקישור באצווה |
+| `citations.spec.ts` | מנוע מראי המקומות: ספר טקסט שמצטט את בראשית מקושר למסד הפתוח, ואז מאושר |
+| `maxlink.spec.ts` | קישור מרבי על "תיקייה" של פירוש וספר הערות מול המסד: תכנון, הרצה, דוח, אישור הוודאיות, undo |
 | `qa.spec.ts` | הבדיקה מוצאת כפול וקישור לכותרת; התיקון הקבוצתי מוחק רק את ההעתק |
 | `db-links.spec.ts` | קישורי המסד של ספר: סיכום, סינון לפי ספר ולפי סוג, העתקה לפרויקט, וייצוא שמוחזק עד אישור (כלל ההחלפה) |
-| `legacy-baseline.spec.ts` | 93/93 הבדיקות העצמיות של `legacy/OtzariaLinker-v3.html` |
+| `db-mapping.spec.ts` | מסד SQLite שאינו במבנה של אוצריא: גרירה, אשף המיפוי, פתיחה וקריאת השורות |
+| `records-import.spec.ts` | קישורים מקובץ JSON בפריסה אחרת (שמות שדות משלו, מספור מ־0): ניחוש, תיקון שדה, תצוגה מקדימה וייבוא |
+| `relink.spec.ts` | מעבר למהדורה חדשה של ספר: השוואה, והעברת הקישורים הבטוחים |
+| `alt-toc.spec.ts` | עורך מבני הכותרות: מבנה חדש מכותרות הספר, מספור בגימטריה, שמירה (עם undo) וייצוא ZIP עם `links/`, `alt_toc/` ו־`_report.txt` |
+| `book-search.spec.ts` | חיפוש בטקסט הספר: <kbd>Ctrl</kbd>+<kbd>F</kbd>, שאילתה בלי ניקוד שמוצאת טקסט מנוקד, הבא/הקודם, רשימת התוצאות, קפיצה והדגשה, <kbd>Esc</kbd> |
+| `history-list.spec.ts` | רשימת ההיסטוריה: הפעולות מהחדשה לישנה, מעבר אחורה וקדימה בעכבר ובמקלדת |
+| `help.spec.ts` | <kbd>F1</kbd> ולחצן העזרה פותחים את המדריך, פרקים מנווטים בתוכו בלי לעזוב את הדף, <kbd>Esc</kbd> סוגר |
+| `robustness.spec.ts` | מסד עם מעגל בעץ העמודים נדחה עם הודעה, והקובץ הבא עדיין נפתח |
+| `legacy-baseline.spec.ts` | 93/93 הבדיקות העצמיות של `legacy/OtzariaLinker-v3.html` (לא רץ ב־Firefox) |
 
 ## 3. Property tests
 
-fast-check משמש איפה שיש אינווריאנטה שקל לנסח ושקשה לכסות בדוגמאות:
+fast-check משמש איפה שיש אינווריאנטה שקל לנסח ושקשה לכסות בדוגמאות (12 קבצים; הרשימה נבנית מ־`grep -rl "fc.assert" tests`):
 
 | קובץ | מה נבדק |
 |---|---|
-| `tests/unit/core/text/offsets.test.ts` | כל אופסט שמיוצא חוזר לאינדקס הגלוי שהתכוונו אליו |
-| `tests/unit/core/text/sanitize.test.ts` | ה־HTML המסונן מכיל בדיוק את התווים הגלויים של השורה הגולמית |
-| `tests/unit/state/history.test.ts` | undo מחזיר כל תמונת מצב |
-| `tests/unit/core/text/gematria.test.ts`, `tests/unit/matching/hebrew-tokens.test.ts`, `tests/unit/linking/footnotes/markers.test.ts`, `tests/unit/linking/dibur-hamatchil/engine.test.ts` | גימטריה, טוקנים ואופסטים גולמיים, סימני הערות, המנוע |
+| `tests/unit/core/text/offsets.test.ts` | כל אופסט שמיוצא חוזר לאינדקס הגלוי שהתכוונו אליו; מונוטוניות; `visibleUnits` ו־`countVisibleChars` מסכימים |
+| `tests/unit/core/text/sanitize.test.ts` | ה־HTML המסונן מכיל בדיוק את התווים הגלויים של השורה הגולמית, ואף תגית לא נושאת תכונה או מטפל אירועים |
+| `tests/unit/core/text/gematria.test.ts` | גימטריה: 1–999 הולכים ושבים, גרש וגרשיים מתעלמים |
+| `tests/unit/core/text/find.test.ts` | חיפוש בספר: המסלול המהיר של `htmlToPlainText` שווה לסריקה המלאה, וכל קטע מהטקסט המקופל נמצא בו (הדחייה המהירה לא מסתירה התאמה) |
+| `tests/unit/core/alt-toc.test.ts` | מבני כותרות: צמתים ← רשומות ← צמתים הוא זהות, בכל עומק |
+| `tests/unit/matching/hebrew-tokens.test.ts` | כל טוקן הוא קטע מהקלט שלא שונה, שאותיותיו הן המפתח שלו |
+| `tests/unit/matching/line-diff.test.ts` | יישור שורות בין מהדורות: ההתאמה עולה ממש ואינה ממפה שתי שורות ישנות לחדשה אחת |
+| `tests/unit/state/history.test.ts` | undo של כל רצף פעולות מחזיר להתחלה; מעבר לנקודה `p` משאיר בדיוק `p` פעולות |
+| `tests/unit/linking/merge.test.ts` | איחוד הצעות (קישור מרבי): בלתי תלוי בסדר הקלט, אידמפוטנטי, ולא מאבד קישור |
+| `tests/unit/linking/citations/numbers.test.ts` | מספרים עבריים במראי מקומות: כל n בין 1 ל־999 נקרא חזרה, ומספור בסדר לא קנוני נדחה |
+| `tests/unit/linking/footnotes/markers.test.ts` | הטקסט הגלוי של העוגן הוא בדיוק הסימן (אופסטים של הגנרטור), לכל סגנון סימן |
+| `tests/unit/linking/dibur-hamatchil/engine.test.ts` | העוגן הוא קטע משורת הבסיס שלא שונתה, ומפתח החיפוש שלו הוא של הד"ה; הקלט לא משתנה |
+
+**`FC_SEED`.** `tests/setup/fast-check.ts` (מוגדר ב־`setupFiles` של Vitest) קורא את `FC_SEED`: מספר שלם נקבע
+כזרע גלובלי של fast-check. בלעדיו כל ריצה מקומית שונה, וכך מכוסה יותר שטח. ב־CI ובשחרור הזרע נגזר
+מה־commit (`FC_SEED=$((16#${GITHUB_SHA:0:7})) npm test`), כך שבנייה אדומה חוזרת בדיוק, ו־commit אחר עדיין בודק
+קלטים אחרים. כשבדיקה נכשלת, fast-check מדפיס את הזרע והנתיב. להרצה חוזרת:
+`FC_SEED=<הזרע> npx vitest run tests/unit/core/text/offsets.test.ts` (ב־PowerShell: `$env:FC_SEED = "<הזרע>"`).
 
 ## 4. בדיקות מקומיות מול מסד אמיתי
 
-הקבצים שבטבלה רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על `seforim.db` (`describe.runIf`). המסד נפתח
-לקריאה בלבד (`openSync(path, "r")`) ואף פעם לא נכתב. בלי המשתנה הם מדולגים, וב־CI הם לא רצים.
+הקבצים שבטבלה (`*.local.test.ts` תחת `tests/integration/`) רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על
+`seforim.db` (`describe.runIf`). המסד נפתח לקריאה בלבד (`openSync(path, "r")`) ואף פעם לא נכתב. בלי
+המשתנה הם מדולגים, וב־CI הם לא רצים. משתני ההרצה האחרים אופציונליים, חוץ מהמסומן.
 
-| קובץ | מה הוא מודד |
-|---|---|
-| `tests/integration/database/real-db.local.test.ts` | הקורא העצל ו־`OtzariaDbReader` מול המסד המלא |
-| `tests/integration/linking/headings/real-db.local.test.ts` | מנוע הכותרות על 13 זוגות, מול הקישורים שבמסד |
-| `tests/integration/linking/dibur-hamatchil/real-db.local.test.ts` | מנוע הד"ה על ספרים שלמים |
-| `tests/integration/linking/footnotes/real-db.local.test.ts` | מנוע ההערות על מדרש ויסעו ועל 25 ספרים עם `line_note` |
-| `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; ועם `OTZARIA_LIBRARY` גם השחזור של רשומות הספרייה מהמסד |
+| קובץ | מה הוא מודד | משתני סביבה |
+|---|---|---|
+| `tests/integration/database/real-db.local.test.ts` | הקורא העצל ו־`OtzariaDbReader` מול המסד המלא | `OTZARIA_DB` |
+| `tests/integration/database/alt-toc-real-db.local.test.ts` | מבני `alt_toc` של ספרים שאינם של ספריא (ספר העיטור, תרגום ותפסיר רס"ג) במסד האמיתי | `OTZARIA_DB` |
+| `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; והשחזור של רשומות הספרייה מהמסד | `OTZARIA_DB`; הבלוק השני רק עם `OTZARIA_LIBRARY` |
+| `tests/integration/linking/headings/real-db.local.test.ts` | מנוע הכותרות על 13 זוגות, מול הקישורים שבמסד | `OTZARIA_DB` |
+| `tests/integration/linking/dibur-hamatchil/real-db.local.test.ts` | מנוע הד"ה על ספרים שלמים | `OTZARIA_DB`; `DH_REPORT=<קובץ>` כותב את כל ההחטאות |
+| `tests/integration/linking/footnotes/real-db.local.test.ts` | מנוע ההערות על מדרש ויסעו ועל 25 ספרים עם `line_note` | `OTZARIA_DB` |
+| `tests/integration/linking/citations/real-db.local.test.ts` | מנוע מראי המקומות על מדגם של ספרים מכל הקטגוריות, מול קישורי המראי מקום שבמסד (דיוק ושחזור לפי רמת ודאות), וזמן על ספר גדול | `OTZARIA_DB`; `CITATIONS_REPORT=<קובץ.json>` (כל ההצעות ששפטו), `CITATIONS_ONLY=<שם ספר>`, `CITATIONS_SHARD=k/n` (כל n־י ספר, להרצה מקבילה; אז הספים לא נבדקים) |
+| `tests/integration/linking/maxlink-real-db.local.test.ts` | קישור מרבי על ספר בסיס שלם: תכנון, הרצה, איחוד והשוואה לקישורי המסד (כמה כבר קיימים, וכמה סותרים) | `OTZARIA_DB`; `MAXLINK_BASES="ברכות,בראשית"` (ברירת מחדל: ברכות), `MAXLINK_LOG=<קובץ>` |
 
 ```bash
 # bash
@@ -84,7 +114,7 @@ $env:OTZARIA_DB = "C:/ProgramData/otzaria/books/seforim.db"
 npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 ```
 
-`DH_REPORT=<קובץ>` עם בדיקת הד"ה כותב את כל ההחטאות לקובץ. הבדיקות מדפיסות precision, recall ועוגנים
+הבדיקות מדפיסות precision, recall ועוגנים
 מדויקים; התוצאות שנמדדו מסוכמות ב־[`AUTOMATION_ENGINE.md`](AUTOMATION_ENGINE.md). הריצה על ספרים שלמים
 לוקחת דקות (ה־timeout של כל בדיקה עד 10 דקות).
 
@@ -157,7 +187,8 @@ py -3 -I scripts/fixtures/make_generic_dbs.py
 - כל שינוי בהתנהגות מגיע עם בדיקה, באותו commit. שינוי מכוון מעדכן את הבדיקה; לא מוחקים אותה.
 - שמות הבדיקות שהועברו מגרסה 3 נשארים בעברית ובניסוח המקורי, כדי שאפשר יהיה לעקוב שאף אחת לא אבדה.
 - בזמן עבודה מריצים את הבדיקות הקשורות לשינוי; לפני PR את הכול (`npm run check`).
-- CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test`, build, E2E ב־Chrome וב־Edge, ובודק שבנייה
-  חוזרת נותנת אותו SHA-256.
+- CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test` עם `FC_SEED` שנגזר מה־commit, build, E2E ב־Chrome,
+  ב־Edge וב־Firefox (`npx playwright install --with-deps chrome msedge firefox`), ובודק שבנייה חוזרת נותנת
+  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)).
 
 </div>

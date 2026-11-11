@@ -23,10 +23,10 @@ npm run build       # dist/OtzariaLinker.html
      התאריך הוא **תאריך ה־commit**, כדי שבנייה חוזרת תפיק אותם בתים. בבנייה מקומית מעץ עבודה מלוכלך,
      ל־commit נוסף `-dirty`. הגרסה וה־commit מוצגים בתחתית תפריט ההגדרות, והגרסה נכתבת גם לקובץ הפרויקט.
    - `build/plugins/license-notice.ts` כותב בראש הקובץ את הודעת ה־GPL ואת הרישיונות של כל חבילה מוטמעת.
-2. `scripts/package-release.mjs` סורק את התוצר ונכשל אם יש בו משאב רשת, ואז יוצר
+2. `scripts/package-release.mjs` סורק את התוצר ונכשל אם יש בו משאב רשת או ממשק רשת, ואז יוצר
    `dist/OtzariaLinker.html`, `dist/OtzariaLinker-<version>.html` ו־`dist/SHA256SUMS`.
 
-גודל התוצר כ־1.6MB. רוב המשקל: שני הגופנים, ה־WASM והאייקונים.
+גודל התוצר כ־1MB (הסקריפט נכשל מעל 1.5MiB, `BUDGET`). רוב המשקל: שני הגופנים, ה־WASM והאייקונים.
 
 **שרת הפיתוח** נוח לעבודה על הממשק, אבל הוא רץ מ־`http://localhost` ולא מ־`file://`. בעיות של Worker,
 WASM או CSP מופיעות רק בקובץ הבנוי. לכן בודקים את התוצר: `npm run build`, ופותחים את

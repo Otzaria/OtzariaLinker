@@ -18,10 +18,16 @@
 
 1. `vite build` → `dist/index.html`, קובץ אחד שכולל הכול ([`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) §1).
 2. `scripts/package-release.mjs`:
-   - **שומר אופליין:** נכשל אם בתוצר יש `<script src>` שאינו `data:`/`blob:`, `<link href>` לרשת,
-     `@import` או `url()` לרשת, או `importScripts` מרשת;
+   - **שומר אופליין** (סריקת התוצר בביטויים רגולריים): נכשל אם יש בו `<script src>` שאינו `data:`/`blob:`,
+     `<link href>` ל־`http(s)`, `@import` או `url()` ל־`http(s)`, או `importScripts`. הוא נכשל גם על
+     **ממשקי רשת בקוד עצמו**: קריאה חשופה ל־`fetch(` (שיטות שלנו בשם `fetch`, כמו `this.fetch`, מותרות),
+     `XMLHttpRequest`, `WebSocket`, `EventSource` ו־`sendBeacon`. הוא מדפיס את כל הממצאים ויוצא בשגיאה;
    - מעתיק ל־`OtzariaLinker.html` ול־`OtzariaLinker-<version>.html` (הגרסה מ־`package.json`);
-   - כותב `SHA256SUMS` ומדפיס את הגודל ואת ה־hash.
+   - כותב `SHA256SUMS`;
+   - **תקציב גודל:** נכשל אם `OtzariaLinker.html` גדול מ־1.5MiB (הקבוע `BUDGET` ב־`scripts/package-release.mjs`). הקובץ
+     נפתח בלחיצה כפולה במחשבים רגילים, ולכן גדילה צריכה להיות החלטה: מעלים את `BUDGET` רק בכוונה. אחרי
+     שהוסר sql.js מהתוצר הקובץ כ־1MB (לפני ההסרה כ־1.8MB);
+   - מדפיס את הגודל ואת ה־hash.
 
 ## 3. בנייה שחוזרת על עצמה
 
@@ -32,14 +38,17 @@
 - ה־ZIP שהכלי מייצא נכתב עם תאריך שינוי קבוע, מאותה סיבה.
 - הגרסאות של כל החבילות נעולות (`.npmrc` עם `save-exact`, `package-lock.json`, `npm ci`).
 
-`ci.yml` בודק את זה בכל push ו־PR: בונה, שומר את ה־SHA-256, מוחק את `dist`, בונה שוב ומשווה.
+`ci.yml` בודק את זה בכל push ו־PR, ו־`release.yml` בודק את זה מה־tag לפני שהקבצים מועלים: בונה, שומר את
+ה־SHA-256, מוחק את `dist`, בונה שוב ומשווה (`test "$sha1" = "$sha2"`).
 
 ## 4. CI (`.github/workflows/ci.yml`)
 
 רץ על push ל־`main` ול־`rewrite/**`, ועל כל pull request, ב־`ubuntu-latest` עם Node 22:
 
-`npm ci` → `npm run typecheck` → `npm test` → `npm run build` → התקנת Chrome ו־Edge →
-`npx playwright test` → בדיקת בנייה חוזרת → העלאת `dist/OtzariaLinker.html` כ־artifact (`OtzariaLinker-html`).
+`npm ci` → `npm run typecheck` → `npm test` (עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3) →
+`npm run build` (כולל הסריקה ותקציב הגודל, §2) → התקנת Chrome, Edge ו־Firefox (`npx playwright install
+--with-deps chrome msedge firefox`) → `npx playwright test` (שלושת הדפדפנים) → בדיקת בנייה חוזרת →
+העלאת `dist/OtzariaLinker.html` כ־artifact (`OtzariaLinker-html`).
 
 ## 5. שחרור (`.github/workflows/release.yml`)
 
@@ -53,7 +62,10 @@
 4. ה־workflow:
    - עושה checkout ל־tag;
    - **נכשל אם ה־tag אינו `v` + הגרסה שב־`package.json`**;
-   - מריץ typecheck, `npm test`, build ו־E2E אופליין ב־Chrome וב־Edge;
+   - מריץ typecheck, `npm test` (עם אותו `FC_SEED` מה־commit), build (עם הסריקה ותקציב הגודל) ו־E2E אופליין
+     בתוצר ב־Chrome, ב־Edge וב־Firefox;
+   - **בודק שהבנייה חוזרת על עצמה מה־tag:** בונה שוב ממחיקת `dist` ומשווה את ה־SHA-256 (§3). אי־התאמה
+     מכשילה את ה־workflow לפני ההעלאה;
    - מעלה את `OtzariaLinker.html`, `OtzariaLinker-<version>.html` ו־`SHA256SUMS` ל־Release (`--clobber`).
 5. בודקים שהקישור הקבוע מוריד את הגרסה החדשה, ושה־hash תואם ל־`SHA256SUMS`.
 
