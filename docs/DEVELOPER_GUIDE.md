@@ -137,6 +137,10 @@ __linker.prefs.layout.value                  // הפריסה
 5. `ctx.progress` מדי כמה מאות פריטים, ובדיקת `ctx.signal.aborted` בלולאות.
 6. נימוקים ואזהרות בעברית פשוטה, עם `code` יציב.
 7. בדיקות יחידה, ובדיקה על נתונים אמיתיים (fixture או בדיקה מקומית עם `OTZARIA_DB`).
+8. קישור מרבי (`AUTOMATION_ENGINE.md` §5): מנוע של **זוג** ספרים נכנס לתכנון רק כשיש לו כלל ב־
+   `src/linking/plan.ts` (`PAIR_ENGINES`, `stepsFor`). מנוע של **ספר אחד** (כל מנוע רשום שאינו ב־
+   `PAIR_ENGINES`) נכנס לבד, לכל ספר שנבחר, וצריך רק את ה־runner שלו ב־`SINGLE_BOOK_RUNNERS`
+   (`src/workers/maxlink-job.ts`): `(registry, source, options, ctx) → Promise<EngineResult>`.
 
 ### 5.2 פורמט ייבוא
 
