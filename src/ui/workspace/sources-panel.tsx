@@ -24,6 +24,11 @@ export function SourcesBody() {
                 {s.info.warnings.length > 0 && ` · ${s.info.warnings.length} אזהרות`}
               </div>
             </div>
+            {store.canRemap(s.info.id) && (
+              <button class="icon-btn" title="שינוי המיפוי של המסד" aria-label={`מיפוי ${s.info.label}`} onClick={() => void store.remapSource(s.info.id)}>
+                <Icon name="fl_settings" size={16} />
+              </button>
+            )}
             <button class="icon-btn" title="סגירת המקור" aria-label={`סגירת ${s.info.label}`} onClick={() => void store.closeSource(s.info.id)}>
               <Icon name="fl_dismiss" size={16} />
             </button>

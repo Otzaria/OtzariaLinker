@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { useStore } from "./context";
+import { DbMappingDialog } from "./dialogs/db-mapping-dialog";
 import { ExportDialog } from "./dialogs/export-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
@@ -52,6 +53,7 @@ export function App() {
       <Notices />
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       {store.dialog.value === "relink" && <RelinkDialog onClose={() => (store.dialog.value = null)} />}
+      <DbMappingDialog />
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

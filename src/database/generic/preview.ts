@@ -117,7 +117,7 @@ function columnPreview(name: string, type: string, rowidAlias: boolean, values: 
 }
 
 function display(v: SqlValue, kind: ColumnKind, codec: GenericTextCodec): string {
-  if (v === null) return "NULL";
+  if (v === null) return "";
   if (typeof v === "string") return clip(v);
   if (typeof v === "number" || typeof v === "bigint") return String(v);
   if (kind === "binary") return `‹${v.length} בתים›`;
