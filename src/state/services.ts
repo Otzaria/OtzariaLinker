@@ -2,6 +2,7 @@ import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { DbMapping, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
+import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
 import type { BookSearchResult } from "../core/text/find";
@@ -50,6 +51,12 @@ export interface BooksService {
   altToc(bookKey: string, opts?: CallOptions): Promise<LibraryAltTocStructure[] | null>;
   /** every heading line of a book, in order */
   headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
+  /**
+   * A book's existing database links, counted and paged (stage 10). Optional so that test fakes
+   * without databases need not implement it; the links panel then says the list is unavailable.
+   */
+  dbLinkSummary?(bookKey: string, opts?: CallOptions): Promise<DbLinkSummary | DbLinksUnavailable>;
+  dbLinksPage?(bookKey: string, query: DbLinkQuery, opts?: CallOptions): Promise<DbLinkPage>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */

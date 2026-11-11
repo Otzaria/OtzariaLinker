@@ -58,6 +58,8 @@ const service: BooksService = {
   searchBook: (key, query, options, opts) => call("searchBook", [key, query, options], opts),
   altToc: (key, opts) => call("altToc", [key], opts),
   headings: (key, opts) => call("headings", [key], opts),
+  dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
+  dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
 };
 
 const saver: Saver = {

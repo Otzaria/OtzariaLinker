@@ -1,4 +1,5 @@
 import { SOURCE_VIEW_TYPES } from "./connection-type";
+import type { LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
 import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "./titles";
@@ -34,6 +35,13 @@ export interface ValidationContext {
   /** undefined when the line is not loaded — the check is then reported as not verified */
   line(book: BookRef, index: number): LineFacts | undefined;
   lineCount(book: BookRef): number | undefined;
+  /**
+   * Whether the project holds a book's links file (imported), the user confirmed the library has
+   * none ("confirmed-new"), or neither ("missing"). Absent = unknown: the db-copy rule is skipped.
+   */
+  linksFile?(sourceTitle: string): "imported" | "confirmed-new" | "missing";
+  /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
+  existing?(link: Link): LinkMatch | null;
 }
 
 export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
@@ -43,6 +51,17 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
 
   if (link.provenance === "db")
     add("error", "export/db-link", "זה קישור קיים מהמסד. אי אפשר לכתוב אותו חזרה לקובץ קישורים כאילו נכתב שם (המידע המקורי שלו לא נשמר במסד).");
+  if (link.provenance === "db-copy") {
+    // A links file REPLACES the book's whole file in the library. A copied database link says the
+    // library most likely HAS a file for this book, so writing a new one would delete its other links.
+    if (ctx.linksFile?.(s.book.title) === "missing")
+      add("error", "export/db-copy-no-file", `הקישור הועתק מהמסד, וקובץ הקישורים של "${s.book.title}" לא נטען לפרויקט. קובץ שייוצא יחליף את כל הקובץ שבספרייה וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
+    add("info", "export/db-copy", "הקישור הועתק מהמסד ושוחזר ממנו: heRef_2, הסוג המקורי והקובץ שבו ישב אינם שמורים במסד. בדקו אותם לפני הייצוא.");
+  }
+  const match = link.provenance === "user" || link.provenance === "auto" ? ctx.existing?.(link) : null;
+  if (match === "same-link")
+    add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");
+  else if (match === "same-lines") add("info", "export/in-db-other-type", "במסד כבר יש קישור בין שתי השורות האלה, בסוג אחר או בכיוון אחר.");
 
   const f = storedForm(link);
   if (f.skipped === "linker") add("error", "export/linker", 'קישורים מסוג "קישור אוטומטי" (linker) אינם מיובאים לאוצריא. בחרו סוג אחר.');

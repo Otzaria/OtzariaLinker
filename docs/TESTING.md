@@ -46,6 +46,7 @@ npm run check                                       # typecheck + npm test + E2E
 | `engines.spec.ts` | מנוע ההערות על זוג טקסטים, מנוע הד"ה על רש"י ובראשית מהמסד האמיתי החלקי, וקישור באצווה |
 | `robustness.spec.ts` | מסד עם מעגל בעץ העמודים נדחה עם הודעה, והקובץ הבא עדיין נפתח |
 | `qa.spec.ts` | הבדיקה מוצאת כפול וקישור לכותרת; התיקון הקבוצתי מוחק רק את ההעתק |
+| `db-links.spec.ts` | קישורי המסד של ספר: סיכום, סינון לפי ספר ולפי סוג, העתקה לפרויקט, וייצוא שמוחזק עד אישור (כלל ההחלפה) |
 | `legacy-baseline.spec.ts` | 93/93 הבדיקות העצמיות של `legacy/OtzariaLinker-v3.html` |
 
 ## 3. Property tests
@@ -61,7 +62,7 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 
 ## 4. בדיקות מקומיות מול מסד אמיתי
 
-ארבעה קבצים רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על `seforim.db` (`describe.runIf`). המסד נפתח
+הקבצים שבטבלה רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על `seforim.db` (`describe.runIf`). המסד נפתח
 לקריאה בלבד (`openSync(path, "r")`) ואף פעם לא נכתב. בלי המשתנה הם מדולגים, וב־CI הם לא רצים.
 
 | קובץ | מה הוא מודד |
@@ -70,6 +71,7 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | `tests/integration/linking/headings/real-db.local.test.ts` | מנוע הכותרות על 13 זוגות, מול הקישורים שבמסד |
 | `tests/integration/linking/dibur-hamatchil/real-db.local.test.ts` | מנוע הד"ה על ספרים שלמים |
 | `tests/integration/linking/footnotes/real-db.local.test.ts` | מנוע ההערות על מדרש ויסעו ועל 25 ספרים עם `line_note` |
+| `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; ועם `OTZARIA_LIBRARY` גם השחזור של רשומות הספרייה מהמסד |
 
 ```bash
 # bash

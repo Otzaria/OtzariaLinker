@@ -2,6 +2,7 @@ import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceLine } from "../core/books";
 import type { DbMapping } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
+import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenedSource, OpenResult } from "../sources/registry";
 import type { BatchItem, BookDiff } from "./engine-job";
@@ -29,4 +30,8 @@ export interface SourcesApi {
   searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
   altToc(bookKey: string): LibraryAltTocStructure[] | null;
   headings(bookKey: string): BookHeading[];
+  /** counts of a book's existing (database) links by type and other book; progress counts links read */
+  dbLinkSummary(bookKey: string): DbLinkSummary | DbLinksUnavailable;
+  /** one filtered page of a book's existing links */
+  dbLinksPage(bookKey: string, query: DbLinkQuery): DbLinkPage;
 }

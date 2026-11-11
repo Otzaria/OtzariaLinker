@@ -27,6 +27,8 @@ import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink"
 import { loadPreferences, type Preferences } from "./preferences";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
+import { DbLinksState } from "./db-links";
+import { linePairIdentity } from "../core/links/equality";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
 /*
@@ -102,6 +104,8 @@ export class AppStore {
   readonly find: Record<Side, BookFind>;
   /** alternative TOC structures (alt_toc) of the project */
   readonly altToc: AltTocState;
+  /** links the open databases already have: list, per-line view, copying into the project (stage 10) */
+  readonly dbLinks: DbLinksState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -186,7 +190,9 @@ export class AppStore {
   });
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
-    return d ? validateLink(d, this.validation()) : [];
+    // editing a copied database link is fine; only its EXPORT waits for the book's links file
+    const { linksFile: _f, ...ctx } = this.validation();
+    return d ? validateLink(d, ctx) : [];
   });
 
   private noticeSeq = 0;
@@ -201,6 +207,7 @@ export class AppStore {
     this.lines = new LineStore(service);
     this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
     this.altToc = new AltTocState(this, service);
+    this.dbLinks = new DbLinksState(this, service);
   }
 
   /* ---------------- sources ---------------- */
@@ -258,6 +265,7 @@ export class AppStore {
     const s = this.sources.value.find((x) => x.info.id === id);
     if (!s) return;
     await this.service.close(id);
+    this.dbLinks.forgetSummary();
     batch(() => {
       this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
       for (const side of ["source", "target"] as const) {
@@ -283,6 +291,7 @@ export class AppStore {
       this.task.value = null;
     });
     this.lines.forgetAll();
+    this.dbLinks.forgetSummary();
     this.notify("warning", `${reason} הקישורים בפרויקט לא נפגעו — פתחו שוב את הספרים כדי להמשיך.`);
   }
 
@@ -780,6 +789,7 @@ export class AppStore {
     const parsed = parseLinksJson(text);
     const sourceRef = this.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
     const fileKey = `${sourceTitle}#${this.linkSeq++}`;
+    this.dbLinks.noteImportedFile(sourceTitle);
     const issues = [...parsed.issues];
     const links = parsed.records.map((r, i) => {
       const { link, issues: more } = recordToLink(r, i, sourceRef, (t) => this.resolveTitle(t), `file:${fileKey}:${i}`);
@@ -826,6 +836,8 @@ export class AppStore {
     }
     const total = [...need.values()].reduce((n, s) => n + s.size, 0);
     const ok = await this.runTask(label, async (opts) => {
+      // database links around the project's own links: validation reports "already in the database"
+      await this.dbLinks.loadAround(this.allLinks.value);
       let done = 0;
       for (const [key, chunks] of need)
         for (const c of chunks) {
@@ -920,6 +932,8 @@ export class AppStore {
         const l = b && this.lines.peek(b.key, index);
         return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
       },
+      linksFile: (title) => this.dbLinks.linksFile(title),
+      existing: (l) => this.dbLinks.matchDb(l),
     };
   }
 
@@ -1103,15 +1117,12 @@ export class AppStore {
 
 
 /**
- * "These two lines are already linked": both ends, in either direction and of any type. A suggestion
- * that only differs from an existing link by type (the library stores Onkelos as TARGUM) or by file
- * direction adds nothing, so it shows as "already exists".
+ * "These two lines are already linked": both ends, in either direction and of any type — the
+ * "same-lines" level of the ONE equality rule (core/links/equality.ts). A suggestion that only
+ * differs from an existing link by type (the library stores Onkelos as TARGUM) or by file direction
+ * adds nothing, so it shows as "already exists". Kept under this name for existing callers.
  */
-export function linePairKey(l: { source: LinkSide; target: LinkSide }): string {
-  const a = `${l.source.book.key}#${l.source.line}`;
-  const b = `${l.target.book.key}#${l.target.line}`;
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
+export const linePairKey = (l: { source: LinkSide; target: LinkSide }): string => linePairIdentity(l);
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {

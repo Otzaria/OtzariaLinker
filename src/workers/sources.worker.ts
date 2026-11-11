@@ -40,6 +40,8 @@ const handle = serve<SourcesApi>(
     runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     altToc: (_ctx, bookKey) => registry.altToc(bookKey),
     headings: (_ctx, bookKey) => registry.headings(bookKey),
+    dbLinkSummary: (ctx, bookKey) => registry.dbLinkSummary(bookKey, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
+    dbLinksPage: (ctx, bookKey, query) => registry.dbLinksPage(bookKey, query, { signal: ctx.signal }),
   },
   (m) => self.postMessage(m),
 );

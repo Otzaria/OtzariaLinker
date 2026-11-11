@@ -7,6 +7,7 @@ import { DbLinksReader, type DbLinkRow } from "../../database/otzaria/links-read
 import { OtzariaDbReader, type DbBook, type DbLine } from "../../database/otzaria/reader";
 import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
+import { LinkListing } from "./link-listing";
 
 /*
  * An Otzaria-family database as a book source. Read-only by construction: nothing here can write.
@@ -15,6 +16,8 @@ import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "
  */
 export class DbBookSource implements BookSource {
   private booksById = new Map<number, DbBook>();
+  /** listings of the last few books shown in the links panel (a big base book holds ~235k links) */
+  private readonly listings = new Map<number, Promise<LinkListing>>();
 
   private constructor(
     readonly info: SourceInfo,
@@ -74,6 +77,50 @@ export class DbBookSource implements BookSource {
     return (await this.links.atLines(ids)).map((r) => this.toLink(r));
   }
 
+  /**
+   * Every link of a book, from the link table's book indexes (DbLinksReader.bookLinks). The line
+   * index of the book's own end comes from the (bookId, lineIndex) index; the other end is read
+   * only for the page shown.
+   */
+  async linkListing(bookKey: string, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<LinkListing | string> {
+    if (!this.links) return `במסד "${this.info.label}" אין טבלת קישורים (link). ייתכן שזו גרסה ישנה או מסד אישי בלי קישורים.`;
+    const id = this.idOf(bookKey);
+    let p = this.listings.get(id);
+    if (!p) {
+      p = this.buildListing(bookKey, id, ctx);
+      this.listings.set(id, p);
+      p.catch(() => this.listings.delete(id)); // a cancelled or failed read is not cached
+      while (this.listings.size > 3) this.listings.delete(this.listings.keys().next().value!);
+    }
+    return p;
+  }
+
+  private async buildListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
+    const t0 = performance.now();
+    const rows = await this.links!.bookLinks(id, ctx);
+    const own = new Map((await this.reader.lineEntries(id)).map((e) => [e.id, e.index]));
+    const others = [...new Set(rows.other)];
+    const otherAt = new Map(others.map((b, i) => [b, i]));
+    const n = rows.ids.length;
+    const ownIndex = new Int32Array(n);
+    const other = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      ownIndex[i] = own.get(rows.ownLine[i]!) ?? -1;
+      other[i] = otherAt.get(rows.other[i]!)!;
+    }
+    return new LinkListing(
+      bookKey,
+      { ref: rows.ids, dir: rows.dir, other, type: rows.type, ownIndex },
+      others.map((b) => this.keyOf(b)),
+      async (ids) => {
+        const got = new Map((await this.links!.byIds(ids)).map((r) => [r.id, this.toLink(r)]));
+        return ids.map((i) => got.get(i)).filter((l): l is Link => !!l);
+      },
+      rows.method,
+      Math.round(performance.now() - t0),
+    );
+  }
+
   async altToc(bookKey: string): Promise<LibraryAltTocStructure[] | null> {
     if (!this.reader.caps.altToc) return null;
     const index = new Map((await this.reader.lineEntries(this.idOf(bookKey))).map((e) => [e.id, e.index]));
@@ -82,6 +129,7 @@ export class DbBookSource implements BookSource {
 
   close(): void {
     this.booksById.clear();
+    this.listings.clear();
   }
 
   private toLink(r: DbLinkRow): Link {
@@ -104,6 +152,7 @@ export class DbBookSource implements BookSource {
       declaredType: canonicalTypeString(r.type),
       heRef2: r.target.heRef ?? `${ref(r.target.bookId).title} ${r.target.lineIndex + 1}`,
       ...(r.anchors.length > 0 && { dbAnchors: r.anchors }),
+      ...(r.suppressedSides.length > 0 && { dbSuppressed: [...r.suppressedSides].sort() }),
     };
   }
 
