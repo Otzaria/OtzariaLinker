@@ -7,6 +7,9 @@ import type { InputFile, OpenedSource, OpenResult } from "../sources/registry";
 import type { BatchItem, BookDiff } from "./engine-job";
 import type { BookSearchResult } from "../core/text/find";
 import type { SearchOptions } from "./search-job";
+import type { MaxLinkJobResult } from "../linking/maxlink-report";
+import type { PlanStep } from "../linking/plan";
+import type { MaxLinkJobOptions } from "./maxlink-job";
 
 /** The worker's operations, as the UI calls them through RpcClient. */
 export interface SourcesApi {
@@ -29,4 +32,6 @@ export interface SourcesApi {
   searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
   altToc(bookKey: string): LibraryAltTocStructure[] | null;
   headings(bookKey: string): BookHeading[];
+  /** runs a max-link plan's steps (progress over all steps; one pair in memory at a time) */
+  runMaxLink(steps: PlanStep[], options: MaxLinkJobOptions): MaxLinkJobResult;
 }

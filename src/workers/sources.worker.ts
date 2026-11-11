@@ -10,6 +10,7 @@ import { SourceRegistry } from "../sources/registry";
 import { batchJob, diffJob, engineJob } from "./engine-job";
 import { serve, type ToWorker } from "./rpc";
 import { searchJob } from "./search-job";
+import { maxlinkJob } from "./maxlink-job";
 import type { SourcesApi } from "./sources-api";
 
 /** A tiny zstd frame of "בדיקת zstd": proves the decoder's WASM starts in this environment. */
@@ -40,6 +41,7 @@ const handle = serve<SourcesApi>(
     runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     altToc: (_ctx, bookKey) => registry.altToc(bookKey),
     headings: (_ctx, bookKey) => registry.headings(bookKey),
+    runMaxLink: (ctx, steps, options) => maxlinkJob(registry, steps, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
   },
   (m) => self.postMessage(m),
 );
