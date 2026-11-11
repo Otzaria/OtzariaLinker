@@ -40,6 +40,38 @@ test("footnotes: markers in the main book are matched to the notes book", async 
   expect(seen.errors).toEqual([]);
 });
 
+test("engine settings (advanced): a custom marker tag is passed to the worker; a dangerous regex blocks the run", async ({ page }) => {
+  const seen = watchPage(page);
+  // <small> markers: the automatic choice (sup, sub, parentheses) would not read them
+  const main = ["<h1>ספר דוגמה</h1>", "<h2>פרק א</h2>", "שורה ראשונה <small>1</small> ועוד <small>2</small>.", "<h2>פרק ב</h2>", "שוב <small>1</small>."].join("\n");
+  const notes = ["<h1>הערות לספר דוגמה</h1>", "<h2>פרק א</h2>", "(1) הערה ראשונה.", "(2) הערה שנייה.", "<h2>פרק ב</h2>", "(1) הערה בפרק ב."].join("\n");
+  await open(page, [
+    { name: "ספר דוגמה.txt", buffer: Buffer.from(main) },
+    { name: "הערות לספר דוגמה.txt", buffer: Buffer.from(notes) },
+  ]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: /^ספר דוגמה/ }).first().getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: "הערות לספר דוגמה" }).first().getByRole("button", { name: "יעד" }).click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "הערות שוליים" });
+  await page.getByRole("button", { name: "הגדרות השיטה (מצב מתקדם)" }).click();
+  await page.locator("summary", { hasText: "הגדרות השיטה" }).click();
+
+  const run = page.getByRole("button", { name: "חיפוש התאמות" });
+  await page.getByLabel("סימני ההערות בספר").selectOption("regex");
+  await page.getByLabel("הביטוי הרגולרי").fill("(a+)+");
+  await expect(page.getByRole("alert").filter({ hasText: "להקפיא" })).toBeVisible();
+  await expect(run).toBeDisabled();
+
+  await page.getByLabel("סימני ההערות בספר").selectOption("tag");
+  await page.getByLabel("שם התגית").fill("small");
+  await expect(page.locator("summary", { hasText: "(1 שונו)" })).toBeVisible();
+  await expect(run).toBeEnabled();
+  await run.click();
+  await expect(page.locator(".sug-table tbody tr")).toHaveCount(3, { timeout: 30_000 });
+  expect(seen.errors).toEqual([]);
+});
+
 test("dibur hamatchil: Rashi on Bereshit against Bereshit from the real database slice", async ({ page }) => {
   const seen = watchPage(page);
   await open(page, [{ name: "seforim.db", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);

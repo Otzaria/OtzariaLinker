@@ -7,6 +7,8 @@ import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
+import { EngineOptions } from "./engine-options";
 
 /*
  * Review of automatic suggestions (ADR 0005 §4): one list, three views —
@@ -81,9 +83,17 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
     return pairByTitle(src.books.map((b) => store.refOf(b.key)), [...store.books.value.values()].map((b) => store.refOf(b.key)));
   }, [mode, batchSource, sources]);
   const paired = preview.filter((p) => p.target).length;
+  const advanced = store.prefs.advanced.value;
+  /** settings per engine, kept while the form is open so switching engines does not lose them */
+  const [formValues, setFormValues] = useState<Partial<Record<EngineId, FormValues>>>({});
+  const values = formValues[engine] ?? defaultFormValues(engine);
+  const check = useMemo(() => toEngineOptions(engine, values), [engine, values]);
+  const invalid = advanced && Object.keys(check.errors).length > 0;
 
   const start = async () => {
-    const ok = mode === "pair" ? await store.runEngine(engine, s!, t!) : await store.runBatch(engine, batchSource);
+    // outside advanced mode the engines run with their defaults, whatever was set before
+    const options = advanced ? check.options : {};
+    const ok = mode === "pair" ? await store.runEngine(engine, s!, t!, options) : await store.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
   return (
@@ -138,11 +148,22 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
           )}
         </>
       )}
+      {advanced ? (
+        <EngineOptions
+          engine={engine}
+          values={values}
+          check={check}
+          onChange={(key, v) => setFormValues((all) => ({ ...all, [engine]: { ...values, [key]: v } }))}
+          onReset={() => setFormValues((all) => ({ ...all, [engine]: defaultFormValues(engine) }))}
+        />
+      ) : (
+        <button class="adv-link" onClick={() => (store.prefs.advanced.value = true)}>הגדרות השיטה (מצב מתקדם)</button>
+      )}
       <p class="muted" style="margin:0;font-size:var(--fs-sm)">
         הכלי רק מציע. שום קישור לא נוצר בלי אישור שלכם, וכל אישור אפשר לבטל.
       </p>
       <div class="row">
-        <button class="btn filled" disabled={!ready || !!store.task.value || (mode === "batch" && !paired)} onClick={start}>
+        <button class="btn filled" disabled={!ready || invalid || !!store.task.value || (mode === "batch" && !paired)} onClick={start} title={invalid ? "יש הגדרה לא תקינה בהגדרות השיטה" : undefined}>
           <Icon name="oz_link_search" size={18} />
           חיפוש התאמות
         </button>
