@@ -44,3 +44,13 @@ export interface SourceInfo {
 
 /** The key of the source a book belongs to ("s3" for "s3:1234"). */
 export const sourceIdOfBookKey = (bookKey: string): string => bookKey.slice(0, bookKey.indexOf(":"));
+
+/** A heading line of a book (what the generator's regular TOC is built from). */
+export interface BookHeading {
+  /** 0-based line */
+  line: number;
+  /** 1–6 */
+  level: number;
+  /** the heading without tags */
+  text: string;
+}
