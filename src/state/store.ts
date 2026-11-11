@@ -13,8 +13,9 @@ import { pairByTitle, type BatchPair } from "../linking/batch";
 import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { parseLinksCsv } from "../formats/links-csv/parse";
-import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
+import { addChanges, commit, deleteChange, editChange, emptyLinkState, linksCount, redo, restoreChange, travel, undo, type Change, type LinkState } from "./history";
 import { CHUNK, LineStore } from "./lines";
+import { BookFind } from "./book-find";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
@@ -84,6 +85,8 @@ export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 export class AppStore {
   readonly prefs: Preferences;
   readonly lines: LineStore;
+  /** the search box of each reader */
+  readonly find: Record<Side, BookFind>;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -181,6 +184,7 @@ export class AppStore {
   ) {
     this.prefs = prefs ?? loadPreferences();
     this.lines = new LineStore(service);
+    this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
   }
 
   /* ---------------- sources ---------------- */
@@ -428,18 +432,20 @@ export class AppStore {
   deleteLinks(ids: readonly string[]): void {
     const s = this.linkState.value;
     const changes = ids.map((id) => deleteChange(s, id)).filter((c): c is Change => !!c);
-    this.apply(changes.length === 1 ? "מחיקת קישור" : `מחיקת ${changes.length} קישורים`, changes);
+    this.apply(changes.length === 1 ? "מחיקת קישור" : `מחיקת ${linksCount(changes.length)}`, changes);
     if (this.editing.value && ids.includes(this.editing.value)) this.clearPicks();
   }
 
   restoreLinks(ids: readonly string[]): void {
     const s = this.linkState.value;
-    this.apply("שחזור קישור", ids.map((id) => restoreChange(s, id)).filter((c): c is Change => !!c));
+    const changes = ids.map((id) => restoreChange(s, id)).filter((c): c is Change => !!c);
+    this.apply(changes.length === 1 ? "שחזור קישור" : `שחזור ${linksCount(changes.length)}`, changes);
   }
 
   setType(ids: readonly string[], declaredType: string): void {
     const s = this.linkState.value;
-    this.apply("שינוי סוג קשר", ids.map((id) => editChange(s, id, { declaredType })).filter((c): c is Change => !!c));
+    const changes = ids.map((id) => editChange(s, id, { declaredType })).filter((c): c is Change => !!c);
+    this.apply(changes.length === 1 ? "שינוי סוג קשר" : `שינוי סוג הקשר של ${linksCount(changes.length)}`, changes);
   }
 
   undo(): void {
@@ -448,6 +454,11 @@ export class AppStore {
 
   redo(): void {
     this.linkState.value = redo(this.linkState.value);
+  }
+
+  /** Undoes or redoes to a point of the history list (`position` actions applied). */
+  goToHistory(position: number): void {
+    this.linkState.value = travel(this.linkState.value, position);
   }
 
   /** Links touching a book, from the project (not database links). */
@@ -590,7 +601,7 @@ export class AppStore {
   rejectSuggestions(ids: readonly string[]): void {
     const approved = ids.map((id) => `auto:${id}`).filter((id) => this.linkState.value.links.has(id));
     batch(() => {
-      if (approved.length) this.apply("ביטול אישור", approved.map((id) => ({ id, before: this.linkState.value.links.get(id)! })));
+      if (approved.length) this.apply(approved.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approved.length.toLocaleString("he")} הצעות`, approved.map((id) => ({ id, before: this.linkState.value.links.get(id)! })));
       this.rejected.value = new Set([...this.rejected.value, ...this.keysOf(ids)]);
     });
   }
@@ -669,7 +680,7 @@ export class AppStore {
   applyRelink(items: readonly RelinkItem[]): number {
     const s = this.linkState.value;
     const changes: Change[] = items.filter((i) => i.moved && s.links.has(i.link.id)).map((i) => ({ id: i.link.id, before: s.links.get(i.link.id)!, after: i.moved! }));
-    this.apply(`העברת ${changes.length.toLocaleString("he")} קישורים למהדורה החדשה`, changes);
+    this.apply(`העברת ${linksCount(changes.length)} למהדורה החדשה`, changes);
     return changes.length;
   }
 
@@ -687,7 +698,7 @@ export class AppStore {
       issues.push(...more);
       return link;
     });
-    this.apply(`ייבוא ${sourceTitle}_links.json (${links.length} קישורים)`, addChanges(links));
+    this.apply(`ייבוא ${sourceTitle}_links.json (${linksCount(links.length)})`, addChanges(links));
     const errors = issues.filter((i) => i.level === "error");
     const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
     if (parsed.generatorRejectsFile)
@@ -812,7 +823,7 @@ export class AppStore {
     const changes: Change[] = [...old.values()].map((l) => ({ id: l.id, before: l }));
     for (const l of p.links) changes.push({ id: l.id, ...(old.get(l.id) && { before: old.get(l.id)! }), after: l });
     batch(() => {
-      this.apply(`פתיחת פרויקט (${p.links.length.toLocaleString("he")} קישורים)`, changes.filter((c) => c.before !== c.after));
+      this.apply(`פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after));
       this.rejected.value = new Set(p.rejectedSuggestions);
       this.savedRevision.value = this.linkState.value.revision;
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);

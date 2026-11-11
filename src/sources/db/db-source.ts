@@ -2,9 +2,9 @@ import { canonicalTypeString } from "../../core/links/connection-type";
 import type { BookOrigin, BookRef, Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
 import { DbLinksReader, type DbLinkRow } from "../../database/otzaria/links-reader";
-import { OtzariaDbReader, type DbBook } from "../../database/otzaria/reader";
+import { OtzariaDbReader, type DbBook, type DbLine } from "../../database/otzaria/reader";
 import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
-import type { BookSource, SourceBook, SourceInfo, SourceLine } from "../book-source";
+import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
 
 /*
  * An Otzaria-family database as a book source. Read-only by construction: nothing here can write.
@@ -47,7 +47,14 @@ export class DbBookSource implements BookSource {
   }
 
   async lines(bookKey: string, from = 0, to = Number.MAX_SAFE_INTEGER): Promise<SourceLine[]> {
-    const rows = await this.reader.lines(this.idOf(bookKey), from, to);
+    return this.toLines(await this.reader.lines(this.idOf(bookKey), from, to));
+  }
+
+  async *scan(bookKey: string, chunk: number): AsyncGenerator<LineChunk> {
+    for await (const c of this.reader.lineChunks(this.idOf(bookKey), chunk)) yield { lines: this.toLines(c.lines), total: c.total };
+  }
+
+  private toLines(rows: DbLine[]): SourceLine[] {
     return rows.map((l) => ({
       index: l.index,
       text: l.content,

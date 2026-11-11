@@ -2,7 +2,7 @@ import type { Link } from "../../core/links/model";
 import { otzariaBookTitle } from "../../core/links/titles";
 import { decodeText } from "../../core/text/decode";
 import { headingLevel, stripTags } from "../../core/text/html";
-import type { BookSource, SourceBook, SourceInfo, SourceLine } from "../book-source";
+import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
 
 /*
  * Books from .txt files (one file, many files, a folder, a ZIP's contents). A library book's lines
@@ -58,6 +58,11 @@ export class TextFilesSource implements BookSource {
       out.push({ index: i, text, anchorText: text, heRef: null, heading, existsInDb: !(heading !== null && !stripTags(text).trim()) });
     }
     return out;
+  }
+
+  async *scan(bookKey: string, chunk: number): AsyncGenerator<LineChunk> {
+    const total = (await this.load(bookKey)).length;
+    for (let i = 0; i < total; i += chunk) yield { lines: await this.lines(bookKey, i, i + chunk - 1), total };
   }
 
   async existingLinks(): Promise<Link[]> {

@@ -94,3 +94,38 @@ export function restoreChange(s: LinkState, id: string): Change | null {
   if (!before || before.status !== "deleted") return null;
   return { id, before, after: { ...before, status: before.keyOrder ? "edited" : "new" } };
 }
+
+/* ---- the history list (v3 "היסטוריית פעולות") ---- */
+
+export interface HistoryEntry {
+  readonly label: string;
+  readonly at: number;
+  /** how many links the action changed */
+  readonly changes: number;
+  /** the history position right after this action: going "to" the entry applies it and everything before it */
+  readonly position: number;
+  /** false for an action that was undone and can be redone */
+  readonly applied: boolean;
+}
+
+/** The current position: how many actions of the timeline are applied (0 = none). */
+export const historyPosition = (s: LinkState): number => s.undo.length;
+
+/** Every action the history holds, oldest first: the applied ones, then the undone ones in redo order. */
+export function timeline(s: LinkState): HistoryEntry[] {
+  const all = [...s.undo, ...[...s.redo].reverse()];
+  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length, position: i + 1, applied: i < s.undo.length }));
+}
+
+/** Undoes or redoes, one action at a time, until `position` actions are applied. */
+export function travel(s: LinkState, position: number): LinkState {
+  const total = s.undo.length + s.redo.length;
+  const to = Math.max(0, Math.min(total, Math.floor(position)));
+  let next = s;
+  while (next.undo.length > to) next = undo(next);
+  while (next.undo.length < to) next = redo(next);
+  return next;
+}
+
+/** "קישור אחד" / "12 קישורים" — counts in action labels. */
+export const linksCount = (n: number): string => (n === 1 ? "קישור אחד" : `${n.toLocaleString("he")} קישורים`);

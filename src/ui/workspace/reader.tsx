@@ -9,6 +9,7 @@ import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
+import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
 import { HideButton } from "./hide-button";
 
@@ -21,6 +22,7 @@ import { HideButton } from "./hide-button";
  */
 const DRAG_TYPE = "application/x-otzaria-line";
 const SIDE_LABEL: Record<Side, string> = { source: "מקור", target: "יעד" };
+const NO_HITS: ReadonlySet<number> = new Set();
 
 export function Reader({ side }: { side: Side }) {
   const store = useStore();
@@ -28,10 +30,24 @@ export function Reader({ side }: { side: Side }) {
   const book = bookKey ? store.books.value.get(bookKey) : undefined;
   const [choosing, setChoosing] = useState(false);
   const [query, setQuery] = useState("");
+  const find = store.find[side];
+  /** bumps on every "open the search box" request, so a second Ctrl+F focuses it again */
+  const [findSeq, setFindSeq] = useState(0);
+  const reading = !!book && !choosing;
+  const openFind = () => {
+    find.open.value = true;
+    setFindSeq((n) => n + 1);
+  };
+  // Ctrl+F while this reader has focus searches its book instead of the browser's find
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!reading || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "f") return;
+    e.preventDefault();
+    openFind();
+  };
 
   return (
-    <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`}>
-      <ReaderHead side={side} title={book?.title} onChoose={() => setChoosing(!choosing)} />
+    <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`} onKeyDown={onKeyDown}>
+      <ReaderHead side={side} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} />
       {choosing || !book ? (
         <div class="panel-body">
           <div class="book-search">
@@ -47,14 +63,13 @@ export function Reader({ side }: { side: Side }) {
           )}
         </div>
       ) : (
-        <BookView key={book.key} side={side} bookKey={book.key} lineCount={book.lineCount} />
+        <BookView key={book.key} side={side} bookKey={book.key} lineCount={book.lineCount} findSeq={findSeq} />
       )}
     </section>
   );
 }
 
-function ReaderHead({ side, title, onChoose }: { side: Side; title: string | undefined; onChoose: () => void }) {
-  const store = useStore();
+function ReaderHead({ side, title, onChoose, onFind, findOpen }: { side: Side; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean }) {
   return (
     <div class="panel-head" data-panel={side} draggable>
       <span class="grip" title="גררו כדי להזיז את הפאנל">
@@ -62,6 +77,11 @@ function ReaderHead({ side, title, onChoose }: { side: Side; title: string | und
       </span>
       <span class={`side-badge ${side}`}>{SIDE_LABEL[side]}</span>
       <h2 class="grow" title={title}>{title ?? "לא נבחר ספר"}</h2>
+      {onFind && (
+        <button class="icon-btn" onClick={onFind} aria-pressed={findOpen} title="חיפוש בטקסט הספר (Ctrl+F)" aria-label="חיפוש בטקסט הספר">
+          <Icon name="oz_search" />
+        </button>
+      )}
       <button class="icon-btn" onClick={onChoose} title="בחירת ספר אחר" aria-label="בחירת ספר">
         <Icon name="oz_book_search" />
       </button>
@@ -70,8 +90,13 @@ function ReaderHead({ side, title, onChoose }: { side: Side; title: string | und
   );
 }
 
-function BookView({ side, bookKey, lineCount }: { side: Side; bookKey: string; lineCount: number | undefined }) {
+function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: string; lineCount: number | undefined; findSeq: number }) {
   const store = useStore();
+  const find = store.find[side];
+  const findOpen = find.open.value;
+  // hits of this book only: a result for the previous book must not mark lines of this one
+  const hits = findOpen && find.bookKey.value === bookKey ? find.hitLines.value : NO_HITS;
+  const currentHit = hits.size ? (find.current.value?.line ?? null) : null;
   const scroller = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<ReadonlySet<number>>(() => new Set([0]));
   store.lines.tick.value; // re-render when chunks arrive
@@ -110,6 +135,14 @@ function BookView({ side, bookKey, lineCount }: { side: Side; bookKey: string; l
       }),
     );
   }, [focus?.seq]);
+
+  // paint the matched words in the rendered hit lines, again whenever more lines render
+  const tick = store.lines.tick.value;
+  useEffect(() => {
+    const id = requestAnimationFrame(() => paintMatches(scroller.current, side, find.query.peek(), hits, currentHit));
+    return () => cancelAnimationFrame(id);
+  }, [hits, currentHit, tick, active]);
+  useEffect(() => () => clearMatches(side), []);
 
   const marks = useLineMarks(side, bookKey);
   const pick = store.pick[side].value;
@@ -192,10 +225,11 @@ function BookView({ side, bookKey, lineCount }: { side: Side; bookKey: string; l
   return (
     <>
       <ReaderTools side={side} bookKey={bookKey} count={count} />
+      {findOpen && <FindBar side={side} bookKey={bookKey} focusSeq={findSeq} onClose={() => scroller.current?.focus()} />}
       <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} aria-label="שורות הספר">
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
-            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} />
+            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} />
           ))}
         </div>
       </div>
@@ -248,7 +282,7 @@ function useLineMarks(side: Side, bookKey: string): Marks {
   return { project: project.value, suggested: suggested.value };
 }
 
-function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean }) {
+function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null }) {
   const { c, bookKey, active, io, count } = props;
   const store = useStore();
   const ref = useRef<HTMLDivElement>(null);
@@ -276,7 +310,7 @@ function Chunk(props: { c: number; bookKey: string; active: boolean; io: Interse
       {lines.map((l, k) => {
         const i = from + k;
         if (!l) return <div key={i} class="ln" data-i={i}><span class="no">{i + 1}</span><span class="tx muted">…</span></div>;
-        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} />;
+        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} />;
       })}
     </div>
   );
@@ -290,9 +324,9 @@ function countDb(links: Link[] | undefined, bookKey: string, from: number, n: nu
   return m;
 }
 
-function Line({ l, picked, mark, sug, db, dropOver, draggableNo }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean }) {
+function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null }) {
   const html = useMemo(() => sanitizeBookHtml(l.anchorText), [l.anchorText]);
-  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}`;
+  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}`;
   return (
     <div class={cls} data-i={l.index} title={l.heading !== null ? "שורת כותרת — אוצריא לא יוצרת קישור אל כותרת או ממנה" : undefined}>
       <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר היעד" : undefined}>{l.index + 1}</span>

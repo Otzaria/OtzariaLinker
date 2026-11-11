@@ -2,6 +2,7 @@ import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
+import type { BookSearchResult } from "../core/text/find";
 
 /*
  * What the state layer needs from the outside world, as interfaces (architecture rule 17). The app
@@ -37,6 +38,7 @@ export interface BooksService {
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
   diffBooks(oldKey: string, newKey: string, opts?: CallOptions): Promise<{ to: number[]; fate: LineFate[]; stats: Record<string, number> }>;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>, opts?: CallOptions): Promise<BatchResultItem[]>;
+  searchBook(bookKey: string, query: string, options: { limit?: number }, opts?: CallOptions): Promise<BookSearchResult>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */

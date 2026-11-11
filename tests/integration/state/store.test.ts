@@ -3,6 +3,7 @@ import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
+import { searchJob } from "../../../src/workers/search-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -17,6 +18,7 @@ function makeStore() {
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
     runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
     diffBooks: (a, b) => diffJob(reg, a, b),
+    searchBook: (k, q, o, opts) => searchJob(reg, k, q, o, { ...(opts?.signal && { signal: opts.signal }), ...(opts?.onProgress && { progress: opts.onProgress }) }),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
