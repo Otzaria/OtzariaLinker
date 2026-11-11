@@ -3,6 +3,7 @@ import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
 import type { ExportBundle } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { DbCopyFiles } from "./db-copy-files";
 
 /*
  * The confirmation before export (plan, "three extra decisions" §3): in plain words, what will be
@@ -19,9 +20,10 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [csv, setCsv] = useState<SefariaCsvFile[] | null>(null);
   const advanced = store.prefs.advanced.value;
 
+  const replan = () => void store.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
   useEffect(() => {
     ref.current?.showModal();
-    void store.prepareExport().then((p) => (p ? setPlan(p) : setFailed(true)));
+    replan();
   }, []);
 
   useEffect(() => {
@@ -101,6 +103,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   )}
                 </>
               )}
+              <DbCopyFiles plan={plan} onChange={replan} />
               {alt && alt.files.length > 0 && (
                 <>
                   <h3 style="margin:4px 0 0">מבני כותרות (alt_toc)</h3>
