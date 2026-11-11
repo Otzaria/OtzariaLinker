@@ -40,5 +40,6 @@ export default defineConfig({
   test: {
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts", "tests/contracts/**/*.test.ts"],
     environment: "node",
+    setupFiles: ["tests/setup/fast-check.ts"],
   },
 });

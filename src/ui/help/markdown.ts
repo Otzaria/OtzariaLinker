@@ -24,8 +24,13 @@ export interface RenderedGuide {
   anchors: string[];
 }
 
-/** where links to other documents (ARCHITECTURE.md…) point: the repository's docs folder */
-export const DOCS_BASE = "https://github.com/Otzaria/OtzariaLinker/blob/main/docs/";
+/**
+ * Where links to other documents (ARCHITECTURE.md…) point: the docs folder AT THIS VERSION'S TAG
+ * (every release is tagged v<version>, release.yml checks it), so the help never describes another
+ * version. Without a build version (unit tests) it falls back to main.
+ */
+const VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null;
+export const DOCS_BASE = `https://github.com/Otzaria/OtzariaLinker/blob/${VERSION ? `v${VERSION}` : "main"}/docs/`;
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
