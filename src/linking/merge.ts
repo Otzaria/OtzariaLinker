@@ -24,6 +24,12 @@ import { CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type Engine
  *     from different engines are a CONFLICT: every side drops to "ambiguous", with the others as
  *     alternatives. Ambiguous suggestions are never approved in bulk.
  * Only "certain" is approved in bulk (store.pendingAtLeast("certain")); nothing here changes that.
+ *
+ * Single-book engines (citations) say something of another kind: a commentary line on verse 1 that
+ * CITES verse 2 is two true links, not a conflict. Their position carries the citation's span, so they
+ * never conflict with, fold into, or absorb a structural engine's suggestion at the same line, and they
+ * do not count in the per-pair statistics (steps 4 and 4b) that judge whether a book's STRUCTURE fits
+ * its base. They still join a structural engine's suggestion on the very same two lines (an agreement).
  */
 
 /** A raw suggestion and the book its step read as the input source (the commentary, the main book, the single book). */
@@ -145,6 +151,8 @@ interface Group {
   inner: Raw[];
   folded: boolean;
   conflictWith: Group[];
+  /** made only of single-book engines (citations): outside the structural statistics */
+  single: boolean;
 }
 
 const better = (a: Raw, b: Raw) =>
@@ -153,9 +161,15 @@ const better = (a: Raw, b: Raw) =>
 function makeGroup(id: string, exact: Raw[]): Group {
   const rep = [...exact].sort(better)[0]!;
   const engines = [...new Set(exact.map((r) => r.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
-  const position = `${endKey(rep.fEnd)}${rep.fAnchor ? `@${rep.fAnchor.rawStart}` : ""}>${rep.oEnd.book.key}`;
-  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [] };
+  const single = engines.every(isSingleBook);
+  // a citation's span is in its id ("…@start-end>…") even without an anchor: two mentions, two positions
+  const span = single ? (rep.fAnchor ? `@${rep.fAnchor.rawStart}` : /@\d+-\d+>/.exec(rep.s.id)?.[0] ?? `@${rep.s.id}`) : rep.fAnchor ? `@${rep.fAnchor.rawStart}` : "";
+  const position = `${single ? "single:" : ""}${endKey(rep.fEnd)}${span}>${rep.oEnd.book.key}`;
+  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [], single };
 }
+
+/** an engine that reads one book and links into all open books (ENGINES[].singleBook) */
+const isSingleBook = (e: EngineId) => ENGINES.find((x) => x.id === e)?.singleBook === true;
 
 /**
  * When, between the same two books, the lines on which two engines both spoke conflict this often, the
@@ -253,7 +267,7 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   //    counted per POSITION (a commentary line): engines in conflict there, or agreeing (exactly or by containment)
   const perPair = new Map<string, { conflicts: number; support: number }>();
   for (const at of byPos.values()) {
-    const live = at.filter((g) => !g.folded);
+    const live = at.filter((g) => !g.folded && !g.single);
     if (!live.length) continue;
     const k = bookPair(live[0]!);
     const c = perPair.get(k) ?? { conflicts: 0, support: 0 };
@@ -279,7 +293,7 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   const versus = new Map<string, { judged: number; contradicted: number }>();
   if (refLines.size)
     for (const g of groups) {
-      if (g.folded) continue;
+      if (g.folded || g.single) continue;
       const known = refLines.get(`${g.rep.fEnd.book.title}#${g.rep.fEnd.line}>${g.rep.oEnd.book.title}`); // reference keys are linePairKey: book TITLES (the one equality rule)
       if (!known) continue;
       const v = versus.get(bookPair(g)) ?? { judged: 0, contradicted: 0 };

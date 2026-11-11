@@ -31,18 +31,19 @@ test("max-link: a folder of a commentary and a notes book against the database �
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("radio", { name: "קישור מרבי" }).click();
-  // the folder is chosen by default; the plan: the commentary (two engines) and the notes book (footnotes)
+  // the folder is chosen by default; the plan: the commentary (two engines), the notes book (footnotes),
+  // and the citations engine once on each of the three books
   await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("3 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("6 הרצות");
   const engines = page.getByRole("group", { name: "השיטות שירוצו" });
-  await expect(engines.getByRole("checkbox")).toHaveCount(3);
+  await expect(engines.getByRole("checkbox")).toHaveCount(4);
   await page.locator("summary", { hasText: "למה כל ספר" }).click();
   await expect(page.locator(".ml-books")).toContainText("ספר הערות על");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/maxlink-plan.png` });
 
   // untick and tick again: the count follows
   await engines.getByRole("checkbox", { name: /לפי דיבור המתחיל/ }).uncheck();
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("2 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("5 הרצות");
   await engines.getByRole("checkbox", { name: /לפי דיבור המתחיל/ }).check();
 
   await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
@@ -55,7 +56,7 @@ test("max-link: a folder of a commentary and a notes book against the database �
   const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
   await expect(approveAll).toBeEnabled();
   const n = Number((await approveAll.textContent())!.match(/\(([\d,]+)\)/)![1]!.replace(/,/g, ""));
-  expect(n).toBe(13); // 10 verses (headings) + 3 footnote markers
+  expect(n).toBe(13); // 10 verses (headings) + 3 footnote markers; the books cite nothing
   await approveAll.click();
   await expect(approveAll).toBeDisabled();
   await expect(page.getByRole("tab", { name: /קישורים/ })).toContainText(String(n));

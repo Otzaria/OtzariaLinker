@@ -55,13 +55,13 @@
 |---|---|---|
 | `core` | המודל והכללים, בלי I/O: קישור, ספר ושורה, סוגי קשר, כללי שמות ספרים, "מה הגנרטור ישמור", ולידציה, **כלל השוויון האחד** בין קישורים, קישורי מסד (שאילתה, סיכום, מקור משוער) ושחזור רשומה מקישור מסד; טקסט: אופסטים, סינון HTML, נרמול עברי, גימטריה, פענוח קידוד; שגיאות עם קוד | `links/model.ts`, `links/stored-form.ts`, `links/validate.ts`, `links/equality.ts`, `links/db-links.ts`, `links/from-db.ts`, `links/connection-type.ts`, `links/titles.ts`, `text/offsets.ts`, `text/sanitize.ts`, `books.ts`, `errors.ts` |
 | `matching` | השוואת טקסט עברי: טוקנים עם אופסטים גולמיים, דמיון מילים, צעד יישור עם גשרים (ראשי תיבות, קיצורים, מילים דבוקות), משקלי מילים; יישור שורות בין שתי מהדורות של ספר (שלב 11, עדיין בלי ממשק) | `hebrew-tokens.ts`, `token-match.ts`, `similarity.ts`, `word-weights.ts`, `line-diff.ts` |
-| `linking` | המנועים האוטומטיים (פונקציות טהורות מספרים להצעות), זיהוי זוגות לאצווה, קישור מרבי (מתכנן, איחוד הצעות, דוח), ודוח האיכות | `automatic/types.ts`, `automatic/index.ts`, `automatic/{headings,dibur-hamatchil,footnotes}/`, `batch.ts`, `plan.ts`, `merge.ts`, `maxlink-report.ts`, `qa.ts` |
+| `linking` | המנועים האוטומטיים (פונקציות טהורות מספרים להצעות), זיהוי זוגות לאצווה, קישור מרבי (מתכנן, איחוד הצעות, דוח), ודוח האיכות | `automatic/types.ts`, `automatic/index.ts`, `automatic/{headings,dibur-hamatchil,footnotes,citations}/`, `batch.ts`, `plan.ts`, `merge.ts`, `maxlink-report.ts`, `qa.ts` |
 | `formats` | `_links.json`: פרסור שמדווח לכל רשומה, המרה 1-based ↔ 0-based, כתיבה דטרמיניסטית, תוכנית ייצוא ו־ZIP | `links-json/{parse,record,convert,serialize,export}.ts` |
 | `database` | קורא SQLite עצל לפי עמודים, מפענח zstd, קורא מסדי אוצריא לפי יכולות (סכמות 0–7), שחזור שורות עם הערות (סכמה 7), קריאת קישורים קיימים (לפי שורה, ולפי ספר מהאינדקסים `idx_link_source_book`/`idx_link_target_book`); קורא של מסד במבנה אחר לפי מיפוי (תצוגה מקדימה, פענוח טקסט, אינדקס סדר לכל ספר); sql.js לבדיקת הפעלה בלבד | `sqlite/lazy/sqlite-file.ts`, `compression/zstd.ts`, `otzaria/{capabilities,reader,line-notes,links-reader}.ts`, `generic/{preview,text-codec,mapped-reader}.ts` |
 | `sources` | "דלת אחת" לכל מה שהמשתמש פתח: זיהוי לפי תוכן, ZIP בטוח, ספרים מקובצי טקסט, ספרים ממסד, ספרים ממסד במבנה אחר לפי מיפוי; רשימת הקישורים הקיימים של ספר (מערכים צפופים, ספירה, סינון ודפדוף) | `registry.ts`, `detect.ts`, `archives/safe-unzip.ts`, `text/text-source.ts`, `db/db-source.ts`, `db/mapped-source.ts`, `db/pending.ts`, `db/link-listing.ts`, `book-source.ts` |
 | `projects` | קובץ הפרויקט: כתיבה, קריאה ואימות | `project-format.ts` |
 | `diagnostics` | יומן מובנה וחסום בגודל, בלי טקסט ספרים. **עדיין לא מחובר לשום מקום ב־HEAD** | `log.ts` |
-| `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, אצווה של זוגות, ותוכנית קישור מרבי (זוג אחד בזיכרון בכל פעם); חיפוש בטקסט של ספר, בנתחים | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `engine-job.ts`, `maxlink-job.ts`, `search-job.ts` |
+| `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, אצווה של זוגות, ותוכנית קישור מרבי (זוג אחד בזיכרון בכל פעם); מנוע מראי המקומות על ספר אחד (המקור בנתחים, אינדקס מקומות לכל ספר מצוטט, במטמון חסום); חיפוש בטקסט של ספר, בנתחים | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `engine-job.ts`, `citations-job.ts`, `maxlink-job.ts`, `search-job.ts` |
 | `state` | `AppStore`; היסטוריה עם undo/redo ומעבר לכל נקודה בה; מטמון שורות; חיפוש בכל קורא; קישור מרבי (תכנון, הרצה, דוח חי); העדפות ופריסה; קישורי המסד בלשונית הקישורים והעתקתם לפרויקט; ממשקי השירותים | `store.ts`, `history.ts`, `lines.ts`, `book-find.ts`, `preferences.ts`, `db-links.ts`, `maxlink.ts`, `services.ts` |
 | `ui` | המסכים: מסך פתיחה, סרגל עליון, סביבת עבודה, קוראים, חיפוש בקורא, בונה, רשימות, הצעות, בדיקה, רשימת היסטוריה, חלונות ייצוא, מעבר מהדורה ועזרה; ערכת נושא ואייקונים | `app.tsx`, `screens/home.tsx`, `workspace/*.tsx`, `dialogs/*.tsx`, `help/`, `theme/`, `icons/` |
 | `app` | נקודת ההרכבה: יוצר את ה־Worker ומחליף אותו כשהוא קורס או נתקע, מתאים אותו ל־`BooksService`, `Saver` של הורדות, אחסון IndexedDB לשמירה האוטומטית, ומרנדר | `main.tsx`, `idb-store.ts` |
@@ -122,6 +122,11 @@ SuggestionsPanel → AppStore.runEngine(engine, sourceKey, targetKey)
   → runEngine (linking, טהור) → EngineResult { suggestions, notes, unmatched }
   ← AppStore.run; מצב כל הצעה נגזר: pending / approved / rejected / exists
   → approveSuggestions → קישורים "auto:<id>" דרך history.commit
+
+מראי מקומות (ספר אחד): AppStore.runCitations(sourceKey)
+  → BooksService.runCitations → Worker: citationsJob: registry.scan (נתחים) → ההפניות והספרים שהן מציינות
+  → לכל ספר מצוטט: registry.heRefs (בלי טקסט) או הכותרות → אינדקס מקומות (במטמון) → CitationRun.finish
+  ← EngineResult, כמו מנוע של זוג
 
 אצווה: AppStore.runBatch(engine, sourceId)
   → pairByTitle (linking/batch.ts): כל ספר במקור ← ספר הבסיס ששמו מופיע ב"… על <בסיס>"
@@ -197,7 +202,7 @@ AppStore.prepareExport / runQualityCheck
 
 ממומש: פתיחת מסדי אוצריא (0–7), מסדי SQLite במבנה אחר דרך אשף מיפוי, קובצי טקסט, תיקיות ו־ZIP; קריאה עצלה; חיפוש בטקסט הספר (ב־Worker,
 `search-job.ts`); קישורי המסד כרשימה לקריאה בלבד, עם קיבוץ, סינון, תצוגה לפי שורה והעתקה לפרויקט
-(שלב 10); בונה ידני עם ולידציה חיה; שלושה מנועים אוטומטיים, לזוג ספרים, באצווה, או כולם יחד בקישור מרבי
+(שלב 10); בונה ידני עם ולידציה חיה; שלושה מנועים אוטומטיים, לזוג ספרים, באצווה, או כולם יחד בקישור מרבי, ומנוע מראי מקומות לספר אחד אל כל הספרים הפתוחים
 (תכנון לפי המסד ולפי השם, איחוד הצעות בלי כפילויות, דוח לפי ספר ושיטה), עם הגדרות במצב מתקדם; ייבוא וייצוא `_links.json`; ייבוא קישורים מ־CSV/TSV; מעבר קישורים למהדורה חדשה של ספר; בדיקת
 איכות; היסטוריית פעולות; פרויקטים, שמירה אוטומטית ושחזור; עזרה בתוך הכלי (המדריך עצמו, `ui/help/markdown.ts`); מבני כותרות אלטרנטיביים (`alt_toc`), דוח
 `_report.txt` ו־CSV בפורמט ספריא (`core/alt-toc/`, `formats/{alt-toc,report,sefaria-csv}/`, `state/alt-toc.ts`).

@@ -28,10 +28,11 @@ async function setup() {
   return { reg, all, texts, byTitle };
 }
 
+// these cases are about the pair engines; the citations step (single-book) has its own case below
 describe("maxlinkJob", () => {
   it("runs every planned step and returns one result per step, in the plan's order", async () => {
     const { reg, all, texts } = await setup();
-    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all });
+    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
     expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "footnotes"]);
     const progress: [number, number][] = [];
     const res = await maxlinkJob(reg, plan.steps, {}, { progress: (d, n) => progress.push([d, n]) });
@@ -47,7 +48,7 @@ describe("maxlinkJob", () => {
 
   it("reads a pair once for all of its engines (one pair in memory at a time)", async () => {
     const { reg, all, byTitle } = await setup();
-    const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all });
+    const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all, singleEngines: [] });
     const spy = vi.spyOn(reg, "lines");
     await maxlinkJob(reg, plan.steps, {}, {});
     expect(plan.steps).toHaveLength(2);
@@ -56,7 +57,7 @@ describe("maxlinkJob", () => {
 
   it("commentaries on one base read the base once: it is kept from one pair to the next", async () => {
     const { reg, all, byTitle } = await setup();
-    const plan = planMaxLink({ selected: [byTitle("ארצות החיים").key], library: all });
+    const plan = planMaxLink({ selected: [byTitle("ארצות החיים").key], library: all, singleEngines: [] });
     expect(plan.steps.filter((s) => s.kind === "pair" && s.target.title === "ארצות החיים")).toHaveLength(4); // two commentaries, two engines
     const spy = vi.spyOn(reg, "lines");
     const res = await maxlinkJob(reg, plan.steps, {}, {});
@@ -66,7 +67,7 @@ describe("maxlinkJob", () => {
 
   it("a failing step is reported and the rest still run", async () => {
     const { reg, all, texts } = await setup();
-    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all });
+    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
     const ghost: BookRef = { key: "s99:1", title: "ספר שנסגר", origin: "otzaria" };
     const bad: PlanStep = { ...(plan.steps[0] as Extract<PlanStep, { kind: "pair" }>), id: "headings|ghost", source: ghost };
     const res = await maxlinkJob(reg, [bad, ...plan.steps], {}, {});
@@ -76,7 +77,7 @@ describe("maxlinkJob", () => {
 
   it("collects the database's links of the books it read from, for 'already exists'", async () => {
     const { reg, all, byTitle } = await setup();
-    const plan = planMaxLink({ selected: [byTitle("תרגום אונקלוס על בראשית").key], library: all });
+    const plan = planMaxLink({ selected: [byTitle("תרגום אונקלוס על בראשית").key], library: all, singleEngines: [] });
     const res = await maxlinkJob(reg, plan.steps, {}, {});
     expect(res.dbLinkKeys.length).toBeGreaterThan(100);
   });
@@ -104,9 +105,21 @@ describe("maxlinkJob", () => {
 
   it("stops when cancelled", async () => {
     const { reg, all, texts } = await setup();
-    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all });
+    const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
     const ac = new AbortController();
     const run = maxlinkJob(reg, plan.steps, {}, { signal: ac.signal, progress: () => ac.abort() });
     await expect(run).rejects.toThrow();
+  });
+});
+
+describe("maxlinkJob — the citations engine (single-book)", () => {
+  it("runs once on the selected book, through its registered runner", async () => {
+    const { reg, all, byTitle } = await setup();
+    const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all });
+    expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "citations"]);
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    const cit = res.items.find((i) => i.stepId.startsWith("citations|"))!;
+    expect(cit.error).toBeUndefined();
+    expect(cit.result!.notes.some((n) => n.code === "citations/summary")).toBe(true);
   });
 });

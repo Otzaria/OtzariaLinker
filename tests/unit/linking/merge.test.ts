@@ -206,3 +206,40 @@ describe("mergeSuggestions — properties", () => {
     );
   });
 });
+
+describe("mergeSuggestions — citations (a single-book engine)", () => {
+  /** citations: the citing line (span 10-20 in its id) → the cited line(s), type reference, no anchor (Sefaria target) */
+  const Q = (c: number, b: number, conf: Confidence, at = 10, end?: number): MergeItem => ({
+    suggestion: { ...sg("citations", side(C, c), side(B, b, end), conf, { declaredType: "reference" }), id: `citations:${C.key}:${c}@${at}-${at + 10}>${B.key}:${b}${end !== undefined ? `-${end}` : ""}` },
+    focus: C.key,
+  });
+
+  it("a commentary line on one verse that cites another is two links, not a conflict", () => {
+    const { suggestions, stats } = mergeSuggestions([H(5, 10, "certain"), Q(5, 30, "certain")]);
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions.every((s) => s.confidence === "certain" && !s.rules.includes("maxlink/conflict"))).toBe(true);
+    expect(stats.conflicts).toBe(0);
+  });
+
+  it("two mentions in one line are two positions; a range citation is not folded into a structural line", () => {
+    const { suggestions } = mergeSuggestions([Q(5, 30, "certain", 10), Q(5, 40, "high", 50), H(5, 31, "certain"), Q(6, 30, "certain", 10, 45)]);
+    expect(suggestions).toHaveLength(4);
+  });
+
+  it("the same two lines from a citation and a structural engine are one link, raised by the agreement", () => {
+    const { suggestions, stats } = mergeSuggestions([H(5, 10, "high"), Q(5, 10, "high")]);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]!.confidence).toBe("certain");
+    expect(stats.agreements).toBe(1);
+  });
+
+  it("citations neither make a pair suspect nor count against the library's links", () => {
+    const structural = Array.from({ length: 30 }, (_, i) => H(i, i, "certain"));
+    const cites = Array.from({ length: 30 }, (_, i) => Q(i, i + 200, "certain"));
+    const reference = Array.from({ length: 30 }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i) }));
+    const { suggestions, stats } = mergeSuggestions([...structural, ...cites], { reference });
+    expect(stats.suspectPairs).toBe(0);
+    expect(stats.contradictedPairs).toBe(0);
+    expect(suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+});

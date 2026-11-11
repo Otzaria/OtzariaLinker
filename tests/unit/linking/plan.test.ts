@@ -3,6 +3,8 @@ import type { BookRef } from "../../../src/core/links/model";
 import { notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
 
 const book = (key: string, title: string, more: Partial<PlanBook> = {}): PlanBook => ({ key, title, origin: "otzaria", ...more });
+/** the pair relations alone: the citations engine (single-book) would add a step for every selected book */
+const planPairs = (input: Parameters<typeof planMaxLink>[0]) => planMaxLink({ singleEngines: [], ...input });
 const steps = (p: ReturnType<typeof planMaxLink>) => p.steps.map((s) => `${s.engine}:${s.source.title}${s.kind === "pair" ? `>${s.target.title}` : ""}`);
 
 describe("notesBaseKey: which titles are notes books", () => {
@@ -32,7 +34,7 @@ describe("planMaxLink — relations by title", () => {
   ];
 
   it("a commentary gets headings and dibur-hamatchil against its base; a targum only headings", () => {
-    const p = planMaxLink({ selected: ["t:1", "t:2"], library: lib });
+    const p = planPairs({ selected: ["t:1", "t:2"], library: lib });
     expect(steps(p)).toEqual(['headings:רש"י על בראשית>בראשית', 'dibur-hamatchil:רש"י על בראשית>בראשית', "headings:תרגום אונקלוס על בראשית>בראשית"]);
     expect(p.books[1]!.decisions.join(" ")).toContain("תרגום");
     expect(p.steps.every((s) => s.kind === "pair" && s.relation.via === "title")).toBe(true);
@@ -40,18 +42,18 @@ describe("planMaxLink — relations by title", () => {
   });
 
   it("a notes book runs the footnotes engine with the MAIN book as the source", () => {
-    const p = planMaxLink({ selected: ["t:4"], library: lib });
+    const p = planPairs({ selected: ["t:4"], library: lib });
     expect(steps(p)).toEqual(["footnotes:ספר דוגמה>הערות לספר דוגמה"]);
     expect(p.steps[0]!.why).toContain("הערות");
   });
 
   it("selecting a base book brings in the open commentaries and notes written on it", () => {
-    expect(steps(planMaxLink({ selected: ["db:1"], library: lib }))).toHaveLength(3);
-    expect(steps(planMaxLink({ selected: ["t:3"], library: lib }))).toEqual(["footnotes:ספר דוגמה>הערות לספר דוגמה"]);
+    expect(steps(planPairs({ selected: ["db:1"], library: lib }))).toHaveLength(3);
+    expect(steps(planPairs({ selected: ["t:3"], library: lib }))).toEqual(["footnotes:ספר דוגמה>הערות לספר דוגמה"]);
   });
 
   it("lists every selected book it cannot link, with the reason; never a step twice", () => {
-    const p = planMaxLink({ selected: ["t:5", "t:6", "t:1", "db:1", "t:1"], library: lib });
+    const p = planPairs({ selected: ["t:5", "t:6", "t:1", "db:1", "t:1"], library: lib });
     const row = (k: string) => p.books.find((b) => b.book.key === k)!;
     expect(row("t:5").skipped).toContain("אין לו ספר בסיס");
     expect(row("t:6").skipped).toContain("ויקרא");
@@ -62,7 +64,7 @@ describe("planMaxLink — relations by title", () => {
   });
 
   it("unticked engines do not run, and the book says why", () => {
-    const p = planMaxLink({ selected: ["t:1", "t:4"], library: lib, engines: new Set(["headings"]) });
+    const p = planPairs({ selected: ["t:1", "t:4"], library: lib, engines: new Set(["headings"]) });
     expect(steps(p)).toEqual(['headings:רש"י על בראשית>בראשית']);
     expect(p.books.find((b) => b.book.key === "t:4")!.skipped).toContain("לא סומנו");
     expect(p.perEngine).toEqual({ headings: 1 });
@@ -72,7 +74,7 @@ describe("planMaxLink — relations by title", () => {
 describe("planMaxLink — the database's declaration (book_base_text)", () => {
   it("wins over the title, and says so when they disagree", () => {
     const lib = [book("d:382", "שולחן ערוך, אורח חיים"), book("d:3860", "משנה ברורה", { bases: ["d:382"], dependence: "commentary" }), book("d:9", "פירוש על משנה ברורה", { bases: ["d:382"] })];
-    const p = planMaxLink({ selected: ["d:3860", "d:9"], library: lib });
+    const p = planPairs({ selected: ["d:3860", "d:9"], library: lib });
     expect(steps(p)).toContain("headings:משנה ברורה>שולחן ערוך, אורח חיים");
     expect(p.steps.find((s) => s.source.key === "d:3860")!.kind === "pair" && (p.steps.find((s) => s.source.key === "d:3860") as { relation: { via: string } }).relation.via).toBe("base-text");
     expect(p.books[1]!.decisions.join(" ")).toContain("לפי המסד");
@@ -80,27 +82,27 @@ describe("planMaxLink — the database's declaration (book_base_text)", () => {
 
   it("does not link a book the database declares on several bases", () => {
     const lib = [book("d:1", "בראשית"), book("d:2", "שמות"), book("d:3", "מדרש לקח טוב", { bases: ["d:1", "d:2"], dependence: "midrash" })];
-    const p = planMaxLink({ selected: ["d:3"], library: lib });
+    const p = planPairs({ selected: ["d:3"], library: lib });
     expect(p.steps).toEqual([]);
     expect(p.books[0]!.skipped).toContain("2 ספרים");
   });
 
   it("dependenceType targum: no dibur-hamatchil even without 'תרגום' in the title", () => {
     const lib = [book("d:1", "בראשית"), book("d:2", "אונקלוס", { bases: ["d:1"], dependence: "targum" })];
-    expect(steps(planMaxLink({ selected: ["d:2"], library: lib }))).toEqual(["headings:אונקלוס>בראשית"]);
+    expect(steps(planPairs({ selected: ["d:2"], library: lib }))).toEqual(["headings:אונקלוס>בראשית"]);
   });
 
   it("a 'הערות על X' notes book is planned with a warning: Otzaria merges it and drops its links", () => {
     const lib = [book("d:1", "מדרש ויסעו"), book("d:2", "הערות על מדרש ויסעו", { bases: ["d:1"] })];
-    const p = planMaxLink({ selected: ["d:2"], library: lib });
+    const p = planPairs({ selected: ["d:2"], library: lib });
     expect(steps(p)).toEqual(["footnotes:מדרש ויסעו>הערות על מדרש ויסעו"]);
     expect(p.steps[0]!.why).toContain("הערות ל…");
   });
 });
 
 describe("planMaxLink — single-book engines (the citations slot)", () => {
-  it("none are registered yet: every registered engine is a pair engine", () => {
-    expect(singleBookEngines()).toEqual([]);
+  it("the citations engine is the one single-book engine", () => {
+    expect(singleBookEngines()).toEqual(["citations"]);
   });
 
   it("a registered single-book engine runs once on every selected book, related or not", () => {
@@ -115,6 +117,8 @@ describe("planMaxLink — single-book engines (the citations slot)", () => {
 
   it("pairs from the same relation are planned once even when both books are selected", () => {
     const lib: BookRef[] = [book("d:1", "בראשית"), book("t:1", 'רש"י על בראשית')];
-    expect(planMaxLink({ selected: ["d:1", "t:1"], library: lib }).steps).toHaveLength(2);
+    expect(planMaxLink({ selected: ["d:1", "t:1"], library: lib, singleEngines: [] }).steps).toHaveLength(2);
+    // with the citations engine (the default): one more step for each selected book
+    expect(steps(planMaxLink({ selected: ["d:1", "t:1"], library: lib }))).toEqual(['headings:רש"י על בראשית>בראשית', 'dibur-hamatchil:רש"י על בראשית>בראשית', "citations:בראשית", 'citations:רש"י על בראשית']);
   });
 });

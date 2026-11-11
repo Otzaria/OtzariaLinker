@@ -7,6 +7,7 @@
 import { LineContentCodec } from "../database/compression/zstd";
 import { loadSqlJs } from "../database/sqlite/sqljs-loader";
 import { SourceRegistry } from "../sources/registry";
+import { citationsJob } from "./citations-job";
 import { batchJob, diffJob, engineJob } from "./engine-job";
 import { serve, type ToWorker } from "./rpc";
 import { searchJob } from "./search-job";
@@ -41,6 +42,7 @@ const handle = serve<SourcesApi>(
     runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     altToc: (_ctx, bookKey) => registry.altToc(bookKey),
     headings: (_ctx, bookKey) => registry.headings(bookKey),
+    runCitations: (ctx, source, options) => citationsJob(registry, source, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     dbLinkSummary: (ctx, bookKey) => registry.dbLinkSummary(bookKey, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     dbLinksPage: (ctx, bookKey, query) => registry.dbLinksPage(bookKey, query, { signal: ctx.signal }),
     runMaxLink: (ctx, steps, options) => maxlinkJob(registry, steps, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),

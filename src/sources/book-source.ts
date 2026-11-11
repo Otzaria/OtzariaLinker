@@ -34,5 +34,9 @@ export interface BookSource {
   linkListing?(bookKey: string, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing | string>;
   /** alternative TOC structures the source already has for a book; null = the source cannot have any */
   altToc?(bookKey: string): Promise<LibraryAltTocStructure[] | null>;
+  /** other names of the source's books (bookKey → names), for the citations engine; absent = titles only */
+  bookAliases?(): Promise<ReadonlyMap<string, readonly string[]>>;
+  /** each line's reference ("בראשית, א, ב") without its text, for the citations engine; absent = use headings */
+  heRefs?(bookKey: string): Promise<{ index: number; heRef: string | null }[]>;
   close(): void;
 }

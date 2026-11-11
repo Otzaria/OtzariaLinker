@@ -8,6 +8,7 @@ import type { BooksService, KeyValueStore } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
 import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
 import { searchJob } from "../../../src/workers/search-job";
+import { citationsJob } from "../../../src/workers/citations-job";
 
 function makeStore() {
   const reg = new SourceRegistry();
@@ -23,6 +24,7 @@ function makeStore() {
     altToc: (k) => reg.altToc(k),
     headings: (k) => reg.headings(k),
     searchBook: (k, q, o) => searchJob(reg, k, q, o),
+    runCitations: (s, o) => citationsJob(reg, s, o, {}),
   };
   const saved: { name: string; data: Uint8Array | string; mime: string }[] = [];
   const store = new AppStore(service, { save: (name, data, mime) => saved.push({ name, data, mime }) }, loadPreferences(null));

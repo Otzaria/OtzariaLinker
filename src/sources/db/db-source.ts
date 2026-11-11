@@ -132,6 +132,22 @@ export class DbBookSource implements BookSource {
     return readAltToc(this.reader.file, this.idOf(bookKey), (id) => index.get(id));
   }
 
+  /** book_acronym, read once per open database (42K rows in the official one) */
+  private aliases: Promise<ReadonlyMap<string, readonly string[]>> | null = null;
+
+  bookAliases(): Promise<ReadonlyMap<string, readonly string[]>> {
+    this.aliases ??= this.reader.acronyms().then((m) => {
+      const out = new Map<string, readonly string[]>();
+      for (const [id, terms] of m) if (this.booksById.has(id)) out.set(this.keyOf(id), terms);
+      return out;
+    });
+    return this.aliases;
+  }
+
+  async heRefs(bookKey: string): Promise<{ index: number; heRef: string | null }[]> {
+    return this.reader.heRefs(this.idOf(bookKey));
+  }
+
   close(): void {
     this.booksById.clear();
     this.listings.clear();

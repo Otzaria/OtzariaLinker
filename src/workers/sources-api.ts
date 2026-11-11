@@ -33,6 +33,8 @@ export interface SourcesApi {
   searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
   altToc(bookKey: string): LibraryAltTocStructure[] | null;
   headings(bookKey: string): BookHeading[];
+  /** the citations engine on one book: its references, linked into every open book (progress in per-mille) */
+  runCitations(source: BookRef, options: Record<string, unknown>): EngineResult;
   /** counts of a book's existing (database) links by type and other book; progress counts links read */
   dbLinkSummary(bookKey: string): DbLinkSummary | DbLinksUnavailable;
   /** one filtered page of a book's existing links */

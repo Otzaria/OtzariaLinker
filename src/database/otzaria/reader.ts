@@ -158,6 +158,36 @@ export class OtzariaDbReader {
   }
 
   /**
+   * (lineIndex, heRef) of every line of a book, WITHOUT the text (no decompression): the
+   * citations engine's reference index of a cited book. Empty when the database has no heRef column.
+   */
+  async heRefs(bookId: number): Promise<{ index: number; heRef: string | null }[]> {
+    const heRefAt = colIndex(this.t.line, "heRef");
+    const entries = await this.lineEntries(bookId);
+    if (heRefAt < 0) return entries.map((e) => ({ index: e.index, heRef: null }));
+    const rows = await this.file.getMany(this.t.line, entries.map((e) => e.id));
+    return entries.map((e) => ({ index: e.index, heRef: (rows.get(e.id)?.values[heRefAt] as string | null | undefined) ?? null }));
+  }
+
+  /** Other names of books (book_acronym: bookId → terms), or an empty map when the table is absent. */
+  async acronyms(): Promise<Map<number, string[]>> {
+    const out = new Map<number, string[]>();
+    const t = await this.file.table("book_acronym");
+    if (!t) return out;
+    const [b, term] = [colIndex(t, "bookId"), colIndex(t, "term")];
+    if (b < 0 || term < 0) return out;
+    for await (const r of this.file.scan(t)) {
+      const id = Number(r.values[b]);
+      const v = r.values[term];
+      if (typeof v !== "string" || !v.trim()) continue;
+      const list = out.get(id);
+      if (list) list.push(v);
+      else out.set(id, [v]);
+    }
+    return out;
+  }
+
+  /**
    * The text link_anchor offsets of this line count: the stored line with its schema-7 footnote
    * bodies put back (LineNoteRehydration). For older schemas it is the stored line.
    */

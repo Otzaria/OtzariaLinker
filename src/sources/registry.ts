@@ -124,6 +124,22 @@ export class SourceRegistry {
     return out;
   }
 
+  /** Every open book with its other names, for the citations engine (book_acronym where a source has it). */
+  async citationCatalog(): Promise<{ book: SourceBook; aliases: readonly string[] }[]> {
+    const out: { book: SourceBook; aliases: readonly string[] }[] = [];
+    for (const s of this.sources.values()) {
+      const aliases = s.bookAliases ? await s.bookAliases() : new Map<string, readonly string[]>();
+      for (const b of await s.books()) out.push({ book: b, aliases: aliases.get(b.key) ?? [] });
+    }
+    return out;
+  }
+
+  /** A book's line references without text, or null when its source has none (text files): use headings. */
+  async heRefs(bookKey: string): Promise<{ index: number; heRef: string | null }[] | null> {
+    const s = this.of(bookKey);
+    return s.heRefs ? s.heRefs(bookKey) : null;
+  }
+
   /** Counts of a book's existing links by type and by the other book, or why it has none (stage 10). */
   async dbLinkSummary(bookKey: string, ctx: ListingContext = {}): Promise<DbLinkSummary | DbLinksUnavailable> {
     const l = await this.listing(bookKey, ctx);

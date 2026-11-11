@@ -77,7 +77,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const info = ENGINES.find((e) => e.id === engine)!;
   const s = store.view.source.value;
   const t = store.view.target.value;
-  const ready = mode === "pair" ? !!s && !!t && s !== t : !!batchSource;
+  // a single-book engine (citations) needs only the source; its targets are all the open books
+  const single = info.singleBook === true;
+  const ready = single ? !!s : mode === "pair" ? !!s && !!t && s !== t : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
     if (mode !== "batch" || !src) return [];
@@ -94,7 +96,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const start = async () => {
     // outside advanced mode the engines run with their defaults, whatever was set before
     const options = advanced ? check.options : {};
-    const ok = mode === "pair" ? await store.runEngine(engine, s!, t!, options) : await store.runBatch(engine, batchSource, options);
+    const ok = single ? await store.runCitations(s!, options) : mode === "pair" ? await store.runEngine(engine, s!, t!, options) : await store.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
   return (
@@ -102,14 +104,14 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
       <h3 style="margin:0">קישור אוטומטי</h3>
       <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
         <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
-        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), engine === "footnotes" && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), (engine === "footnotes" || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
         <button class="chip" role="radio" aria-checked={mode === "maxlink"} aria-pressed={mode === "maxlink"} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
       </div>
       {mode === "maxlink" ? <MaxLinkForm onDone={onDone} onCancel={onCancel} /> : <>
       <label class="field">
         שיטה
         <select value={engine} onChange={(e) => setEngine(e.currentTarget.value as EngineId)}>
-          {ENGINES.filter((e) => mode === "pair" || e.id !== "footnotes").map((e) => (
+          {ENGINES.filter((e) => mode === "pair" || (e.id !== "footnotes" && !e.singleBook)).map((e) => (
             <option key={e.id} value={e.id}>{e.title}</option>
           ))}
         </select>
@@ -121,10 +123,17 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
             <span class="side-badge source">{info.sourceRole}</span>
             <span>{s ? store.refOf(s).title : "בחרו ספר בחלונית המקור"}</span>
           </div>
-          <div class={`end target${t ? " set" : ""}`}>
-            <span class="side-badge target">{info.targetRole}</span>
-            <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
-          </div>
+          {single ? (
+            <div class="end target set">
+              <span class="side-badge target">{info.targetRole}</span>
+              <span>{`${store.books.value.size.toLocaleString("he")} ספרים פתוחים — לא צריך לבחור יעד`}</span>
+            </div>
+          ) : (
+            <div class={`end target${t ? " set" : ""}`}>
+              <span class="side-badge target">{info.targetRole}</span>
+              <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
+            </div>
+          )}
         </>
       ) : (
         <>

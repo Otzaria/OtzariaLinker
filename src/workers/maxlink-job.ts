@@ -4,6 +4,7 @@ import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
 import type { SourceRegistry } from "../sources/registry";
+import { citationsJob } from "./citations-job";
 
 /*
  * Runs a max-link plan in the worker (stage 8.4): the steps one after another, with progress over
@@ -19,10 +20,11 @@ export type SingleRunner = (registry: SourceRegistry, source: BookRef, options: 
 /**
  * Runners of the single-book engines, by engine id. The type demands one for every registered engine
  * that is not a pair engine (linking/plan.ts), so registering an engine there without its runner does
- * not compile. The citations engine registers here:
- *   citations: citationsJob,
+ * not compile.
  */
-export const SINGLE_BOOK_RUNNERS: Record<SingleEngineId, SingleRunner> = {};
+export const SINGLE_BOOK_RUNNERS: Record<SingleEngineId, SingleRunner> = {
+  citations: citationsJob,
+};
 
 export interface MaxLinkJobOptions {
   /** per-engine options (advanced mode); absent = the engine's defaults */

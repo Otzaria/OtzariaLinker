@@ -65,6 +65,15 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "includeInlineNoteMarkers", label: "לקרוא גם סימנים של הערות שכבר מוטמעות בשורה", default: false },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
   ],
+  citations: [
+    { kind: "select", key: "minConfidence", label: "ודאות מינימלית להצעה", default: "possible", choices: [["possible", "אפשרית ומעלה"], ["high", "גבוהה ומעלה"], ["certain", "ודאית בלבד"]], hint: "הצעות בוודאות נמוכה יותר לא יוצגו כלל." },
+    { kind: "boolean", key: "ibid", label: 'לפענח "שם" לפי ההפניה הקודמת', default: true },
+    { kind: "boolean", key: "ranges", label: "הפניה לפרק או לדף שלם מקושרת לכל השורות שלו", default: true, hint: "בלי הסימון הקישור הוא לשורה הראשונה בלבד." },
+    { kind: "select", key: "anchors", label: "עוגן על מילות ההפניה", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
+    { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
+    { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
+    ...THRESHOLDS,
+  ],
 };
 
 /** the text field next to a marker select: `<key>.custom` */

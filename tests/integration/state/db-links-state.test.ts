@@ -5,6 +5,7 @@ import type { Link } from "../../../src/core/links/model";
 import { countVisibleChars } from "../../../src/core/text/offsets";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
+import { citationsJob } from "../../../src/workers/citations-job";
 import { searchJob } from "../../../src/workers/search-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
@@ -30,6 +31,7 @@ function makeStore() {
     close: async (id) => reg.close(id),
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
     runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
+    runCitations: (s, o) => citationsJob(reg, s, o, {}),
     diffBooks: (a, b) => diffJob(reg, a, b),
     searchBook: (k, q, o) => searchJob(reg, k, q, o, {}),
     altToc: (k) => reg.altToc(k),

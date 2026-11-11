@@ -1,3 +1,4 @@
+import type { CitationsOptions } from "./citations";
 import { runDiburHamatchilEngine, type DhOptions } from "./dibur-hamatchil";
 import { runFootnotesEngine, type FootnotesOptions } from "./footnotes";
 import { runHeadingsEngine, type HeadingsOptions } from "./headings";
@@ -10,7 +11,7 @@ import type { EngineBook, EngineContext, EngineId, EngineResult } from "./types"
  * A suggestion's own source/target is the RECORD direction, which may differ: dibur-hamatchil writes
  * base → commentary with a word anchor when both books are Otzaria's (docs/research/DH_ANCHOR_DIRECTION.md).
  */
-export type EngineOptions = { headings: HeadingsOptions; footnotes: FootnotesOptions; "dibur-hamatchil": DhOptions };
+export type EngineOptions = { headings: HeadingsOptions; footnotes: FootnotesOptions; "dibur-hamatchil": DhOptions; citations: CitationsOptions };
 
 export interface EngineInfo {
   id: EngineId;
@@ -19,6 +20,8 @@ export interface EngineInfo {
   sourceRole: string;
   targetRole: string;
   description: string;
+  /** reads one book only; its targets are all the open books (no target to pick, no batch pairing) */
+  singleBook?: boolean;
 }
 
 export const ENGINES: readonly EngineInfo[] = [
@@ -43,6 +46,14 @@ export const ENGINES: readonly EngineInfo[] = [
     targetRole: "ספר ההערות",
     description: "מספרי ההערות בטקסט (<sup>, סוגריים או תבנית משלכם) מותאמים לשורות בספר ההערות, גם כשהמספור מתחיל מחדש בכל פרק.",
   },
+  {
+    id: "citations",
+    title: "מראי מקומות",
+    sourceRole: "הספר שבו נמצאות ההפניות",
+    targetRole: "כל הספרים הפתוחים",
+    description: `הפניות בטקסט, כמו "(בראשית א, ב)", "ב"ק דף לג ע"ב" או "רמב"ם הל' שבת פ"א ה"ב", מקושרות לשורה שהן מציינות בספרים הפתוחים בכלי. צריך לבחור רק את ספר המקור.`,
+    singleBook: true,
+  },
 ];
 
 export function runEngine(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): EngineResult {
@@ -53,6 +64,9 @@ export function runEngine(id: EngineId, source: EngineBook, target: EngineBook, 
       return runDiburHamatchilEngine(source, target, options as DhOptions, ctx);
     case "footnotes":
       return runFootnotesEngine(source, target, options as FootnotesOptions, ctx);
+    case "citations":
+      // single-book: the worker runs it through citationsJob, which reads the library's indexes
+      throw Object.assign(new Error('שיטת "מראי מקומות" מקשרת ספר אחד אל כל הספרים הפתוחים, ולא זוג ספרים.'), { code: "engine/single-book" });
     default:
       throw Object.assign(new Error(`המנוע "${id}" עדיין לא זמין בגרסה הזו.`), { code: "engine/unavailable" });
   }

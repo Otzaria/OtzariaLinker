@@ -1,6 +1,7 @@
 import type { BookRef, LinkSide } from "../../src/core/links/model";
 import type { Confidence, EngineResult, Suggestion } from "../../src/linking/automatic/types";
 import type { SourceRegistry } from "../../src/sources/registry";
+import { citationsJob } from "../../src/workers/citations-job";
 import { engineJob } from "../../src/workers/engine-job";
 
 /*
@@ -9,17 +10,9 @@ import { engineJob } from "../../src/workers/engine-job";
  * engines.test.ts is shared: suggestions are reduced to (source line → target book, line range) in the
  * direction of `role`, and compared with the gold links of the same books.
  *
- * Adding an engine = adding one entry. For the citations engine (another branch:
- * src/linking/automatic/citations, `citationsJob(registry, source, options, ctx)`), the entry is:
- *
- *   {
- *     id: "citations",
- *     pairs: "single-book",                 // one book; the targets are whatever it cites
- *     goldTypes: ["LINKER", "REFERENCE"],   // the database's citation layers
- *     run: async ({ registry, source }) => (await citationsJob(registry, source, {}, {})).suggestions,
- *   },
- *
- * and its pair set is a list of books (VALIDATE_CITATION_BOOKS, or the default in engines.test.ts).
+ * Adding an engine = adding one entry. The citations engine (single-book: one book, the targets are
+ * whatever it cites; gold = the database's citation layers LINKER and REFERENCE) runs on a list of
+ * books (VALIDATE_CITATION_BOOKS, or the default in engines.test.ts).
  */
 export interface EngineRun {
   registry: SourceRegistry;
@@ -50,7 +43,7 @@ export const ENGINE_CASES: readonly EngineCase[] = [
   { id: "headings", pairs: "pair", goldTypes: ["COMMENTARY"], run: viaWorkerJob("headings") },
   { id: "dibur-hamatchil", pairs: "pair", goldTypes: ["COMMENTARY"], run: viaWorkerJob("dibur-hamatchil") },
   { id: "footnotes", pairs: "library-footnotes", goldTypes: ["footnotes", "footnote"], run: async ({ registry, source, target }) => (await engineJob(registry, "footnotes", source, target!, {}, {})).suggestions },
-  // { id: "citations", pairs: "single-book", goldTypes: ["LINKER", "REFERENCE"], run: … } — see above
+  { id: "citations", pairs: "single-book", goldTypes: ["LINKER", "REFERENCE"], run: async ({ registry, source }) => (await citationsJob(registry, source, {}, {})).suggestions },
 ];
 
 /** A gold link reduced to the evaluated direction: line of the "from" book → lines of the other book. */

@@ -53,6 +53,8 @@ export interface BooksService {
   altToc(bookKey: string, opts?: CallOptions): Promise<LibraryAltTocStructure[] | null>;
   /** every heading line of a book, in order */
   headings(bookKey: string, opts?: CallOptions): Promise<BookHeading[]>;
+  /** the citations engine (single book): references in one book, linked into all open books */
+  runCitations(source: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
   /**
    * A book's existing database links, counted and paged (stage 10). Optional so that test fakes
    * without databases need not implement it; the links panel then says the list is unavailable.

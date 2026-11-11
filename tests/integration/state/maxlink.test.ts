@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
+import type { EngineId } from "../../../src/linking/automatic";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
+import { citationsJob } from "../../../src/workers/citations-job";
 import { maxlinkJob } from "../../../src/workers/maxlink-job";
 import { searchJob } from "../../../src/workers/search-job";
 import { loadPreferences } from "../../../src/state/preferences";
@@ -24,6 +26,7 @@ function makeStore() {
     close: async (id) => reg.close(id),
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
     runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
+    runCitations: (s, o) => citationsJob(reg, s, o, {}),
     diffBooks: (a, b) => diffJob(reg, a, b),
     searchBook: (k, q, o) => searchJob(reg, k, q, o, {}),
     altToc: (k) => reg.altToc(k),
@@ -53,10 +56,13 @@ async function opened() {
   return { store, saved, folder, key };
 }
 
+/** the pair engines: these cases count their steps; the citations engine (single-book) is checked in maxlink-job.test.ts */
+const PAIRS: ReadonlySet<EngineId> = new Set(["headings", "dibur-hamatchil", "footnotes"]);
+
 describe("AppStore — max-link", () => {
   it("plans a folder: each book with the engines that fit it and why; books it cannot link, with the reason", async () => {
     const { store, folder } = await opened();
-    const plan = store.planMaxLink({ kind: "source", id: folder.info.id });
+    const plan = store.planMaxLink({ kind: "source", id: folder.info.id }, PAIRS);
     expect(plan.books).toHaveLength(4);
     expect(plan.perEngine).toEqual({ headings: 1, "dibur-hamatchil": 1, footnotes: 1 });
     expect(plan.books.find((b) => b.book.title === "חידושים")!.skipped).toBeTruthy();
@@ -66,7 +72,7 @@ describe("AppStore — max-link", () => {
   it("runs into ONE suggestions run; approve all certain is one undoable action; the report follows", async () => {
     const { store, folder, saved } = await opened();
     const scope = { kind: "source", id: folder.info.id } as const;
-    expect(await store.runMaxLink(store.planMaxLink(scope), store.maxLink.scopeLabel(scope))).toBe(true);
+    expect(await store.runMaxLink(store.planMaxLink(scope, PAIRS), store.maxLink.scopeLabel(scope))).toBe(true);
     const run = store.run.value!;
     expect(run.maxlink!.steps).toHaveLength(3);
     const sugs = run.result.suggestions as MergedSuggestion[];
@@ -95,7 +101,7 @@ describe("AppStore — max-link", () => {
   it("suggestions the database already has show as 'already exists' (Onkelos on Bereshit)", async () => {
     const { store, key } = await opened();
     const scope = { kind: "book", key: key("תרגום אונקלוס על בראשית") } as const;
-    const plan = store.planMaxLink(scope);
+    const plan = store.planMaxLink(scope, PAIRS);
     expect(plan.steps.map((s) => s.engine)).toEqual(["headings"]); // a targum: no dibur-hamatchil
     await store.runMaxLink(plan, "אונקלוס");
     const rep = store.maxLink.report.value!;
@@ -111,7 +117,7 @@ describe("AppStore — max-link", () => {
     const firstHeadings = store.pendingAtLeast("certain")[0]!;
     expect(store.approveSuggestions([firstHeadings])).toBe(1);
 
-    await store.runMaxLink(store.planMaxLink(scope), "תיקייה");
+    await store.runMaxLink(store.planMaxLink(scope, PAIRS), "תיקייה");
     expect(store.suggestionCounts.value.exists).toBe(1); // not approvable a second time
     const pending = new Set(store.pendingAtLeast("certain"));
     const sugs = store.run.value!.result.suggestions as MergedSuggestion[];
