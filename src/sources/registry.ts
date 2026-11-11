@@ -5,7 +5,7 @@ import type { Link } from "../core/links/model";
 import { decodeText } from "../core/text/decode";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
-import type { BookSource } from "./book-source";
+import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
 import { detectKind, type DetectedKind } from "./detect";
 import { TextFilesSource, type TextFile } from "./text/text-source";
@@ -73,6 +73,17 @@ export class SourceRegistry {
 
   async existingLinks(bookKey: string, from: number, to: number): Promise<Link[]> {
     return this.of(bookKey).existingLinks(bookKey, from, to);
+  }
+
+  /** A whole book, chunk by chunk (see BookSource.scan); pages through lines() for a source without scan. */
+  async *scan(bookKey: string, chunk: number): AsyncGenerator<LineChunk> {
+    const src = this.of(bookKey);
+    if (src.scan) return yield* src.scan(bookKey, chunk);
+    for (let from = 0; ; from += chunk) {
+      const lines = await src.lines(bookKey, from, from + chunk - 1);
+      if (lines.length) yield { lines };
+      if (!lines.length || lines.at(-1)!.index < from + chunk - 1) return;
+    }
   }
 
   close(sourceId: string): void {

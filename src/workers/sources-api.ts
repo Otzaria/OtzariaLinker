@@ -3,6 +3,8 @@ import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenResult } from "../sources/registry";
 import type { BatchItem, BookDiff } from "./engine-job";
+import type { BookSearchResult } from "../core/text/find";
+import type { SearchOptions } from "./search-job";
 
 /** The worker's operations, as the UI calls them through RpcClient. */
 export interface SourcesApi {
@@ -19,4 +21,6 @@ export interface SourcesApi {
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;
   diffBooks(oldKey: string, newKey: string): BookDiff;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>): BatchItem[];
+  /** lines of one book that contain a query (capped), with snippets; progress counts lines */
+  searchBook(bookKey: string, query: string, options: SearchOptions): BookSearchResult;
 }

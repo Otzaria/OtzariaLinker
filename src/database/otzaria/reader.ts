@@ -105,7 +105,19 @@ export class OtzariaDbReader {
 
   /** Lines [from, to] (inclusive, 0-based lineIndex) of a book. */
   async lines(bookId: number, from = 0, to = Number.MAX_SAFE_INTEGER): Promise<DbLine[]> {
-    const entries = (await this.lineEntries(bookId)).filter((e) => e.index >= from && e.index <= to);
+    return this.linesAt((await this.lineEntries(bookId)).filter((e) => e.index >= from && e.index <= to));
+  }
+
+  /**
+   * The whole book in chunks of `size` lines, walking the line index ONCE (lines() walks it on every
+   * call). For a scan of a whole book (in-book search) without holding all of it in memory.
+   */
+  async *lineChunks(bookId: number, size: number): AsyncGenerator<{ lines: DbLine[]; total: number }> {
+    const entries = await this.lineEntries(bookId);
+    for (let i = 0; i < entries.length; i += size) yield { lines: await this.linesAt(entries.slice(i, i + size)), total: entries.length };
+  }
+
+  private async linesAt(entries: readonly { index: number; id: number }[]): Promise<DbLine[]> {
     const ids = entries.map((e) => e.id);
     const lineRows = await this.file.getMany(this.t.line, ids);
     const contentRows = this.t.content ? await this.file.getMany(this.t.content, ids) : null;
