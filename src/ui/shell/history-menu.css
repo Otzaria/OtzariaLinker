@@ -1,0 +1,12 @@
+/* The history list in the app bar (history-menu.tsx). Colours only from tokens.css. */
+.history-menu { display: contents; }
+/* the button sits at the start of the bar: open toward the middle of the screen, not off its edge */
+.history-menu .menu-pop { inset-inline-start: 0; inset-inline-end: auto; }
+.history-list { display: grid; gap: 2px; width: min(380px, 90vw); max-height: min(70vh, 560px); overflow: auto; }
+.history-list .item { align-items: flex-start; border-inline-start: 3px solid transparent; }
+.history-list .item[aria-checked="true"] { border-inline-start-color: var(--primary); }
+.history-list .item.undone { color: var(--on-surface-variant); }
+.history-list .item.undone .history-label { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--on-surface-variant) 60%, transparent); }
+.history-label { display: block; overflow-wrap: anywhere; }
+.history-meta { display: block; font-size: var(--fs-sm); color: var(--on-surface-variant); margin-top: 2px; }
+.history-empty { padding: 8px 10px; color: var(--on-surface-variant); max-width: 340px; }

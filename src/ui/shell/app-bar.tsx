@@ -1,6 +1,7 @@
 import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { HistoryMenu } from "./history-menu";
 import { Menu, MenuItem } from "./menu";
 
 const PRESET_LABELS: Record<LayoutPreset, string> = { four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: "מקור מעל יעד" };
@@ -30,6 +31,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           <button class="icon-btn" disabled={!ls.redo.length} onClick={() => store.redo()} title={ls.redo.length ? `ביצוע חוזר: ${ls.redo.at(-1)!.label} (Ctrl+Y)` : "אין מה לבצע שוב"} aria-label="ביצוע חוזר">
             <Icon name="fl_arrow_redo" />
           </button>
+          <HistoryMenu />
           <span class="sep" />
           <Menu icon="fl_layout_column_four" label="פריסת סביבת העבודה">
             {(close) => (
