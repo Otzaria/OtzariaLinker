@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useStore } from "./context";
 import { ExportDialog } from "./dialogs/export-dialog";
+import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
 import { Home } from "./screens/home";
 import { AppBar } from "./shell/app-bar";
@@ -50,6 +51,7 @@ export function App() {
       {store.screen.value === "home" ? <Home /> : <Workspace />}
       <Notices />
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+      {store.dialog.value === "relink" && <RelinkDialog onClose={() => (store.dialog.value = null)} />}
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}
     </div>
   );

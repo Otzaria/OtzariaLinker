@@ -53,6 +53,7 @@ const service: BooksService = {
   close: async (id) => void (await call("close", [id])),
   runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
   runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
+  diffBooks: (oldKey, newKey, opts) => call("diffBooks", [oldKey, newKey], opts),
 };
 
 const saver: Saver = {

@@ -1,5 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import { runEngine, type EngineBook, type EngineContext, type EngineId, type EngineResult } from "../linking/automatic";
+import { diffLines, type LineFate, type LineMapping } from "../matching/line-diff";
 import type { SourceRegistry } from "../sources/registry";
 
 /** Reads both whole books from the registry and runs an engine on them (in the worker). */
@@ -38,4 +39,17 @@ export async function batchJob(registry: SourceRegistry, engine: EngineId, pairs
   }
   ctx.progress?.(pairs.length, pairs.length);
   return out;
+}
+
+export interface BookDiff {
+  to: number[];
+  fate: LineFate[];
+  stats: LineMapping["stats"];
+}
+
+/** Aligns the lines of two editions of a book (both read here, in the worker). */
+export async function diffJob(registry: SourceRegistry, oldKey: string, newKey: string): Promise<BookDiff> {
+  const text = async (key: string) => (await registry.lines(key, 0, Number.MAX_SAFE_INTEGER)).map((l) => l.anchorText);
+  const m = diffLines(await text(oldKey), await text(newKey));
+  return { to: [...m.to], fate: [...m.fate], stats: m.stats };
 }

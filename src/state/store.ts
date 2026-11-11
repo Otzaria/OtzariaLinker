@@ -15,6 +15,7 @@ import { parseLinksJson } from "../formats/links-json/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
 import { CHUNK, LineStore } from "./lines";
 import { qaCsv, runQa, type QaReport } from "../linking/qa";
+import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
@@ -624,6 +625,43 @@ export class AppStore {
         this.reveal(side, end.book.key, end.line);
       }
     });
+  }
+
+  /* ---------------- moving links to a new edition (stage 11) ---------------- */
+
+  /** a dialog opened from inside a panel */
+  readonly dialog = signal<"relink" | null>(null);
+  readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number> } | null>(null);
+
+  async planRelinkFor(oldKey: string, newKey: string): Promise<boolean> {
+    const diff = await this.runTask("משווה בין המהדורות…", (opts) => this.service.diffBooks(oldKey, newKey, opts));
+    if (!diff) return false;
+    const oldRef = this.refOf(oldKey);
+    const anchored = this.allLinks.value.filter((l) => l.anchor && this.sameBook(l.source.book, oldKey));
+    for (const l of anchored) {
+      await this.lines.load(oldKey, l.source.line, l.source.line);
+      const to = diff.to[l.source.line] ?? -1;
+      if (to >= 0) await this.lines.load(newKey, to, to);
+    }
+    const plan = planRelink({
+      links: this.allLinks.value,
+      oldBook: oldRef,
+      newBook: this.refOf(newKey),
+      mapping: { to: Int32Array.from(diff.to), fate: diff.fate },
+      oldLine: (i) => this.lines.peek(oldKey, i)?.anchorText,
+      newLine: (i) => this.lines.peek(newKey, i)?.anchorText,
+      isOld: (ref) => this.sameBook(ref, oldKey),
+    });
+    this.relink.value = { oldKey, newKey, plan, stats: diff.stats };
+    return true;
+  }
+
+  /** Applies chosen items of the relink plan as ONE undoable action. */
+  applyRelink(items: readonly RelinkItem[]): number {
+    const s = this.linkState.value;
+    const changes: Change[] = items.filter((i) => i.moved && s.links.has(i.link.id)).map((i) => ({ id: i.link.id, before: s.links.get(i.link.id)!, after: i.moved! }));
+    this.apply(`העברת ${changes.length.toLocaleString("he")} קישורים למהדורה החדשה`, changes);
+    return changes.length;
   }
 
   /* ---------------- import / export ---------------- */

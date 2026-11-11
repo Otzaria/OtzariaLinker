@@ -2,7 +2,7 @@ import type { SourceLine } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenResult } from "../sources/registry";
-import type { BatchItem } from "./engine-job";
+import type { BatchItem, BookDiff } from "./engine-job";
 
 /** The worker's operations, as the UI calls them through RpcClient. */
 export interface SourcesApi {
@@ -17,5 +17,6 @@ export interface SourcesApi {
   close(sourceId: string): void;
   /** runs an automatic engine on two whole books (both read here, in the worker) */
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;
+  diffBooks(oldKey: string, newKey: string): BookDiff;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>): BatchItem[];
 }

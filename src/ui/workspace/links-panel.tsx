@@ -45,6 +45,12 @@ export function LinksPanel() {
 
   return (
     <>
+      <div class="bulk" style="padding:6px 6px 0">
+        <button class="btn text" onClick={() => (store.dialog.value = "relink")} title="כשספר השתנה (שורות נוספו, נמחקו או נערכו) — מעבירים את הקישורים למהדורה החדשה">
+          <Icon name="oz_text_compare" size={16} />
+          מעבר למהדורה חדשה של ספר
+        </button>
+      </div>
       <div class="filters">
         {(["all", "new", "edited", "existing", "deleted"] as const).map((s) =>
           s === "all" || counts[s] ? (

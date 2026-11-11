@@ -16,7 +16,7 @@ interface TaskDef {
   hint: string;
   pick: { folder?: boolean; accept?: string };
   /** where the workspace should start (guided tasks — UX review suggestion 1) */
-  then?: { tab: SideTab; engine?: EngineId; batch?: boolean };
+  then?: { tab: SideTab; engine?: EngineId; batch?: boolean; dialog?: "relink" };
   soon?: string;
 }
 
@@ -26,6 +26,7 @@ const TASKS: TaskDef[] = [
   { icon: "oz_search_in_folder", title: "קישור תיקייה שלמה", hint: "פירושים רבים מתיקייה, כל אחד מול הספר שבשמו", pick: { folder: true }, then: { tab: "suggestions", engine: "headings", batch: true } },
   { icon: "oz_library_link", title: "קישור בין מסדים", hint: "שני מסדי SQLite, אישיים או של אוצריא", pick: { accept: ".db,.sqlite,.sqlite3" } },
   { icon: "oz_link_edit", title: "עריכת קישורים קיימים", hint: "קובצי ‎_links.json — בדיקה, תיקון וייצוא מחדש", pick: { accept: ".json,.zip" }, then: { tab: "links" } },
+  { icon: "oz_text_compare", title: "תיקון קישורים אחרי שינוי ספר", hint: "המהדורה הישנה, החדשה וקובץ הקישורים — הקישורים עוברים לשורות הנכונות", pick: {}, then: { tab: "links", dialog: "relink" } },
   { icon: "oz_document_link", title: "פתיחת פרויקט שמור", hint: "ממשיכים מאיפה שעצרתם (קובץ ‎.otzlinker.json)", pick: { accept: ".json" } },
   { icon: "oz_link_add", title: "עבודה ידנית חופשית", hint: "בוחרים ספרים, שורות, טווחים ומילים בעצמכם", pick: {} },
 ];
@@ -40,6 +41,7 @@ export function Home() {
     if (then && store.screen.value === "workspace") {
       store.intent.value = { ...(then.engine && { engine: then.engine }), ...(then.batch && { batch: true }) };
       store.sideTab.value = then.tab;
+      if (then.dialog) store.dialog.value = then.dialog;
     }
   };
   const hasWork = store.sources.value.length > 0 || store.linkState.value.links.size > 0;

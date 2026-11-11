@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { batchJob, engineJob } from "../../../src/workers/engine-job";
+import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -16,6 +16,7 @@ function makeStore() {
     close: async (id) => reg.close(id),
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
     runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
+    diffBooks: (a, b) => diffJob(reg, a, b),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
@@ -228,5 +229,24 @@ describe("AppStore — suggestions the library already has", () => {
     await store.runEngine("headings", key("תרגום אונקלוס על בראשית"), key("בראשית"));
     expect(store.dbLinkKeys.value.size).toBeGreaterThan(0);
     expect(store.suggestionCounts.value.exists).toBeGreaterThan(0);
+  });
+});
+
+describe("AppStore — moving links to a new edition", () => {
+  it("a line inserted at the top shifts every link by one, all certain, in one undo step", async () => {
+    const { store } = makeStore();
+    const v1 = ["<h1>ספר</h1>", "שורה ראשונה של הספר", "שורה שנייה של הספר", "שורה שלישית של הספר"];
+    const v2 = ["<h1>ספר</h1>", "הקדמה חדשה לגמרי", ...v1.slice(1)];
+    const links = JSON.stringify([2, 3, 4].map((l) => ({ line_index_1: l, heRef_2: "בסיס", path_2: "בסיס.txt", line_index_2: 1, "Conection Type": "reference" })));
+    await store.openFiles([{ path: "ישן/ספר.txt", blob: new Blob([v1.join("\n")]) }, { path: "ספר_links.json", blob: new Blob([links]) }]);
+    await store.openFiles([{ path: "חדש/ספר.txt", blob: new Blob([v2.join("\n")]) }]);
+    const [oldB, newB] = [...store.books.value.values()];
+    expect(await store.planRelinkFor(oldB!.key, newB!.key)).toBe(true);
+    const plan = store.relink.value!.plan;
+    expect(plan.counts).toEqual({ certain: 3, review: 0, lost: 0 });
+    const undoBefore = store.linkState.value.undo.length;
+    expect(store.applyRelink(plan.items)).toBe(3);
+    expect(store.linkState.value.undo.length).toBe(undoBefore + 1);
+    expect(store.allLinks.value.map((l) => [l.source.book.key, l.source.line])).toEqual([[newB!.key, 2], [newB!.key, 3], [newB!.key, 4]]);
   });
 });
