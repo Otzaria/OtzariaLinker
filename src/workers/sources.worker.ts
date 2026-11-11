@@ -35,6 +35,8 @@ const handle = serve<SourcesApi>(
     diffBooks: (_ctx, oldKey, newKey) => diffJob(registry, oldKey, newKey),
     runBatch: (ctx, engine, pairs, options) => batchJob(registry, engine, pairs, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
     runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, { signal: ctx.signal, progress: (d, n) => ctx.progress(d, n) }),
+    altToc: (_ctx, bookKey) => registry.altToc(bookKey),
+    headings: (_ctx, bookKey) => registry.headings(bookKey),
   },
   (m) => self.postMessage(m),
 );

@@ -1,3 +1,4 @@
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { Link } from "../core/links/model";
 
@@ -13,5 +14,7 @@ export interface BookSource {
   lines(bookKey: string, from?: number, to?: number): Promise<SourceLine[]>;
   /** existing links touching lines [from, to] of a book (read-only, provenance "db") */
   existingLinks(bookKey: string, from: number, to: number): Promise<Link[]>;
+  /** alternative TOC structures the source already has for a book; null = the source cannot have any */
+  altToc?(bookKey: string): Promise<LibraryAltTocStructure[] | null>;
   close(): void;
 }

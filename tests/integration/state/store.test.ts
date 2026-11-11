@@ -17,6 +17,8 @@ function makeStore() {
     runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
     runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
     diffBooks: (a, b) => diffJob(reg, a, b),
+    altToc: (k) => reg.altToc(k),
+    headings: (k) => reg.headings(k),
   };
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));

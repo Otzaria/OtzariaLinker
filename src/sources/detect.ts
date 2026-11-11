@@ -6,6 +6,7 @@ export type DetectedKind =
   | "sqlite"
   | "zip"
   | "links-json" // an array of Otzaria link records
+  | "alt-toc-json" // alt_toc/<book>_alt_toc.json: alternative TOC structures
   | "project" // a saved OtzariaLinker project
   | "json" // other JSON — needs a mapping
   | "csv"
@@ -24,6 +25,7 @@ export function detectKind(head: Uint8Array, fileName = ""): DetectedKind {
   const text = new TextDecoder("utf-8").decode(head).replace(/^﻿/, "").trimStart();
   if (text.startsWith("{") && /"format"\s*:\s*"otzaria-linker-project"/.test(text)) return "project";
   if (text.startsWith("[") && /"line_index_1"|"path_2"|"Conection Type"/.test(text)) return "links-json";
+  if (text.startsWith("[") && (/_alt_toc\.json$/i.test(fileName) || (/"key"\s*:/.test(text) && /"nodes"\s*:/.test(text)))) return "alt-toc-json";
   if (text.startsWith("{") || text.startsWith("[")) return "json";
 
   const ext = fileName.toLowerCase().split(".").pop() ?? "";

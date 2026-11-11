@@ -1,6 +1,8 @@
 import { canonicalTypeString } from "../../core/links/connection-type";
 import type { BookOrigin, BookRef, Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
+import type { LibraryAltTocStructure } from "../../core/alt-toc/model";
+import { readAltToc } from "../../database/otzaria/alt-toc-reader";
 import { DbLinksReader, type DbLinkRow } from "../../database/otzaria/links-reader";
 import { OtzariaDbReader, type DbBook } from "../../database/otzaria/reader";
 import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
@@ -63,6 +65,12 @@ export class DbBookSource implements BookSource {
     const lines = await this.reader.lineEntries(this.idOf(bookKey));
     const ids = lines.filter((e) => e.index >= from && e.index <= to).map((e) => e.id);
     return (await this.links.atLines(ids)).map((r) => this.toLink(r));
+  }
+
+  async altToc(bookKey: string): Promise<LibraryAltTocStructure[] | null> {
+    if (!this.reader.caps.altToc) return null;
+    const index = new Map((await this.reader.lineEntries(this.idOf(bookKey))).map((e) => [e.id, e.index]));
+    return readAltToc(this.reader.file, this.idOf(bookKey), (id) => index.get(id));
   }
 
   close(): void {

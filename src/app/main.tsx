@@ -54,6 +54,8 @@ const service: BooksService = {
   runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
   runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
   diffBooks: (oldKey, newKey, opts) => call("diffBooks", [oldKey, newKey], opts),
+  altToc: (key, opts) => call("altToc", [key], opts),
+  headings: (key, opts) => call("headings", [key], opts),
 };
 
 const saver: Saver = {

@@ -1,4 +1,5 @@
-import type { SourceLine } from "../core/books";
+import type { LibraryAltTocStructure } from "../core/alt-toc/model";
+import type { BookHeading, SourceLine } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import type { EngineId, EngineResult } from "../linking/automatic";
 import type { InputFile, OpenResult } from "../sources/registry";
@@ -19,4 +20,6 @@ export interface SourcesApi {
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;
   diffBooks(oldKey: string, newKey: string): BookDiff;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>): BatchItem[];
+  altToc(bookKey: string): LibraryAltTocStructure[] | null;
+  headings(bookKey: string): BookHeading[];
 }
