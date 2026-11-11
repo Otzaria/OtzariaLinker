@@ -20,7 +20,7 @@ describe("sanitizeBookHtml — XSS (TD-C4)", () => {
       fc.property(fc.string({ unit: fc.constantFrom("<", ">", "b", "img", " ", "on", "=", '"', "x", "/", "&", ";", "א") }), (s) => {
         // every "<" left in the output opens a bare allowlisted tag: no attributes, nothing else
         const tags = sanitizeBookHtml(s).match(/<[^>]*>?/g) ?? [];
-        return tags.every((t) => /^<\/?[a-z][a-z0-9]*>$/.test(t));
+        return tags.every((t) => /^<\/?(?:[a-z][a-z0-9]*|x-uncounted)>$/.test(t));
       }),
     );
   });
@@ -37,15 +37,18 @@ describe("sanitizeBookHtml — book formatting survives", () => {
     expect(sanitizeBookHtml("א</b>ב")).toBe("אב");
     expect(sanitizeBookHtml("<b>א<i>ב</b>ג")).toBe("<b>א<i>ב</i></b>ג");
   });
-  it("keeps valid entities, escapes lone < & and quotes", () => {
+  it("keeps valid entities, escapes a lone & and quotes", () => {
     expect(sanitizeBookHtml("א&amp;ב &#1488; &nbsp;")).toBe("א&amp;ב &#1488; &nbsp;");
-    expect(sanitizeBookHtml('א < ב & "ג"')).toBe("א &lt; ב &amp; &quot;ג&quot;");
+    expect(sanitizeBookHtml('א & "ג"')).toBe("א &amp; &quot;ג&quot;");
+  });
+  it("a '<' with no '>' : the rest stays visible to the user but is marked uncounted (generator rule)", () => {
+    expect(sanitizeBookHtml("<b>א < ב")).toBe("<b>א <x-uncounted>&lt; ב</x-uncounted></b>");
   });
 });
 
 /** Visible characters of sanitized output, counted the way the browser renders them. */
 function renderedLength(html: string): number {
-  return html.replace(/<[^>]*>/g, "").replace(/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#[xX][0-9a-fA-F]+);/g, "_").length;
+  return html.replace(/<x-uncounted>.*<\/x-uncounted>/s, "").replace(/<[^>]*>/g, "").replace(/&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#[xX][0-9a-fA-F]+);/g, "_").length;
 }
 
 describe("sanitizeBookHtml — anchors stay aligned", () => {

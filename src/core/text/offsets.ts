@@ -1,72 +1,94 @@
 /**
- * Visible ↔ raw character offsets inside a line of book HTML.
+ * Visible ↔ raw character offsets inside a line of book HTML — an exact port of the generator's
+ * rules, because the generator turns the raw `start`/`end` of a `_links.json` record into
+ * `link_anchor.charStart/charEnd` with them:
+ *   SeforimLibrary@23f1f8f1 generator/common/.../common/HtmlCharCounter.kt
+ *   (`countVisibleChars(html, endExclusive)` and `visibleUnits(html)`).
  *
- * The user selects on rendered text (no tags); the link file needs RAW offsets (tags included).
- * Rules match the generator's `buildLinkAnchor`:
- *   • a tag `<…>` is swallowed and does not count as a visible character;
- *   • an entity `&…;` counts as ONE visible character;
- *   • a lone `<` without `>` or `&` without `;` is plain text — otherwise the scanner runs to the
- *     end of the string and returns an offset past it, and the generator rejects the anchor.
- * Verified example from the format doc: "אב <b>ג</b> דה", visible 3..5 → raw 6..12.
+ *   • `<` opens a tag that lasts until the next `>`. A `<` with no `>` therefore hides the REST OF
+ *     THE LINE (v3 counted it as a character — that disagreed with the generator).
+ *   • `&` followed by `;` within the next 9 characters (entity of at most 10 chars) is ONE visible
+ *     unit; otherwise the `&` alone is a unit and the following characters count normally.
+ *     (v3 allowed 12 characters after `&`.)
+ *   • Offsets are UTF-16 code units, as in Kotlin and JavaScript strings.
  */
 
-/** An entity longer than this is not an entity. */
-const ENTITY_MAX = 12;
+const ENTITY_SPAN = 10;
 
-function tagEnd(s: string, i: number): number | null {
-  const gt = s.indexOf(">", i);
-  return gt === -1 ? null : gt + 1;
+/** One visible unit: a single character, or a whole `&…;` entity. `[start, end)` in raw offsets. */
+export interface VisibleUnit {
+  start: number;
+  end: number;
 }
 
-function entityEnd(s: string, i: number): number | null {
-  const sc = s.indexOf(";", i);
-  return sc === -1 || sc - i > ENTITY_MAX ? null : sc + 1;
+/** The visible units of a line, in order (port of `visibleUnits`). */
+export function visibleUnits(html: string): VisibleUnit[] {
+  const s = String(html);
+  const units: VisibleUnit[] = [];
+  let inTag = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inTag) {
+      if (c === ">") inTag = false;
+    } else if (c === "<") {
+      inTag = true;
+    } else if (c === "&") {
+      const end = Math.min(s.length, i + ENTITY_SPAN);
+      let j = i + 1;
+      while (j < end && s[j] !== ";") j++;
+      if (j < end) {
+        units.push({ start: i, end: j + 1 });
+        i = j;
+      } else {
+        units.push({ start: i, end: i + 1 });
+      }
+    } else {
+      units.push({ start: i, end: i + 1 });
+    }
+  }
+  return units;
 }
 
-/** Advances one visible unit from `raw`; returns the new raw index and how many visible chars were consumed. */
-function step(s: string, raw: number): [next: number, visible: 0 | 1] {
-  const ch = s[raw];
-  if (ch === "<") {
-    const e = tagEnd(s, raw);
-    return e == null ? [raw + 1, 1] : [e, 0];
+/**
+ * Visible characters in `html[0, endExclusive)` — exact port of the generator's
+ * `countVisibleChars`, including its behaviour when `endExclusive` falls inside an entity.
+ */
+export function countVisibleChars(html: string, endExclusive: number = String(html).length): number {
+  const s = String(html);
+  if (!s.length || endExclusive <= 0) return 0;
+  const len = Math.min(s.length, endExclusive);
+  let count = 0;
+  let inTag = false;
+  for (let i = 0; i < len; i++) {
+    const c = s[i];
+    if (inTag) {
+      if (c === ">") inTag = false;
+    } else if (c === "<") {
+      inTag = true;
+    } else if (c === "&") {
+      const end = Math.min(len, i + ENTITY_SPAN);
+      let j = i + 1;
+      while (j < end && s[j] !== ";") j++;
+      count++;
+      if (j < end) i = j;
+    } else {
+      count++;
+    }
   }
-  if (ch === "&") {
-    const e = entityEnd(s, raw);
-    return [e ?? raw + 1, 1];
-  }
-  return [raw + 1, 1];
+  return count;
 }
 
-export function rawOffsetFromVisible(rawHtml: string, visibleIndex: number): number {
-  const s = String(rawHtml);
-  const n = s.length;
-  let raw = 0;
-  let visible = 0;
-  while (visible < visibleIndex && raw < n) {
-    const [next, v] = step(s, raw);
-    raw = next;
-    visible += v;
-  }
-  // Snap onto the glyph itself: skip opening tags that precede it, so the offset points at the
-  // character and not at the tag boundary (this is what yields start=6 in the documented example).
-  while (raw < n && s[raw] === "<") {
-    const e = tagEnd(s, raw);
-    if (e == null) break;
-    raw = e;
-  }
-  return Math.min(raw, n);
-}
-
-/** The inverse: how many visible characters precede a raw offset. */
-export function countVisibleChars(rawHtml: string, rawIndex: number): number {
-  const s = String(rawHtml);
-  const lim = Math.min(rawIndex, s.length);
-  let raw = 0;
-  let visible = 0;
-  while (raw < lim) {
-    const [next, v] = step(s, raw);
-    raw = next;
-    visible += v;
-  }
-  return visible;
+/**
+ * Raw offset where visible unit `visibleIndex` begins — i.e. the offset to write to `start`/`end`
+ * so that the generator's `countVisibleChars(content, raw)` gives back exactly `visibleIndex`.
+ * Opening tags before the glyph are skipped (the offset points at the glyph, not the tag), which
+ * yields the documented example "אב <b>ג</b> דה": visible 3..5 → raw 6..12.
+ * Past the last unit, returns the line length.
+ */
+export function rawOffsetFromVisible(html: string, visibleIndex: number): number {
+  const s = String(html);
+  const v = Math.trunc(Number(visibleIndex));
+  const units = visibleUnits(s);
+  if (!(v >= 0)) return 0;
+  return v < units.length ? units[v]!.start : s.length;
 }

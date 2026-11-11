@@ -9,8 +9,9 @@
  * exactly the same visible characters, in the same order, as the generator's counting rules see in
  * the raw line. "<script>x</script>" therefore renders as the harmless visible text "x".
  *
- * The scanner uses the same tag/entity rules as offsets.ts (a lone "<" or "&" is text; an entity
- * is at most 12 chars up to ";").
+ * The scanner uses the generator's tag/entity rules (offsets.ts): an entity is at most 10 chars,
+ * and a "<" with no ">" hides the rest of the line from the generator's count. That rest is still
+ * shown to the user, escaped, inside <x-uncounted>, which the UI excludes from anchor selection.
  */
 
 const ALLOWED = new Set([
@@ -18,9 +19,10 @@ const ALLOWED = new Set([
   "h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "div", "br", "font", "q", "cite",
 ]);
 const VOID = new Set(["br"]);
-const ENTITY_MAX = 12;
+const ENTITY_SPAN = 10;
 const VALID_ENTITY = /^&(?:[a-zA-Z][a-zA-Z0-9]{1,31}|#\d{1,7}|#[xX][0-9a-fA-F]{1,6});$/;
 
+const escapeText = (t: string): string => t.replace(/[<>&"]/g, (c) => escapeChar(c));
 const escapeChar = (ch: string): string =>
   ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === "&" ? "&amp;" : ch === '"' ? "&quot;" : ch;
 
@@ -34,12 +36,17 @@ export function sanitizeBookHtml(raw: unknown): string {
     const ch = s[i]!;
     if (ch === "<") {
       const gt = s.indexOf(">", i);
-      if (gt === -1) { out += "&lt;"; i++; continue; }
+      if (gt === -1) {
+        out += `<x-uncounted>${escapeText(s.slice(i))}</x-uncounted>`;
+        break;
+      }
       out += renderTag(s.slice(i + 1, gt), open);
       i = gt + 1;
     } else if (ch === "&") {
-      const sc = s.indexOf(";", i);
-      if (sc !== -1 && sc - i <= ENTITY_MAX) {
+      let sc = i + 1;
+      const lim = Math.min(n, i + ENTITY_SPAN);
+      while (sc < lim && s[sc] !== ";") sc++;
+      if (sc < lim) {
         const ent = s.slice(i, sc + 1);
         // A valid entity renders as one glyph, matching the counting rule. An "entity-shaped"
         // invalid sequence (e.g. "&a b;") is counted as ONE visible char by the generator but would
