@@ -21,9 +21,19 @@ export interface DiagnosticsHeader {
 
 export const diagnosticsLog = (): Log => new Log(5000);
 
+/*
+ * Notices quote what the user opened — a cell of a sheet, a title, the snippet a JSON.parse error
+ * shows — so the log keeps only the start of each (security review A11): enough to recognise the
+ * problem, not a copy of the file in a log meant to be attached to a public issue.
+ */
+export const LOG_TEXT_CAP = 160;
+export const LOG_DETAIL_CAP = 80;
+export const capLogText = (s: string, cap: number): string => (s.length > cap ? `${s.slice(0, cap)}… (+${s.length - cap})` : s);
+
 /** "error" notices are errors, "warning" warnings, everything else info. */
 export function logNotice(log: Log, kind: string, text: string, details?: readonly string[]): void {
-  const data = details?.length ? { details: details.slice(0, 50) } : undefined;
+  const data = details?.length ? { details: details.slice(0, 50).map((d) => capLogText(d, LOG_DETAIL_CAP)) } : undefined;
+  text = capLogText(text, LOG_TEXT_CAP);
   if (kind === "error") log.error("notice", text, data);
   else if (kind === "warning") log.warn("notice", text, data);
   else log.info("notice", text, data);
@@ -41,7 +51,7 @@ export function logTask(log: Log, label: string, now: () => number = Date.now) {
     cancelled: () => log.info("task", label, { ms: now() - started, outcome: "cancelled" }),
     failed: (err: unknown) => {
       const e = err as { code?: string; message?: string };
-      log.error("task", label, { ms: now() - started, outcome: "failed", message: e?.message ?? String(err) }, e?.code);
+      log.error("task", label, { ms: now() - started, outcome: "failed", message: capLogText(e?.message ?? String(err), LOG_TEXT_CAP) }, e?.code);
     },
   };
 }

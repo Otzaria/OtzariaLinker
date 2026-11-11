@@ -112,6 +112,8 @@ const utf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 export class LineContentCodec {
   private readonly decoders = new Map<number, InstanceType<typeof ZstdDecoder>>();
   private readonly dictionaries = new Map<number, Uint8Array>();
+  /** decoders built on a POOL dictionary: dropped when that id becomes conflicted later (security review A11) */
+  private readonly fromPool = new Set<number>();
 
   /**
    * `dictionaries` = every zstd_dict.dict of the database (any order). They are also offered to
@@ -150,6 +152,13 @@ export class LineContentCodec {
 
   private decoder(dictId: number): InstanceType<typeof ZstdDecoder> {
     let d = this.decoders.get(dictId);
+    // a second, different dictionary with this id was opened after the decoder was built: the pool
+    // no longer knows which one is right, so neither does this decoder
+    if (d && this.fromPool.has(dictId) && this.pool.isConflicted(dictId)) {
+      this.decoders.delete(dictId);
+      this.fromPool.delete(dictId);
+      d = undefined;
+    }
     if (d) return d;
     let dictionary: Uint8Array | undefined;
     if (dictId !== 0) {
@@ -167,6 +176,7 @@ export class LineContentCodec {
     }
     d = new ZstdDecoder(dictionary ? { dictionary } : {}).init(module());
     this.decoders.set(dictId, d);
+    if (dictId !== 0 && !this.dictionaries.has(dictId)) this.fromPool.add(dictId);
     return d;
   }
 }

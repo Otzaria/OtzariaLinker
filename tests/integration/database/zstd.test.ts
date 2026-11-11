@@ -95,6 +95,20 @@ describe("zstd dictionaries shared across open databases and files", () => {
     const frame = new Uint8Array(zstdCompressSync(enc.encode("x"), { dictionary: dict } as never));
     expect(codeOf(() => new LineContentCodec([], pool).decode(frame))).toBe("db/compressed-unknown-dictionary");
   });
+  it("a decoder built on a pool dictionary stops when a conflicting one arrives later (security review A11)", () => {
+    const pool = new DictionaryPool();
+    const frame = new Uint8Array(zstdCompressSync(enc.encode("שורה"), { dictionary: dict } as never));
+    pool.add(dict, "a");
+    const personal = new LineContentCodec([], pool);
+    expect(personal.decode(frame)).toBe("שורה"); // decoder built and cached
+    const other = dict.slice();
+    other[100] = other[100]! ^ 0xff;
+    pool.add(other, "b");
+    expect(codeOf(() => personal.decode(frame))).toBe("db/compressed-unknown-dictionary");
+    // a database's OWN dictionary is not affected by the pool
+    const own = new LineContentCodec([dict], pool);
+    expect(own.decode(frame)).toBe("שורה");
+  });
   it("a dictionary file is recognised by content and reported by the registry", async () => {
     expect(detectKind(dict.subarray(0, 4096), "whatever.bin")).toBe("zstd-dict");
     const res = await new SourceRegistry().open([{ path: "otzaria.dict", blob: new Blob([new Uint8Array(dict)]) }]);
