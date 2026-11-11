@@ -32,6 +32,12 @@ export function licenseNotice(opts: { packages: readonly string[]; version: stri
           "",
           "Bundled third-party software:",
           "SQLite (inside sql.js) is in the public domain.",
+          "Otzaria Icons (github.com/Otzaria/otzaria_icons) — GPL-3.0.",
+          "Fluent UI System Icons (github.com/microsoft/fluentui-system-icons), a few generic icons — MIT,",
+          "  Copyright (c) 2020 Microsoft Corporation.",
+          "Frank Ruehl CLM (Culmus project, Maxim Iorsh) — GPL-2.0 with the font exception: embedding the font",
+          "  in a document does not by itself make the document GPL.",
+          "Noto Rashi Hebrew (Google) — SIL Open Font License 1.1.",
         ].join("\n");
         const notices = opts.packages.map(licenceOf).join("\n\n");
         // "--" may not appear inside an HTML comment.

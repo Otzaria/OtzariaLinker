@@ -32,6 +32,7 @@
 
   /* Otzaria AppSurfaces.panelBackground (light) */
   --app-bg: #f6ede5;
+  --reader-bg: var(--surface);
   /* semantics outside ColorScheme */
   --warning: #8a5a00;               --on-warning-container: #4a3000;
   --warning-container: #ffdfa8;
@@ -48,9 +49,10 @@
   /* spacing — AppTokens.spaceXS..XL */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
 
-  /* typography — AppTokens.fontSM..XL; system fonts only (no network) */
+  /* typography — AppTokens.fontSM..XL; the book fonts are the app's own, embedded (ADR 0005 §7) */
   --font-ui: "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Hebrew", sans-serif;
-  --font-book: "FrankRuehl CLM", "Frank Ruhl Libre", "Taamey Frank CLM", David, "Noto Serif Hebrew", Georgia, "Times New Roman", serif;
+  --font-book: "OtzariaFrank", "Frank Ruhl Libre", David, "Noto Serif Hebrew", Georgia, serif;
+  --font-rashi: "OtzariaRashi", var(--font-book);
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
   --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 18px;
   /* user font scale (settings) multiplies the book text size */
@@ -90,6 +92,7 @@
   --inverse-surface: #ede0d4;       --on-inverse-surface: #362f27;
   --inverse-primary: #805610;
   --app-bg: #000000;
+  --reader-bg: #242424; /* the app's neutral dark reading surface */
   --warning: #ffc46b;               --warning-container: #4a3000;
   --on-warning-container: #ffdfa8;
   --highlight: #7a5f1c;

@@ -52,12 +52,18 @@ class ChunkCache<T> {
 
 export class LineStore {
   readonly tick = signal(0);
+  /** line counts learned from a short last chunk — text books do not know their length up front */
+  private readonly counts = new Map<string, number>();
   private readonly lines: ChunkCache<SourceLine>;
   private readonly existing: ChunkCache<Link>;
 
   constructor(service: BooksService) {
     const bump = () => (this.tick.value = this.tick.peek() + 1);
-    this.lines = new ChunkCache((b, f, t) => service.lines(b, f, t), bump);
+    this.lines = new ChunkCache(async (b, f, t) => {
+      const got = await service.lines(b, f, t);
+      if (got.length < t - f + 1) this.counts.set(b, f + got.length);
+      return got;
+    }, bump);
     this.existing = new ChunkCache((b, f, t) => service.existingLinks(b, f, t), bump);
   }
 
@@ -67,6 +73,11 @@ export class LineStore {
     const s = this.lines.state(bookKey, c);
     if (!s) void this.lines.ensure(bookKey, c);
     return s?.status === "ready" ? s.items[index - c * CHUNK] : undefined;
+  }
+
+  /** Number of lines, once the end of the book has been read (undefined before). */
+  count(bookKey: string): number | undefined {
+    return this.counts.get(bookKey);
   }
 
   /** Error message of the chunk holding `index`, if loading it failed. */

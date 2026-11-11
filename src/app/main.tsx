@@ -1,26 +1,61 @@
+import { effect } from "@preact/signals";
 import { render } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { AppStore } from "../state/store";
+import type { BooksService, Saver } from "../state/services";
+import { App } from "../ui/app";
+import { StoreContext } from "../ui/context";
+import { applyTheme } from "../ui/theme/theme";
+import "../ui/theme/tokens.css";
+import "../ui/theme/app.css";
 import { RpcClient, type Port } from "../workers/rpc";
 import type { SourcesApi } from "../workers/sources-api";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
 
-/** Temporary shell (Milestone B). The real UI lands in Milestone F. */
-function App() {
-  const [engine, setEngine] = useState("בודק…");
-  useEffect(() => {
-    const w = new SourcesWorker();
-    new RpcClient<SourcesApi>(w as unknown as Port).call("ping", []).then(
-      (r) => setEngine(`SQLite ${r.sqlite} · ${r.zstd}`),
-      (e: Error) => setEngine(`שגיאה: ${e.message}`),
-    );
-  }, []);
-  return (
-    <main style="font-family: system-ui, sans-serif; padding: 24px">
-      <h1>מנהל הקישורים של אוצריא 2.0</h1>
-      <p>גרסת פיתוח {__APP_VERSION__} · {__APP_COMMIT__}</p>
-      <p>מנוע מסד נתונים: <output id="engine">{engine}</output></p>
-    </main>
-  );
-}
+/*
+ * Composition root: the only place that knows about every layer. It creates the worker, adapts it
+ * to the state layer's BooksService, provides a browser download Saver, and renders the UI.
+ */
+const worker = new SourcesWorker();
+const rpc = new RpcClient<SourcesApi>(worker as unknown as Port);
 
-render(<App />, document.getElementById("app")!);
+const service: BooksService = {
+  open: (files, opts) => rpc.call("open", [files], opts),
+  lines: (key, from, to, opts) => rpc.call("lines", [key, from, to], opts),
+  existingLinks: (key, from, to, opts) => rpc.call("existingLinks", [key, from, to], opts),
+  close: async (id) => void (await rpc.call("close", [id])),
+};
+
+const saver: Saver = {
+  save(name, data, mime) {
+    const url = URL.createObjectURL(new Blob([data as BlobPart], { type: mime }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  },
+};
+
+const store = new AppStore(service, saver);
+
+let stopTheme = () => {};
+effect(() => {
+  stopTheme();
+  stopTheme = applyTheme(store.prefs.theme.value);
+});
+effect(() => document.documentElement.style.setProperty("--font-scale", String(store.prefs.fontScale.value)));
+
+// a self-check the offline E2E test reads: proves sql.js and zstd start in this environment
+void rpc.call("ping", []).then(
+  (r) => (document.documentElement.dataset.engine = `SQLite ${r.sqlite} · ${r.zstd}`),
+  (e: Error) => (document.documentElement.dataset.engine = `שגיאה: ${e.message}`),
+);
+// debugging and E2E hook (no data leaves the page)
+(globalThis as { __linker?: AppStore }).__linker = store;
+
+render(
+  <StoreContext.Provider value={store}>
+    <App />
+  </StoreContext.Provider>,
+  document.getElementById("app")!,
+);

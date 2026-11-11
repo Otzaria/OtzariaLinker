@@ -48,6 +48,7 @@ export interface Task {
 }
 
 export type Screen = "home" | "workspace";
+export type SideTab = "builder" | "links" | "books";
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -69,6 +70,9 @@ export class AppStore {
   /** id of the link being edited in the builder, or null when creating */
   readonly editing = signal<string | null>(null);
   readonly notices = signal<Notice[]>([]);
+  /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
+  readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
+  readonly sideTab = signal<SideTab>("builder");
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -184,6 +188,22 @@ export class AppStore {
   }
 
   /* ---------------- reading and picking ---------------- */
+
+  /** Shows a line in a reader (opening its book there if needed) and flashes it. */
+  reveal(side: Side, bookKey: string, line: number): void {
+    batch(() => {
+      if (this.view[side].value !== bookKey && this.books.value.has(bookKey)) this.view[side].value = bookKey;
+      this.focus[side].value = { line, seq: (this.focus[side].peek()?.seq ?? 0) + 1 };
+    });
+  }
+
+  /** Shows both ends of a link. */
+  revealLink(l: Link): void {
+    const s = this.bookOf(l.source.book);
+    const t = this.bookOf(l.target.book);
+    if (s) this.reveal("source", s.key, l.source.line);
+    if (t) this.reveal("target", t.key, l.target.line);
+  }
 
   showBook(side: Side, bookKey: string): void {
     batch(() => {
@@ -381,7 +401,10 @@ export class AppStore {
 
   validation(): ValidationContext {
     return {
-      lineCount: (ref) => this.bookOf(ref)?.lineCount,
+      lineCount: (ref) => {
+        const b = this.bookOf(ref);
+        return b && (b.lineCount ?? this.lines.count(b.key));
+      },
       line: (ref, index): LineFacts | undefined => {
         const b = this.bookOf(ref);
         const l = b && this.lines.peek(b.key, index);
