@@ -19,6 +19,8 @@ export interface LinksRecord {
   ref_2?: string;
   /** anchor_src_hash, anchor_context and any unknown key, verbatim */
   extras: Record<string, unknown>;
+  /** `"Conection Type": null` in the file (the generator reads it as "", i.e. OTHER) */
+  typeNull?: boolean;
   /** key order as it appeared in the file */
   keyOrder: string[];
 }

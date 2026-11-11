@@ -61,6 +61,7 @@ export function recordToLink(
     }),
     ...(Object.keys(rec.extras).length > 0 && { passthrough: rec.extras }),
     keyOrder: rec.keyOrder,
+    ...(rec.typeNull && { typeNull: true }),
     targetPath: rec.path_2,
     fileIndex: index,
   };
@@ -86,5 +87,6 @@ export function linkToRecord(link: Link): LinksRecord {
     ...(link.ref2 !== undefined && { ref_2: link.ref2 }),
     extras: { ...link.passthrough },
     keyOrder: [...(link.keyOrder ?? [])],
+    ...(link.typeNull && { typeNull: true }),
   };
 }

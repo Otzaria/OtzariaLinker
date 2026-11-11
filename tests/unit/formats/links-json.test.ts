@@ -75,6 +75,17 @@ describe("convert — 1-based file ↔ 0-based model", () => {
     expect(link.target.book.origin).toBe("unknown");
     expect(issues.map((i) => i.code)).toContain("record/target-not-found");
   });
+  it("a null or missing \"Conection Type\" is written back as it was, until a type is set", () => {
+    // real library files: 259 have `"Conection Type": null` (MoreBooks/links/סידור אשכנז_links.json, live), 2 have
+    // records without the key; both came back as `"Conection Type": ""`, rewriting an untouched file
+    const base = { line_index_1: 2, heRef_2: "רש״י", path_2: "רש״י על בראשית.txt", line_index_2: 3 };
+    for (const rec of [base, { ...base, "Conection Type": null }]) {
+      const text = JSON.stringify([rec], null, 2);
+      const { link } = recordToLink(parseLinksJson(text).records[0]!, 0, src, () => tgt, "f0");
+      expect(serializeLinksJson([linkToRecord(link)])).toBe(text);
+      expect(JSON.parse(serializeLinksJson([linkToRecord({ ...link, declaredType: "commentary" })]))[0]["Conection Type"]).toBe("commentary");
+    }
+  });
   it("new links get the canonical key order and a folder-less path_2", () => {
     const link: Link = { id: "n", status: "new", provenance: "user", source: { book: src, line: 2, end: 4 }, target: { book: tgt, line: 0 }, declaredType: "commentary", heRef2: "רש״י", anchor: { rawStart: 3 } };
     expect(serializeLinksJson([linkToRecord(link)])).toBe(

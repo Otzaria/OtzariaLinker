@@ -183,6 +183,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(a && { anchor: { rawStart: a.rawStart as number, ...(a.rawEnd !== undefined && { rawEnd: a.rawEnd as number }), ...(a.label !== undefined && { label: a.label as string }), ...(str(a.contentHash) && { contentHash: a.contentHash }) } }),
     ...(pass !== undefined && { passthrough: copyData(pass as Record<string, unknown>) }),
     ...(l.keyOrder !== undefined && { keyOrder: [...l.keyOrder] }),
+    ...(l.typeNull === true && { typeNull: true }),
     ...(str(l.targetPath) && { targetPath: l.targetPath }),
     ...(isInt(l.fileIndex) && { fileIndex: l.fileIndex }),
   };
