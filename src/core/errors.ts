@@ -20,6 +20,8 @@ export type ErrorCode =
   | "db/no-books"
   | "db/schema-newer"
   | "source/closed"
+  | "db/mapping-invalid"
+  | "db/mapping-unknown-token"
   | "db/corrupt";
 
 export class LinkerError extends Error {
