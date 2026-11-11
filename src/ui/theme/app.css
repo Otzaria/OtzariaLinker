@@ -57,6 +57,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 
 /* ---------- home ---------- */
 .home { flex: 1; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; padding: 32px max(24px, 6vw); align-content: start; }
+.recovery { display: flex; gap: 10px; align-items: center; padding: 12px 14px; margin-bottom: 18px; border-radius: var(--radius); background: var(--tertiary-container); color: var(--on-tertiary-container); flex-wrap: wrap; }
 .home h1 { font-size: 22px; margin: 0 0 4px; }
 .home .lede { margin: 0 0 20px; color: var(--on-surface-variant); }
 .tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
@@ -231,9 +232,12 @@ details.held summary { cursor: pointer; font-weight: 600; }
 /* full-window drop target */
 .drop-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--primary-container) 70%, transparent); border: 3px dashed var(--primary); font-size: 22px; font-weight: 600; color: var(--on-primary-container); pointer-events: none; }
 
-/* narrow screens: the builder collapses under the readers (ADR 0005 §3) */
+/* narrow screens (ADR 0005 §3): one column of readers, the side panel as a bar fixed at the bottom
+   (so the builder stays in view while picking lines), the sources list last */
 @media (max-width: 900px) {
   .home { grid-template-columns: 1fr; padding: 16px; }
-  .workspace { grid-template-columns: 1fr !important; grid-template-rows: none !important; grid-auto-rows: minmax(260px, 1fr); overflow: auto; }
+  .workspace { grid-template-columns: 1fr !important; grid-template-rows: none !important; grid-auto-rows: minmax(300px, 60vh); overflow: auto; padding-bottom: 0; }
   .splitter { display: none; }
+  .workspace > .stack-col:has(.side-panel) { position: sticky; bottom: 0; z-index: 6; order: 8; height: 46vh; min-height: 0; box-shadow: var(--elev-3); }
+  .workspace > .stack-col:has(.sources-panel) { order: 9; }
 }

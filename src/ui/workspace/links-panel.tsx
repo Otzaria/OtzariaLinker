@@ -89,7 +89,9 @@ export function LinkItem({ l }: { l: Link }) {
           {l.source.book.title} {where(l.source.line, l.source.end)}
         </span>
         <Icon name="oz_link" size={14} />
-        <span>{l.heRef2 || `${l.target.book.title} ${where(l.target.line, l.target.end)}`}</span>
+        <span>
+          {l.heRef2 || l.target.book.title} <span class="muted">({where(l.target.line, l.target.end)})</span>
+        </span>
       </div>
       <div class="acts" onClick={(e) => e.stopPropagation()}>
         {l.status === "deleted" ? (

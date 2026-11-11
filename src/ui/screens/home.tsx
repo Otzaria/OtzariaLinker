@@ -1,4 +1,6 @@
 import { useState } from "preact/hooks";
+import type { EngineId } from "../../linking/automatic";
+import type { SideTab } from "../../state/store";
 import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
@@ -13,15 +15,17 @@ interface TaskDef {
   title: string;
   hint: string;
   pick: { folder?: boolean; accept?: string };
+  /** where the workspace should start (guided tasks — UX review suggestion 1) */
+  then?: { tab: SideTab; engine?: EngineId; batch?: boolean };
   soon?: string;
 }
 
 const TASKS: TaskDef[] = [
-  { icon: "oz_book_link", title: "קישור ספר לפירוש", hint: "ספר בסיס ופירוש עליו — לפי כותרות ודיבור המתחיל", pick: {} },
-  { icon: "oz_link_marker", title: "קישור הערות שוליים", hint: "מספרי ההערות בספר מול ספר ההערות", pick: {} },
-  { icon: "oz_search_in_folder", title: "קישור תיקייה שלמה", hint: "פירושים רבים מתיקייה, כל אחד מול הספר שבשמו", pick: { folder: true } },
+  { icon: "oz_book_link", title: "קישור ספר לפירוש", hint: "ספר בסיס ופירוש עליו — לפי כותרות ודיבור המתחיל", pick: {}, then: { tab: "suggestions", engine: "headings" } },
+  { icon: "oz_link_marker", title: "קישור הערות שוליים", hint: "מספרי ההערות בספר מול ספר ההערות", pick: {}, then: { tab: "suggestions", engine: "footnotes" } },
+  { icon: "oz_search_in_folder", title: "קישור תיקייה שלמה", hint: "פירושים רבים מתיקייה, כל אחד מול הספר שבשמו", pick: { folder: true }, then: { tab: "suggestions", engine: "headings", batch: true } },
   { icon: "oz_library_link", title: "קישור בין מסדים", hint: "שני מסדי SQLite, אישיים או של אוצריא", pick: { accept: ".db,.sqlite,.sqlite3" } },
-  { icon: "oz_link_edit", title: "עריכת קישורים קיימים", hint: "קובצי ‎_links.json — בדיקה, תיקון וייצוא מחדש", pick: { accept: ".json,.zip" } },
+  { icon: "oz_link_edit", title: "עריכת קישורים קיימים", hint: "קובצי ‎_links.json — בדיקה, תיקון וייצוא מחדש", pick: { accept: ".json,.zip" }, then: { tab: "links" } },
   { icon: "oz_document_link", title: "פתיחת פרויקט שמור", hint: "ממשיכים מאיפה שעצרתם (קובץ ‎.otzlinker.json)", pick: { accept: ".json" } },
   { icon: "oz_link_add", title: "עבודה ידנית חופשית", hint: "בוחרים ספרים, שורות, טווחים ומילים בעצמכם", pick: {} },
 ];
@@ -29,17 +33,33 @@ const TASKS: TaskDef[] = [
 export function Home() {
   const store = useStore();
   const [over, setOver] = useState(false);
-  const open = async (opts: TaskDef["pick"]) => store.openFiles(await pickFiles(opts));
+  const open = async (opts: TaskDef["pick"], then?: TaskDef["then"]) => {
+    const files = await pickFiles(opts);
+    if (!files.length) return;
+    await store.openFiles(files);
+    if (then && store.screen.value === "workspace") {
+      store.intent.value = { ...(then.engine && { engine: then.engine }), ...(then.batch && { batch: true }) };
+      store.sideTab.value = then.tab;
+    }
+  };
   const hasWork = store.sources.value.length > 0 || store.linkState.value.links.size > 0;
 
   return (
     <main class="home">
       <section>
+        {store.recovery.value && (
+          <div class="recovery" role="alert">
+            <Icon name="fl_history" size={24} />
+            <span class="grow">נמצאה עבודה שלא נשמרה מהפעם הקודמת: {store.recovery.value.links.toLocaleString("he")} קישורים.</span>
+            <button class="btn filled" onClick={store.recovery.value.restore}>שחזור</button>
+            <button class="btn text" onClick={store.recovery.value.dismiss}>התעלמות</button>
+          </div>
+        )}
         <h1>מה תרצו לעשות?</h1>
         <p class="lede">בוחרים משימה, והכלי יבקש רק את מה שצריך. הכול נשאר במחשב שלכם — שום קובץ לא נשלח לשום מקום.</p>
         <div class="tasks">
           {TASKS.map((t) => (
-            <button key={t.title} class="task-card" onClick={() => open(t.pick)}>
+            <button key={t.title} class="task-card" onClick={() => open(t.pick, t.then)}>
               <Icon name={t.icon} size={28} />
               <b>{t.title}</b>
               <span>{t.hint}</span>

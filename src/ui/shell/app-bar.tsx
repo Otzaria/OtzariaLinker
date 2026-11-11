@@ -1,9 +1,10 @@
-import { PRESETS, type LayoutPreset, type ThemeSetting } from "../../state/preferences";
+import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { Menu, MenuItem } from "./menu";
 
 const PRESET_LABELS: Record<LayoutPreset, string> = { four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: "מקור מעל יעד" };
+const PANEL_LABELS: Record<PanelId, string> = { sources: "מקורות וספרים", source: "ספר המקור", target: "ספר היעד", side: "החלונית (בונה, קישורים, הצעות)" };
 const THEME_LABELS: Record<ThemeSetting, string> = { system: "לפי המערכת", light: "בהיר", dark: "כהה" };
 
 export function AppBar({ onExport }: { onExport: () => void }) {
@@ -23,7 +24,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
 
       {inWorkspace && (
         <>
-          <button class="icon-btn" disabled={!ls.undo.length} onClick={() => store.undo()} title={ls.undo.length ? `ביטול: ${ls.undo.at(-1)!.label} (Ctrl+Z)` : "אין מה לבטל"} aria-label="ביטול">
+          <button class="icon-btn" disabled={!ls.undo.length} onClick={() => store.undo()} title={ls.undo.length ? `ביטול הפעולה האחרונה: ${ls.undo.at(-1)!.label} (Ctrl+Z)` : "אין מה לבטל"} aria-label="ביטול הפעולה האחרונה">
             <Icon name="fl_arrow_undo" />
           </button>
           <button class="icon-btn" disabled={!ls.redo.length} onClick={() => store.redo()} title={ls.redo.length ? `ביצוע חוזר: ${ls.redo.at(-1)!.label} (Ctrl+Y)` : "אין מה לבצע שוב"} aria-label="ביצוע חוזר">
@@ -37,6 +38,12 @@ export function AppBar({ onExport }: { onExport: () => void }) {
                 {(Object.keys(PRESETS) as LayoutPreset[]).map((p) => (
                   <MenuItem key={p} checked={prefs.layout.value.preset === p} onSelect={() => ((prefs.layout.value = structuredClone(PRESETS[p])), close())}>
                     {PRESET_LABELS[p]}
+                  </MenuItem>
+                ))}
+                {prefs.layout.value.hidden.length > 0 && <div class="label">פאנלים מוסתרים</div>}
+                {prefs.layout.value.hidden.map((p) => (
+                  <MenuItem key={p} icon="fl_add" onSelect={() => ((prefs.layout.value = { ...prefs.layout.value, hidden: prefs.layout.value.hidden.filter((x) => x !== p), order: prefs.layout.value.order.includes(p) ? prefs.layout.value.order : [...prefs.layout.value.order, p] }), close())}>
+                    הצגת {PANEL_LABELS[p]}
                   </MenuItem>
                 ))}
                 <div class="label">גוררים כותרת של פאנל כדי להחליף מקומות, וגבול בין פאנלים כדי לשנות רוחב.</div>

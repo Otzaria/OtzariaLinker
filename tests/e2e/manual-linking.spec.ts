@@ -44,8 +44,9 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await source.locator('.ln[data-i="1"] .tx').click();
   await target.locator('.ln[data-i="2"] .tx').click();
   const builder = page.locator(".builder");
-  await expect(builder).toContainText("ref_2"); // Bereshit is a Sefaria book: the weekly sync needs the English ref
-  await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeDisabled();
+  // Bereshit is a Sefaria book: the library's weekly sync wants the English ref — a warning, not a block
+  await expect(builder.locator(".problems .warning")).toContainText("ref_2");
+  await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
   await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
   await expect(builder.locator(".stored-as")).toContainText("בראשית"); // shows how Otzaria will store it

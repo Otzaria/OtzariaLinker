@@ -6,6 +6,7 @@ import { Icon } from "../icons/icon";
 import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
+import { HideButton } from "./hide-button";
 import { SourcesBody } from "./sources-panel";
 import { QaPanel } from "./qa-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
@@ -56,7 +57,7 @@ export function Workspace() {
 function PanelContent({ id }: { id: PanelId }) {
   if (id === "source") return <Reader side="source" />;
   if (id === "target") return <Reader side="target" />;
-  if (id === "sources") return <Panel id="sources" title="מקורות וספרים" icon="oz_bookshelf"><SourcesBody /></Panel>;
+  if (id === "sources") return <Panel id="sources" title="מקורות וספרים" icon="oz_bookshelf" class="sources-panel"><SourcesBody /></Panel>;
   return <SidePanel />;
 }
 
@@ -76,7 +77,7 @@ function PanelSlot({ id, onDrop, children }: { id: PanelId; onDrop: (target: Pan
     <div
       class="stack-col"
       onDragStart={(e) => {
-        const head = (e.target as HTMLElement).closest?.(".panel-head");
+        const head = (e.target as HTMLElement).closest?.(".panel-head, .tabs .grip");
         if (head && e.dataTransfer) {
           e.dataTransfer.setData(PANEL_DRAG, id);
           e.dataTransfer.effectAllowed = "move";
@@ -91,11 +92,9 @@ function PanelSlot({ id, onDrop, children }: { id: PanelId; onDrop: (target: Pan
   );
 }
 
-export function Panel({ id, title, icon, children, actions }: { id: PanelId; title: string; icon: Parameters<typeof Icon>[0]["name"]; children: ComponentChildren; actions?: ComponentChildren }) {
-  const store = useStore();
-  const layout = store.prefs.layout.value;
+export function Panel({ id, title, icon, children, actions, class: cls }: { id: PanelId; title: string; icon: Parameters<typeof Icon>[0]["name"]; children: ComponentChildren; actions?: ComponentChildren; class?: string }) {
   return (
-    <section class="panel" aria-label={title}>
+    <section class={`panel${cls ? ` ${cls}` : ""}`} aria-label={title}>
       <div class="panel-head" draggable>
         <span class="grip" title="גררו כדי להזיז את הפאנל">
           <Icon name="fl_re_order_dots_vertical" size={16} />
@@ -105,9 +104,7 @@ export function Panel({ id, title, icon, children, actions }: { id: PanelId; tit
           {title}
         </h2>
         {actions}
-        <button class="icon-btn" title="הסתרת הפאנל (מחזירים מתפריט הפריסה)" aria-label={`הסתרת ${title}`} onClick={() => (store.prefs.layout.value = { ...layout, hidden: [...layout.hidden, id] })}>
-          <Icon name="fl_eye_off" size={18} />
-        </button>
+        <HideButton id={id} label={title} />
       </div>
       <div class="panel-body">{children}</div>
     </section>
@@ -122,7 +119,7 @@ function SidePanel() {
   const linkCount = store.allLinks.value.length;
   const current = tab === "books" && !sourcesHidden ? "builder" : tab;
   return (
-    <section class="panel" aria-label="בונה וקישורים">
+    <section class="panel side-panel" aria-label="בונה וקישורים">
       <div class="tabs" role="tablist">
         <span class="grip" style="align-self:center;cursor:grab" draggable title="גררו כדי להזיז את הפאנל">
           <Icon name="fl_re_order_dots_vertical" size={16} />
@@ -143,6 +140,8 @@ function SidePanel() {
           <Icon name="oz_link_check" size={16} />
           בדיקה {store.qa.value && store.qa.value.bySeverity.error > 0 && <span class="count">{store.qa.value.bySeverity.error.toLocaleString("he")}</span>}
         </button>
+        <span class="grow" />
+        <HideButton id="side" label="החלונית" />
         {sourcesHidden && (
           <button role="tab" aria-selected={current === "books"} onClick={() => (store.sideTab.value = "books")}>
             <Icon name="oz_bookshelf" size={16} />

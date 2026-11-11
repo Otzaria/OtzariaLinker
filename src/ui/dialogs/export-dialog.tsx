@@ -33,11 +33,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           {plan && c && (
             <>
               <div class="stats">
-                <Stat n={c.new} label="קישורים חדשים" />
-                <Stat n={c.edited} label="קישורים ערוכים" />
-                <Stat n={c.kept} label="נשמרים כמו שהם" />
-                <Stat n={c.deleted} label="יימחקו מהקובץ" />
-                <Stat n={c.heldBack} label="לא ייוצאו (שגיאה)" bad={c.heldBack > 0} />
+                {/* only the numbers that say something (UX review suggestion 4) */}
+                {c.new > 0 && <Stat n={c.new} label="קישורים חדשים" />}
+                {c.edited > 0 && <Stat n={c.edited} label="קישורים ערוכים" />}
+                {c.kept > 0 && <Stat n={c.kept} label="נשמרים כמו שהם" />}
+                {c.deleted > 0 && <Stat n={c.deleted} label="יימחקו מהקובץ" />}
+                {c.heldBack > 0 && <Stat n={c.heldBack} label="לא ייוצאו (שגיאה)" bad />}
                 <Stat n={c.files} label="קבצים" />
               </div>
               {plan.files.length > 0 && (

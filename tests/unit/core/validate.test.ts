@@ -48,9 +48,11 @@ describe("validateLink — generator gates", () => {
 });
 
 describe("validateLink — Sefaria rules (legacy §10 ref_1/ref_2)", () => {
-  it("legacy: יעד ספריא בלי ref_2 → שגיאה ; עם ref_2 — אין שגיאה", () => {
-    expect(codes(link({ target: { book: SEF, line: 2 } }))).toContain("error:sefaria/ref2-required");
-    expect(codes(link({ target: { book: SEF, line: 2 }, ref2: "Genesis 1:3" }))).not.toContain("error:sefaria/ref2-required");
+  // v3 made this an error. 2.0 makes it a warning (UX review, 2026-11-11): only the library's weekly
+  // sync needs ref_2; the generator ignores it, and blocking every link into Tanakh was unusable.
+  it("יעד ספריא בלי ref_2 → אזהרה (לא חוסם) ; עם ref_2 — בלי אזהרה", () => {
+    expect(codes(link({ target: { book: SEF, line: 2 } }))).toContain("warning:sefaria/ref2-required");
+    expect(codes(link({ target: { book: SEF, line: 2 }, ref2: "Genesis 1:3" }))).not.toContain("warning:sefaria/ref2-required");
   });
   it("legacy: רשומה שיובאה בלי ref_2 = אזהרה", () => {
     expect(codes(link({ target: { book: SEF, line: 2 }, status: "existing", provenance: "file" }))).toContain("warning:sefaria/ref2-required");

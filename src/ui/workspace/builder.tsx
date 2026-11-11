@@ -7,6 +7,8 @@ import { TYPE_CHOICES } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { LinkItem } from "./links-panel";
+import { plainText } from "./plain-text";
+import { visibleSlice } from "../../matching/hebrew-tokens";
 
 /*
  * The link builder (ADR 0005 §3, option A): both ends, the type and the reference, checked live
@@ -29,7 +31,11 @@ export function Builder() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        store.createFromDraft();
+        // a blocked draft says why, instead of doing nothing (UX review suggestion 7)
+        if (!store.createFromDraft() && store.draft.value) {
+          const err = store.draftProblems.value.find((p) => p.severity === "error");
+          if (err) store.notify("error", `הקישור לא נוצר: ${err.message}`);
+        }
       }
     };
     addEventListener("keydown", onKey);
@@ -78,7 +84,7 @@ export function Builder() {
         )}
       </label>
 
-      {(advanced || srcSefaria) && srcSefaria && (
+      {srcSefaria && (
         <label class="field">
           ref_1 — ציון ספריא באנגלית של המקור
           <input type="text" dir="ltr" placeholder="Genesis 1:1" value={store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} />
@@ -168,11 +174,11 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
       </button>
       {pick.anchor && (
         <span style="grid-column:1/-1" class="muted">
-          עוגן: <mark class="anchor-hl">{pick.anchor.text || `תווים ${pick.anchor.rawStart}–${pick.anchor.rawEnd ?? ""}`}</mark>{" "}
+          עוגן: <mark class="anchor-hl">{pick.anchor.text || (line ? visibleSlice(line.anchorText, pick.anchor.rawStart, pick.anchor.rawEnd ?? pick.anchor.rawStart + 1) : "…")}</mark>{" "}
           <button class="adv-link" onClick={() => store.pickLine(side, pick.bookKey, pick.line)}>הסרת העוגן</button>
         </span>
       )}
-      {line && <span class="snip">{stripTags(line.anchorText)}</span>}
+      {line && <span class="snip">{plainText(line.anchorText)}</span>}
     </div>
   );
 }

@@ -65,8 +65,8 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   if (t.book.origin === "otzaria" && t.book.title !== normalizeTitle(t.book.title))
     add("error", "export/title-not-normalized", `שם הספר "${t.book.title}" כתוב עם מירכאות או רווחים שאוצריא מנרמלת (למשל "→״). במסד הוא נקרא "${normalizeTitle(t.book.title)}", והקישור לא יימצא.`);
 
-  sideChecks("המקור", link.source, ctx, add);
-  sideChecks("היעד", link.target, ctx, add);
+  sideChecks("ספר המקור", link.source, ctx, add);
+  sideChecks("ספר היעד", link.target, ctx, add);
   anchorChecks(link, f.flipped, ctx, add);
   sefariaChecks(link, add);
   return out;
@@ -83,7 +83,7 @@ function sideChecks(label: string, side: Link["source"], ctx: ValidationContext,
   else if (!facts.exists) add("error", "export/line-not-in-db", `שורה ${side.line + 1} ב${label} היא כותרת ריקה, ואוצריא לא יוצרת אותה במסד. הקישור יידחה.`);
   else if (facts.heading !== null) add("error", "export/heading-line", `שורה ${side.line + 1} ב${label} היא שורת כותרת. אוצריא מדלגת על קישור שאחד מקצותיו כותרת — קשרו לשורה שאחריה.`);
 
-  if (side.end !== undefined && side.end <= side.line) add("warning", "export/range-ignored", `סוף הטווח ב${label} אינו אחרי ההתחלה, והטווח יתעלם.`);
+  if (side.end !== undefined && side.end <= side.line) add("warning", "export/range-ignored", `סוף הטווח ב${label} אינו אחרי ההתחלה, והטווח לא ייחשב.`);
   if (isRange(side)) {
     if (count !== undefined && side.end! >= count) add("error", "export/range-out-of-range", `סוף הטווח ב${label} (שורה ${side.end! + 1}) מעבר לסוף הספר.`);
     const endFacts = ctx.line(side.book, side.end!);
@@ -112,11 +112,11 @@ function sefariaChecks(link: Link, add: Add) {
   if (link.ref1 !== undefined && link.ref2 !== undefined) add("error", "sefaria/both-refs", "ברשומה יש גם ref_1 וגם ref_2. מותר רק אחד מהם.");
   if (link.ref1 !== undefined && !srcSef) add("error", "sefaria/ref1-side", "ref_1 מותר רק כשספר המקור הוא ספר ספריא.");
   if (link.ref2 !== undefined && !tgtSef) add("error", "sefaria/ref2-side", "ref_2 מותר רק כשספר היעד הוא ספר ספריא.");
-  const isNew = link.status === "new" || link.provenance === "user" || link.provenance === "auto";
   if (srcSef && !tgtSef && link.ref1 === undefined)
-    add(isNew ? "error" : "warning", "sefaria/ref1-required", "ספר המקור הוא ספר ספריא: הסנכרון השבועי של הספרייה דורש ref_1 (ציון ספריא באנגלית).");
+    // a warning, not an error: only the library's weekly sync needs it; the generator ignores it (UX review #8)
+    add("warning", "sefaria/ref1-required", "ספר המקור הוא ספר ספריא. כדי לשלוח את הקישור לספריית אוצריא, הוסיפו את ציון ספריא באנגלית (ref_1). לשימוש פרטי אפשר בלי.");
   if (tgtSef && !srcSef && link.ref2 === undefined)
-    add(isNew ? "error" : "warning", "sefaria/ref2-required", "ספר היעד הוא ספר ספריא: הסנכרון השבועי של הספרייה דורש ref_2 (ציון ספריא באנגלית).");
+    add("warning", "sefaria/ref2-required", "ספר היעד הוא ספר ספריא. כדי לשלוח את הקישור לספריית אוצריא, הוסיפו את ציון ספריא באנגלית (ref_2). לשימוש פרטי אפשר בלי.");
   if ((srcSef || tgtSef) && link.anchor?.rawEnd !== undefined)
     add("error", "sefaria/anchor-range", "עוגן עם סוף (end) אינו נתמך בקישור שנוגע בספר ספריא.");
   if (tgtSef && !srcSef && link.anchor)

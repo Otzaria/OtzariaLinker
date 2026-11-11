@@ -107,6 +107,10 @@ export class AppStore {
   readonly run = signal<SuggestionRun | null>(null);
   /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
   readonly dbLinkKeys = signal<ReadonlySet<string>>(new Set());
+  /** unsaved work found from a previous session, until the user restores or dismisses it */
+  readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
+  /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
+  readonly intent = signal<{ engine?: EngineId; batch?: boolean } | null>(null);
   /** the last quality report; null until the user runs the check */
   readonly qa = signal<QaReport | null>(null);
   /** the link revision the report was made on — a different revision means the report is stale */
@@ -194,9 +198,26 @@ export class AppStore {
     const opened = res.sources.flatMap((s) => s.books);
     if (opened.length) {
       this.notify("success", `נפתחו ${opened.length.toLocaleString("he")} ספרים מ־${res.sources.map((s) => s.info.label).join(", ")}.`);
-      if (!this.view.source.value) this.view.source.value = opened[0]!.key;
+      this.chooseRoles(opened);
       this.screen.value = "workspace";
     } else if (res.documents.length) this.screen.value = "workspace";
+  }
+
+  /**
+   * Which opened book goes where: a commentary ("X על Y") is the source and its open base the target;
+   * a "הערות…" book is the target of the book it annotates. Falls back to the first opened book.
+   */
+  private chooseRoles(opened: readonly SourceBook[]): void {
+    if (this.view.source.peek() && this.view.target.peek()) return;
+    const all = [...this.books.peek().values()].map((b) => this.refOf(b.key));
+    const pair = pairByTitle(opened.map((b) => this.refOf(b.key)), all).find((p) => p.target);
+    const notes = opened.find((b) => b.title.startsWith("הערות"));
+    const main = notes && opened.find((b) => b !== notes && notes.title.includes(b.title));
+    batch(() => {
+      if (pair?.target) (this.view.source.value = pair.source.key), (this.view.target.value = pair.target.key);
+      else if (notes && main) (this.view.source.value = main.key), (this.view.target.value = notes.key);
+      else if (!this.view.source.peek()) this.view.source.value = opened[0]!.key;
+    });
   }
 
   async closeSource(id: string): Promise<void> {
@@ -281,7 +302,15 @@ export class AppStore {
       const hi = Math.max(cur.end ?? cur.line, line, cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
-    if (side === "target") this.draftHeRef.value = this.editing.value ? this.draftHeRef.value : null;
+    if (side === "target") {
+      // a new target makes the old reference wrong — also while editing (UX review #3)
+      const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+      const sameTarget = edited && this.sameBook(edited.target.book, bookKey) && edited.target.line === this.pick.target.value?.line;
+      if (!sameTarget) {
+        this.draftHeRef.value = null;
+        this.draftRef2.value = "";
+      }
+    }
     this.activeSide.value = side;
     this.autoType();
   }
@@ -360,9 +389,18 @@ export class AppStore {
       this.draftRef2.value = "";
       // keep the source pick only when it was a range/anchor the user may link again; else advance to the next line
       const s = this.pick.source.value;
-      if (s && !s.anchor && s.end === undefined) this.pick.source.value = { bookKey: s.bookKey, line: s.line + 1 };
+      if (s && !s.anchor && s.end === undefined) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
     });
     return link;
+  }
+
+  /** The next line after `line` that is not a heading (links to headings are dropped), as far as loaded. */
+  private nextContentLine(bookKey: string, line: number): number {
+    for (let i = line + 1; i < line + 50; i++) {
+      const l = this.lines.peek(bookKey, i);
+      if (!l || l.heading === null) return i;
+    }
+    return line + 1;
   }
 
   editInBuilder(id: string): void {
@@ -402,15 +440,11 @@ export class AppStore {
   }
 
   undo(): void {
-    const label = this.linkState.value.undo.at(-1)?.label;
     this.linkState.value = undo(this.linkState.value);
-    if (label) this.notify("info", `בוטל: ${label}`);
   }
 
   redo(): void {
-    const label = this.linkState.value.redo.at(-1)?.label;
     this.linkState.value = redo(this.linkState.value);
-    if (label) this.notify("info", `בוצע שוב: ${label}`);
   }
 
   /** Links touching a book, from the project (not database links). */
@@ -610,7 +644,7 @@ export class AppStore {
     const errors = issues.filter((i) => i.level === "error");
     const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
     if (parsed.generatorRejectsFile)
-      this.notify("error", `"${path}": אוצריא הייתה דוחה את הקובץ הזה כולו כמו שהוא (${errors.length} רשומות פגומות). הרשומות התקינות נטענו; בייצוא הקובץ ייכתב מחדש תקין.`, details);
+      this.notify("error", `"${path}": אוצריא הייתה דוחה את הקובץ הזה כולו כמו שהוא (${new Set(errors.map((e) => e.index)).size} רשומות פגומות). הרשומות התקינות נטענו; בייצוא הקובץ ייכתב מחדש תקין.`, details);
     else if (issues.length) this.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.`, details);
     else this.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".`);
     if (sourceRef.origin === "unknown") this.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
@@ -768,7 +802,10 @@ export class AppStore {
         } catch {
           return;
         }
-        if (n) this.notify("info", `נמצאה עבודה שלא נשמרה מהפעם הקודמת (${n.toLocaleString("he")} קישורים).`, undefined, { label: "שחזור", run: () => this.openProject("שמירה אוטומטית", text) });
+        if (!n) return;
+        // kept aside so the next autosave cannot overwrite it before the user decides (UX review #4)
+        void kv.set(`${KEY}:recovered`, text).catch(() => {});
+        this.recovery.value = { links: n, restore: () => (this.openProject("שמירה אוטומטית", text), (this.recovery.value = null)), dismiss: () => ((this.recovery.value = null), void kv.delete(`${KEY}:recovered`).catch(() => {})) };
       },
       () => {},
     );

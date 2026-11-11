@@ -175,10 +175,12 @@ describe("AppStore — projects and autosave", () => {
     const b = makeStore();
     b.store.startAutosave(kv, 0);
     await new Promise((r) => setTimeout(r, 10));
-    const offer = b.store.notices.value.find((n) => n.action?.label === "שחזור")!;
-    expect(offer.text).toContain("1");
-    offer.action!.run();
+    const offer = b.store.recovery.value!;
+    expect(offer.links).toBe(1);
+    expect(mem.get("autosave:v1:recovered")).toContain("otzaria-linker-project"); // safe from the next autosave
+    offer.restore();
     expect(b.store.allLinks.value).toHaveLength(1);
+    expect(b.store.recovery.value).toBeNull();
   });
 });
 

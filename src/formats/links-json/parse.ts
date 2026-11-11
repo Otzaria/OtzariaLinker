@@ -141,7 +141,7 @@ export function parseLinksJson(text: string): ParseResult {
     });
   });
   if (generatorRejectsFile)
-    file("error", "file/generator-rejects", "לפחות רשומה אחת לא ניתנת לפענוח, ולכן הגנרטור של אוצריא ידלג על **כל** הקובץ. תקנו את הרשומות המסומנות לפני השימוש.");
+    file("error", "file/generator-rejects", "לפחות רשומה אחת לא ניתנת לפענוח, ולכן הגנרטור של אוצריא ידלג על הקובץ כולו. תקנו את הרשומות המסומנות לפני השימוש.");
   return { records, issues, generatorRejectsFile, pipelineRejectsBytes };
 }
 

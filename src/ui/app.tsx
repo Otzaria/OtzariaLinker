@@ -16,7 +16,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]");
-      if (typing || !(e.ctrlKey || e.metaKey)) return;
+      // shortcuts belong to the workspace; on the home screen Ctrl+S would save an empty project
+      if (typing || !(e.ctrlKey || e.metaKey) || store.screen.value !== "workspace") return;
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) (e.preventDefault(), store.undo());
       else if (k === "y" || (k === "z" && e.shiftKey)) (e.preventDefault(), store.redo());

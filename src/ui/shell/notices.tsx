@@ -19,7 +19,8 @@ export function Notices() {
 
 function NoticeView({ n, onClose }: { n: Notice; onClose: () => void }) {
   useEffect(() => {
-    if (n.kind === "warning" || n.kind === "error" || n.details) return;
+    // a notice that offers an action stays until used or closed (UX review #4)
+    if (n.kind === "warning" || n.kind === "error" || n.details || n.action) return;
     const t = setTimeout(onClose, 5000);
     return () => clearTimeout(t);
   }, [n.id]);

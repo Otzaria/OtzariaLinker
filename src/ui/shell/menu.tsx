@@ -8,6 +8,8 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
+    // keyboard: focus moves into the menu; arrows move between items (UX review #6)
+    ref.current?.querySelector<HTMLElement>(".menu-pop .item")?.focus();
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -23,7 +25,17 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
         <Icon name={icon} />
       </button>
       {open && (
-        <div class="menu-pop" role="menu">
+        <div
+          class="menu-pop"
+          role="menu"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+            e.preventDefault();
+            const items = [...(ref.current?.querySelectorAll<HTMLElement>(".menu-pop .item") ?? [])];
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+          }}
+        >
           {children(() => setOpen(false))}
         </div>
       )}

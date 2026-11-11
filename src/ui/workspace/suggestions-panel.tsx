@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { CONFIDENCE_LABELS, ENGINES, type Confidence, type EngineId, type Suggestion } from "../../linking/automatic";
 import { stripTags } from "../../core/text/html";
 import { pairByTitle } from "../../linking/batch";
+import { plainText } from "./plain-text";
 import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/store";
 import { useStore } from "../context";
@@ -65,8 +66,9 @@ export function SuggestionsPanel() {
 
 function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => void) | undefined }) {
   const store = useStore();
-  const [engine, setEngine] = useState<EngineId>("headings");
-  const [mode, setMode] = useState<"pair" | "batch">("pair");
+  const intent = store.intent.value;
+  const [engine, setEngine] = useState<EngineId>(intent?.engine ?? "headings");
+  const [mode, setMode] = useState<"pair" | "batch">(intent?.batch ? "batch" : "pair");
   const sources = store.sources.value;
   const [batchSource, setBatchSource] = useState<string>(() => sources.find((x) => x.info.kind === "text-files")?.info.id ?? sources[0]?.info.id ?? "");
   const info = ENGINES.find((e) => e.id === engine)!;
@@ -261,9 +263,15 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
   const store = useStore();
   const end = (l: number, e?: number) => (e !== undefined && e > l ? `${l + 1}–${e + 1}` : `${l + 1}`);
   return (
-    <tr class={`st-${state}`} onClick={() => store.showSuggestion(s.id)} title={s.reasons.map((r) => r.text).join(" · ")}>
+    <tr
+      class={`st-${state}`}
+      tabIndex={0}
+      onClick={() => store.showSuggestion(s.id)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.showSuggestion(s.id))}
+      title={s.reasons.map((r) => r.text).join(" · ")}
+    >
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label="בחירה" />
+        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${s.source.line + 1}: ${s.heRef2}`} />
       </td>
       <td>{store.run.value?.batch && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
       <td>{s.heRef2}</td>
@@ -313,9 +321,10 @@ function StepView({ card }: { card: boolean }) {
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest?.("input, textarea, select") || e.ctrlKey || e.metaKey || !s) return;
+      // keys act only when no control has focus: Enter on a focused button must press THAT button (UX review #1)
+      if ((e.target as HTMLElement).closest?.("input, textarea, select, button, a, [role=tab], [contenteditable]") || e.ctrlKey || e.metaKey || e.altKey || !s) return;
       const k = e.key.toLowerCase();
-      if (k === "a" || k === "enter" || k === "ש") (e.preventDefault(), store.approveSuggestions([s.id]), go(1, true));
+      if (k === "a" || k === "ש") (e.preventDefault(), store.approveSuggestions([s.id]), go(1, true));
       else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.rejectSuggestions([s.id]), go(1, true));
       else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
       else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
@@ -389,7 +398,7 @@ function CardTexts({ s }: { s: Suggestion }) {
   store.lines.tick.value;
   const text = (key: string, line: number) => {
     const l = store.lines.line(key, line);
-    return l ? stripTags(l.anchorText) : "…";
+    return l ? plainText(l.anchorText) : "…";
   };
   return (
     <>

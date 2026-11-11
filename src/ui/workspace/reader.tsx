@@ -10,6 +10,7 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
 import { BookList } from "./book-picker";
+import { HideButton } from "./hide-button";
 
 /*
  * One book, read lazily. The book is split into chunks of CHUNK lines; a chunk is a placeholder
@@ -53,8 +54,9 @@ export function Reader({ side }: { side: Side }) {
 }
 
 function ReaderHead({ side, title, onChoose }: { side: Side; title: string | undefined; onChoose: () => void }) {
+  const store = useStore();
   return (
-    <div class="panel-head" data-panel={side}>
+    <div class="panel-head" data-panel={side} draggable>
       <span class="grip" title="גררו כדי להזיז את הפאנל">
         <Icon name="fl_re_order_dots_vertical" size={16} />
       </span>
@@ -63,6 +65,7 @@ function ReaderHead({ side, title, onChoose }: { side: Side; title: string | und
       <button class="icon-btn" onClick={onChoose} title="בחירת ספר אחר" aria-label="בחירת ספר">
         <Icon name="oz_book_search" />
       </button>
+      <HideButton id={side} label={`ספר ה${SIDE_LABEL[side]}`} />
     </div>
   );
 }
@@ -124,19 +127,27 @@ function BookView({ side, bookKey, lineCount }: { side: Side; bookKey: string; l
       if (a && side === "source") return store.pickAnchor(side, bookKey, i, a);
       if (a) return; // words in the target are just selected text; anchors live on the source line
     }
+    if (e.shiftKey) getSelection()?.removeAllRanges(); // a Shift-range is lines, not text
     store.pickLine(side, bookKey, i, e.shiftKey);
     if (side === "target" && store.prefs.createMode.value === "click" && store.pick.source.value) createNow();
   };
 
   const createNow = () => {
     const made = store.createFromDraft();
-    if (made) store.notify("success", "הקישור נוצר.", undefined, { label: "ביטול", run: () => store.undo() });
+    if (made) store.notify("success", "הקישור נוצר (Ctrl+Z מבטל).");
     else if (store.draftProblems.value.length) store.notify("error", `הקישור לא נוצר: ${store.draftProblems.value.find((p) => p.severity === "error")?.message ?? ""}`);
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (!pickHere || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
+    // keyboard-only use: the first arrow picks the first line in view (UX review #6)
+    if (!pickHere) {
+      const top = scroller.current?.getBoundingClientRect().top ?? 0;
+      const first = [...(scroller.current?.querySelectorAll<HTMLElement>(".ln") ?? [])].find((el) => el.getBoundingClientRect().bottom > top);
+      store.pickLine(side, bookKey, first ? Number(first.dataset.i) : 0);
+      return;
+    }
     const edge = e.shiftKey ? (pickHere.end ?? pickHere.line) : pickHere.line;
     const next = Math.max(0, edge + (e.key === "ArrowDown" ? 1 : -1));
     if (count !== undefined && next >= count) return;

@@ -52,7 +52,8 @@ export function loadPreferences(storage: Storage | null = safeStorage()): Prefer
     advanced: signal(pick(saved.advanced, (x) => typeof x === "boolean", false)),
     createMode: signal(pick(saved.createMode, (x) => x === "builder" || x === "click", "builder" as CreateMode)),
     suggestionsView: signal(pick(saved.suggestionsView, (x) => x === "table" || x === "inline" || x === "card", "table" as SuggestionsView)),
-    layout: signal(pick(saved.layout, isLayout, PRESETS.four)),
+    // below ~1200px four columns are too tight; start with two texts and a side panel (UX review)
+    layout: signal(pick(saved.layout, isLayout, (globalThis.innerWidth ?? 1920) < 1200 ? PRESETS.drawer : PRESETS.four)),
   };
   effect(() => {
     const snapshot = Object.fromEntries(Object.entries(prefs).map(([k, s]) => [k, (s as Signal<unknown>).value]));
