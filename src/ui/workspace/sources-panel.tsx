@@ -4,7 +4,7 @@ import { pickFiles } from "../files";
 import { Icon } from "../icons/icon";
 import { BookList } from "./book-picker";
 
-const KIND_LABEL = { "otzaria-db": "מסד", "text-files": "קבצים" } as const;
+const KIND_LABEL = { "otzaria-db": "מסד", "text-files": "קבצים", "mapped-db": "מסד ממופה" } as const;
 
 /** Open sources (databases, folders, files) and a search over all their books. */
 export function SourcesBody() {
@@ -16,7 +16,7 @@ export function SourcesBody() {
       <div class="sources-list">
         {sources.map((s) => (
           <div class="source-row" key={s.info.id}>
-            <Icon name={s.info.kind === "otzaria-db" ? "fl_database" : "fl_folder"} size={18} />
+            <Icon name={s.info.kind !== "text-files" ? "fl_database" : "fl_folder"} size={18} />
             <div class="grow">
               <div title={s.info.label} style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{s.info.label}</div>
               <div class="meta">

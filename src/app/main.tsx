@@ -48,6 +48,7 @@ const call = <K extends keyof SourcesApi & string>(op: K, args: Parameters<Sourc
 
 const service: BooksService = {
   open: (files, opts) => call("open", [files], opts),
+  openMapped: (token, mapping, opts) => call("openMapped", [token, mapping], opts),
   lines: (key, from, to, opts) => call("lines", [key, from, to], opts),
   existingLinks: (key, from, to, opts) => call("existingLinks", [key, from, to], opts),
   close: async (id) => void (await call("close", [id])),

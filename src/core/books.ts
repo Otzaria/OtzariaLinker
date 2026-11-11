@@ -4,7 +4,7 @@ import type { BookOrigin } from "./links/model";
  * Plain data about books and lines as every source reports them (stage 6). They live in core so
  * that the state and UI layers can hold them without depending on any source implementation.
  */
-export type SourceKind = "otzaria-db" | "text-files";
+export type SourceKind = "otzaria-db" | "text-files" | "mapped-db";
 
 export interface SourceBook {
   /** unique across all open sources: "<sourceId>:<book id inside the source>" */
