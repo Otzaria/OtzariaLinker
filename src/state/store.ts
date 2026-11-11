@@ -28,8 +28,11 @@ import { loadPreferences, type Preferences } from "./preferences";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
-import { linePairIdentity } from "../core/links/equality";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
+import { MaxLinkState, type MaxLinkRunOptions, type MaxLinkScope } from "./maxlink";
+import type { MaxLinkRunInfo } from "../linking/maxlink-report";
+import { linePairKey } from "../linking/merge";
+import type { MaxLinkPlan } from "../linking/plan";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -82,6 +85,8 @@ export interface SuggestionRun {
   at: number;
   /** a batch run: one summary row per book (paired or not) */
   batch?: BatchRow[];
+  /** a max-link run: the plan, every step's outcome and the merge counts (state/maxlink.ts) */
+  maxlink?: MaxLinkRunInfo;
 }
 
 export interface BatchRow {
@@ -106,6 +111,8 @@ export class AppStore {
   readonly altToc: AltTocState;
   /** links the open databases already have: list, per-line view, copying into the project (stage 10) */
   readonly dbLinks: DbLinksState;
+  /** max-link: plan, run and report (state/maxlink.ts) */
+  readonly maxLink: MaxLinkState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -134,7 +141,7 @@ export class AppStore {
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
-  readonly intent = signal<{ engine?: EngineId; batch?: boolean } | null>(null);
+  readonly intent = signal<{ engine?: EngineId; batch?: boolean; maxlink?: boolean } | null>(null);
   /** the last quality report; null until the user runs the check */
   readonly qa = signal<QaReport | null>(null);
   /** the link revision the report was made on — a different revision means the report is stale */
@@ -208,6 +215,7 @@ export class AppStore {
     this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
     this.altToc = new AltTocState(this, service);
     this.dbLinks = new DbLinksState(this, service);
+    this.maxLink = new MaxLinkState(this, service, saver);
   }
 
   /* ---------------- sources ---------------- */
@@ -586,12 +594,15 @@ export class AppStore {
     if (!run) return m;
     const links = this.linkState.value.links;
     const rejected = this.rejected.value;
+    // every other link counts — also one approved from ANOTHER run (another engine, a max-link run), which
+    // would otherwise be approved twice; only this run's own approvals are left out
+    const ownIds = new Set(run.result.suggestions.map((s) => `auto:${s.id}`));
     const existing = new Set<string>();
-    for (const l of links.values()) if (l.status !== "deleted" && !l.id.startsWith("auto:")) existing.add(linePairKey(l));
+    for (const l of links.values()) if (l.status !== "deleted" && !ownIds.has(l.id)) existing.add(linePairKey(l));
     for (const k of this.dbLinkKeys.value) existing.add(k);
     for (const s of run.result.suggestions) {
       const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejected.has(rejectionKey(s)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
+      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejectionKeys(s).some((k) => rejected.has(k)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
     }
     return m;
   });
@@ -629,7 +640,7 @@ export class AppStore {
     const ids2 = new Set(links.map((l) => l.id.slice(5)));
     batch(() => {
       this.apply(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
-      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).map(rejectionKey));
+      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys));
       if ([...keys].some((k) => this.rejected.value.has(k))) this.rejected.value = new Set([...this.rejected.value].filter((k) => !keys.has(k)));
     });
     return links.length;
@@ -650,7 +661,7 @@ export class AppStore {
 
   private keysOf(ids: readonly string[]): string[] {
     const want = new Set(ids);
-    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).map(rejectionKey);
+    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).flatMap(rejectionKeys);
   }
 
   /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */
@@ -675,6 +686,16 @@ export class AppStore {
         this.reveal(side, end.book.key, end.line);
       }
     });
+  }
+
+  /** Max-link: the plan for a scope (books, engines, reasons) — nothing runs yet. */
+  planMaxLink(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
+    return this.maxLink.plan(scope, engines);
+  }
+
+  /** Max-link: runs a plan; its merged suggestions become the current run. */
+  runMaxLink(plan: MaxLinkPlan, scopeLabel: string, options?: MaxLinkRunOptions): Promise<boolean> {
+    return this.maxLink.run(plan, scopeLabel, options);
   }
 
   /* ---------------- databases in someone else's schema (mapping wizard) ---------------- */
@@ -1118,16 +1139,33 @@ export class AppStore {
 
 /**
  * "These two lines are already linked": both ends, in either direction and of any type — the
- * "same-lines" level of the ONE equality rule (core/links/equality.ts). A suggestion that only
- * differs from an existing link by type (the library stores Onkelos as TARGUM) or by file direction
- * adds nothing, so it shows as "already exists". Kept under this name for existing callers.
+ * "same-lines" level of the ONE equality rule (core/links/equality.ts), shared with the worker
+ * through linking/merge.ts. Kept under this name for existing callers.
  */
-export const linePairKey = (l: { source: LinkSide; target: LinkSide }): string => linePairIdentity(l);
+export { linePairKey };
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {
   const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
   return `${s.engine}|${end(s.source)}${s.anchor ? `@${s.anchor.rawStart}` : ""}>${end(s.target)}`;
+}
+
+/**
+ * Every key a rejection of this suggestion is stored and recognised under. A merged (max-link)
+ * suggestion also has the key of each raw suggestion it was made of — so a rejection made in a
+ * single-engine run still holds — and one without engine or direction, which survives a re-run whose
+ * representative record comes from another engine. (Its anchor counts only where one engine gave
+ * several links between the same two lines — footnote markers — and the merge kept them apart.)
+ */
+export function rejectionKeys(s: Suggestion): string[] {
+  const members = (s as { members?: readonly { suggestion: Suggestion }[] }).members;
+  if (!members?.length) return [rejectionKey(s)];
+  const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
+  const pair = (x: Suggestion) => [end(x.source), end(x.target)].sort().join("<>");
+  const own = pair(s);
+  const exact = members.filter((m) => pair(m.suggestion) === own).map((m) => rejectionKey(m.suggestion));
+  const split = s.id.includes("@") && s.anchor ? `@${end(s.source)}:${s.anchor.rawStart}` : "";
+  return [...new Set([rejectionKey(s), ...exact])].concat(`*|${own}${split}`);
 }
 
 declare const __APP_VERSION__: string;

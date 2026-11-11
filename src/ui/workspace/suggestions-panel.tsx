@@ -9,6 +9,7 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions } from "./engine-options";
+import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
 /*
  * Review of automatic suggestions (ADR 0005 §4): one list, three views —
@@ -32,7 +33,7 @@ export function SuggestionsPanel() {
     <div style="display:flex;flex-direction:column;min-height:100%">
       <div class="sug-head">
         <div class="grow">
-          <b>{engine?.title}</b>: {run.label}
+          <b>{run.maxlink ? "קישור מרבי" : engine?.title}</b>: {run.label}
           <div class="muted" style="font-size:var(--fs-sm)">
             {run.result.suggestions.length.toLocaleString("he")} הצעות · {c.pending.toLocaleString("he")} ממתינות · {c.approved.toLocaleString("he")} אושרו
             {run.result.unmatched.length > 0 && ` · ${run.result.unmatched.length.toLocaleString("he")} שורות בלי התאמה`}
@@ -60,7 +61,7 @@ export function SuggestionsPanel() {
           ))}
         </ul>
       )}
-      <BatchSummary />
+      {run.maxlink ? <MaxLinkReportView /> : <BatchSummary />}
       {view === "table" ? <TableView /> : <StepView card={view === "card"} />}
     </div>
   );
@@ -70,7 +71,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const store = useStore();
   const intent = store.intent.value;
   const [engine, setEngine] = useState<EngineId>(intent?.engine ?? "headings");
-  const [mode, setMode] = useState<"pair" | "batch">(intent?.batch ? "batch" : "pair");
+  const [mode, setMode] = useState<"pair" | "batch" | "maxlink">(intent?.maxlink ? "maxlink" : intent?.batch ? "batch" : "pair");
   const sources = store.sources.value;
   const [batchSource, setBatchSource] = useState<string>(() => sources.find((x) => x.info.kind === "text-files")?.info.id ?? sources[0]?.info.id ?? "");
   const info = ENGINES.find((e) => e.id === engine)!;
@@ -102,7 +103,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
       <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
         <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
         <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), engine === "footnotes" && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "maxlink"} aria-pressed={mode === "maxlink"} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
       </div>
+      {mode === "maxlink" ? <MaxLinkForm onDone={onDone} onCancel={onCancel} /> : <>
       <label class="field">
         שיטה
         <select value={engine} onChange={(e) => setEngine(e.currentTarget.value as EngineId)}>
@@ -169,6 +172,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         </button>
         {onCancel && <button class="btn text" onClick={onCancel}>ביטול</button>}
       </div>
+      </>}
     </div>
   );
 }
@@ -294,7 +298,7 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       <td onClick={(e) => e.stopPropagation()}>
         <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${s.source.line + 1}: ${s.heRef2}`} />
       </td>
-      <td>{store.run.value?.batch && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
+      <td>{(store.run.value?.batch || store.run.value?.maxlink) && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
       <td>{s.heRef2}</td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>

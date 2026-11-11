@@ -19,6 +19,14 @@ export interface SourceBook {
   path?: string;
   /** e.g. "Sefaria", "MoreBooks" — the database's source name */
   sourceName?: string;
+  /**
+   * Keys of the books this one is written on, as the source declares them (Otzaria databases from
+   * schema 2: book_base_text). Absent when the source does not say; the max-link planner then falls
+   * back to the title ("X על Y").
+   */
+  bases?: string[];
+  /** book.dependenceType as stored: "commentary", "targum", "midrash", "guides" (schema 2+) */
+  dependence?: string;
 }
 
 export interface SourceLine {

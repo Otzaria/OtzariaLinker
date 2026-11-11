@@ -60,6 +60,7 @@ const service: BooksService = {
   headings: (key, opts) => call("headings", [key], opts),
   dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
   dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
+  runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
 };
 
 const saver: Saver = {
