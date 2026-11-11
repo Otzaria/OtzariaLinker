@@ -54,7 +54,7 @@ export class OtzariaDbReader {
         if (d instanceof Uint8Array) dicts.push(d);
       }
     }
-    return new OtzariaDbReader(file, caps, new LineContentCodec(dicts), {
+    return new OtzariaDbReader(file, caps, new LineContentCodec(dicts, undefined, "מסד פתוח"), {
       book,
       line,
       content: caps.text === "line_content" ? await file.table("line_content") : null,

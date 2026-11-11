@@ -257,7 +257,9 @@
    - official: אין library_id ב־schema_meta, יש link ו־connection_type, ובדרך כלל source='Sefaria'.
    - PDC / מצורף: schema_meta.library_id (+library_name, author) ו/או טבלת external_link.
    - user_books: יש user_link / user_import_file / book.isPersonal, ואין schema_meta.
-7. דחיסה: יש zstd_dict → טוענים את כל השורות. ממפים dictID→מילון לפי **כותרת המילון** (magic
+7. דחיסה: יש zstd_dict → טוענים את כל השורות, ומציעים אותם גם ל**מאגר המילונים של ה־Worker** (`DictionaryPool`):
+   מסד בלי המילון, או קובץ מילון שנפתח (זיהוי לפי magic), משתמשים במילון שהגיע מכל מקור. מילון המסד עצמו
+   קודם; שני מילונים שונים עם אותו dictID פוסלים את ה־id מהמאגר (לא מנחשים). ממפים dictID→מילון לפי **כותרת המילון** (magic
    EC30A437 LE, ואז dictID ב־u32 LE בבתים 4-7), לא לפי zstd_dict.id. מפענחים **לכל ערך בנפרד**:
    - TEXT → כמו שהוא.
    - BLOB עם magic 28B52FFD → zstd.

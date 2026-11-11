@@ -223,6 +223,8 @@ export class AppStore {
     for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
     for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
+    for (const d of res.dictionaries ?? [])
+      this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);

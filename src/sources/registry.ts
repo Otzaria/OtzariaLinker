@@ -6,6 +6,7 @@ import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
 import { decodeText } from "../core/text/decode";
 import { stripTags } from "../core/text/html";
+import { sharedDictionaries } from "../database/compression/zstd";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
@@ -41,6 +42,8 @@ export interface OpenResult {
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema: opened through openMapped once the user maps them */
   needsMapping?: PendingDb[];
+  /** zstd dictionaries opened as files: books compressed with them can now be read (see DictionaryPool) */
+  dictionaries?: { path: string; id: number }[];
 }
 
 const HEAD = 4096;
@@ -154,6 +157,17 @@ export class SourceRegistry {
         if (f.blob.size > MAX_TEXT_DOC) return void result.skipped.push({ path: f.path, reason: "הקובץ גדול מדי לייבוא (מעל 256MB)." });
         result.documents.push({ path: f.path, kind: "links-csv", text: decodeText(new Uint8Array(await f.blob.arrayBuffer())).text });
         return;
+      case "zstd-dict": {
+        if (f.blob.size > 2 * 1024 ** 2) return void result.skipped.push({ path: f.path, reason: "קובץ מילון דחיסה גדול מ־2MB: מפענח הדפדפן אינו תומך בו." });
+        try {
+          const id = sharedDictionaries.add(new Uint8Array(await f.blob.arrayBuffer()), f.path);
+          if (id === null) return void result.skipped.push({ path: f.path, reason: "הקובץ נראה כמו מילון דחיסה, אבל אין לו מזהה." });
+          (result.dictionaries ??= []).push({ path: f.path, id });
+        } catch (err) {
+          result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את מילון הדחיסה.") });
+        }
+        return;
+      }
       case "binary":
         return void result.skipped.push({ path: f.path, reason: "קובץ בינארי שאינו מסד SQLite או ZIP." });
     }

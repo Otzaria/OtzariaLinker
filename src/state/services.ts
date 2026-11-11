@@ -27,6 +27,8 @@ export interface OpenResult {
   skipped: { path: string; reason: string }[];
   /** SQLite files not in Otzaria's schema, waiting for the mapping wizard */
   needsMapping?: PendingDb[];
+  /** zstd dictionaries opened as files (books compressed with them become readable) */
+  dictionaries?: { path: string; id: number }[];
 }
 
 export interface CallOptions {

@@ -5,6 +5,7 @@
 export type DetectedKind =
   | "sqlite"
   | "zip"
+  | "zstd-dict" // a trained zstd dictionary (e.g. the library's), for databases that lack theirs
   | "links-json" // an array of Otzaria link records
   | "alt-toc-json" // alt_toc/<book>_alt_toc.json: alternative TOC structures
   | "project" // a saved OtzariaLinker project
@@ -20,6 +21,7 @@ const SQLITE_MAGIC = "SQLite format 3\u0000";
 export function detectKind(head: Uint8Array, fileName = ""): DetectedKind {
   if (startsWithAscii(head, SQLITE_MAGIC)) return "sqlite";
   if (head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05)) return "zip";
+  if (head[0] === 0x37 && head[1] === 0xa4 && head[2] === 0x30 && head[3] === 0xec) return "zstd-dict";
   if (looksBinary(head)) return "binary";
 
   const text = new TextDecoder("utf-8").decode(head).replace(/^﻿/, "").trimStart();
