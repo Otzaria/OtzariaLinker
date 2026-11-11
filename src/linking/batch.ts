@@ -14,21 +14,42 @@ export interface BatchPair {
   reason?: string;
 }
 
-export function pairByTitle(commentaries: readonly BookRef[], bases: readonly BookRef[]): BatchPair[] {
+/** Open books by their base-title key, built once and shared by many lookups (the max-link planner pairs thousands). */
+export type TitleIndex = ReadonlyMap<string, readonly BookRef[]>;
+
+export function titleIndex(bases: readonly BookRef[]): TitleIndex {
   const byKey = new Map<string, BookRef[]>();
   for (const b of bases) {
     const k = baseTitleKey(b.title);
-    byKey.set(k, [...(byKey.get(k) ?? []), b]);
+    const list = byKey.get(k);
+    if (list) list.push(b);
+    else byKey.set(k, [b]);
   }
-  return commentaries.map((c): BatchPair => {
-    const k = declaredBaseKey(c.title);
-    if (!k) return { source: c, target: null, reason: 'השם אינו בצורה "… על <ספר>", ולכן לא ידוע על איזה ספר הוא.' };
-    const hits = (byKey.get(k) ?? []).filter((b) => b.key !== c.key);
-    if (!hits.length) return { source: c, target: null, reason: `ספר הבסיס "${k}" אינו פתוח באף מקור.` };
-    // the official library wins over personal copies; more than one candidate of the same kind is ambiguous
-    const official = hits.filter((b) => b.origin !== "personal");
-    const pool = official.length ? official : hits;
-    if (pool.length > 1) return { source: c, target: null, reason: `נמצאו ${pool.length} ספרים בשם "${pool[0]!.title}". בחרו את הבסיס ידנית.` };
-    return { source: c, target: pool[0]! };
-  });
+  return byKey;
+}
+
+/**
+ * The open book a base-title key names, or why there is none. The official library wins over
+ * personal copies; more than one candidate of the same kind is ambiguous.
+ */
+export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef): { target: BookRef } | { reason: string } {
+  const hits = (index.get(k) ?? []).filter((b) => b.key !== self.key);
+  if (!hits.length) return { reason: `ספר הבסיס "${k}" אינו פתוח באף מקור.` };
+  const official = hits.filter((b) => b.origin !== "personal");
+  const pool = official.length ? official : hits;
+  if (pool.length > 1) return { reason: `נמצאו ${pool.length} ספרים בשם "${pool[0]!.title}". בחרו את הבסיס ידנית.` };
+  return { target: pool[0]! };
+}
+
+/** One commentary against an index of open books, by its title. */
+export function pairOne(c: BookRef, index: TitleIndex): BatchPair {
+  const k = declaredBaseKey(c.title);
+  if (!k) return { source: c, target: null, reason: 'השם אינו בצורה "… על <ספר>", ולכן לא ידוע על איזה ספר הוא.' };
+  const r = resolveBaseKey(k, index, c);
+  return "target" in r ? { source: c, target: r.target } : { source: c, target: null, reason: r.reason };
+}
+
+export function pairByTitle(commentaries: readonly BookRef[], bases: readonly BookRef[]): BatchPair[] {
+  const index = titleIndex(bases);
+  return commentaries.map((c) => pairOne(c, index));
 }
