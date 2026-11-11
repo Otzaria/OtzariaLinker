@@ -12,7 +12,8 @@ import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, ty
 import { planExport, zipExport, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { addChanges, commit, deleteChange, editChange, emptyLinkState, redo, restoreChange, undo, type Change, type LinkState } from "./history";
-import { LineStore } from "./lines";
+import { CHUNK, LineStore } from "./lines";
+import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { loadPreferences, type Preferences } from "./preferences";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 
@@ -51,7 +52,7 @@ export interface Task {
 }
 
 export type Screen = "home" | "workspace";
-export type SideTab = "builder" | "links" | "suggestions" | "books";
+export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
 
 /** One run of an automatic engine and the user's decisions on it. */
 export interface SuggestionRun {
@@ -88,6 +89,10 @@ export class AppStore {
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
   readonly run = signal<SuggestionRun | null>(null);
+  /** the last quality report; null until the user runs the check */
+  readonly qa = signal<QaReport | null>(null);
+  /** the link revision the report was made on — a different revision means the report is stale */
+  readonly qaRevision = signal(-1);
   /** rejected suggestion ids — kept across re-runs, since suggestion ids are deterministic */
   readonly rejected = signal<ReadonlySet<string>>(new Set());
   /** the suggestion shown in the inline/card views */
@@ -493,29 +498,51 @@ export class AppStore {
     return b ? this.refOf(b.key) : null;
   }
 
-  /** Loads every line the export must check (ends of every link) and returns the plan. */
-  async prepareExport(): Promise<ExportPlan | null> {
-    const links = this.allLinks.value.filter((l) => l.status !== "deleted");
-    const need = new Map<string, number[]>();
-    for (const l of links)
+  /** Loads the lines at both ends of every link, so the rules can be checked on real lines. */
+  private async loadLinkLines(label: string): Promise<boolean> {
+    const need = new Map<string, Set<number>>();
+    for (const l of this.allLinks.value) {
+      if (l.status === "deleted") continue;
       for (const side of [l.source, l.target]) {
         const b = this.bookOf(side.book);
         if (!b) continue;
-        need.set(b.key, [...(need.get(b.key) ?? []), side.line, side.end ?? side.line]);
+        const set = need.get(b.key) ?? new Set<number>();
+        set.add(Math.floor(side.line / CHUNK)).add(Math.floor((side.end ?? side.line) / CHUNK));
+        need.set(b.key, set);
       }
-    const ok = await this.runTask("בודק את הקישורים לפני הייצוא…", async (opts) => {
+    }
+    const total = [...need.values()].reduce((n, s) => n + s.size, 0);
+    const ok = await this.runTask(label, async (opts) => {
       let done = 0;
-      const total = need.size;
-      for (const [key, idx] of need) {
-        opts.signal?.throwIfAborted();
-        const chunks = [...new Set(idx.map((i) => Math.floor(i / 200)))];
-        for (const c of chunks) await this.lines.load(key, c * 200, c * 200);
-        opts.onProgress?.(++done, total);
-      }
+      for (const [key, chunks] of need)
+        for (const c of chunks) {
+          opts.signal?.throwIfAborted();
+          await this.lines.load(key, c * CHUNK, c * CHUNK);
+          opts.onProgress?.(++done, total);
+        }
       return true;
     });
-    if (!ok) return null;
+    return ok === true;
+  }
+
+  /** Loads every line the export must check (ends of every link) and returns the plan. */
+  async prepareExport(): Promise<ExportPlan | null> {
+    if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
     return planExport(this.allLinks.value, this.validation());
+  }
+
+  async runQualityCheck(): Promise<QaReport | null> {
+    if (!(await this.loadLinkLines("בודק את איכות הקישורים…"))) return null;
+    const report = runQa(this.allLinks.value, this.validation());
+    batch(() => {
+      this.qa.value = report;
+      this.qaRevision.value = this.linkState.value.revision;
+    });
+    return report;
+  }
+
+  saveQaReport(): void {
+    if (this.qa.value) this.saver.save(`בדיקת-קישורים-${new Date().toISOString().slice(0, 10)}.csv`, qaCsv(this.qa.value), "text/csv");
   }
 
   saveExport(plan: ExportPlan): void {

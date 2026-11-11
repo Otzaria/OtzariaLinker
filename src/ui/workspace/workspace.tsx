@@ -7,6 +7,7 @@ import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
 import { SourcesBody } from "./sources-panel";
+import { QaPanel } from "./qa-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
 
 /*
@@ -138,6 +139,10 @@ function SidePanel() {
           <Icon name="oz_link_search" size={16} />
           הצעות {store.run.value && <span class="count">{store.suggestionCounts.value.pending.toLocaleString("he")}</span>}
         </button>
+        <button role="tab" aria-selected={current === "qa"} onClick={() => (store.sideTab.value = "qa")}>
+          <Icon name="oz_link_check" size={16} />
+          בדיקה {store.qa.value && store.qa.value.bySeverity.error > 0 && <span class="count">{store.qa.value.bySeverity.error.toLocaleString("he")}</span>}
+        </button>
         {sourcesHidden && (
           <button role="tab" aria-selected={current === "books"} onClick={() => (store.sideTab.value = "books")}>
             <Icon name="oz_bookshelf" size={16} />
@@ -145,7 +150,7 @@ function SidePanel() {
           </button>
         )}
       </div>
-      <div class="panel-body">{current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : current === "suggestions" ? <SuggestionsPanel /> : <SourcesBody />}</div>
+      <div class="panel-body">{current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : current === "suggestions" ? <SuggestionsPanel /> : current === "qa" ? <QaPanel /> : <SourcesBody />}</div>
     </section>
   );
 }
