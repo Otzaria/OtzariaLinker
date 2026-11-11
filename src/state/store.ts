@@ -1,3 +1,4 @@
+import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal } from "@preact/signals";
 import { parseProject, serializeProject } from "../projects/project-format";
 import type { SourceBook } from "../core/books";
@@ -165,7 +166,7 @@ export class AppStore {
   });
   readonly booksByTitle = computed(() => {
     const m = new Map<string, SourceBook[]>();
-    for (const b of this.books.value.values()) m.set(b.title, [...(m.get(b.title) ?? []), b]);
+    for (const b of this.books.value.values()) pushTo(m, b.title, b);
     return m;
   });
   readonly allLinks = computed(() => [...this.linkState.value.links.values()]);

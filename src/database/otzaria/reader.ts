@@ -1,3 +1,4 @@
+import { pushTo } from "../../core/collections";
 import { LinkerError } from "../../core/errors";
 import { LineContentCodec } from "../compression/zstd";
 import type { ByteSource } from "../sqlite/lazy/byte-source";
@@ -103,7 +104,7 @@ export class OtzariaDbReader {
     if (b < 0 || base < 0) return out;
     for await (const r of this.file.scan(t)) {
       const id = Number(r.values[b]);
-      out.set(id, [...(out.get(id) ?? []), Number(r.values[base])]);
+      pushTo(out, id, Number(r.values[base]));
     }
     return out;
   }

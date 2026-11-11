@@ -1,3 +1,4 @@
+import { pushTo } from "../../../core/collections";
 import type { BookRef } from "../../../core/links/model";
 import { normalize } from "../../../core/text/hebrew";
 import { analyzeBook, buildUnits } from "../headings/structure";
@@ -258,7 +259,7 @@ export function buildHeadingsIndex(book: BookRef, lines: readonly EngineLine[]):
   const byLast = new Map<number, typeof units>();
   for (const u of units) {
     const n = u.path.at(-1)!.n!;
-    byLast.set(n, [...(byLast.get(n) ?? []), u]);
+    pushTo(byLast, n, u);
   }
   return {
     book,

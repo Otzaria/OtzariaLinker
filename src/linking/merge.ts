@@ -1,3 +1,4 @@
+import { pushTo } from "../core/collections";
 import { linePairIdentity } from "../core/links/equality";
 import type { LinkSide, RawAnchor } from "../core/links/model";
 import { CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type Reason, type Suggestion } from "./automatic";
@@ -221,7 +222,7 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   for (const k of [...byPair.keys()].sort()) {
     const list = byPair.get(k)!;
     const perEngine = new Map<string, Raw[]>();
-    for (const r of list) perEngine.set(r.s.engine, [...(perEngine.get(r.s.engine) ?? []), r]);
+    for (const r of list) pushTo(perEngine, r.s.engine, r);
     const seeder = [...perEngine.entries()].sort(([ea, a], [eb, b]) => b.length - a.length || engineRank(ea) - engineRank(eb) || cmp(ea, eb))[0]!;
     if (seeder[1].length < 2) {
       groups.push(makeGroup(`mx:${k}`, list));
@@ -239,7 +240,7 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
 
   // 3. groups at the same position: fold coarse into precise, mark conflicts between different engines
   const byPos = new Map<string, Group[]>();
-  for (const g of groups) byPos.set(g.position, [...(byPos.get(g.position) ?? []), g]);
+  for (const g of groups) pushTo(byPos, g.position, g);
   for (const at of byPos.values()) {
     if (at.length < 2) continue;
     // a precise suggestion with support absorbs the coarse range around it…

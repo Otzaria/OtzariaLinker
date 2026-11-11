@@ -1,3 +1,4 @@
+import { pushTo } from "../core/collections";
 import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseKey, isMergeableCompanionTitle, normalizeTitle } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
@@ -230,7 +231,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     }
 
   const onBase = new Map<string, Relation[]>();
-  for (const r of relations.values()) onBase.set(r.base.key, [...(onBase.get(r.base.key) ?? []), r]);
+  for (const r of relations.values()) pushTo(onBase, r.base.key, r);
   const books: PlanBookRow[] = selected.map((k) => {
     const b = byKey.get(k)!;
     const decisions: string[] = [];
