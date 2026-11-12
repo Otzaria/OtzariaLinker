@@ -64,6 +64,15 @@ describe.runIf(DB)("planner vs the database's COMMENTARY evidence", () => {
         via.set(`${d}>${s.relation.base.key}`, s.relation.via + (s.relation.through ? "+through" : "") + (s.relation.scope ? "+scope" : ""));
       }
     const title = (k: string) => byId.get(idOf(k))?.title ?? k;
+    // EVIDENCE_RERUN: the ids of the books whose run the job's part/through/page rules can change (a
+    // scoped or a carried step, or a base of the Zohar), to drop from a benchmark cache and run again
+    if (process.env.EVIDENCE_RERUN) {
+      const ids = new Set<number>();
+      for (const s of plan.steps)
+        if (s.kind === "pair" && (s.relation.scope || s.relation.through || /זו?הר/.test(s.target.title))) ids.add(idOf(s.relation.dependant.key));
+      writeFileSync(join(DIR, "rerun-ids.json"), JSON.stringify([...ids]));
+      console.log(`rerun candidates: ${ids.size}`);
+    }
     // the relations the existing links ADD to a book that has its own (declaration or title): the noise check
     const added = new Map<string, string>();
     const ownDeps = new Set(plan.steps.filter((s) => s.kind === "pair" && s.relation.via !== "links").map((s) => (s.kind === "pair" ? s.relation.dependant.key : "")));

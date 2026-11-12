@@ -182,7 +182,7 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
   });
 
   it("a citation inside the intermediate (REFERENCE, LINKER) is not where its line stands on the base", async () => {
-    const far = { ...BOOKS, "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון", "סעיף שני", "סעיף שלישי", "שורה", "שורה", "שורה", "שורה", "סימן אחר"]) };
+    const far: Record<string, ReturnType<typeof lines>> = { ...BOOKS, "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון", "סעיף שני", "סעיף שלישי", "שורה", "שורה", "שורה", "שורה", "סימן אחר"]) };
     const cited = [...links, { id: "l3", source: { book: mid, line: 3 }, target: { book: base, line: 9 }, declaredType: "reference" }];
     const reg = { lines: async (key: string) => far[key]!, existingLinks: async (key: string) => cited.filter((l) => l.source.book.key === key || l.target.book.key === key) } as unknown as SourceRegistry;
     const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
