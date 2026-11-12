@@ -164,7 +164,7 @@ export async function maxlinkJob(
       if (step.kind === "pair" && step.relation.through) {
         loaded = null;
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner);
+        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks);
       } else if (step.kind === "pair") {
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
@@ -230,14 +230,17 @@ export async function maxlinkJob(
  * base. A place in the intermediate with no such link gives nothing; one whose links spread over more
  * than THROUGH_SPAN lines of the base is too vague to carry, and is counted in the notes.
  */
-async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext, partLinks: Map<string, Map<string, number[]>>): Promise<EngineResult> {
   const out = new Map<string, Suggestion>();
   const notes: Reason[] = [];
   for (const via of step.relation.through ?? []) {
     let r = results.get(`${step.engine}|${step.source.key}>${via.book.key}`);
     if (!r) {
       const inner: Extract<PlanStep, { kind: "pair" }> = { ...step, target: via.book, relation: { ...step.relation, base: via.book, through: undefined, ...(via.scope ? { scope: via.scope } : { scope: undefined }) } };
-      r = runScoped(inner, await load(registry, step.source), await load(registry, via.book), options, ctx);
+      const source = await load(registry, step.source);
+      // the part of the dependant on this intermediate, by the library's links when no part is named after it
+      const byLinks = via.scope && !sectionFor(source, via.scope.section) ? await partByLinks(registry, source, via.book.key, partLinks) : null;
+      r = runScoped(inner, source, await load(registry, via.book), options, ctx, byLinks);
     }
     const toBase = await linkedLines(registry, via.book.key, step.target.key);
     let carried = 0;
