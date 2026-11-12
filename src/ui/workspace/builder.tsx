@@ -24,8 +24,16 @@ export function Builder() {
   const editing = store.editing.value;
   const s = store.pick.source.value;
   const t = store.pick.target.value;
-  const srcSefaria = s && store.books.value.get(s.bookKey)?.origin === "sefaria";
-  const tgtSefaria = t && store.books.value.get(t.bookKey)?.origin === "sefaria";
+  // the library's own classification (B6), or a database Sefaria book (a ref there is refused, and the field shows why)
+  const sefariaSide = (key: string) => {
+    const b = store.books.value.get(key);
+    return !!b && (store.isSefariaOwned(b) || b.origin === "sefaria");
+  };
+  const srcSefaria = s && sefariaSide(s.bookKey);
+  const tgtSefaria = t && sefariaSide(t.bookKey);
+  // the ref the builder built from the line's heRef (B1): shown as the placeholder until the user types one
+  const autoRef1 = !store.draftRef1.value.trim() ? store.draft.value?.ref1 : undefined;
+  const autoRef2 = !store.draftRef2.value.trim() ? store.draft.value?.ref2 : undefined;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -87,13 +95,13 @@ export function Builder() {
       {srcSefaria && (
         <label class="field">
           ref_1 — ציון ספריא באנגלית של המקור
-          <input type="text" dir="ltr" placeholder="Genesis 1:1" value={store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} />
+          <input type="text" dir="ltr" placeholder={autoRef1 ?? "Genesis 1:1"} title={autoRef1 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} />
         </label>
       )}
       {tgtSefaria && (
         <label class="field">
           ref_2 — ציון ספריא באנגלית של היעד
-          <input type="text" dir="ltr" placeholder="Genesis 1:1" value={store.draftRef2.value} onInput={(e) => (store.draftRef2.value = e.currentTarget.value)} />
+          <input type="text" dir="ltr" placeholder={autoRef2 ?? "Genesis 1:1"} title={autoRef2 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef2.value} onInput={(e) => (store.draftRef2.value = e.currentTarget.value)} />
         </label>
       )}
 

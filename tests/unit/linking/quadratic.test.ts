@@ -6,26 +6,36 @@ import { planMaxLink } from "../../../src/linking/plan";
 /*
  * Security review A8: lists built with `m.set(k, [...(m.get(k) ?? []), x])` and scans over the whole
  * line per character were quadratic — 12 s (plan, on the UI thread), 24.6 s (aliases) at 40,000
- * items. The bounds below are loose (a slow CI machine) but far under the quadratic times.
+ * items. Measured as GROWTH, not as wall time, so a loaded machine does not fail them: four times the
+ * input must cost well under the sixteen times a quadratic path costs.
  */
 const time = (f: () => unknown): number => {
   const t = performance.now();
   f();
   return performance.now() - t;
 };
+/** the best of three runs (less noise), at n and at 4n */
+function growth(run: (n: number) => unknown, n: number): number {
+  const best = (k: number) => Math.min(time(() => run(k)), time(() => run(k)), time(() => run(k)));
+  run(n); // warm up
+  return best(4 * n) / Math.max(best(n), 1);
+}
 
 describe("linear on hostile sizes", () => {
-  it("max-link plan: a base with 40,000 commentaries", () => {
-    const base = { key: "b", title: "בראשית", origin: "personal" as const };
-    const lib = [base, ...Array.from({ length: 40_000 }, (_, i) => ({ key: `c${i}`, title: `פירוש${i} על בראשית`, origin: "personal" as const, bases: ["b"] }))];
-    expect(time(() => planMaxLink({ selected: ["b"], library: lib }))).toBeLessThan(4_000);
-  }, 60_000);
+  it("max-link plan: a base with many commentaries", () => {
+    const plan = (n: number) => {
+      const base = { key: "b", title: "בראשית", origin: "personal" as const };
+      return planMaxLink({ selected: ["b"], library: [base, ...Array.from({ length: n }, (_, i) => ({ key: `c${i}`, title: `פירוש${i} על בראשית`, origin: "personal" as const, bases: ["b"] }))] });
+    };
+    expect(growth(plan, 5_000)).toBeLessThan(8);
+  }, 120_000);
 
-  it("citations alias index: 40,000 books with one title", () => {
-    expect(time(() => AliasIndex.build(Array.from({ length: 40_000 }, (_, i) => ({ book: { key: `k${i}`, title: "ספר", origin: "personal" as const } }))))).toBeLessThan(4_000);
-  }, 60_000);
+  it("citations alias index: many books with one title", () => {
+    const build = (n: number) => AliasIndex.build(Array.from({ length: n }, (_, i) => ({ book: { key: `k${i}`, title: "ספר", origin: "personal" as const } })));
+    expect(growth(build, 5_000)).toBeLessThan(8);
+  }, 120_000);
 
-  it("citation tokens of a line of 200,000 '&'", () => {
-    expect(time(() => citationTokens("&".repeat(200_000)))).toBeLessThan(2_000);
-  }, 60_000);
+  it("citation tokens of a line of '&'", () => {
+    expect(growth((n) => citationTokens("&".repeat(n)), 50_000)).toBeLessThan(8);
+  }, 120_000);
 });
