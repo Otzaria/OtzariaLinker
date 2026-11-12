@@ -851,10 +851,18 @@ export class CitationScanner {
    */
   private internal(toks: readonly Tok[], i: number, line: number): number | null {
     const t = toks[i]!;
-    if (!this.selfTarget || t.gershayim || t.geresh || !RELATIVE.test(t.text)) return null;
+    if (!this.selfTarget || t.geresh) return null;
+    // "כמו שנתבאר בסימן ל"ח", "ויתבאר בסי' צ"ו", "כמו שכתבתי בסימן ח": the author's own book, the tense its
+    // direction; "(וע"ל סי' קס"ט)" — עיין לעיל or עיין לקמן, either way (AUTHOR_WORDS)
+    const word = t.gershayim ? (SEE_ABOVE.test(wordShape(t)) ? 0 : null) : AUTHOR_PAST.test(t.text) ? -1 : AUTHOR_FUTURE.test(t.text) ? 1 : null;
+    if (word === null && (t.gershayim || !RELATIVE.test(t.text))) return null;
+    // a commentary on the Shulchan Aruch: a siman is its base's (relative(), at the marker word)
+    if (word !== null && this.base) return null;
     const addr = parseAddress(toks, i + 1, { enclosed: opensBefore(toks, i) });
     const e = addr?.elems[0];
     if (!addr || !e || !e.explicit || e.kind === "daf" || e.kind === "?" || addr.elems.some((x) => x.kind === "daf" || x.amud !== undefined)) return null;
+    // measured before a siman only (the library's ערוך השולחן, the Shulchan Aruch, the ב"ח)
+    if (word !== null && e.kind !== "siman") return null;
     const named = (x: Tok | undefined) => !!x && x.kind === "word" && !RELATIVE.test(x.text) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && (((x.gershayim || x.geresh) && !numeralOf(x) && !LOCATION_WORD.test(wordShape(x))) || OTHER_WORK.test(x.text));
     const titled = (at: number) => at >= 0 && toks[at]?.kind === "word" && this.aliases.matchAt(toks, at).length > 0;
     if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(beforeIndex(toks, i, 1)) || titled(beforeIndex(toks, i, 2))) return this.drop("internal-of-another-book");
@@ -864,7 +872,7 @@ export class CitationScanner {
     // "(לעיל פסוק טו)" in a midrash is a verse of the Torah, of a chapter the text does not say: the citation
     // before it was another verse's in two of three cases checked by hand (§6.8) — no link
     if (e.kind === "pasuk") return null;
-    const dir = /לעיל$/.test(t.text) ? -1 : 1;
+    const dir = word ?? (/לעיל$/.test(t.text) ? -1 : 1);
     return this.emit(toks, line, { from: i, to, candidates: [this.selfTarget], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "internal", numericName: false, commentators: false, internal: { dir, here: this.structure.here() } });
   }
 
@@ -1077,7 +1085,8 @@ export class CitationScanner {
       }
     }
     if (!found) {
-      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1];
+      // "מדרש תנאים על ספר דברים": the book of the Tanakh after "ספר", as in the headings above
+      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1]?.replace(/^ספר /, "");
       found = (on && this.aliases.lookup(on)?.targets.find((x) => x.tier === "title" && x.collection === "tanakh")) || null;
     }
     return (this.contextCache = found);
@@ -1467,6 +1476,18 @@ const DAF_WORD = /^(?:ו?ב)?דף$/;
 
 /** "לעיל", "לקמן", with a prefix ("ולקמן", "דלעיל", "כדלקמן") */
 const RELATIVE = /^(?:[ודכ]{0,2})(?:לעיל|לקמן|להלן)$/;
+/*
+ * AUTHOR_WORDS: the author pointing into his own book without "לעיל"/"לקמן" — "כמו שנתבאר בסימן ל"ח", "ויתבאר
+ * בסי' צ"ו", "כמו שכתבתי בסימן ח'" (the tense is the direction), and "(וע"ל סי' קס"ט)", which the Shulchan
+ * Aruch writes for עיין לעיל and עיין לקמן alike. Measured on the database's links of these words to a siman
+ * (DB links of the line to the book itself at that siman / to the Shulchan Aruch / to none): the verbs in
+ * ערוך השולחן 1,853 / 471 / 684, בית יוסף 377 / 86 / 855, ב"ח 85 / 32 / 121, responsa almost never; "וע"ל" in
+ * the four parts of the Shulchan Aruch 558 / 17 / 57, ב"ח 200 / 28 / 398. "כמבואר"/"כמ"ש" (as is explained —
+ * anywhere) and "עיין" are no word of the book's own: not taken.
+ */
+const AUTHOR_PAST = /^(?:[וכ]{0,2}ש?)(?:נתבאר|נתבארו|ביארנו|בארנו|ביארתי|בארתי|כתבתי|כתבנו)$/;
+const AUTHOR_FUTURE = /^(?:[וכ]{0,2}ש?)(?:יתבאר|יתבארו|יבואר|נבאר|אבאר)$/;
+const SEE_ABOVE = /^ו?ע"ל$/;
 
 /** the tractate of a Talmud/Mishna title (the inverse of the derived names) */
 function tractateOfTitle(title: string, coll: Collection): string | null {
