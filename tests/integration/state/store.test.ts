@@ -175,6 +175,7 @@ describe("AppStore — the suggestion table reads like the user's choice", () =>
     const snippets = list.map((s) => store.suggestions.snippet(store.suggestions.display(s).to));
     expect(snippets.every((x) => !!x && x.length > 0)).toBe(true);
     expect(new Set(snippets).size).toBe(list.length);
+    expect(snippets.some((x) => /[&<]/.test(x!))).toBe(false); // plain text: no tags or entities ("&thinsp;")
   });
 
   it("a dibur hamatchil run stored base → commentary still reads from the commentary the user chose (audit F18)", async () => {

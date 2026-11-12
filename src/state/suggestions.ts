@@ -9,7 +9,7 @@ import { addChanges, commit, type Change, type LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource } from "./services";
 import type { NoticeKind, Pick as LinePick, Side, SideTab } from "./store";
 import { CHUNK, type LineStore } from "./lines";
-import { stripTags } from "../core/text/html";
+import { htmlToPlainText } from "../core/text/html";
 
 /*
  * Automatic suggestions (stage 8): running an engine on a pair of books, the citations engine on one
@@ -291,7 +291,7 @@ export class SuggestionsState {
   snippet(side: LinkSide): string | undefined {
     const l = this.host.lines.peek(side.book.key, side.line);
     if (!l) return undefined;
-    const words = stripTags(l.text).trim().split(/\s+/).filter(Boolean);
+    const words = htmlToPlainText(l.text).trim().split(/\s+/).filter(Boolean);
     return words.slice(0, SNIPPET_WORDS).join(" ") + (words.length > SNIPPET_WORDS ? "…" : "");
   }
 
