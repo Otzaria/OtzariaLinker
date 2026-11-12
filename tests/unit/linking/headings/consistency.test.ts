@@ -96,6 +96,31 @@ describe("headings guard — a level counting the commentary's own notes, past t
   });
 });
 
+describe("headings guard — a base that marks its pages inside its lines (the Zohar)", () => {
+  const page = (v: string) => `<i data-overlay="Vilna Pages" data-value="${v}"></i>`;
+  const zohar = ["<h1>ספר הזהר</h1>", "<h2>בראשית</h2>"];
+  for (let n = 2; n <= 13; n++) zohar.push(`${page(`${n}a`)}שורה של דף ${n} א`, `${page(`${n}b`)}שורה של דף ${n} ב`);
+  zohar.push("<h2>תוספות</h2>", "<h3>כרך א</h3>", "שורה בנספח");
+
+  it("lines placed by a daf are left to dibur-hamatchil, with a note; other headings still link", () => {
+    const base = book("b:zohar", "ספר הזהר", zohar);
+    const mm = book("c:mm", "מקדש מלך", ["<h1>מקדש מלך</h1>", "<h2>כרך א</h2>", "<h3>דף ה.</h3>", "פירוש על הדף", "<h2>בראשית</h2>", "פירוש על הפרשה"]);
+    const r = runHeadingsEngine(mm, base);
+    expect(r.notes.map((n) => n.code)).toContain("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 3)).toBeUndefined();
+    expect(r.unmatched.find((u) => u.line === 3)!.reasons[0]!.code).toBe("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 5)).toBeDefined();
+  });
+
+  it("…not when the base has daf headings of its own", () => {
+    const base = book("b:talmud", "מסכת", ["<h1>מסכת</h1>", "<h2>דף ה.</h2>", ...zohar.slice(2, 26)]);
+    const c = book("c:c", "פירוש", ["<h1>פירוש</h1>", "<h2>דף ה.</h2>", "פירוש על הדף"]);
+    const r = runHeadingsEngine(c, base);
+    expect(r.notes.map((n) => n.code)).not.toContain("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 2)).toBeDefined();
+  });
+});
+
 describe("headings guard — numbers the base does not have (ראב\"ד על ספרא)", () => {
   // the base's section numbers its 8 rules "(א)…(ח)"; the commentary counts its own paragraphs פסקה א…יב
   const base = book("b:sifra", "ספרא", [

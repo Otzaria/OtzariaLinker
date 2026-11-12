@@ -68,6 +68,17 @@ interface Scored {
   readonly alignment: Alignment;
 }
 
+/** At least this many inline page marks make a base "paged" (as dibur-hamatchil/windows.ts pageMarks) */
+const PAGE_MARKS_MIN = 20;
+const PAGE_MARK_RE = /data-overlay\s*=\s*["'][^"']*Pages["'][^>]*?data-value\s*=\s*["']\d{1,3}[ab]["']/i;
+
+/** Does the book mark its pages inside its lines (the Zohar's Vilna pages)? */
+function pageMarked(book: EngineBook): boolean {
+  let n = 0;
+  for (const l of book.lines) if (l.text.includes("data-overlay") && PAGE_MARK_RE.test(l.text) && ++n >= PAGE_MARKS_MIN) return true;
+  return false;
+}
+
 export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, options: HeadingsOptions = {}, ctx: EngineContext = {}): EngineResult {
   const opts = {
     // "source": the record sits in the commentary's file and the generator stores it base → commentary,
@@ -132,6 +143,16 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   // structural consistency (./consistency.ts): commentary levels whose numbers are not the base's
   const numbering = assessNumbering(cs, units, match);
   for (const s of numbering.suspect.values()) notes.push(numberingNote(s));
+  /*
+   * A base with no daf headings that marks its pages INSIDE its lines (the Zohar's `<i data-overlay="Vilna
+   * Pages" data-value="5a">`): a commentary's "דף ה." is a page of those marks, which this engine does not
+   * read — it matched the volume headings of the Zohar's appendix and the ranges around them instead
+   * (library benchmark: מקדש מלך 0 of 9,639, אור החמה 0 of 19,718 right, against the database's links).
+   * Lines placed by a daf are left to dibur-hamatchil, whose windows read the page marks (§3.1).
+   */
+  const pagedBase = !units.some((u) => u.path.some((e) => e.kind === "daf")) && pageMarked(base);
+  if (pagedBase && cs.headings.some((h) => h.path.some((e) => e.kind === "daf")))
+    notes.push({ code: "heading/paged-base", text: `ב"${base.book.title}" אין כותרות דף, ומספרי הדפים מסומנים בתוך השורות. שורות שהמקום שלהן נקבע לפי דף לא קושרו בשיטה הזו; דיבור המתחיל קורא את סימני הדפים.` });
   const belowHigh = opts.thresholds.high - 0.001;
   const quotes = new QuoteChecker(base, (p) => bs.lines[p]!.skip !== "heading");
 
@@ -145,6 +166,10 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     const info = cs.lines[p]!;
     const srcIndex = commentary.lines[p]!.index;
     if (info.skip) { skipped++; continue; }
+    if (pagedBase && info.path.some((e) => e.kind === "daf")) {
+      unmatched.push({ line: srcIndex, reasons: [{ code: "heading/paged-base", text: "המקום של השורה נקבע לפי דף, ובספר הבסיס הדפים מסומנים בתוך השורות ולא בכותרות" }] });
+      continue;
+    }
     let P: readonly PathElement[] = useMarkers && info.marker !== null ? [...info.path, { kind: "?", n: info.marker, label: `(${toGematria(info.marker)})` }] : info.path;
     // a level the commentary numbers by its own count is not a place: the section above it is (consistency.ts)
     let beyond: LevelStats | undefined;
