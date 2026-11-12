@@ -210,6 +210,15 @@ describe('a ס"ק with no siman', () => {
     // in a book on something else, the siman is unknown
     expect(scan([['עיין במג"א סק"א שהביא', "ספר כלשהו, תמה, א"]])[0]!.rule).toBeUndefined();
   });
+  it('not when the line named another siman, or "שם" stands by the name (לבושי שרד: the database points to that siman)', () => {
+    const title = "לבושי שרד על שלחן ערוך אורח חיים";
+    // the "שלחן" spelling is a commentary on the Shulchan Aruch too
+    expect(scan([['כמש"כ המג"א סק"ה:', `${title}, רמז, ז`]], title)[0]!.rule).toBe("sk-here");
+    // "(מ"א סק"א) עס"ג. היינו במג"א סק"ד ובסי' צ"ב סעיף ב' והוא שם במג"א סק"ב" (לבושי שרד, ט, ב)
+    const cs = scan([['היינו ובסי\' צ"ב סעיף ב\' והוא שם במג"א סק"ב בשם הסמ"ג:', `${title}, ט, ב`]], title);
+    expect(cs.some((c) => c.rule === "sk-here")).toBe(false);
+    expect(scan([['כמ"ש המג"א שם סק"ג', `${title}, כה, ב`]], title).some((c) => c.rule === "sk-here")).toBe(false);
+  });
 });
 
 describe('"שם" and a ס"ק after a siman', () => {

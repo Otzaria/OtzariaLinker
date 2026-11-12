@@ -323,7 +323,11 @@ export class CitationScanner {
         const siman = this.hereSiman();
         const base = normTitle(this.base.book.title);
         const same = cands.filter((c) => c.collection === "sa-commentary" && saBaseOf(c.book.title) === base);
-        if (siman !== null && same.length) {
+        // not when the line has named another siman ("ובסי' צ"ב סעיף ב' והוא שם במג"א סק"ב", "בסי' ע"ו כמ"ש המג"א
+        // שם סק"ג"): the ס"ק is that siman's. Measured in לבושי שרד (a commentary the "שלחן ערוך" spelling let in):
+        // 19 of 74 confirmed-or-contradicted were such, the database's LINKER pointing to the siman named before
+        const otherSiman = (this.last?.line === line && this.last.elems[0]?.kind === "siman") || [before(toks, i, 1), before(toks, i, 2), toks[m.to]].some((x) => isWord(x, "שם"));
+        if (siman !== null && same.length && !otherSiman) {
           cands = same;
           elems = [{ kind: "siman", n: siman, explicit: true, numeral: { n: siman, form: "gershayim", common: false } }, ...elems];
           rule = "sk-here";
