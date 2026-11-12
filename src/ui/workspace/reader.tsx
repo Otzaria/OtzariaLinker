@@ -11,6 +11,7 @@ import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
 import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
+import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
 
 /*
@@ -47,7 +48,7 @@ export function Reader({ side }: { side: Side }) {
 
   return (
     <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`} onKeyDown={onKeyDown}>
-      <ReaderHead side={side} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} />
+      <ReaderHead side={side} bookKey={book?.key} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} />
       {choosing || !book ? (
         <div class="panel-body">
           <div class="book-search">
@@ -58,7 +59,7 @@ export function Reader({ side }: { side: Side }) {
           ) : (
             <div class="empty">
               <Icon name="oz_book_open_medium_lines" size={40} />
-              <span>עדיין לא נפתחו ספרים. גררו לכאן ספר או מסד, או פתחו מהמסך הראשי.</span>
+              <span>עדיין לא נפתחו ספרים. "הוספת מקור" (בחלונית המקורות) פותחת תיקייה, קבצים או מסד — או גררו אותם לכאן.</span>
             </div>
           )}
         </div>
@@ -69,7 +70,11 @@ export function Reader({ side }: { side: Side }) {
   );
 }
 
-function ReaderHead({ side, title, onChoose, onFind, findOpen }: { side: Side; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean }) {
+function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen }: { side: Side; bookKey: string | undefined; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean }) {
+  const store = useStore();
+  // several sources open: which one this book comes from (with its name when another source has the same title)
+  const origin = useBookOrigin()(bookKey);
+  const showSource = !!origin.source && store.sources.value.length > 1;
   return (
     <div class="panel-head" data-panel={side} draggable>
       <span class="grip" title="גררו כדי להזיז את הפאנל">
@@ -77,6 +82,7 @@ function ReaderHead({ side, title, onChoose, onFind, findOpen }: { side: Side; t
       </span>
       <span class={`side-badge ${side}`}>{SIDE_LABEL[side]}</span>
       <h2 class="grow" title={title}>{title ?? "לא נבחר ספר"}</h2>
+      {showSource && <SourceBadge source={origin.source!} name={origin.ambiguous} />}
       {onFind && (
         <button class="icon-btn" onClick={onFind} aria-pressed={findOpen} title="חיפוש בטקסט הספר (Ctrl+F)" aria-label="חיפוש בטקסט הספר">
           <Icon name="oz_search" />

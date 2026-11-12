@@ -25,8 +25,11 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const store = useStore();
   const sources = store.sources.value;
   const current = store.view[store.activeSide.value].value ?? store.view.source.value;
-  const [kind, setKind] = useState<ScopeKind>(() => (sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
-  const [sourceId, setSourceId] = useState<string>(() => sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
+  // a guided task names the source to link (the folder against the Otzaria database, a personal database)
+  const asked = store.intent.value?.sourceId;
+  const askedSource = asked && sources.some((s) => s.info.id === asked) ? asked : undefined;
+  const [kind, setKind] = useState<ScopeKind>(() => (askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
+  const [sourceId, setSourceId] = useState<string>(() => askedSource ?? sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
   const [off, setOff] = useState<ReadonlySet<EngineId>>(new Set());
   const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
   const books = store.books.value;

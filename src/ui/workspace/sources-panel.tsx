@@ -1,12 +1,11 @@
 import { useState } from "preact/hooks";
 import { useStore } from "../context";
-import { pickFiles } from "../files";
 import { Icon } from "../icons/icon";
+import { AddSources } from "./add-sources";
 import { BookList } from "./book-picker";
+import { badgeOf, SourceBadge } from "./source-badge";
 
-const KIND_LABEL = { "otzaria-db": "מסד", "text-files": "קבצים", "mapped-db": "מסד ממופה" } as const;
-
-/** Open sources (databases, folders, files) and a search over all their books. */
+/** Open sources (databases, folders, files), adding more, and a search over all their books. */
 export function SourcesBody() {
   const store = useStore();
   const [q, setQ] = useState("");
@@ -14,14 +13,20 @@ export function SourcesBody() {
   return (
     <>
       <div class="sources-list">
+        {sources.length === 0 && (
+          <p class="muted empty-sources">
+            אין מקור פתוח. הוסיפו תיקייה, קבצים או מסד — אפשר כמה מקורות יחד, ולקשר בין ספרים של מקורות שונים.
+          </p>
+        )}
         {sources.map((s) => (
           <div class="source-row" key={s.info.id}>
             <Icon name={s.info.kind !== "text-files" ? "fl_database" : "fl_folder"} size={18} />
             <div class="grow">
-              <div title={s.info.label} style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{s.info.label}</div>
+              <bdi class="source-label" title={s.info.label}>{s.info.label}</bdi>
               <div class="meta">
-                {KIND_LABEL[s.info.kind]} · {s.books.length.toLocaleString("he")} ספרים
-                {s.info.warnings.length > 0 && ` · ${s.info.warnings.length} אזהרות`}
+                <SourceBadge source={s} />
+                <span>{s.books.length.toLocaleString("he")} ספרים</span>
+                {s.info.warnings.length > 0 && <span>{s.info.warnings.length} אזהרות</span>}
               </div>
             </div>
             {store.canRemap(s.info.id) && (
@@ -29,20 +34,17 @@ export function SourcesBody() {
                 <Icon name="fl_settings" size={16} />
               </button>
             )}
-            <button class="icon-btn" title="סגירת המקור" aria-label={`סגירת ${s.info.label}`} onClick={() => void store.closeSource(s.info.id)}>
+            <button class="icon-btn" title={`סגירת המקור (${badgeOf(s).label}). הקישורים שבפרויקט נשארים.`} aria-label={`סגירת ${s.info.label}`} onClick={() => void store.closeSource(s.info.id)}>
               <Icon name="fl_dismiss" size={16} />
             </button>
           </div>
         ))}
-        <button class="btn outlined" onClick={async () => store.openFiles(await pickFiles())}>
-          <Icon name="fl_add" size={16} />
-          הוספת מקור
-        </button>
+        <AddSources startOpen={sources.length === 0} />
       </div>
       {sources.length > 0 && (
         <>
           <div class="book-search">
-            <input type="search" placeholder="חיפוש ספר…" value={q} onInput={(e) => setQ(e.currentTarget.value)} aria-label="חיפוש ספר" />
+            <input type="search" placeholder="חיפוש ספר…" title="חיפוש בכל המקורות הפתוחים" value={q} onInput={(e) => setQ(e.currentTarget.value)} aria-label="חיפוש ספר" />
           </div>
           <BookList query={q} />
         </>

@@ -7,7 +7,7 @@ import { HelpDialog } from "./dialogs/help-dialog";
 import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
-import { Home } from "./screens/home";
+import { Home, StartTaskDialog } from "./screens/home";
 import { AppBar } from "./shell/app-bar";
 import { Notices } from "./shell/notices";
 import { Workspace } from "./workspace/workspace";
@@ -15,7 +15,6 @@ import { Workspace } from "./workspace/workspace";
 /** The whole program: app bar, the current screen, notices, and a window-wide drop target. */
 export function App() {
   const store = useStore();
-  const [exporting, setExporting] = useState(false);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => {
@@ -58,13 +57,15 @@ export function App() {
         await store.openFiles(await fromDataTransfer(e.dataTransfer));
       }}
     >
-      <AppBar onExport={() => setExporting(true)} />
+      <AppBar onExport={() => (store.dialog.value = "export")} />
       {store.screen.value === "home" ? <Home /> : <Workspace />}
       <Notices />
-      {exporting && <ExportDialog onClose={() => setExporting(false)} />}
-      {store.dialog.value === "relink" && <RelinkDialog onClose={() => (store.dialog.value = null)} />}
-      {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onClose={() => (store.dialog.value = null)} />}
-      {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => (store.dialog.value = null)} />}
+      {/* dialogs are routes (state/router.ts): closing one goes back in history; Back closes it */}
+      {store.dialog.value === "export" && <ExportDialog onClose={() => store.closeDialog("export")} />}
+      {store.dialog.value === "relink" && <RelinkDialog onClose={() => store.closeDialog("relink")} />}
+      {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onSection={(id) => (store.helpSection.value = id)} onClose={() => store.closeDialog("help")} />}
+      {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => store.closeDialog("alt-toc")} />}
+      {store.dialog.value === "start" && <StartTaskDialog onClose={() => store.closeDialog("start")} />}
       <DbMappingDialog />
       <RecordsDialog />
       {dropping && store.screen.value === "workspace" && <div class="drop-veil">שחררו כדי לפתוח</div>}

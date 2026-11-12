@@ -24,7 +24,9 @@ export function SuggestionsPanel() {
   const store = useStore();
   const run = store.suggestions.run.value;
   const [setup, setSetup] = useState(false);
-  if (!run || setup) return <RunForm onDone={() => setSetup(false)} onCancel={run ? () => setSetup(false) : undefined} />;
+  // the address "#/maxlink" asks for the max-link form even when the last run was of another kind
+  const wantsMaxLink = store.suggestMode.value === "maxlink" && !run?.maxlink;
+  if (!run || setup || wantsMaxLink) return <RunForm onDone={() => setSetup(false)} onCancel={run ? () => setSetup(false) : undefined} />;
   const c = store.suggestions.counts.value;
   const view = store.prefs.suggestionsView.value;
   const engine = ENGINES.find((e) => e.id === run.engine);
@@ -70,9 +72,11 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const store = useStore();
   const intent = store.intent.value;
   const [engine, setEngine] = useState<EngineId>(intent?.engine ?? "headings");
-  const [mode, setMode] = useState<"pair" | "batch" | "maxlink">(intent?.maxlink ? "maxlink" : intent?.batch ? "batch" : "pair");
+  // in the store, not here: the route names it (#/maxlink), and a guided task starts in it
+  const mode = store.suggestMode.value;
+  const setMode = (m: typeof mode) => (store.suggestMode.value = m);
   const sources = store.sources.value;
-  const [batchSource, setBatchSource] = useState<string>(() => sources.find((x) => x.info.kind === "text-files")?.info.id ?? sources[0]?.info.id ?? "");
+  const [batchSource, setBatchSource] = useState<string>(() => (intent?.sourceId && sources.some((x) => x.info.id === intent.sourceId) ? intent.sourceId : (sources.find((x) => x.info.kind === "text-files")?.info.id ?? sources[0]?.info.id ?? "")));
   const info = ENGINES.find((e) => e.id === engine)!;
   const s = store.view.source.value;
   const t = store.view.target.value;

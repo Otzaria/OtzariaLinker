@@ -9,6 +9,8 @@ import "../ui/theme/tokens.css";
 import "../ui/theme/app.css";
 import { RpcClient, type Port } from "../workers/rpc";
 import { booksService } from "./books-service";
+import { hashLocation } from "./hash-location";
+import { Router } from "../state/router";
 import { idbStore } from "./idb-store";
 import type { SourcesApi } from "../workers/sources-api";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
@@ -63,6 +65,8 @@ const saver: Saver = {
 const store = new AppStore(service, saver);
 onLost = (reason) => store.workerLost(reason);
 store.startAutosave(idbStore());
+// the address follows the screens and dialogs (#/workspace/links, #/help/…), and Back/Forward move between them
+new Router(store, hashLocation()).start();
 
 let stopTheme = () => {};
 effect(() => {
