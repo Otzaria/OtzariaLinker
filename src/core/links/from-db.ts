@@ -27,6 +27,8 @@ export interface AdoptContext {
   line(book: BookRef, index: number): { anchorText: string; heRef: string | null } | undefined;
   /** whether the project holds the links file of a book (imported from the library) */
   hasLinksFile(title: string): boolean;
+  /** the library sync counts the book as Sefaria-owned (core/links/sefaria-titles.ts); absent = the database origin */
+  sefariaOwned?(book: BookRef): boolean;
 }
 
 export interface AdoptResult {
@@ -84,7 +86,8 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
 
   // heRef_2 is not in the database: the file target's own reference (line.heRef), with the anchor label
   const targetLine = ctx.line(chosen.target.book, chosen.target.line);
-  let heRef2 = targetLine?.heRef ?? `${chosen.target.book.title} ${chosen.target.line + 1}`;
+  // never blank: the weekly sync rejects an empty heRef_2 (B3)
+  let heRef2 = targetLine?.heRef?.trim() ? targetLine.heRef : `${chosen.target.book.title} ${chosen.target.line + 1}`;
 
   let anchor: RawAnchor | undefined;
   if (anchors0.length && !f.flipped) {
@@ -113,12 +116,20 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
   if (!ctx.hasLinksFile(chosen.source.book.title))
     add("warning", "adopt/no-links-file", `קובץ הקישורים של "${chosen.source.book.title}" לא נטען לפרויקט. ייצוא שלו יחליף את הקובץ שבספרייה, ולכן הכלי לא ייצא את הקישור עד שתטענו את הקובץ (או תאשרו שאין לספר קובץ).`);
 
+  // A range on a Sefaria side cannot be submitted: the weekly sync remaps only the start line from the
+  // ref, so the end drifts (LINK_FORMATS §1.8, compatibility review B1). The copy keeps the start line.
+  const sefaria = (b: BookRef) => ctx.sefariaOwned?.(b) ?? b.origin === "sefaria";
+  const single = (side: LinkSide, label: string): LinkSide => {
+    if (!sefaria(side.book) || side.end === undefined || side.end <= side.line) return side;
+    add("warning", "adopt/sefaria-range", `בקישור במסד יש טווח ב${label} (${side.book.title}), שהוא ספר ספריא. הסנכרון השבועי של הספרייה לא מעדכן סוף טווח בצד ספריא, ולכן הועתקה רק שורת ההתחלה.`);
+    return { book: side.book, line: side.line };
+  };
   const link: Link = {
     id,
     status: "new",
     provenance: "db-copy",
-    source: chosen.source,
-    target: chosen.target,
+    source: single(chosen.source, "ספר המקור"),
+    target: single(chosen.target, "ספר היעד"),
     declaredType: chosen.declaredType,
     heRef2,
     ...(anchor && { anchor }),

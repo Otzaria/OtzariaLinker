@@ -85,3 +85,21 @@ export function titleDeclaresDependencyOn(dependantTitle: string, baseTitle: str
  * link into it is dropped silently by the generator. A safe title is e.g. "הערות ל<X>".
  */
 export const isMergeableCompanionTitle = (title: string): boolean => normalizeTitle(title).startsWith("הערות על ");
+
+/*
+ * A book title becomes a file name on export ("<title>_links.json", "<title>_alt_toc.json",
+ * "<title>.links.csv") and a path inside the ZIP. Titles come from databases, mapped databases and
+ * projects — all untrusted — so a title that is not a plain file name ("../../x", "a/b", NUL,
+ * control characters, characters Windows refuses in a file name) is never written (security review A4).
+ */
+const UNSAFE_FILE_CHAR = /[/\\\u0000-\u001f\u007f<>:"|?*]/;
+
+/** Why a title cannot be a file name, in Hebrew; null when it can. */
+export function unsafeFileTitle(title: string): string | null {
+  if (!title.trim()) return "השם ריק";
+  if (title.includes("..")) return 'יש בשם ".."';
+  const bad = UNSAFE_FILE_CHAR.exec(title)?.[0];
+  if (bad !== undefined) return /[\u0000-\u001f\u007f]/.test(bad) ? "יש בשם תו בקרה" : `יש בשם התו "${bad}", שאסור בשם קובץ`;
+  if (/[. ]$/.test(title)) return "השם מסתיים בנקודה או ברווח, ו־Windows משמיטה אותם משם קובץ";
+  return null;
+}

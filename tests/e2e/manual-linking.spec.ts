@@ -44,8 +44,10 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await source.locator('.ln[data-i="1"] .tx').click();
   await target.locator('.ln[data-i="2"] .tx').click();
   const builder = page.locator(".builder");
-  // Bereshit is a Sefaria book: the library's weekly sync wants the English ref — a warning, not a block
-  await expect(builder.locator(".problems .warning")).toContainText("ref_2");
+  // Bereshit is a Sefaria book: the library's weekly sync wants the English ref, and the builder builds
+  // it from the line's heRef (compatibility review B1) — shown as the field's placeholder, no warning
+  await expect(builder.getByPlaceholder("Genesis 1:1")).toHaveAttribute("title", /אוטומטית/);
+  await expect(builder.locator(".problems", { hasText: "ref_2" })).toHaveCount(0);
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
   await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();

@@ -19,6 +19,7 @@ export type QaCategory =
   | "unverified"
   | "in-db"
   | "db-copy"
+  | "library-file"
   | "other";
 
 export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: string }>> = {
@@ -34,6 +35,7 @@ export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: s
   unverified: { title: "לא נבדק", hint: "השורה לא נטענה, ולכן לא נבדקה" },
   "in-db": { title: "כבר במסד", hint: "המסד הפתוח כבר מכיל קישור בין אותן שורות (לפי כלל השוויון האחד, core/links/equality.ts)" },
   "db-copy": { title: "הועתק מהמסד", hint: "קישורים שהועתקו מהמסד: מה ששוחזר, ומה חסר כדי לייצא אותם בבטחה" },
+  "library-file": { title: "קובץ הספרייה", hint: "הקובץ שייוצא יחליף את קובץ הקישורים של הספר בספרייה: טענו אותו מהספרייה או אשרו במפורש" },
   other: { title: "אחר", hint: "" },
 };
 
@@ -57,12 +59,18 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/sefaria-both": "sefaria",
   "export/title-not-normalized": "title",
   "export/companion-merged": "title",
+  "export/companion-merge-cancelled": "title",
+  "export/companion-merge-broken": "title",
   "export/heref-missing": "reference",
   "export/line-not-verified": "unverified",
   "export/in-db": "in-db",
   "export/in-db-other-type": "in-db",
   "export/db-copy": "db-copy",
   "export/db-copy-no-file": "db-copy",
+  "export/file-unverified": "library-file",
+  "export/library-file-not-loaded": "library-file",
+  "export/file-held": "library-file",
+  "export/unsafe-title": "title",
 };
 export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (code.startsWith("sefaria/") ? "sefaria" : "other");
 

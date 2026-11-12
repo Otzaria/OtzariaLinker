@@ -38,3 +38,17 @@ describe("diagnostics", () => {
     expect(diagnosticsFileName(new Date("2026-11-11T20:01:02Z"))).toBe("otzaria-linker-diagnostics-2026-11-11-20-01-02.jsonl");
   });
 });
+
+describe("diagnostics never copy a file into the log (security review A11)", () => {
+  it("a notice and each detail are capped", () => {
+    const log = new Log(10, () => 1);
+    const cell = "תוכן תא ".repeat(1000);
+    logNotice(log, "error", `"x.csv": ${cell}`, [`רשומה 1: ${cell}`]);
+    const e = log.entries()[0]!;
+    expect(e.msg.length).toBeLessThan(200);
+    expect((e.data!.details as string[])[0]!.length).toBeLessThan(110);
+    const t = logTask(log, "קורא", () => 1);
+    t.failed(new SyntaxError(`Unexpected token in JSON at position 5: ${cell}`));
+    expect(String(log.entries().at(-1)!.data!.message).length).toBeLessThan(200);
+  });
+});

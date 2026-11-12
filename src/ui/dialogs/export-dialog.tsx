@@ -58,6 +58,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 {alt && alt.files.length > 0 && <Stat n={alt.files.reduce((n, f) => n + f.structures, 0)} label="מבני כותרות" />}
                 {alt && alt.heldBack.length > 0 && <Stat n={alt.heldBack.length} label="ספרים שמבני הכותרות שלהם לא ייוצאו" bad />}
               </div>
+              <label style="display:grid;gap:4px">
+                <span class="muted">הייצוא מיועד ל…</span>
+                <select
+                  value={store.exportPurpose.value}
+                  onChange={(e) => ((store.exportPurpose.value = e.currentTarget.value as "submission" | "private"), replan())}
+                  aria-label="למה מיועד הייצוא"
+                  title={`ספרי ספריא נקבעים לפי ${store.sefariaTitles.value.label}`}
+                >
+                  <option value="submission">שליחה לספריית אוצריא (מומלץ): כללי הסנכרון של הספרייה מחייבים</option>
+                  <option value="private">שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה</option>
+                </select>
+              </label>
               {advanced && (
                 <label style="display:grid;gap:4px">
                   <span class="muted">פורמט קובצי הקישורים</span>

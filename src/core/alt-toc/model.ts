@@ -83,16 +83,27 @@ export function entriesToNodes(entries: readonly AltTocEntry[]): AltTocNode[] {
   return root;
 }
 
-/** The file's nested nodes → flat entries in document order; the level is the nesting depth. */
+/*
+ * How deep a structure may nest. Real structures are a few levels deep (חלק ← סימן ← סעיף); a file or
+ * database that nests thousands of levels made the recursive readers and JSON.stringify throw a
+ * RangeError (security review A7). Deeper entries are an error and the book is not written.
+ */
+export const MAX_ALT_TOC_DEPTH = 64;
+
+/** The file's nested nodes → flat entries in document order; the level is the nesting depth. Iterative. */
 export function nodesToEntries(nodes: readonly AltTocNode[]): AltTocEntry[] {
   const out: AltTocEntry[] = [];
-  const walk = (list: readonly AltTocNode[], level: number) => {
-    for (const n of list) {
-      out.push({ heTitle: n.heTitle, line: n.line, level });
-      if (n.children?.length) walk(n.children, level + 1);
+  const stack: { list: readonly AltTocNode[]; i: number; level: number }[] = [{ list: nodes, i: 0, level: 0 }];
+  while (stack.length) {
+    const top = stack.at(-1)!;
+    const n = top.list[top.i++];
+    if (!n) {
+      stack.pop();
+      continue;
     }
-  };
-  walk(nodes, 0);
+    out.push({ heTitle: n.heTitle, line: n.line, level: top.level });
+    if (n.children?.length) stack.push({ list: n.children, i: 0, level: top.level + 1 });
+  }
   return out;
 }
 
@@ -114,26 +125,31 @@ export function rowsToEntries(rows: readonly AltTocRow[]): { entries: AltTocEntr
   const children = new Map<number | null, AltTocRow[]>();
   for (const r of rows) {
     const parent = r.parentId !== null && ids.has(r.parentId) ? r.parentId : null;
-    children.set(parent, [...(children.get(parent) ?? []), r]);
+    // push, not spread: 40,000 siblings took 13.6 s copied one by one (security review A8)
+    const list = children.get(parent);
+    if (list) list.push(r);
+    else children.set(parent, [r]);
   }
   for (const list of children.values()) list.sort((a, b) => a.id - b.id);
   const entries: AltTocEntry[] = [];
   let skipped = 0;
   const seen = new Set<number>();
-  const walk = (parent: number | null, level: number) => {
-    for (const r of children.get(parent) ?? []) {
-      if (seen.has(r.id)) continue; // a cycle in a damaged database
-      seen.add(r.id);
-      if (r.line === null) {
-        skipped++;
-        walk(r.id, level);
-      } else {
-        entries.push({ heTitle: r.text, line: r.line, level });
-        walk(r.id, level + 1);
-      }
+  // iterative: a damaged or hostile database can chain thousands of parents (security review A7)
+  const stack: { list: readonly AltTocRow[]; i: number; level: number }[] = [{ list: children.get(null) ?? [], i: 0, level: 0 }];
+  while (stack.length) {
+    const top = stack.at(-1)!;
+    const r = top.list[top.i++];
+    if (!r) {
+      stack.pop();
+      continue;
     }
-  };
-  walk(null, 0);
+    if (seen.has(r.id)) continue; // a cycle in a damaged database
+    seen.add(r.id);
+    if (r.line === null) skipped++;
+    else entries.push({ heTitle: r.text, line: r.line, level: top.level });
+    const kids = children.get(r.id);
+    if (kids) stack.push({ list: kids, i: 0, level: r.line === null ? top.level : top.level + 1 });
+  }
   return { entries, skipped };
 }
 
@@ -197,6 +213,8 @@ export function validateAltToc(structures: readonly AltTocStructure[], ctx: AltT
     type Frame = { level: number; line: number; title: string; lastChild?: number };
     const stack: Frame[] = [];
     const top: Frame = { level: -1, line: 0, title: "" };
+    const deep = s.entries.findIndex((e) => e.level >= MAX_ALT_TOC_DEPTH);
+    if (deep >= 0) add("error", "alt-toc/too-deep", `במבנה "${name}" יש צמתים מקוננים יותר מ־${MAX_ALT_TOC_DEPTH} רמות. מבנה כזה אינו מבנה כותרות אמיתי, והכלי לא כותב אותו; צמצמו את הקינון.`, si, deep);
     s.entries.forEach((e, ei) => {
       const where = `"${name}", צומת ${ei + 1}${e.heTitle ? ` ("${e.heTitle}")` : ""}`;
       if (!e.heTitle.trim()) add("error", "alt-toc/title-missing", `${where}: חסרה כותרת לצומת.`, si, ei);

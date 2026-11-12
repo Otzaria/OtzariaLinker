@@ -1,3 +1,4 @@
+import { pushTo } from "../../core/collections";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { isRange, type Link } from "../../core/links/model";
 import type { AltTocExportPlan } from "../alt-toc/export";
@@ -86,7 +87,7 @@ export function buildExportReport(r: ReportInput): string {
 
   // per book: what happens to each book of the library
   const books = new Map<string, string[]>();
-  const note = (title: string, text: string) => books.set(title, [...(books.get(title) ?? []), text]);
+  const note = (title: string, text: string) => pushTo(books, title, text);
   if (r.format === "json") for (const f of links.files) note(f.sourceTitle, `${f.records.toLocaleString("he")} קישורים`);
   else for (const f of r.csv ?? []) note(f.sourceTitle, `${f.rows.toLocaleString("he")} קישורים`);
   for (const f of altToc.files) note(f.title, f.clears ? "מבני הכותרות נמחקים" : `${f.structures} מבני כותרות`);

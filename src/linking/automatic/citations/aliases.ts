@@ -1,3 +1,4 @@
+import { pushTo } from "../../../core/collections";
 import type { BookRef } from "../../../core/links/model";
 import { strictValue } from "./numbers";
 import { citationTokens, unifyFinals, type Tok } from "./text";
@@ -173,13 +174,15 @@ export class AliasIndex {
   private readonly truncated = new Map<string, AliasEntry | null>();
   /** names dropped by the guards (for the run's notes) */
   dropped = 0;
+  /** while building: where each (book, section) sits in an entry's targets — findIndex per add was quadratic (A8) */
+  private targetSlots: Map<AliasEntry, Map<string, number>> | null = new Map();
 
   static build(catalog: readonly CatalogBook[]): AliasIndex {
     const ix = new AliasIndex();
     const byTitle = new Map<string, BookRef[]>();
     for (const c of catalog) {
       const t = normTitle(c.book.title);
-      byTitle.set(t, [...(byTitle.get(t) ?? []), c.book]);
+      pushTo(byTitle, t, c.book);
       ix.collections.set(c.book.key, collectionOf(c.book.title));
     }
     for (const c of catalog) {
@@ -200,6 +203,7 @@ export class AliasIndex {
         ix.commentariesOn.set(on[1]!, list);
       }
     }
+    ix.targetSlots = null; // add() is done; the guards below rewrite the target lists
     ix.dropAuthorNames();
     ix.prune();
     for (const list of ix.byFirst.values()) list.sort((a, b) => b.words.length - a.words.length);
@@ -242,9 +246,14 @@ export class AliasIndex {
       list.push(entry);
       this.byFirst.set(words[0]!.key, list);
     }
-    const same = entry.targets.findIndex((x) => x.book.key === target.book.key && x.section === target.section);
-    if (same < 0) entry.targets.push(target);
-    else if (TIER_RANK[target.tier] < TIER_RANK[entry.targets[same]!.tier]) entry.targets[same] = target;
+    const slotKey = `${target.book.key}|${target.section ?? ""}`;
+    let slots = this.targetSlots?.get(entry);
+    if (this.targetSlots && !slots) this.targetSlots.set(entry, (slots = new Map()));
+    const same = slots ? (slots.get(slotKey) ?? -1) : entry.targets.findIndex((x) => x.book.key === target.book.key && x.section === target.section);
+    if (same < 0) {
+      slots?.set(slotKey, entry.targets.length);
+      entry.targets.push(target);
+    } else if (TIER_RANK[target.tier] < TIER_RANK[entry.targets[same]!.tier]) entry.targets[same] = target;
   }
 
   /**
@@ -532,7 +541,7 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
     }
     case "sa": {
       const part = title.slice("שולחן ערוך, ".length);
-      for (const p of SA_PARTS[part] ?? [part]) {
+      for (const p of (Object.hasOwn(SA_PARTS, part) ? SA_PARTS[part] : undefined) ?? [part]) {
         for (const n of [...SA_NAMES, 'רמ"א', 'הרמ"א']) out.push({ name: `${n} ${p}` });
         // "או"ח סי' א", "בחושן משפט סי' ק"צ" alone are the Shulchan Aruch (the Tur needs its own name before it)
         out.push({ name: p });

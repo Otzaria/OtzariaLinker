@@ -4,6 +4,7 @@
  */
 export type ErrorCode =
   | "archive/unsafe-path"
+  | "export/unsafe-path"
   | "archive/too-many-entries"
   | "archive/too-large"
   | "archive/suspicious-ratio"

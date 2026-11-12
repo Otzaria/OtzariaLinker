@@ -606,7 +606,7 @@ function buildSuggestion(
   }
   const runnerUp = h.lines.length > 1 ? score : null;
 
-  if (flags.merged) warnings.push(r("footnotes/companion-merged", `שם ספר ההערות "${notes.book.title}" מתחיל ב"הערות על". אוצריא ממזגת ספר כזה לתוך ספר הבסיס ומוחקת בשקט את הקישורים אליו. שם בטוח: "הערות ל…".`));
+  if (flags.merged) warnings.push(r("footnotes/companion-merged", `שם ספר ההערות "${notes.book.title}" מתחיל ב"הערות על", ואוצריא ממזגת ספר כזה לתוך ספר הבסיס. לקישור הזה יש עוגן על הסימן, וזה מבטל את המיזוג: ההערות יישארו ספר נפרד והקישור יישמר.`));
   const line = withoutBom(main.lines[h.occ.line]?.text ?? "");
   const lead = noteLead.get(target);
   if (!appRecognisesMarker(line, m)) warnings.push(r("footnotes/no-popup", "אוצריא לא תציג חלונית ריחוף לסימן בצורה הזו (היא מזהה רק \"(12)\" או <sup>(א)</sup>). הקישור יופיע כעוגן על הסימן."));
@@ -699,7 +699,7 @@ function mergeByLine(xs: { line: number; reasons: Reason[] }[]): { line: number;
 function titleWarnings(notes: EngineBook, declaredType: string): Reason[] {
   const out: Reason[] = [];
   if (isMergeableCompanionTitle(notes.book.title))
-    out.push(r("footnotes/companion-merged", `שם ספר ההערות "${notes.book.title}" מתחיל ב"הערות על". המחולל של אוצריא ממזג ספר כזה לתוך ספר הבסיס, וכל הקישורים אליו נמחקים בשקט. כדי שהקישורים יישמרו, תנו לו שם כמו "הערות ל…".`));
+    out.push(r("footnotes/companion-merged", `שם ספר ההערות "${notes.book.title}" מתחיל ב"הערות על", והמחולל של אוצריא ממזג ספר כזה לתוך ספר הבסיס — אבל רק כשאין עוגן על שורות ההערות. המנוע הזה כותב עוגן על כל סימן, ולכן הקישורים שלו מבטלים את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו. אם קובץ הקישורים של הבסיס בספרייה כבר ממזג את ההערות (רשומות בלי עוגן), הקישורים החדשים יבטלו את המיזוג הזה.`));
   if (!popupTypeOk(declaredType, notes.book.title))
     out.push(r("footnotes/no-popup-type", `סוג הקשר "${declaredType}" ושם ספר ההערות לא יאפשרו חלונית ריחוף על הסימנים המודפסים: נדרש סוג תלוי־טקסט, וגם סוג FOOTNOTES או שם ספר שמתחיל ב"הערות".`));
   return out;
@@ -715,7 +715,7 @@ function mergeNotes(notes: EngineBook, linked: ReadonlySet<number>, unmarked: re
   const headings = notes.lines.filter((l) => l.heading !== null && stripTags(l.text) && !linked.has(l.index)).length;
   const out: Reason[] = [];
   if (unmarked.length)
-    out.push(r("footnotes/merge-blocked", `אם המיזוג לא יתבצע (למשל כי ${unmarked.length} שורות הערה אינן מקושרות, או כי לקישורים יש עוגן), ספר ההערות יישאר ספר נפרד והקישורים יישמרו. אבל אין לסמוך על זה — עדיף לשנות את השם.`));
+    out.push(r("footnotes/merge-blocked", `גם ${unmarked.length} שורות הערה שאינן מקושרות מונעות את המיזוג: ספר ההערות יישאר ספר נפרד והקישורים יישמרו.`));
   if (headings)
     out.push(r("footnotes/merge-loses-headings", `אם המיזוג כן יתבצע, ${headings} שורות כותרת בספר ההערות יאבדו: הן אינן מוזרקות לשום מקום.`));
   return out;

@@ -12,7 +12,14 @@ const MAX_TABLES = 200;
 const SAMPLE_ROWS = 20;
 export const SHOWN_ROWS = 5;
 const CELL_CHARS = 160;
-const HTML = /<\/?[a-z][a-z0-9]*(\s[^>]*)?>/i;
+/*
+ * A tag. The attribute part stops at "<" too: with `[^>]*` a cell like "<a <a <a …" (no ">") made
+ * every "<a" scan to the end of the cell — quadratic on sample cells read at open (security review
+ * A6). Only the start of a cell is looked at; a cell that has markup has it early.
+ */
+const HTML = /<\/?[a-z][a-z0-9]*(?:\s[^<>]*)?>/i;
+const HTML_PROBE = 4096;
+export const looksLikeHtml = (s: string): boolean => HTML.test(s.length > HTML_PROBE ? s.slice(0, HTML_PROBE) : s);
 
 export async function previewSchema(file: SqliteFile): Promise<SchemaPreview> {
   const schema = await file.schema();
@@ -71,7 +78,7 @@ function columnPreview(name: string, type: string, rowidAlias: boolean, values: 
   for (const v of filled) {
     if (typeof v === "number" || typeof v === "bigint") kinds.add(Number.isInteger(Number(v)) ? "integer" : "real");
     else if (typeof v === "string") {
-      kinds.add(HTML.test(v) ? "html" : "text");
+      kinds.add(looksLikeHtml(v) ? "html" : "text");
       (chars += v.length), texts++;
     } else {
       const k = blobKind(v);
@@ -82,7 +89,7 @@ function columnPreview(name: string, type: string, rowidAlias: boolean, values: 
         try {
           const s = codec.decode(v) ?? "";
           (chars += s.length), texts++;
-          if (HTML.test(s)) kinds.add("html");
+          if (looksLikeHtml(s)) kinds.add("html");
         } catch {
           kinds.add("binary");
         }

@@ -1,7 +1,9 @@
 import { zipSync, strToU8 } from "fflate";
+import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
+import { unsafeFileTitle } from "../../core/links/titles";
 import { storedKey } from "../../core/links/stored-form";
-import { validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
+import { FILE_LEVEL_CODES, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
@@ -39,6 +41,8 @@ export interface ExportOptions {
   includeErrors?: boolean;
   /** the text layout of each book's imported file (formats/links-json/layout.ts); new files get the default */
   layouts?: (sourceTitle: string) => JsonLayout | undefined;
+  /** the book's library file was loaded (it may hold no records): its file is not "new" */
+  loadedFile?: (sourceTitle: string) => boolean;
 }
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
@@ -52,7 +56,9 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     // An imported record the user did not touch is already in the library: dropping it from the
     // rewritten file would DELETE it there. It is kept as it was, with its problems as warnings.
     const untouchedImport = l.provenance === "file" && l.status === "existing";
-    if (!opts.includeErrors && !untouchedImport && p.some((x) => x.severity === "error")) heldBack.push({ link: l, problems: p });
+    // a problem of the book's whole file holds it back always — also untouched and in expert mode (A1–A4)
+    const fileHeld = p.some((x) => FILE_LEVEL_CODES.has(x.code));
+    if (fileHeld || (!opts.includeErrors && !untouchedImport && p.some((x) => x.severity === "error"))) heldBack.push({ link: l, problems: p });
     else {
       written.push(l);
       if (p.some((x) => x.severity === "warning" || x.severity === "error")) warned.push({ link: l, problems: p });
@@ -68,10 +74,11 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     else bySource.set(l.source.book.title, [l]);
   }
   const importedTitles = new Set(links.filter((l) => l.provenance === "file").map((l) => l.source.book.title));
+  const heldTitles = new Set(heldBack.filter((h) => h.problems.some((x) => FILE_LEVEL_CODES.has(x.code))).map((h) => h.link.source.book.title));
 
   // A book whose imported links were ALL deleted still needs its file — empty — or the library's
   // old file would stay and the deletions would never happen (compatibility review #2).
-  for (const title of importedTitles) if (!bySource.has(title)) bySource.set(title, []);
+  for (const title of importedTitles) if (!bySource.has(title) && !heldTitles.has(title) && !unsafeFileTitle(title)) bySource.set(title, []);
 
   const files: ExportFile[] = [...bySource.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
@@ -82,7 +89,7 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
         sourceTitle: title,
         text: serializeLinksJson(ordered.map(linkToRecord), opts.layouts?.(title)),
         records: ordered.length,
-        isNewFile: !importedTitles.has(title),
+        isNewFile: !importedTitles.has(title) && !opts.loadedFile?.(title),
       };
     });
 
@@ -124,8 +131,34 @@ export function zipExport(plan: ExportPlan): Uint8Array {
   return zipBundle(plan.files.map((f) => ({ path: `links/${f.name}`, text: f.text })));
 }
 
-/** A ZIP of text files at the given paths (links/…, alt_toc/…, _report.txt). Deterministic (fixed mtime). */
+/**
+ * A ZIP of text files at the given paths (links/…, alt_toc/…, _report.txt). Deterministic (fixed mtime).
+ * Every path must stay inside the archive's folder — the same rule safe-unzip applies to what it
+ * reads: no absolute path, drive letter, backslash, empty, "." or ".." segment, NUL or control
+ * character. Titles are checked before (export/unsafe-title); this is the last line (A4).
+ */
 export function zipBundle(entries: readonly { path: string; text: string }[]): Uint8Array {
+  assertSafeExportPaths(entries);
   const mtime = new Date("2000-01-01T00:00:00Z");
   return zipSync(Object.fromEntries(entries.map((e) => [e.path, [strToU8(e.text), { mtime }]])), { level: 6 });
+}
+
+/** Throws (export/unsafe-path) unless every path is a plain relative path and no two are the same. */
+export function assertSafeExportPaths(entries: readonly { path: string }[]): void {
+  for (const e of entries)
+    if (!isSafeZipPath(e.path)) throw new LinkerError("export/unsafe-path", `קובץ בייצוא קיבל נתיב לא בטוח ("${e.path}"), ולכן הייצוא נעצר. שנו את שם הספר שממנו נגזר הנתיב.`, { path: e.path });
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (seen.has(e.path)) throw new LinkerError("export/unsafe-path", `שני קבצים בייצוא קיבלו אותו נתיב ("${e.path}"), ולכן הייצוא נעצר.`, { path: e.path });
+    seen.add(e.path);
+  }
+}
+
+/** NUL, C0 controls and DEL */
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** A relative path of plain segments, without anything that leaves the folder or that Windows refuses. */
+export function isSafeZipPath(path: string): boolean {
+  if (!path || path.startsWith("/") || path.includes("\\") || CONTROL.test(path) || /^[a-zA-Z]:/.test(path)) return false;
+  return path.split("/").every((seg) => seg !== "" && seg !== "." && seg !== ".." && !/[<>:"|?*]/.test(seg) && !/[. ]$/.test(seg));
 }

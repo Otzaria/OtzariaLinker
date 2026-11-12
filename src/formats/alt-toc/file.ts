@@ -1,4 +1,4 @@
-import { entriesToNodes, nodesToEntries, writtenStructures, type AltTocNode, type AltTocStructure } from "../../core/alt-toc/model";
+import { entriesToNodes, MAX_ALT_TOC_DEPTH, nodesToEntries, writtenStructures, type AltTocNode, type AltTocStructure } from "../../core/alt-toc/model";
 
 /*
  * `alt_toc/<book title>_alt_toc.json` — read and write. The decoding rules are those of the
@@ -69,7 +69,8 @@ export function parseAltTocJson(text: string): AltTocParseResult {
     return [];
   };
 
-  const node = (x: unknown, where: string): AltTocNode | null => {
+  let tooDeep = false;
+  const node = (x: unknown, where: string, depth = 0): AltTocNode | null => {
     if (!isObj(x)) {
       fail("alt-toc/bad-node", `${where}: צומת חייב להיות אובייקט.`);
       return null;
@@ -81,8 +82,15 @@ export function parseAltTocJson(text: string): AltTocParseResult {
     const lineNo = typeof line === "number" && Number.isFinite(line) ? Math.trunc(line) : 0;
     if (typeof line === "number" && Number.isFinite(line) && lineNo !== line) warn("alt-toc/line-fraction", `${where}: השורה ${line} אינה מספר שלם. אוצריא תשתמש ב־${lineNo}.`);
     const title = typeof heTitle === "string" ? heTitle : "";
-    const kids = list(x, "children", where)
-      .map((c, i) => node(c, `${where} ← ${i + 1}`))
+    // the recursion is bounded: deeper children are not read, and the file is reported (security review A7)
+    const children = list(x, "children", where);
+    if (children.length && depth + 1 >= MAX_ALT_TOC_DEPTH) {
+      if (!tooDeep) fail("alt-toc/too-deep", `${where}: הצמתים מקוננים יותר מ־${MAX_ALT_TOC_DEPTH} רמות. הכלי לא קורא את מה שמתחת.`);
+      tooDeep = true;
+      return { heTitle: typeof heTitle === "string" ? heTitle : "", line: lineNo };
+    }
+    const kids = children
+      .map((c, i) => node(c, `${where} ← ${i + 1}`, depth + 1))
       .filter((c): c is AltTocNode => !!c);
     return { heTitle: title, line: lineNo, ...(kids.length && { children: kids }) };
   };

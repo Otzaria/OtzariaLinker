@@ -87,3 +87,36 @@ describe("planExport", () => {
     expect(strFromU8(files["links/ספר א_links.json"]!)).toBe(IMPORTED);
   });
 });
+
+describe("titles that are not plain file names (security review A4)", () => {
+  const evil = ["../../../.github/workflows/x", "..\\..\\Startup\\y", "a\\b", "a/b", "x\u0000y", "x\u0001", "a:b", "..", "ספר."];
+  it("unsafeFileTitle names the reason; real titles pass", async () => {
+    const { unsafeFileTitle } = await import("../../../src/core/links/titles");
+    for (const t of evil) expect(unsafeFileTitle(t), t).not.toBeNull();
+    for (const t of ["ספר א", "המאיר לארץ על ארצות החיים", "שו״ת חתם סופר", "Genesis"]) expect(unsafeFileTitle(t), t).toBeNull();
+  });
+
+  it("a link whose source title is unsafe is held back — also an untouched import and in expert mode", () => {
+    for (const title of evil) {
+      const S = book(title);
+      const plan = planExport([mk("n", { source: { book: S, line: 3 } }), { ...imported[0]!, source: { ...imported[0]!.source, book: S } }], ctx, { includeErrors: true });
+      expect(plan.files, title).toEqual([]);
+      expect(plan.heldBack.map((h) => h.problems.some((p) => p.code === "export/unsafe-title")), title).toEqual([true, true]);
+    }
+  });
+
+  it("zipBundle refuses a path that leaves the folder or repeats", async () => {
+    const { zipBundle } = await import("../../../src/formats/links-json/export");
+    for (const path of ["links/../../x.json", "/abs.json", "C:/x.json", "links\\x.json", "links//x.json", "a/./b", "x\u0000.json"])
+      expect(() => zipBundle([{ path, text: "" }]), path).toThrow(/נתיב לא בטוח/);
+    expect(() => zipBundle([{ path: "a.json", text: "" }, { path: "a.json", text: "" }])).toThrow(/אותו נתיב/);
+    expect(Object.keys(unzipSync(zipBundle([{ path: "links/ספר א_links.json", text: "[]" }, { path: "_report.txt", text: "" }])))).toEqual(["links/ספר א_links.json", "_report.txt"]);
+  });
+
+  it("an alt_toc book with an unsafe title is held back", async () => {
+    const { planAltTocExport } = await import("../../../src/formats/alt-toc/export");
+    const plan = planAltTocExport([{ title: "../x", origin: "user", structures: [{ key: "k", entries: [{ heTitle: "a", line: 1, level: 0 }] }] } as never], () => ({ lineCount: () => 10, line: () => ({ exists: true, heading: null }) }) as never);
+    expect(plan.files).toEqual([]);
+    expect(plan.heldBack[0]!.problems[0]!.code).toBe("export/unsafe-title");
+  });
+});

@@ -20,6 +20,8 @@ export class DbBookSource implements BookSource {
   private readonly listings = new Map<number, Promise<LinkListing>>();
   /** book_base_text, read once at open */
   private bases = new Map<number, number[]>();
+  /** book_has_links.hasSourceLinks, read once at open */
+  private withLinks = new Set<number>();
 
   private constructor(
     readonly info: SourceInfo,
@@ -36,6 +38,7 @@ export class DbBookSource implements BookSource {
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links);
     for (const b of await reader.books()) s.booksById.set(b.id, b);
     s.bases = await reader.baseTexts();
+    s.withLinks = await reader.booksWithSourceLinks();
     return s;
   }
 
@@ -53,6 +56,7 @@ export class DbBookSource implements BookSource {
       ...(b.source !== null && { sourceName: b.source }),
       ...(this.bases.has(b.id) && { bases: this.bases.get(b.id)!.map((id) => this.keyOf(id)) }),
       ...(b.dependenceType !== null && { dependence: b.dependenceType }),
+      ...(this.withLinks.has(b.id) && { hasSourceLinks: true }),
     }));
   }
 
@@ -171,7 +175,7 @@ export class DbBookSource implements BookSource {
       source: end(r.source),
       target: end(r.target),
       declaredType: canonicalTypeString(r.type),
-      heRef2: r.target.heRef ?? `${ref(r.target.bookId).title} ${r.target.lineIndex + 1}`,
+      heRef2: r.target.heRef?.trim() ? r.target.heRef : `${ref(r.target.bookId).title} ${r.target.lineIndex + 1}`,
       ...(r.anchors.length > 0 && { dbAnchors: r.anchors }),
       ...(r.suppressedSides.length > 0 && { dbSuppressed: [...r.suppressedSides].sort() }),
     };

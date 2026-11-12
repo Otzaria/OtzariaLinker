@@ -1,3 +1,4 @@
+import { pushTo } from "../../core/collections";
 import { LinkerError } from "../../core/errors";
 import { LineContentCodec } from "../compression/zstd";
 import type { ByteSource } from "../sqlite/lazy/byte-source";
@@ -91,6 +92,17 @@ export class OtzariaDbReader {
     return out;
   }
 
+  /** book_has_links: the books with hasSourceLinks = 1. Empty when the table is absent. */
+  async booksWithSourceLinks(): Promise<Set<number>> {
+    const out = new Set<number>();
+    const t = await this.file.table("book_has_links");
+    if (!t) return out;
+    const [b, has] = [colIndex(t, "bookId"), colIndex(t, "hasSourceLinks")];
+    if (has < 0) return out;
+    for await (const r of this.file.scan(t)) if (Number(r.values[has]) === 1) out.add(b < 0 ? Number(r.rowid) : Number(r.values[b] ?? r.rowid));
+    return out;
+  }
+
   /**
    * book_base_text (schema 2+): bookId → the base books it is written on, as Sefaria declares them.
    * A small table (5.4K rows in the full library), scanned once. Empty when the table is absent.
@@ -103,7 +115,7 @@ export class OtzariaDbReader {
     if (b < 0 || base < 0) return out;
     for await (const r of this.file.scan(t)) {
       const id = Number(r.values[b]);
-      out.set(id, [...(out.get(id) ?? []), Number(r.values[base])]);
+      pushTo(out, id, Number(r.values[base]));
     }
     return out;
   }

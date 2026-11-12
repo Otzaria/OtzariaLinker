@@ -114,8 +114,15 @@ export function citationTokens(html: unknown): Tok[] {
       continue;
     }
     if (c === "&") {
-      const semi = s.indexOf(";", i + 1);
-      if (semi > i && semi - i < 10) {
+      // an entity is at most 10 characters with "&" and ";": look only that far — indexOf over the rest
+      // of the line made a line of "&&&…" quadratic (security review A8)
+      let semi = -1;
+      for (let k = i + 1, stop = Math.min(s.length, i + 10); k < stop; k++)
+        if (s[k] === ";") {
+          semi = k;
+          break;
+        }
+      if (semi > i) {
         const ent = s.slice(i + 1, semi).toLowerCase();
         if (ent === "quot") quote(2, semi + 1);
         else if (ent === "#39" || ent === "apos") quote(1, semi + 1);

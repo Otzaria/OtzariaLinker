@@ -5,7 +5,7 @@ import { type DbLinkDirection, type DbLinkQuery, type DbLinkSummary, type DbLink
 import { linkMatchIndex, matchLink, storedLinkIdentity, type LinkMatch, type LinkMatchIndex } from "../core/links/equality";
 import { adoptDbLink } from "../core/links/from-db";
 import type { BookRef, Link } from "../core/links/model";
-import type { Problem } from "../core/links/validate";
+import type { LinksFileState, Problem } from "../core/links/validate";
 import { sourceTitleFromLinksFileName } from "../core/links/titles";
 import { addChanges, commit, deleteChange, linksCount, type Change, type LinkState } from "./history";
 import { CHUNK, type LineStore } from "./lines";
@@ -29,6 +29,8 @@ export interface DbLinksHost {
   readonly pick: Record<Side, Signal<Pick | null>>;
   bookOf(ref: BookRef): SourceBook | undefined;
   importLinksFile(path: string, text: string): void;
+  loadSefariaTitles(path: string, text: string): boolean;
+  isSefariaOwned(book: { readonly title: string }): boolean;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
 }
@@ -56,9 +58,10 @@ export class DbLinksState {
   readonly list = signal<{ query: string; total: number; links: Link[]; loading: boolean } | null>(null);
   /** database link ids the user ticked for copying */
   readonly selected = signal<ReadonlySet<string>>(new Set());
-  /** titles whose links file the user loaded in this session (an empty file adds no link, but counts) */
-  readonly loadedFiles = signal<ReadonlySet<string>>(new Set());
-  /** titles the user confirmed have NO links file in the library: a copied link may start a new file */
+  /**
+   * titles the user confirmed in the export dialog: the library has no links file for the book, or the
+   * project's copy of it is the current one — the export may write the book's file without loading it
+   */
   readonly newFileOk = signal<ReadonlySet<string>>(new Set());
 
   readonly bookKey = computed(() => this.host.view[this.side.value].value);
@@ -189,6 +192,7 @@ export class DbLinksState {
         return l ? { anchorText: l.anchorText, heRef: l.heRef } : undefined;
       },
       hasLinksFile: (title: string) => this.linksFile(title) !== "missing",
+      sefariaOwned: (book: BookRef) => this.host.isSefariaOwned(book),
     };
     const index = this.projectIndex.peek();
     const made: Link[] = [];
@@ -230,15 +234,21 @@ export class DbLinksState {
     return made.length;
   }
 
-  /** Whether the project holds a book's links file — the db-copy export rule (core/links/validate.ts). */
-  linksFile(title: string): "imported" | "confirmed-new" | "missing" {
-    if (this.loadedFiles.value.has(title)) return "imported";
-    for (const l of this.host.linkState.value.links.values()) if (l.provenance === "file" && l.source.book.title === title) return "imported";
-    return this.newFileOk.value.has(title) ? "confirmed-new" : "missing";
-  }
-
-  noteImportedFile(title: string): void {
-    if (!this.loadedFiles.peek().has(title)) this.loadedFiles.value = new Set([...this.loadedFiles.peek(), title]);
+  /**
+   * Whether the project holds a book's links file (the file rules of core/links/validate.ts), from
+   * the undoable state only: a file counts as loaded when an import that PARSED put it in
+   * LinkState.files in this session; undoing the import forgets it (security review A2). A file
+   * restored from a saved project — or "file" links with no record of their file — is only a
+   * snapshot: "unverified" until it is loaded again or confirmed (A3).
+   */
+  linksFile(title: string): LinksFileState {
+    const s = this.host.linkState.value;
+    const f = s.files.get(title);
+    if (f?.verified) return "imported";
+    if (this.newFileOk.value.has(title)) return "confirmed-new";
+    if (f) return "unverified";
+    for (const l of s.links.values()) if (l.provenance === "file" && l.source.book.title === title) return "unverified";
+    return "missing";
   }
 
   /** The user says the library has no links file for this book: copied links may start a new one. */
@@ -256,6 +266,9 @@ export class DbLinksState {
   async loadLinksFiles(files: readonly InputFile[], titles: readonly string[]): Promise<string[]> {
     const want = new Set(titles);
     const found: string[] = [];
+    // a library checkout carries the list of Sefaria titles its sync and gate use: it wins over the embedded one (B6)
+    const list = files.find((f) => f.path.replace(/\\/g, "/").endsWith(".github/data/sefaria_he_titles.txt"));
+    if (list) this.host.loadSefariaTitles(list.path, await list.blob.text());
     for (const f of files) {
       const title = sourceTitleFromLinksFileName(f.path.split(/[\\/]/).at(-1) ?? f.path);
       if (!title || !want.has(title) || found.includes(title)) continue;

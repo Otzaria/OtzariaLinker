@@ -1,5 +1,6 @@
 import type { BookHeading } from "../../core/books";
 import type { BookRef, Link } from "../../core/links/model";
+import { unsafeFileTitle } from "../../core/links/titles";
 import { CONNECTION_TYPE_KEY } from "../links-json/record";
 
 /*
@@ -66,6 +67,7 @@ export function planSefariaCsv(links: readonly Link[], headingsOf: (book: BookRe
   const bySource = new Map<string, SefariaCsvRow[]>();
   const ordered = [...links].sort((a, b) => cmp(a.source.book.title, b.source.book.title) || a.source.line - b.source.line || a.target.line - b.target.line);
   for (const l of ordered) {
+    if (unsafeFileTitle(l.source.book.title)) continue; // never a file name that leaves the folder (A4)
     const rows = bySource.get(l.source.book.title) ?? [];
     rows.push({
       citation1: citationAt(headingsOf(l.source.book) ?? [], l.source.line, l.source.book.title),

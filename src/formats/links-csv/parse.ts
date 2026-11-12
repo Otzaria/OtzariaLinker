@@ -23,7 +23,7 @@ export function parseLinksCsv(text: string, fileName: string): CsvLinksResult {
   const rows = parseDelimited(text.replace(/^﻿/, ""), delimiter);
   const problems: string[] = [];
   if (rows.length < 2) return { files: [], problems: ["בקובץ אין שורות נתונים מתחת לשורת הכותרות."] };
-  const header = rows[0]!.map((h) => ALIASES[h.trim().toLowerCase()] ?? h.trim());
+  const header = rows[0]!.map((h) => (Object.hasOwn(ALIASES, h.trim().toLowerCase()) ? ALIASES[h.trim().toLowerCase()]! : h.trim()));
   for (const need of ["line_index_1", "heRef_2", "path_2", "line_index_2", CONNECTION_TYPE_KEY])
     if (!header.includes(need)) problems.push(`חסרה עמודה "${need}" בשורת הכותרות.`);
   if (problems.length) return { files: [], problems };
@@ -32,12 +32,15 @@ export function parseLinksCsv(text: string, fileName: string): CsvLinksResult {
   const bySource = new Map<string, Record<string, unknown>[]>();
   rows.slice(1).forEach((cells, r) => {
     if (cells.every((c) => !c.trim())) return;
-    const rec: Record<string, unknown> = {};
-    header.forEach((h, i) => {
-      const v = (cells[i] ?? "").trim();
-      if (!v) return;
+    // the row's own cells, not every header column: a short row under a huge header stays cheap
+    // (security review A5); no prototype, so a "__proto__" column is data (SECURITY.md §6)
+    const rec = Object.create(null) as Record<string, unknown>;
+    for (let i = 0, n = Math.min(cells.length, header.length); i < n; i++) {
+      const v = cells[i]!.trim();
+      if (!v) continue;
+      const h = header[i]!;
       rec[h] = NUMERIC.has(h) && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
-    });
+    }
     const source = String(rec.source_title ?? fromName ?? "");
     delete rec.source_title;
     if (!source) return void problems.push(`שורה ${r + 2}: לא ידוע מהו ספר המקור (אין עמודת source_title, ושם הקובץ אינו "<ספר>_links.csv").`);

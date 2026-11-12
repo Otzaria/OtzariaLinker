@@ -107,11 +107,12 @@ describe("planMaxLink — the database's declaration (book_base_text)", () => {
     expect(steps(planPairs({ selected: ["d:2"], library: lib }))).toEqual(["headings:אונקלוס>בראשית"]);
   });
 
-  it("a 'הערות על X' notes book is planned with a warning: Otzaria merges it and drops its links", () => {
+  it("a 'הערות על X' notes book is planned with the real outcome: the footnotes engine anchors every record, which cancels the merge (B5)", () => {
     const lib = [book("d:1", "מדרש ויסעו"), book("d:2", "הערות על מדרש ויסעו", { bases: ["d:1"] })];
     const p = planPairs({ selected: ["d:2"], library: lib });
     expect(steps(p)).toEqual(["footnotes:מדרש ויסעו>הערות על מדרש ויסעו"]);
-    expect(p.steps[0]!.why).toContain("הערות ל…");
+    expect(p.steps[0]!.why).toContain("מבטלים את המיזוג");
+    expect(p.steps[0]!.why).not.toContain("נמחקים בשקט");
   });
 });
 
@@ -135,5 +136,27 @@ describe("planMaxLink — single-book engines (the citations slot)", () => {
     expect(planMaxLink({ selected: ["d:1", "t:1"], library: lib, singleEngines: [] }).steps).toHaveLength(2);
     // with the citations engine (the default): one more step for each selected book
     expect(steps(planMaxLink({ selected: ["d:1", "t:1"], library: lib }))).toEqual(['headings:רש"י על בראשית>בראשית', 'dibur-hamatchil:רש"י על בראשית>בראשית', "citations:בראשית", 'citations:רש"י על בראשית']);
+  });
+});
+
+describe("planMaxLink — a translation is linked as a translation (compatibility review B8)", () => {
+  it("headings on a translation of a base book declares targum, which the generator stores as TARGUM", async () => {
+    const { storedForm } = await import("../../../src/core/links/stored-form");
+    // an Otzaria translation of a Sefaria base book (a Sefaria translation of a Sefaria book would be
+    // Sefaria↔Sefaria, which the generator never imports from a file)
+    const lib = [book("s:1", "בראשית", { origin: "sefaria", isBaseBook: true }), book("o:7", "תרגום חדש על בראשית", { isBaseBook: false, bases: ["s:1"], dependence: "targum" })];
+    const p = planPairs({ selected: ["o:7"], library: lib });
+    expect(steps(p)).toEqual(["headings:תרגום חדש על בראשית>בראשית"]);
+    const step = p.steps[0]!;
+    expect(step.kind === "pair" && step.options).toEqual({ declaredType: "targum" });
+    const f = storedForm({ source: { book: lib[1]!, line: 3 }, target: { book: lib[0]!, line: 2 }, declaredType: "targum" });
+    expect([f.stored, f.flipped]).toEqual(["TARGUM", true]); // shown by the app as a translation of the base
+  });
+
+  it("a translation whose title does not name its base keeps 'source' (targum would be downgraded to OTHER)", () => {
+    const lib = [book("s:1", "בראשית", { origin: "sefaria", isBaseBook: true }), book("s:9", "תרגום יונתן", { bases: ["s:1"], dependence: "targum" })];
+    const p = planPairs({ selected: ["s:9"], library: lib });
+    const step = p.steps.find((s) => s.engine === "headings")!;
+    expect(step.kind === "pair" && step.options).toBeUndefined();
   });
 });

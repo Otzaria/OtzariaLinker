@@ -203,7 +203,8 @@ export class CitationRun {
         continue;
       }
       const res = best.res;
-      const ranged = this.opts.ranges && res.end > res.line;
+      // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1)
+      const ranged = this.opts.ranges && res.end > res.line && !sefariaSide(res.book);
       const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: res.line };
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
@@ -228,7 +229,7 @@ export class CitationRun {
         ...(anchor && { anchor }),
         target,
         declaredType: "reference",
-        heRef2: best.heRef ?? res.label,
+        heRef2: best.heRef?.trim() ? best.heRef : res.label,
         score: round(best.score),
         confidence,
         reasons,
@@ -237,7 +238,7 @@ export class CitationRun {
           .filter((o) => o !== best)
           .slice(0, this.opts.maxAlternatives)
           .map((o): Candidate => ({
-            target: o.res.end > o.res.line ? { book: o.res.book, line: o.res.line, end: o.res.end } : { book: o.res.book, line: o.res.line },
+            target: this.opts.ranges && o.res.end > o.res.line && !sefariaSide(o.res.book) ? { book: o.res.book, line: o.res.line, end: o.res.end } : { book: o.res.book, line: o.res.line },
             score: round(o.score),
             reasons: [{ code: "citations/alternative", text: `${o.res.label} (${o.target.book.title})` }],
           })),
@@ -390,3 +391,9 @@ export function runCitationsEngine(source: EngineBook, library: CitationLibrary,
   for (const b of run.targets()) run.resolveWith(library.index(b), b, library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined);
   return run.finish(ctx);
 }
+
+/**
+ * a book the library manages through Sefaria refs, by the database origin: the library list
+ * (core/links/sefaria-titles.ts) stays out of the worker bundle; the export checks ranges by the list
+ */
+const sefariaSide = (book: BookRef): boolean => book.origin === "sefaria";

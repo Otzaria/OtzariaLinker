@@ -1,5 +1,6 @@
+import { pushTo } from "../core/collections";
 import type { BookRef } from "../core/links/model";
-import { baseTitleKey, declaredBaseKey, isMergeableCompanionTitle, normalizeTitle } from "../core/links/titles";
+import { baseTitleKey, declaredBaseKey, isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
 import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 
@@ -74,7 +75,17 @@ export interface Relation {
 
 /** One unit of work. `pair` steps run an engine on (source → target) in the engine's input direction. */
 export type PlanStep =
-  | { id: string; kind: "pair"; engine: PairEngineId; source: BookRef; target: BookRef; relation: Relation; why: string }
+  | {
+      id: string;
+      kind: "pair";
+      engine: PairEngineId;
+      source: BookRef;
+      target: BookRef;
+      relation: Relation;
+      why: string;
+      /** engine options the plan sets for this pair (e.g. declaredType "targum"); the user's own options win */
+      options?: Readonly<Record<string, unknown>>;
+    }
   | { id: string; kind: "single"; engine: SingleEngineId; source: BookRef; why: string };
 
 export interface PlanBookRow {
@@ -143,7 +154,7 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
   const titleKey = notesKey ?? declaredBaseKey(book.title);
   const caveats: string[] = [];
   if (kind === "notes" && isMergeableCompanionTitle(book.title))
-    caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס, וקישורים אליו נמחקים בשקט. אם הספר צריך להישאר ספר, שנו את שמו ל"הערות ל…".`);
+    caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס רק כשאין עוגן על שורות ההערות. מנוע ההערות כותב עוגן בכל רשומה, ולכן הקישורים שלו מבטלים את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו. אם קובץ הקישורים של הבסיס בספרייה כבר ממזג את ההערות, זה ישנה את מה שמוצג באוצריא — הבדיקה לפני הייצוא תגיד.`);
 
   const declaredKeys = (book.bases ?? []).filter((k) => k !== book.key);
   const declared = declaredKeys.map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b);
@@ -185,7 +196,17 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
 
 const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם" };
 
-function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; source: BookRef; target: BookRef; why: string }[] {
+/*
+ * A translation (book.dependenceType "targum", or "תרגום…") linked by headings is declared "targum",
+ * not "source", when the generator will store it as TARGUM the right way round: the base is a base
+ * book and the translation's title names it ("X על <base>"), so the record flips and keeps its type
+ * (LINK_FORMATS §1.5, Generator.kt:2275-2291). Then the app shows the translation chip; "source" made
+ * it COMMENTARY (compatibility review B8). Otherwise "targum" would be downgraded to OTHER or stored
+ * backwards, so "source" (COMMENTARY) stays.
+ */
+const targumTypeOk = (dep: BookRef, base: BookRef): boolean => base.isBaseBook === true && titleDeclaresDependencyOn(dep.title, base.title);
+
+function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>> }[] {
   const d = quote(rel.dependant.title);
   const b = quote(rel.base.title);
   const scoped = rel.scope
@@ -201,12 +222,14 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
         why: `${d} הוא ספר הערות על ${b} (${VIA_TEXT[rel.via]}). שיטת הערות השוליים מתאימה כל סימן הערה ב־${b} לשורה בספר ההערות שנפתחת באותו סימן.${tail}`,
       },
     ];
-  const out: { engine: PairEngineId; source: BookRef; target: BookRef; why: string }[] = [
+  const asTargum = isTargum(depBook) && targumTypeOk(rel.dependant, rel.base);
+  const out: { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>> }[] = [
     {
       engine: "headings",
       source: rel.dependant,
       target: rel.base,
-      why: `${d} כתוב על ${b} (${VIA_TEXT[rel.via]}). שיטת הכותרות מקשרת כל שורה בפירוש לפי הכותרות שמעליה (פרק ופסוק, סימן וסעיף, דף ועמוד).${tail}`,
+      why: `${d} כתוב על ${b} (${VIA_TEXT[rel.via]}). שיטת הכותרות מקשרת כל שורה בפירוש לפי הכותרות שמעליה (פרק ופסוק, סימן וסעיף, דף ועמוד).${asTargum ? " זה תרגום, ולכן הקישורים נכתבים מסוג \"תרגום\" (targum) ויוצגו באוצריא כתרגום." : ""}${tail}`,
+      ...(asTargum && { options: { declaredType: "targum" } }),
     },
   ];
   if (!isTargum(depBook))
@@ -264,8 +287,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     }
 
   const onBase = new Map<string, Relation[]>();
-  for (const rs of relations.values()) for (const r of rs) onBase.set(r.base.key, [...(onBase.get(r.base.key) ?? []), r]);
-  const books: PlanBookRow[] = selected.map((k) => {
+  for (const rs of relations.values()) for (const r of rs) pushTo(onBase, r.base.key, r); const books: PlanBookRow[] = selected.map((k) => {
     const b = byKey.get(k)!;
     const decisions: string[] = [];
     const owns = relations.get(k) ?? [];

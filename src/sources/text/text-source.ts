@@ -1,3 +1,4 @@
+import { pushTo } from "../../core/collections";
 import type { Link } from "../../core/links/model";
 import { otzariaBookTitle } from "../../core/links/titles";
 import { decodeText } from "../../core/text/decode";
@@ -32,7 +33,7 @@ export class TextFilesSource implements BookSource {
     const titles = new Map<string, string[]>();
     for (const f of files) {
       const t = otzariaBookTitle(stemOf(f.path));
-      titles.set(t, [...(titles.get(t) ?? []), f.path]);
+      pushTo(titles, t, f.path);
     }
     for (const [t, paths] of titles)
       if (paths.length > 1)

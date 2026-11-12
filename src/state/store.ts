@@ -1,20 +1,25 @@
+import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal } from "@preact/signals";
 import { parseProject, serializeProject } from "../projects/project-format";
 import type { SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
-import { path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
+import { normalizeTitle, path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
+import { dropStalePipelineFields } from "../core/links/pipeline-fields";
+import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
+import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
-import { recordToLink } from "../formats/links-json/convert";
+import { linkToRecord, recordToLink } from "../formats/links-json/convert";
+import { recordToObject } from "../formats/links-json/serialize";
 import { storedKey } from "../core/links/stored-form";
 import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
-import { planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
+import { assertSafeExportPaths, planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { parseLinksCsv } from "../formats/links-csv/parse";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, fileFingerprint, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LibraryFile, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import type { AltTocExportPlan } from "../formats/alt-toc/export";
 import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-report";
@@ -160,6 +165,13 @@ export class AppStore {
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
+  /**
+   * The titles the library's sync and PR gate count as Sefaria books (B6): embedded at build time,
+   * replaced by the library's own file when the user opens a library folder that has it.
+   */
+  readonly sefariaTitles = signal<SefariaTitles>(embeddedSefariaTitles());
+  /** what the export is for (B1): the library (its sync's rules are errors) or private use (warnings) */
+  readonly exportPurpose = signal<"submission" | "private">("submission");
 
   readonly books = computed(() => {
     const m = new Map<string, SourceBook>();
@@ -168,7 +180,7 @@ export class AppStore {
   });
   readonly booksByTitle = computed(() => {
     const m = new Map<string, SourceBook[]>();
-    for (const b of this.books.value.values()) m.set(b.title, [...(m.get(b.title) ?? []), b]);
+    for (const b of this.books.value.values()) pushTo(m, b.title, b);
     return m;
   });
   readonly allLinks = computed(() => [...this.linkState.value.links.values()]);
@@ -185,25 +197,40 @@ export class AppStore {
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
     const { anchor: _a, ref1: _r1, ref2: _r2, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
-    const ref1 = this.draftRef1.value.trim();
-    const ref2 = this.draftRef2.value.trim();
-    return {
+    // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
+    const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
+    const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
+    const d: Link = {
       ...kept,
       source,
       target,
       declaredType: this.draftType.value,
-      heRef2: this.draftHeRef.value ?? this.autoHeRef(t),
+      // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
+      heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
       ...(s.anchor && { anchor: { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) } }),
       ...(ref1 && { ref1 }),
       ...(ref2 && { ref2 }),
       ...(base && base.target.book.title !== target.book.title && { targetPath: path2ForTitle(target.book.title) }),
     };
+    // an edited record never keeps the sync's fields for an anchor or line it no longer has (B2)
+    return base ? dropStalePipelineFields(base, d).link : d;
   });
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
+    // the library's rules are checked at export (purpose); here they warn, so a link is never blocked from being made
     const { linksFile: _f, ...ctx } = this.validation();
-    return d ? validateLink(d, ctx) : [];
+    if (!d) return [];
+    const out = validateLink(d, { ...ctx, purpose: "private" });
+    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    if (base) {
+      const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
+      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ref_1 הישן ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
+      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ref_2 הישן ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
+      const fields = dropped.filter((x) => x.startsWith("anchor_"));
+      if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: `${fields.join(" ו־")} של הסנכרון השבועי יוסרו מהרשומה, כי העוגן או השורה השתנו.` });
+    }
+    return out;
   });
 
   private noticeSeq = 0;
@@ -239,11 +266,23 @@ export class AppStore {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
-    for (const d of res.documents) if (d.kind === "links-json") this.importLinksFile(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "links-csv") this.importLinksCsv(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "records") this.offerRecords(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "alt-toc-json") this.altToc.importFile(d.path, d.text);
-    for (const d of res.documents) if (d.kind === "project") this.openProject(d.path, d.text);
+    // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
+    // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
+    const each = (kind: string, run: (path: string, text: string) => void) => {
+      for (const d of res.documents)
+        if (d.kind === kind)
+          try {
+            run(d.path, d.text);
+          } catch (err) {
+            this.log.error("open", "document failed", { kind, error: String((err as Error)?.name ?? err) });
+            this.notify("error", `"${d.path}" לא נטען: ${(err as Error)?.message ?? String(err)}. שאר הקבצים נטענו.`);
+          }
+    };
+    each("links-json", (p, t) => this.importLinksFile(p, t));
+    each("links-csv", (p, t) => this.importLinksCsv(p, t));
+    each("records", (p, t) => this.offerRecords(p, t));
+    each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
+    each("project", (p, t) => this.openProject(p, t));
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
@@ -359,6 +398,11 @@ export class AppStore {
       const hi = Math.max(cur.end ?? cur.line, line, cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
+    if (side === "source" && this.editing.value) {
+      // a new source line makes the old ref_1 wrong — the sync would move the link back to it (B2)
+      const edited = this.linkState.value.links.get(this.editing.value);
+      if (edited && !(this.sameBook(edited.source.book, bookKey) && edited.source.line === this.pick.source.value?.line)) this.draftRef1.value = "";
+    }
     if (side === "target") {
       // a new target makes the old reference wrong — also while editing (UX review #3)
       const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
@@ -410,7 +454,7 @@ export class AppStore {
     const book = this.books.value.get(t.bookKey);
     const title = book?.title ?? this.refOf(t.bookKey).title;
     const line = this.lines.peek(t.bookKey, t.line);
-    if (line?.heRef) return line.heRef;
+    if (line?.heRef?.trim()) return line.heRef;
     const trail: string[] = [];
     let level = 7;
     for (let i = t.line; i >= 0 && i > t.line - 3000 && level > 1; i--) {
@@ -664,7 +708,8 @@ export class AppStore {
       source: s.source,
       target: s.target,
       declaredType: s.declaredType,
-      heRef2: s.heRef2,
+      // every engine's reference, never blank (B3): the target's title and line otherwise
+      heRef2: s.heRef2.trim() ? s.heRef2 : `${s.target.book.title} ${s.target.line + 1}`,
       ...(s.anchor && { anchor: s.anchor }),
     };
   }
@@ -843,24 +888,53 @@ export class AppStore {
 
   /* ---------------- import / export ---------------- */
 
-  /** the text layout of each book's imported links file, reused when it is written back (minimal library diff) */
-  private readonly fileLayouts = new Map<string, JsonLayout>();
-
+  /**
+   * Loads a book's links file FROM THE LIBRARY: its records become "file" links, and the project now
+   * holds that book's file (LinkState.files) — the export writes it back as the library's file plus
+   * the user's changes, and replaces the library's file with it. Only a file that parsed counts as
+   * loaded, and undoing the import forgets it (security review A1, A2).
+   *
+   * Loading a book's file again: the same file (fingerprint and every untouched record) only marks it
+   * loaded in this session — that is how a file restored from a saved project is verified (A3). A
+   * different file replaces the project's copy when the user changed nothing in it; otherwise nothing
+   * changes and the user is told why (the tool never merges two versions of a file silently).
+   */
   importLinksFile(path: string, text: string): void {
     const sourceTitle = sourceTitleFromLinksFileName(path);
     if (!sourceTitle) return void this.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו ספר המקור.`);
     const parsed = parseLinksJson(text);
+    const fatal = parsed.issues.find((i) => i.index < 0 && i.level === "error" && (i.code === "file/not-json" || i.code === "file/not-array"));
+    if (fatal)
+      return void this.notify("error", `"${path}" לא נטען: ${fatal.message} קובץ הקישורים של "${sourceTitle}" לא נחשב טעון, ולכן ייצוא שלו עדיין מחכה לקובץ תקין מהספרייה.`);
     const sourceRef = this.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
     const fileKey = `${sourceTitle}#${this.linkSeq++}`;
-    this.fileLayouts.set(sourceTitle, detectLayout(text));
-    this.dbLinks.noteImportedFile(sourceTitle);
     const issues = [...parsed.issues];
     const links = parsed.records.map((r, i) => {
       const { link, issues: more } = recordToLink(r, i, sourceRef, (t) => this.resolveTitle(t), `file:${fileKey}:${i}`);
       issues.push(...more);
       return link;
     });
-    this.apply(`ייבוא ${sourceTitle}_links.json (${linksCount(links.length)})`, addChanges(links));
+    const file: LibraryFile = { title: sourceTitle, records: parsed.records.length, hash: fileFingerprint(text), verified: true, layout: detectLayout(text) };
+    const s = this.linkState.value;
+    const prev = s.files.get(sourceTitle);
+    const held = [...s.links.values()].filter((l) => l.provenance === "file" && l.source.book.title === sourceTitle);
+    let removed: Change[] = [];
+    if (prev || held.length) {
+      if (prev && sameLibraryFile(prev, file, held, links)) {
+        if (prev.verified) return void this.notify("info", `קובץ הקישורים של "${sourceTitle}" כבר טעון, והקובץ שנבחר זהה לו. לא השתנה דבר.`);
+        this.linkState.value = commit(s, `אימות ${sourceTitle}_links.json מול הספרייה`, [], Date.now(), [], [fileChange(s, sourceTitle, { ...prev, verified: true, layout: file.layout! })]);
+        return void this.notify("success", `קובץ הקישורים של "${sourceTitle}" שנטען זהה לעותק שבפרויקט. הספר מוכן לייצוא.`);
+      }
+      const changed = held.filter((l) => l.status !== "existing").length;
+      if (changed)
+        return void this.notify(
+          "error",
+          `"${path}" שונה מקובץ הקישורים של "${sourceTitle}" שבפרויקט, ובפרויקט יש ${linksCount(changed)} ערוכים או מחוקים מתוכו. הכלי לא ממזג שתי גרסאות של קובץ. כדי לעבוד על הקובץ העדכני: בטלו או מחקו את השינויים בקישורים של הספר וטענו שוב; או אשרו בחלון הייצוא שהעותק שבפרויקט הוא העדכני.`,
+        );
+      removed = held.map((l) => ({ id: l.id, before: l }));
+    }
+    this.linkState.value = commit(s, `ייבוא ${sourceTitle}_links.json (${linksCount(links.length)})`, [...removed, ...addChanges(links)], Date.now(), [], [fileChange(s, sourceTitle, file)]);
+    if (removed.length) this.notify("info", `העותק הקודם של קובץ הקישורים של "${sourceTitle}" (${linksCount(removed.length)}) הוחלף בקובץ שנטען.`);
     const errors = issues.filter((i) => i.level === "error");
     const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
     if (parsed.generatorRejectsFile)
@@ -870,13 +944,69 @@ export class AppStore {
     if (sourceRef.origin === "unknown") this.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
   }
 
-  /** A spreadsheet of links (CSV/TSV): one links file per source book, through the same import. */
+  /** A spreadsheet of links (CSV/TSV): NEW links, one batch per source book (importSheetLinks). */
   importLinksCsv(path: string, text: string): void {
     const r = parseLinksCsv(text, path);
     // a sheet whose columns are not the library's names: let the user map them instead of failing
     if (!r.files.length && r.problems.some((p) => p.startsWith("חסרה עמודה"))) return this.offerRecords(path, text);
     if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${path}": ${r.problems.length} בעיות בגיליון.`, r.problems.slice(0, 100));
-    for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
+    this.importSheetLinks(path, r.files);
+  }
+
+  /**
+   * Links from a spreadsheet or a records file. They go through the links-file parser (one set of
+   * rules), but they are NOT the library's file of their book: they are new links (provenance
+   * "import", status "new"), validated and held back like any new link, and they never mark the
+   * book's library file as loaded nor change how it is written (security review A1). Book titles are
+   * matched exactly, and else by the generator's normalisation when that names exactly one open book
+   * (ASCII " for gershayim and the like — compatibility review B7). ONE undoable action.
+   */
+  private importSheetLinks(path: string, files: readonly { sourceTitle: string; text: string }[]): void {
+    if (!files.length) return;
+    const byNorm = new Map<string, Set<string>>();
+    for (const t of this.booksByTitle.value.keys()) {
+      const n = normalizeTitle(t);
+      byNorm.set(n, (byNorm.get(n) ?? new Set()).add(t));
+    }
+    const fixed = new Map<string, string>();
+    const resolve = (title: string): BookRef | null => {
+      const exact = this.resolveTitle(title);
+      if (exact) return exact;
+      const hits = byNorm.get(normalizeTitle(titleFromPath2(title)));
+      if (hits?.size !== 1) return null;
+      const dbTitle = [...hits][0]!;
+      fixed.set(titleFromPath2(title), dbTitle);
+      return this.resolveTitle(dbTitle);
+    };
+    const links: Link[] = [];
+    const issues: string[] = [];
+    let dropped = 0;
+    for (const f of files) {
+      const parsed = parseLinksJson(f.text);
+      const sourceRef = resolve(f.sourceTitle) ?? { key: `unresolved:${f.sourceTitle}`, title: f.sourceTitle, origin: "unknown" as const };
+      const batch = this.linkSeq++;
+      for (const i of parsed.issues) issues.push(`${f.sourceTitle}${i.index >= 0 ? `, רשומה ${i.index + 1}` : ""}: ${i.message}`);
+      parsed.records.forEach((r, i) => {
+        const { link, issues: more } = recordToLink(r, i, sourceRef, resolve, `imp:${batch.toString(36)}:${i}`);
+        for (const x of more) issues.push(`${f.sourceTitle}, רשומה ${i + 1}: ${x.message}`);
+        // a new link: none of the library-file bookkeeping (position, key order, unknown fields)
+        const { fileIndex: _i, keyOrder: _k, typeNull: _t, passthrough, ...rest } = link;
+        if (passthrough && Object.keys(passthrough).length) dropped++;
+        links.push({ ...rest, status: "new", provenance: "import" });
+      });
+    }
+    if (links.length) this.apply(`ייבוא ${linksCount(links.length)} מ־"${path}"`, addChanges(links));
+    const notes = [
+      ...[...fixed].map(([from, to]) => `השם "${from}" הותאם לספר "${to}" (אותו שם אחרי הנרמול של אוצריא).`),
+      ...(dropped ? [`ב־${linksCount(dropped)} היו עמודות שאינן שדות של קובץ קישורים; הן לא יובאו.`] : []),
+      ...issues,
+    ];
+    if (!links.length) return void this.notify("error", `"${path}": לא יובא אף קישור.`, notes.slice(0, 200));
+    this.notify(
+      notes.length ? "warning" : "success",
+      `יובאו ${linksCount(links.length)} חדשים מ־"${path}". הם נבדקים בייצוא כמו כל קישור חדש, וקובץ הקישורים של כל ספר בספרייה עדיין צריך להיטען לפני ייצוא.`,
+      notes.length ? notes.slice(0, 200) : undefined,
+    );
   }
 
   resolveTitle(title: string): BookRef | null {
@@ -914,11 +1044,52 @@ export class AppStore {
     return ok === true;
   }
 
+  /** Whether the library's sync and PR gate count a book as Sefaria-owned (B6). */
+  isSefariaOwned(book: { readonly title: string }): boolean {
+    return isSefariaOwned(book, this.sefariaTitles.value);
+  }
+
+  /** The library's own list of Sefaria titles (`.github/data/sefaria_he_titles.txt`) replaces the embedded one. */
+  loadSefariaTitles(path: string, text: string): boolean {
+    const list = parseSefariaTitles(text, path);
+    if (!list) return void this.notify("warning", `"${path}": אין בקובץ שמות ספרים, ולכן הכלי ממשיך עם הרשימה המובנית.`), false;
+    this.sefariaTitles.value = list;
+    this.notify("info", `נטענה רשימת ספרי ספריא של הספרייה מ־"${path}" (${list.titles.size.toLocaleString("he")} ספרים). לפיה הכלי קובע איפה נדרש ref_1/ref_2.`);
+    return true;
+  }
+
+  /**
+   * Fills the Sefaria refs the library's sync needs where the user did not, from the database heRef of
+   * the line (core/links/sefaria-ref.ts) — ONE undoable action, said in a notice. Only links the user
+   * made or changed; an untouched library record is left as it is in the library (B1).
+   */
+  private fillSefariaRefs(): void {
+    const s = this.linkState.value;
+    const changes: Change[] = [];
+    for (const l of s.links.values()) {
+      if (l.status === "deleted" || l.provenance === "db" || (l.provenance === "file" && l.status === "existing")) continue;
+      const srcSef = this.isSefariaOwned(l.source.book);
+      const tgtSef = this.isSefariaOwned(l.target.book);
+      if (srcSef === tgtSef) continue;
+      const side = srcSef ? l.source : l.target;
+      if ((srcSef ? l.ref1 : l.ref2) !== undefined) continue;
+      const b = this.bookOf(side.book);
+      const ref = b && sefariaRefFromHeRef(this.lines.peek(b.key, side.line)?.heRef);
+      if (!ref) continue;
+      changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
+    }
+    if (!changes.length) return;
+    this.apply(`השלמת ציוני ספריא (ref_1/ref_2) ל־${linksCount(changes.length)}`, changes);
+    this.notify("info", `הכלי השלים ציון ספריא באנגלית (ref_1/ref_2) ל־${linksCount(changes.length)} מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+  }
+
   /** Loads every line the export must check (ends of every link, alt_toc lines) and returns the plan. */
   async prepareExport(): Promise<ExportBundle | null> {
     if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
+    if (this.exportPurpose.value === "submission") this.fillSefariaRefs();
     await this.altToc.loadLines();
-    return { ...planExport(this.allLinks.value, this.validation(), { layouts: (t) => this.fileLayouts.get(t) }), altToc: this.altToc.plan() };
+    const files = this.linkState.value.files;
+    return { ...planExport(this.allLinks.value, this.validation(), { layouts: (t) => files.get(t)?.layout, loadedFile: (t) => files.get(t)?.verified === true }), altToc: this.altToc.plan() };
   }
 
   /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */
@@ -978,8 +1149,13 @@ export class AppStore {
       ...bundle.altToc.files.map((f) => ({ path: `alt_toc/${f.name}`, text: f.text, mime: "application/json" })),
     ];
     if (!data.length) return;
-    if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
-    else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
+    try {
+      assertSafeExportPaths(data);
+      if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
+      else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
+    } catch (err) {
+      return void this.notify("error", (err as Error).message);
+    }
     this.savedRevision.value = this.linkState.value.revision;
     const alt = bundle.altToc.files.length;
     this.notify("success", `יוצאו ${(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length).toLocaleString("he")} קישורים ב־${csv ? csv.length : plan.files.length} קבצים${alt ? `, ומבני כותרות ל־${alt} ספרים` : ""}.`);
@@ -997,6 +1173,9 @@ export class AppStore {
         return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
       },
       linksFile: (title) => this.dbLinks.linksFile(title),
+      sefariaOwned: (book) => this.isSefariaOwned(book),
+      purpose: this.exportPurpose.value,
+      libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),
     };
   }
@@ -1013,6 +1192,7 @@ export class AppStore {
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
         altToc: this.altToc.list.value,
         dbMappings: [...this.dbMappings.value.values()],
+        libraryFiles: [...this.linkState.value.files.values()].map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
       },
       APP_VERSION,
     );
@@ -1040,8 +1220,12 @@ export class AppStore {
     const ls = this.linkState.value;
     const altChanges: AltTocChange[] = [...ls.altToc.keys()].filter((t) => !p.altToc.some((b) => b.title === t)).map((t) => altTocChange(ls, t, null));
     for (const b of p.altToc) altChanges.push(altTocChange(ls, b.title, b));
+    // the project's library files replace the current ones, as UNVERIFIED snapshots: a project is
+    // not the library, so each book waits until its file is loaded again or confirmed (A3)
+    const fileChanges = [...ls.files.keys()].filter((t) => !p.libraryFiles.some((f) => f.title === t)).map((t) => fileChange(ls, t, null));
+    for (const f of p.libraryFiles) fileChanges.push(fileChange(ls, f.title, { ...f, verified: false }));
     batch(() => {
-      this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges);
+      this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges, fileChanges);
       this.rejected.value = new Set(p.rejectedSuggestions);
       if (p.dbMappings?.length) this.dbMappings.value = new Map([...this.dbMappings.value, ...p.dbMappings.map((m) => [m.fingerprint, m] as const)]);
       this.savedRevision.value = this.linkState.value.revision;
@@ -1055,6 +1239,9 @@ export class AppStore {
     this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.`);
     if (missing.length) this.notify("info", `כדי לראות את הקישורים על הטקסט, פתחו שוב את המקורות: ${missing.join(", ")}. הקישורים יתחברו לספרים לפי השם.`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
+    const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
+    if (snapshots.length)
+      this.notify("info", `בפרויקט יש עותק של קובצי הקישורים של ${snapshots.length === 1 ? `"${snapshots[0]}"` : `${snapshots.length} ספרים`} מהספרייה. לפני ייצוא שלהם טענו אותם שוב מהספרייה (הכלי יוודא שהם לא השתנו), או אשרו בחלון הייצוא שהעותק העדכני.`, snapshots.length > 1 ? snapshots.slice(0, 50) : undefined);
   }
 
   /**
@@ -1107,6 +1294,8 @@ export class AppStore {
   offerRecords(path: string, text: string): void {
     const table = parseRecords(text, path);
     if (!table) return void this.notify("error", `"${path}": לא נמצאו בקובץ רשומות קישורים (מערך של אובייקטים, JSON Lines או טבלה עם שורת כותרות).`);
+    if (table.truncated)
+      this.notify("warning", `"${path}" גדול מדי לייבוא מלא: ${[table.truncated.fields && `${table.truncated.fields.toLocaleString("he")} עמודות`, table.truncated.rows && `${table.truncated.rows.toLocaleString("he")} רשומות`].filter(Boolean).join(" ו־")} לא נקראו. פצלו את הקובץ, או השאירו בו רק את העמודות של הקישורים.`);
     this.pendingRecords.value = [...this.pendingRecords.value, { path, table, mapping: guessRecordsMapping(table) }];
   }
 
@@ -1117,7 +1306,7 @@ export class AppStore {
     const r = recordsToLinksFiles(first.table, mapping, first.path);
     this.pendingRecords.value = rest;
     if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${first.path}": ${r.problems.length} רשומות לא יובאו.`, r.problems);
-    for (const f of r.files) this.importLinksFile(`${f.sourceTitle}_links.json`, f.text);
+    this.importSheetLinks(first.path, r.files);
   }
 
   skipRecords(): void {
@@ -1209,6 +1398,17 @@ export function rejectionKeys(s: Suggestion): string[] {
   const exact = members.filter((m) => pair(m.suggestion) === own).map((m) => rejectionKey(m.suggestion));
   const split = s.id.includes("@") && s.anchor ? `@${end(s.source)}:${s.anchor.rawStart}` : "";
   return [...new Set([rejectionKey(s), ...exact])].concat(`*|${own}${split}`);
+}
+
+/**
+ * The file just loaded is the file the project already holds: same fingerprint and record count, and
+ * every record the user did not touch is the same record at the same position. The fingerprint alone
+ * is a claim a project file makes; the records are checked so a forged snapshot is never "verified".
+ */
+function sameLibraryFile(prev: LibraryFile, file: LibraryFile, held: readonly Link[], loaded: readonly Link[]): boolean {
+  if (prev.hash !== file.hash || prev.records !== file.records) return false;
+  const rec = (l: Link) => JSON.stringify(recordToObject(linkToRecord(l)));
+  return held.every((l) => l.status !== "existing" || (l.fileIndex !== undefined && loaded[l.fileIndex] !== undefined && rec(loaded[l.fileIndex]!) === rec(l)));
 }
 
 declare const __APP_VERSION__: string;

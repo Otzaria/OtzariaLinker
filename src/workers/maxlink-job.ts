@@ -116,8 +116,9 @@ export async function maxlinkJob(
           }
         }
         ctx.signal?.throwIfAborted();
-        result = runScoped(step, loaded.source, loaded.target, optionsOf(step.engine), inner);
-      } else {
+        // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
+        const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
+        result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner);     } else {
         loaded = null;
         const run = runners[step.engine];
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);

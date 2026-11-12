@@ -1,3 +1,4 @@
+import { pushTo } from "../core/collections";
 import { batch, computed, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
@@ -114,7 +115,7 @@ export class MaxLinkState {
     // "already exists": the database's links, and the project's — except the link a suggestion's own approval made
     const db = new Set(res.dbLinkKeys);
     const project = new Map<string, string[]>();
-    for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") project.set(linePairKey(l), [...(project.get(linePairKey(l)) ?? []), l.id]);
+    for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
     const merged = mergeSuggestions(items, {
       reference: db,
       existing: (s) => (db.has(linePairKey(s)) ? "db" : project.get(linePairKey(s))?.some((id) => id !== `auto:${s.id}`) ? "project" : null),

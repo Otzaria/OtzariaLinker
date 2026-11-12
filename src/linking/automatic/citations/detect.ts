@@ -216,8 +216,9 @@ export class CitationScanner {
       // (two words back, past "לקמן"/"כמ"ש": "הט"ז לקמן בסימן ח'", "רש"ל בתשובה סימן צ"ז", "לבוש בסימן נ"ח")
       const named = (x: Tok | undefined) => !!x && x.kind === "word" && !RELATIVE.test(x.text) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && (((x.gershayim || x.geresh) && !numeralOf(x)) || OTHER_WORK.test(x.text));
       const titled = (back: number) => {
-        const x = before(toks, i, back);
-        return !!x && x.kind === "word" && this.aliases.matchAt(toks, toks.indexOf(x)).length > 0;
+        const at = beforeIndex(toks, i, back); // its index, not toks.indexOf: that was a scan per marker (A8)
+        const x = toks[at];
+        return !!x && x.kind === "word" && this.aliases.matchAt(toks, at).length > 0;
       };
       if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(1) || titled(2) || named(toks[addr.to]) || named(toks[addr.to + 1])) return this.drop("siman-of-another-book");
       return this.emit(toks, line, { from: i, to: addr.to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false });
@@ -377,7 +378,7 @@ const SA_COMMENTARY_BASE: Readonly<Record<string, string>> = {
 function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
   const title = sourceTitle.replace(/[״]/g, '"');
   const on = / על (.+)$/.exec(title)?.[1];
-  const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, SA_COMMENTARY_BASE[title]];
+  const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, Object.hasOwn(SA_COMMENTARY_BASE, title) ? SA_COMMENTARY_BASE[title] : undefined];
   for (const n of names) {
     if (!n) continue;
     const t = aliases.lookup(n)?.targets.find((x) => x.tier === "title" && (x.collection === "bavli" || x.collection === "sa"));
@@ -458,19 +459,25 @@ function isDibur(toks: readonly Tok[], i: number): boolean {
 
 /** the word right before the citation (skipping one opening bracket) */
 function before(toks: readonly Tok[], i: number, back = 1): Tok | undefined {
+  const at = beforeIndex(toks, i, back);
+  return at < 0 ? undefined : toks[at];
+}
+
+/** the index of that word, or -1 */
+function beforeIndex(toks: readonly Tok[], i: number, back = 1): number {
   let j = i - 1;
   let seen = 0;
   while (j >= 0) {
     const t = toks[j]!;
     if (t.kind === "punct") {
-      if (!"([,".includes(t.text)) return undefined;
+      if (!"([,".includes(t.text)) return -1;
       j--;
       continue;
     }
-    if (++seen === back) return t;
+    if (++seen === back) return j;
     j--;
   }
-  return undefined;
+  return -1;
 }
 
 function qualifierBefore(toks: readonly Tok[], i: number): Collection | undefined {
