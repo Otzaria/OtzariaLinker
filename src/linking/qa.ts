@@ -132,6 +132,24 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
   other: "פתחו את הקישור בבונה ותקנו לפי ההסבר.",
 };
 
+/**
+ * The one-click remedy the check offers next to a problem, when there is one (product audit F8): the
+ * builder cannot fix a rule of the library's sync or an anchor the library refuses, so "fix in the
+ * builder" alone left the error where it was.
+ *   "private"     — export for private use: the library's Sefaria rules become warnings or do not apply;
+ *   "drop-anchor" — remove the word anchor the library refuses or that breaks a notes merge.
+ */
+export type QaAction = "private" | "drop-anchor";
+const PRIVATE_REMEDY = new Set(["sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
+const ANCHOR_REMEDY = new Set(["sefaria/anchor-range", "sefaria/anchor-into-sefaria", "sefaria/pending-anchor-hash", "export/anchor-on-notes-line", "export/anchor-dropped-flip", "export/companion-merge-broken"]);
+
+export function qaAction(p: Problem, purpose: "submission" | "private" = "submission"): QaAction | null {
+  if (p.severity === "info") return null;
+  if (ANCHOR_REMEDY.has(p.code)) return "drop-anchor";
+  if (purpose !== "private" && p.severity === "error" && PRIVATE_REMEDY.has(p.code)) return "private";
+  return null;
+}
+
 /** One sentence: what the user can do about this problem (Hebrew). */
 export const suggestedFix = (code: string, category: QaCategory = categoryOf(code)): string => FIX_BY_CODE[code] ?? FIX_BY_CATEGORY[category];
 

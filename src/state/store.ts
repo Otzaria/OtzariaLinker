@@ -549,6 +549,20 @@ export class AppStore {
     this.apply(changes.length === 1 ? "שינוי סוג קשר" : `שינוי סוג הקשר של ${linksCount(changes.length)}`, changes);
   }
 
+  /** Removes the word anchor of links (the remedy the quality check offers for an anchor the library refuses). */
+  dropAnchors(ids: readonly string[]): void {
+    const s = this.linkState.value;
+    const changes = ids
+      .map((id): Change | null => {
+        const before = s.links.get(id);
+        if (!before?.anchor || before.provenance === "db") return null;
+        const { anchor: _a, ...rest } = before;
+        return { id, before, after: { ...rest, status: before.status === "existing" ? "edited" : before.status } };
+      })
+      .filter((c): c is Change => !!c);
+    this.apply(changes.length === 1 ? "הסרת עוגן" : `הסרת העוגן של ${linksCount(changes.length)}`, changes);
+  }
+
   undo(): void {
     this.linkState.value = undo(this.linkState.value);
   }
