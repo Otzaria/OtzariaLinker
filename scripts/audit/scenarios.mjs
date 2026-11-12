@@ -20,7 +20,10 @@ export async function exportFlow(s, p, name, { tryPrivate = true } = {}) {
   await s.click(exp, "'ייצוא'");
   const dialog = p.getByRole("dialog");
   await dialog.locator(".stats, p").first().waitFor({ timeout: 60_000 });
-  await wait(p, 1500);
+  const t0 = Date.now();
+  await dialog.getByText("בודק את כל הקישורים מול הספרים…").waitFor({ state: "detached", timeout: 300_000 }).catch(() => {});
+  s.timings.exportCheck = Date.now() - t0;
+  await wait(p, 800);
   const held = dialog.locator("summary", { hasText: /לא ייוצאו, ולמה/ });
   if (await held.count()) {
     if (!(await dialog.locator("details.held[open]").count())) await s.click(held.first(), "פתיחת 'קישורים לא ייוצאו, ולמה'");
@@ -143,7 +146,7 @@ async function approveAll(s, p) {
   }
   return n;
 }
-async function runMaxLink(s, p, scope) {
+async function runMaxLink(s, p, scope, { timeout = 300_000 } = {}) {
   await s.click(p.getByRole("tab", { name: /הצעות/ }), "לשונית 'הצעות'");
   const ml = p.getByRole("radio", { name: "קישור מרבי" });
   if ((await ml.getAttribute("aria-checked")) !== "true") await s.click(ml, "'קישור מרבי'");
@@ -162,8 +165,21 @@ async function runMaxLink(s, p, scope) {
   await s.shot("maxlink-plan");
   const t = Date.now();
   await s.click(p.getByRole("button", { name: "הפעלת קישור מרבי" }), "'הפעלת קישור מרבי'");
-  await p.locator("details.ml-report").waitFor({ timeout: 300_000 });
-  await idle(p, 300_000);
+  // progress samples while it runs (the app bar's progress bar)
+  const samples = [];
+  const timer = setInterval(async () => {
+    try {
+      const v = await p.locator(".app-bar .task progress").evaluate((e) => `${e.value}/${e.max}`);
+      samples.push(`${Math.round((Date.now() - t) / 1000)}s:${v}`);
+    } catch {}
+  }, 30_000);
+  try {
+    await p.locator("details.ml-report").waitFor({ timeout });
+    await idle(p, timeout);
+  } finally {
+    clearInterval(timer);
+    if (samples.length) s.note(`התקדמות: ${samples.join(" ")}`);
+  }
   s.timings.maxlinkRun = Date.now() - t;
   await wait(p, 800);
   s.note(`תוצאה: ${(await sideText(p)).slice(0, 700)}`);
@@ -343,8 +359,8 @@ import { unzipSync, strFromU8 } from "fflate";
 /** Working set of the Chrome processes Playwright launched (their profile dir is playwright's), in MB. */
 export function chromeMb() {
   try {
-    const ps = "(Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*playwright*' } | Measure-Object -Property WorkingSetSize -Sum).Sum";
-    const out = execSync(`powershell -NoProfile -EncodedCommand ${Buffer.from(ps, "utf16le").toString("base64")}`, { encoding: "utf8" });
+    const ps = "$ProgressPreference='SilentlyContinue'; (Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*playwright*' } | Measure-Object -Property WorkingSetSize -Sum).Sum";
+    const out = execSync(`powershell -NoProfile -EncodedCommand ${Buffer.from(ps, "utf16le").toString("base64")}`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     return Math.round(Number(out.trim()) / 1048576);
   } catch {
     return -1;
@@ -450,18 +466,20 @@ export async function s11(s, { IN }) {
   await wait(p, 1000);
   await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
   await idle(p);
+  await s.lap("started");
   const det = p.locator(".notice details summary").first();
   if (await det.count()) {
     await s.click(det, "'פרטים' בהודעה על הקובץ");
     s.note(`פרטי ההודעה: ${(await p.locator(".notice").first().innerText()).replace(/\s+/g, " ").slice(0, 1200)}`);
     await s.shot("load-details");
   }
-  for (const x of await p.locator(".notice .icon-btn[aria-label='סגירה']").all()) await x.click().catch(() => {});
+  for (const x of await p.locator(".notice .icon-btn[aria-label='סגירה']").all()) await x.click({ timeout: 1000 }).catch(() => {});
   await s.click(p.getByRole("tab", { name: /^בדיקה/ }), "לשונית 'בדיקה'");
   await s.shot("qa-empty");
   await s.click(p.locator(".side-panel .panel-body .btn.filled").first(), "הרצת הבדיקה");
   await idle(p);
   await wait(p, 1000);
+  await s.lap("qaDone");
   await s.shot("qa-report");
   s.note(`דוח הבדיקה: ${(await sideText(p)).slice(0, 1500)}`);
   const fix = p.getByRole("button", { name: "תיקון" }).first();
@@ -474,8 +492,19 @@ export async function s11(s, { IN }) {
     await s.click(p.locator('.reader.target .ln[data-i="5"] .tx'), "לחיצה על שורת יעד נכונה");
     await wait(p, 500);
     await s.shot("qa-fix-picked");
-    const save = p.locator(".builder").getByRole("button", { name: /עדכון|שמירה|יצירת קישור/ }).first();
-    if (await save.count()) await s.click(save, `'${(await save.innerText()).trim()}'`);
+    const save = p.locator(".builder").getByRole("button", { name: /שמירת השינויים|יצירת קישור/ }).first();
+    if (await save.count()) {
+      await save.scrollIntoViewIfNeeded();
+      await s.shot("qa-fix-save");
+      if (await save.isDisabled()) {
+        s.note(`'${(await save.innerText()).trim()}' מושבת: ${(await p.locator(".builder .problems, .builder [role=alert]").allInnerTexts()).join(" | ").replace(/\s+/g, " ").slice(0, 500)}`);
+        s.confuse("'תיקון' פותח את הבונה, אבל כפתור השמירה מושבת עד שממלאים ציון ספריא באנגלית (ref_2)");
+        s.decide("מה לכתוב בשדה 'ref_2 — ציון ספריא באנגלית של היעד'?");
+        await s.type(p.locator(".builder").getByPlaceholder(/Genesis/).last(), "Genesis 1:4", "הקלדת 'Genesis 1:4' בשדה ref_2");
+        await wait(p, 500);
+      }
+      if (await save.isEnabled()) await s.click(save, `'${(await save.innerText()).trim()}'`);
+    }
     await wait(p, 500);
   }
   await s.click(p.getByRole("tab", { name: /^בדיקה/ }), "חזרה ללשונית 'בדיקה'");
@@ -485,9 +514,11 @@ export async function s11(s, { IN }) {
   if (await rerun.count()) await s.click(rerun, "הרצת הבדיקה מחדש");
   await idle(p);
   await wait(p, 800);
+  await s.lap("qaAgainDone");
   await s.shot("qa-after");
   s.note(`אחרי תיקון: ${(await sideText(p)).slice(0, 900)}`);
   await exportFlow(s, p, "export");
+  await s.lap("exported");
   s.verdict = "works with friction";
 }
 s11.title = "בדיקת קישורים ותיקון שגיאות";
@@ -520,3 +551,84 @@ export async function s12(s, { IN }) {
   s.verdict = "works with friction";
 }
 s12.title = "ייצוא והחזרה לאוצריא";
+
+/**
+ * 9b — the same batch against the REAL library database (read-only, opened through the file picker,
+ * never copied). Runs only when AUDIT_REAL_DB names it. A watchdog closes the browser context if
+ * Chrome's working set passes AUDIT_MAX_MB (default 3500).
+ */
+export async function s13(s, { IN }) {
+  const DB = process.env.AUDIT_REAL_DB;
+  if (!DB) {
+    s.verdict = "skipped (AUDIT_REAL_DB not set)";
+    return;
+  }
+  const max = Number(process.env.AUDIT_MAX_MB ?? 3500);
+  let peak = 0;
+  const dog = setInterval(() => {
+    const mb = chromeMb();
+    peak = Math.max(peak, mb);
+    if (mb > max) {
+      s.note(`כלב השמירה סגר את הדפדפן: ${mb} MB`);
+      void s.context?.close();
+    }
+  }, 5000);
+  try {
+    const p = await s.open();
+    await s.click(task(p, "תיקייה מול אוצריא"), "'תיקייה מול אוצריא'");
+    await s.pick(sheetBtn(p, "התיקייה: תיקייה"), `${IN}/s9/מאות`, "שלב 1: 'תיקייה' ← 300 פירושים");
+    await p.locator(".start-task .opened").first().waitFor({ timeout: 300_000 });
+    let t = Date.now();
+    await s.pick(sheetBtn(p, "מסד אוצריא: מסד נתונים"), [DB], "שלב 2: 'מסד נתונים' ← seforim.db האמיתי (4.5GB)");
+    await p.locator(".start-task li").nth(1).locator(".opened").waitFor({ timeout: 600_000 });
+    s.timings.openRealDb = Date.now() - t;
+    await s.shot("start-sheet");
+    s.note(`הגיליון: ${(await p.getByRole("dialog").innerText()).replace(/\s+/g, " ").slice(0, 400)}`);
+    s.note(`זיכרון אחרי פתיחת המסד: ${chromeMb()} MB`);
+    await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+    await idle(p, 600_000);
+    await wait(p, 2000);
+    await s.shot("workspace");
+    t = Date.now();
+    await runMaxLink(s, p, undefined, { timeout: Number(process.env.AUDIT_REAL_TIMEOUT ?? 1_500_000) });
+    s.timings.maxlinkTotal = Date.now() - t;
+    s.note(`זיכרון אחרי הקישור המרבי: ${chromeMb()} MB`);
+    await approveAll(s, p);
+    await s.shot("approved");
+    t = Date.now();
+    await exportFlow(s, p, "export");
+    s.timings.exportTotal = Date.now() - t;
+    s.verdict = "works with friction";
+  } finally {
+    clearInterval(dog);
+    s.note(`שיא זיכרון Chrome (דגימה כל 5 שניות): ${peak} MB`);
+  }
+}
+s13.title = "אצווה של 300 ספרים מול המסד האמיתי (9ב)";
+
+/** Extra checks: unsaved work after closing the tab, and a personal database in another layout. */
+export async function s14(s, { IN, MINI_DB }) {
+  const p = await s.open();
+  await s.pick(p.locator(".drop-strip").getByRole("button", { name: "קבצים" }), FOUR.map((t) => `${IN}/s3/${t}.txt`), "'קבצים' ← ארבעה ספרים");
+  await idle(p);
+  await s.click(p.getByRole("tab", { name: "בונה" }), "'בונה'");
+  await s.click(p.locator('.reader.source .ln[data-i="3"] .tx'), "שורה במקור");
+  await s.click(p.locator('.reader.target .ln[data-i="3"] .tx'), "שורה ביעד");
+  await s.key("Control+Enter", "Ctrl+Enter");
+  await wait(p, 3000);
+  // the tab is closed by mistake and opened again (same browser profile)
+  const q = await s.context.newPage();
+  await p.close();
+  await q.goto(p.url().split("#")[0]);
+  await wait(q, 2500);
+  s.page = q;
+  await s.shot("recovery");
+  s.note(`אחרי סגירה ופתיחה: ${(await q.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 300)}`);
+  // a personal database in a different layout (not Otzaria's): the mapping wizard
+  await s.pick(q.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }), [`${MINI_DB.replace(/seforim-v7-mini\.db$/, "generic/books-lines.db")}`], "'מסד נתונים' ← מסד במבנה אחר");
+  await wait(q, 2500);
+  await s.shot("generic-db");
+  s.note(`מסד במבנה אחר: ${(await q.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 900)}`);
+  s.verdict = "checked";
+}
+s14.title = "בדיקות נוספות: שחזור עבודה ומסד במבנה אחר";
