@@ -1,5 +1,5 @@
 import type { Link } from "../core/links/model";
-import { validateExport, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
+import { asExported, validateExport, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
 /*
  * Link quality report (stage 16). It reuses the export rules — QA and export must never disagree —
@@ -156,7 +156,8 @@ export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport 
   const issues: QaIssue[] = [];
   let clean = 0;
   for (const l of live) {
-    const ps = (problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
+    // as the export acts on them (asExported): an untouched library record is kept, its errors are warnings
+    const ps = asExported(l, problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
     if (!ps.some((p) => p.severity !== "info")) clean++;
     for (const p of ps) issues.push({ link: l, category: categoryOf(p.code), problem: p });
   }

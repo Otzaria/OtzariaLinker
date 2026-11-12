@@ -253,6 +253,20 @@ function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
 }
 
 /**
+ * A link's problems as the export ACTS on them — one rule for the export plan and the quality check,
+ * so the two never disagree (product audit F7). An imported record the user did not touch is already
+ * in the library's file: dropping it from the rewritten file would DELETE it there, so the export
+ * writes it as it was, and its errors are warnings that say so. A problem of the whole file
+ * (FILE_LEVEL_CODES) holds the file back always, and stays an error.
+ */
+export function asExported(link: Link, problems: readonly Problem[]): Problem[] {
+  if (link.provenance !== "file" || link.status !== "existing") return [...problems];
+  return problems.map((p) => (p.severity === "error" && !FILE_LEVEL_CODES.has(p.code) ? { ...p, severity: "warning" as const, message: `${p.message} ${KEPT_AS_IS}` } : p));
+}
+
+const KEPT_AS_IS = "(הרשומה כבר נמצאת בקובץ שבספרייה ולא שיניתם אותה, ולכן הייצוא משאיר אותה כמו שהיא. כדי לתקן אותה, ערכו או מחקו אותה.)";
+
+/**
  * Problems of a whole export: per-link problems plus links that collapse into one in the database —
  * by the one equality rule (equality.ts storedLinkIdentity: stored ends by TITLE and stored type), so
  * two editions of a book open together (a text file and the database) are one book here too.
