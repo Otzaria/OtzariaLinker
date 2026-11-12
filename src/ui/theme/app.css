@@ -162,6 +162,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 
 /* links list */
 .tabs { display: flex; gap: 0; padding: 0 4px; overflow-x: auto; scrollbar-width: thin; border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }
+/* the side panel is narrow (~270px in the four-column layout): its tabs wrap to a second row instead of
+   scrolling out of sight with no hint (visual regression finding, 1280px: "בדיקה" was invisible) */
+.side-panel .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; }
 .tabs button { flex: none; border: 0; background: none; padding: 10px 8px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--on-surface-variant); display: inline-flex; gap: 6px; align-items: center; }
 .tabs button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .count { font-size: 11px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
@@ -182,7 +185,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .status.deleted { background: var(--error-container); color: var(--on-error-container); }
 
 /* suggestions */
-.sug-head { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--outline-variant); }
+.sug-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--outline-variant); }
+/* the summary keeps a readable width; in a narrow panel the buttons move to a second row */
+.sug-head > .grow { flex: 1 1 160px; min-width: 160px; }
 .bulk { padding: 0 6px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
 .sug-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .sug-table th { position: sticky; top: 0; background: var(--surface-container-high); text-align: start; font-weight: 600; padding: 4px 6px; z-index: 1; }
