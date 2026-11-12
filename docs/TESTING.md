@@ -166,6 +166,7 @@ npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 שמונה בדיקות שמשוות את הכלי לנתונים האמיתיים שבמחשב: המסד העדכני של אוצריא, עותק git של ספריית
 אוצריא ומסדים זרים. הן לא רצות ב־`npm test` (תצורה נפרדת, `vitest.validation.config.ts`), וכל אחת
 מדולגת בלי משתני הסביבה שלה. הממצאים והמספרים: [`validation/REAL_DATA_REPORT.md`](validation/REAL_DATA_REPORT.md).
+"האם הכלי מפיק לפחות את הקישורים שכבר יש", לכל סוג קישור ועל כל הספרייה: [`validation/LIBRARY_BENCHMARK.md`](validation/LIBRARY_BENCHMARK.md).
 
 | משתנה | מה |
 |---|---|
@@ -189,6 +190,8 @@ npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 | `tests/validation/library-texts.test.ts` | 4. ספרי ‎.txt מהספרייה מול אותם ספרים במסד |
 | `tests/validation/engines.test.ts` | 5. המנועים מול הקישורים שכבר במסד (ומול רשומות ההערות של הספרייה). מנוע חדש = רשומה אחת ב־`engine-harness.ts` |
 | `tests/validation/multibase.test.ts` | 5ב. קישור מרבי על ספרים שכתובים על כמה בסיסים (חלק לכל בסיס; בלי חלק רק ד"ה, עד "אפשרית"), מול קישורי COMMENTARY שבמסד, לפי מנוע ושלב. `VALIDATE_MULTIBASE_N` (ברירת מחדל 30) |
+| `tests/validation/library-benchmark.test.ts` | 5ג. **מדד הספרייה**: הקישור המרבי על כל ספר (או מדגם מרובד), מול **כל** סוגי הקישורים שבמסד — כמה מהקיימים הכלי מפיק מחדש, בדיוק לפי ודאות, וההצעות החדשות. רץ ברקע, בכמה תהליכים, עם מטמון להמשך (`BENCH_*`). התוצאות והפערים: [`validation/LIBRARY_BENCHMARK.md`](validation/LIBRARY_BENCHMARK.md) |
+| `tests/validation/library-benchmark-whatif.test.ts` | 5ד. מנוע זוגות על זוגות שהמתכנן לא מקשר (כמה קישורים יסגור קשר חסר) |
 | `tests/validation/foreign-dbs.test.ts` | 6. מסדים זרים: מסד אוצריא, אשף המיפוי או סירוב מנומק; בלי כתיבה |
 | `tests/validation/performance.test.ts` | 7. זמנים וזיכרון על המסד האמיתי |
 | `tests/validation/browser/real-db.spec.ts` | 8. הקובץ הבנוי ב־Chrome פותח את המסד האמיתי דרך בוחר הקבצים (`npm run validate:browser`) |
