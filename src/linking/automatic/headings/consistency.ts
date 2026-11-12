@@ -21,7 +21,15 @@ import { pathKey, type BookStructure, type Unit } from "./structure";
  *     the base's named "הוספה" level) although "פרק ג" itself is the base's main פרק ג — a line was
  *     placed outside the place of its own section. See `insideParent`.
  *
- * Both numbering guards are PAIR-level statistics over a commentary level (a kind), so they work for
+ *   • "שפתי כהן על שולחן ערוך חושן משפט" heads its notes "סעיף טו" where טו is its OWN ס"ק: the note on
+ *     the שולחן ערוך's סעיף יד. The numbers are dense and mostly exist in the base, so neither guard above
+ *     fires, and each line went to the wrong סעיף (2,334 of 5,456 against the database's links).
+ *     Signature: the commentary names a number the section does not have — its highest number is above
+ *     the base's highest — in section after section (197 of 386 סימנים there; 4 of 665 in "ביאור הגר"א",
+ *     which counts the base's סעיפים). Such a level is not a place at all: the line is linked to the
+ *     section above it ("beyond-base"; index.ts drops the level from the line's path).
+ *
+ * The numbering guards are PAIR-level statistics over a commentary level (a kind), so they work for
  * a single-engine run and do not depend on the max-link merge (whose PAIR_DISAGREEMENT compares
  * engines). They only lower confidence; they never invent a different target.
  */
@@ -36,6 +44,10 @@ const SHARED_MIN = 0.8;
 const MIN_SECTIONS = 3;
 /** numbers needed before a level is judged at all */
 const MIN_NUMBERS = 10;
+/** "beyond-base": sections whose highest number is above the base's highest… */
+const BEYOND_MIN_SECTIONS = 3;
+/** …and their share of the sections compared */
+const BEYOND_MIN_SHARE = 0.1;
 
 export interface LevelStats {
   readonly kind: string;
@@ -49,7 +61,9 @@ export interface LevelStats {
   readonly dense: number;
   /** Σ commentary max / Σ base max */
   readonly reach: number;
-  readonly verdict: "parallel" | "own-numbering" | "not-shared";
+  /** sections whose highest commentary number is above the base's highest there */
+  readonly beyond: number;
+  readonly verdict: "parallel" | "own-numbering" | "not-shared" | "beyond-base";
 }
 
 export interface NumberingVerdict {
@@ -120,7 +134,7 @@ export function assessNumbering(cs: BookStructure, units: readonly Unit[], match
     g.nums.add(last.n);
     groups.set(k, g);
   }
-  const acc = new Map<string, { sections: number; numbers: number; shared: number; count: number; cMax: number; bMax: number }>();
+  const acc = new Map<string, { sections: number; numbers: number; shared: number; count: number; cMax: number; bMax: number; beyond: number }>();
   for (const g of groups.values()) {
     // the parent's place in the base, when it is found exactly and unambiguously
     const cands = match(g.parent).filter((c) => c.alignment.missing === 0);
@@ -128,13 +142,14 @@ export function assessNumbering(cs: BookStructure, units: readonly Unit[], match
     if (!top || (cands[1] && cands[1].score === top.score)) continue;
     const base = numbersInside(byKind, top.unit, g.kind);
     if (!base || !base.size) continue;
-    const a = acc.get(g.kind) ?? { sections: 0, numbers: 0, shared: 0, count: 0, cMax: 0, bMax: 0 };
+    const a = acc.get(g.kind) ?? { sections: 0, numbers: 0, shared: 0, count: 0, cMax: 0, bMax: 0, beyond: 0 };
     a.sections++;
     a.numbers += g.nums.size;
     for (const n of g.nums) if (base.has(n)) a.shared++;
     a.count += g.nums.size;
     a.cMax += Math.max(...g.nums);
     a.bMax += Math.max(...base);
+    if (Math.max(...g.nums) > Math.max(...base)) a.beyond++;
     acc.set(g.kind, a);
   }
   const levels: LevelStats[] = [];
@@ -145,10 +160,11 @@ export function assessNumbering(cs: BookStructure, units: readonly Unit[], match
     const reach = a.cMax / a.bMax;
     let verdict: LevelStats["verdict"] = "parallel";
     if (a.numbers >= MIN_NUMBERS) {
-      if (shared < SHARED_MIN) verdict = "not-shared";
+      if (a.beyond >= BEYOND_MIN_SECTIONS && a.beyond >= BEYOND_MIN_SHARE * a.sections) verdict = "beyond-base";
+      else if (shared < SHARED_MIN) verdict = "not-shared";
       else if (a.sections >= MIN_SECTIONS && dense >= DENSE_MIN && reach <= REACH_MAX) verdict = "own-numbering";
     }
-    const s: LevelStats = { kind, sections: a.sections, numbers: a.numbers, shared, dense, reach, verdict };
+    const s: LevelStats = { kind, sections: a.sections, numbers: a.numbers, shared, dense, reach, beyond: a.beyond, verdict };
     levels.push(s);
     if (verdict !== "parallel") suspect.set(kind, s);
   }
@@ -168,6 +184,11 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const levelName = (kind: string) => (kind === "?" ? "המספור בלי שם" : `"${kindWord(kind) || kind}"`);
 
 export function numberingNote(s: LevelStats): Reason {
+  if (s.verdict === "beyond-base")
+    return {
+      code: "heading/beyond-base",
+      text: `${levelName(s.kind)} בפירוש הוא מספור משלו ולא של ספר הבסיס: ב־${s.beyond} מתוך ${s.sections} קטעים הפירוש מגיע למספר שאין בבסיס באותו קטע. לכן שורה תחת הרמה הזו מקושרת לקטע שמעליה כולו, ו"אפשרית" בלבד`,
+    };
   return s.verdict === "own-numbering"
     ? {
         code: "heading/own-numbering",
@@ -181,7 +202,10 @@ export function numberingNote(s: LevelStats): Reason {
 
 export function numberingWarning(s: LevelStats): Reason {
   return {
-    code: s.verdict === "own-numbering" ? "heading/own-numbering" : "heading/numbering-not-shared",
-    text: `ייתכן ש${levelName(s.kind)} בפירוש אינו המספור של ספר הבסיס (ראו הערות הריצה), ולכן הביטחון הוגבל ל"אפשרית"`,
+    code: s.verdict === "beyond-base" ? "heading/beyond-base" : s.verdict === "own-numbering" ? "heading/own-numbering" : "heading/numbering-not-shared",
+    text:
+      s.verdict === "beyond-base"
+        ? `${levelName(s.kind)} בפירוש אינו המספור של ספר הבסיס (ראו הערות הריצה), ולכן השורה מקושרת לקטע שמעליו כולו, והביטחון הוגבל ל"אפשרית"`
+        : `ייתכן ש${levelName(s.kind)} בפירוש אינו המספור של ספר הבסיס (ראו הערות הריצה), ולכן הביטחון הוגבל ל"אפשרית"`,
   };
 }

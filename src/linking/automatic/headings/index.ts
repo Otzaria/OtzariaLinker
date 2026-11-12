@@ -13,7 +13,7 @@ import {
   type Suggestion,
 } from "../types";
 import { align, type AlignContext, type AlignEvent, type Alignment } from "./align";
-import { assessNumbering, numberingNote, numberingWarning, targetElement } from "./consistency";
+import { assessNumbering, numberingNote, numberingWarning, targetElement, type LevelStats } from "./consistency";
 import { QuoteChecker } from "./quote";
 import { dafElement, kindThe, kindWord, type NumberingMode, type PathElement } from "./numbering";
 import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "./structure";
@@ -66,6 +66,17 @@ interface Scored {
   readonly path: readonly PathElement[];
   readonly score: number;
   readonly alignment: Alignment;
+}
+
+/** At least this many inline page marks make a base "paged" (as dibur-hamatchil/windows.ts pageMarks) */
+const PAGE_MARKS_MIN = 20;
+const PAGE_MARK_RE = /data-overlay\s*=\s*["'][^"']*Pages["'][^>]*?data-value\s*=\s*["']\d{1,3}[ab]["']/i;
+
+/** Does the book mark its pages inside its lines (the Zohar's Vilna pages)? */
+function pageMarked(book: EngineBook): boolean {
+  let n = 0;
+  for (const l of book.lines) if (l.text.includes("data-overlay") && PAGE_MARK_RE.test(l.text) && ++n >= PAGE_MARKS_MIN) return true;
+  return false;
 }
 
 export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, options: HeadingsOptions = {}, ctx: EngineContext = {}): EngineResult {
@@ -132,6 +143,16 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   // structural consistency (./consistency.ts): commentary levels whose numbers are not the base's
   const numbering = assessNumbering(cs, units, match);
   for (const s of numbering.suspect.values()) notes.push(numberingNote(s));
+  /*
+   * A base with no daf headings that marks its pages INSIDE its lines (the Zohar's `<i data-overlay="Vilna
+   * Pages" data-value="5a">`): a commentary's "דף ה." is a page of those marks, which this engine does not
+   * read — it matched the volume headings of the Zohar's appendix and the ranges around them instead
+   * (library benchmark: מקדש מלך 0 of 9,639, אור החמה 0 of 19,718 right, against the database's links).
+   * Lines placed by a daf are left to dibur-hamatchil, whose windows read the page marks (§3.1).
+   */
+  const pagedBase = !units.some((u) => u.path.some((e) => e.kind === "daf")) && pageMarked(base);
+  if (pagedBase && cs.headings.some((h) => h.path.some((e) => e.kind === "daf")))
+    notes.push({ code: "heading/paged-base", text: `ב"${base.book.title}" אין כותרות דף, ומספרי הדפים מסומנים בתוך השורות. שורות שהמקום שלהן נקבע לפי דף לא קושרו בשיטה הזו; דיבור המתחיל קורא את סימני הדפים.` });
   const belowHigh = opts.thresholds.high - 0.001;
   const quotes = new QuoteChecker(base, (p) => bs.lines[p]!.skip !== "heading");
 
@@ -145,7 +166,21 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     const info = cs.lines[p]!;
     const srcIndex = commentary.lines[p]!.index;
     if (info.skip) { skipped++; continue; }
-    const P = useMarkers && info.marker !== null ? [...info.path, { kind: "?", n: info.marker, label: `(${toGematria(info.marker)})` }] : info.path;
+    if (pagedBase && info.path.some((e) => e.kind === "daf")) {
+      unmatched.push({ line: srcIndex, reasons: [{ code: "heading/paged-base", text: "המקום של השורה נקבע לפי דף, ובספר הבסיס הדפים מסומנים בתוך השורות ולא בכותרות" }] });
+      continue;
+    }
+    let P: readonly PathElement[] = useMarkers && info.marker !== null ? [...info.path, { kind: "?", n: info.marker, label: `(${toGematria(info.marker)})` }] : info.path;
+    // a level the commentary numbers by its own count is not a place: the section above it is (consistency.ts)
+    let beyond: LevelStats | undefined;
+    for (let i = 1; i < P.length; i++) {
+      const s = numbering.suspect.get(P[i]!.kind);
+      if (P[i]!.kind !== "name" && s?.verdict === "beyond-base") {
+        beyond = s;
+        P = P.slice(0, i);
+        break;
+      }
+    }
     if (!P.length) {
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/no-position", text: "השורה אינה נמצאת תחת אף כותרת, ולכן אין לה מיקום מבני" }] });
       continue;
@@ -178,9 +213,17 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       }
     }
     const el = targetElement(chosen.alignment);
-    const suspect = el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined;
+    const suspect = beyond ?? (el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined);
     let score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
-    if (suspect || outsideSection) score = Math.min(score, belowHigh);
+    /*
+     * The line's own heading is a NAME the base does not have, below the place that was found ("דף ב. ›
+     * רבינו חננאל", "… › שאילתות פרשת צו"): an anthology's source under the daf it was gathered for, and the
+     * sugya often goes on past that amud. The whole amud is the parent's place, not the line's: in קובץ
+     * שיטות קמאי (5 tractates) 1,094 of the 7,859 certain the database judged were elsewhere.
+     */
+    const last = P[P.length - 1];
+    const unplacedName = P.length > 1 && last!.kind === "name" && chosen.alignment.events.some((e) => e.code === "skip-commentary" && e.c === last);
+    if (suspect || outsideSection || unplacedName) score = Math.min(score, belowHigh);
     // the line's own quote, when it marks one, must not sit in the neighbouring stretch instead (./quote.ts)
     let quoteAt: number | null = null;
     if (score >= opts.thresholds.high) {
@@ -201,6 +244,10 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     if (suspect) {
       warnings.push(numberingWarning(suspect));
       rules.push("headings.numbering-suspect");
+    }
+    if (unplacedName) {
+      warnings.push({ code: "heading/unplaced-name", text: `הכותרת של השורה ("${last!.label}") אינה בספר הבסיס, ולכן השורה קושרה לכל המקום שמעליה (${describe(chosen.path)}), והביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.unplaced-name");
     }
     if (quoteAt !== null) {
       warnings.push({ code: "heading/quote-elsewhere", text: `הדיבור המתחיל של השורה לא נמצא במקום הזה, אבל נמצא סמוך אליו בספר הבסיס (שורה ${base.lines[quoteAt]!.index + 1}); ייתכן שגבולות הקטעים בשני הספרים שונים, ולכן הביטחון הוגבל ל"אפשרית"` });

@@ -5,7 +5,7 @@ import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
 import { buildReport, reportCsv, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
-import { evidenceFromCounts, linkedFields, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook } from "../linking/plan";
+import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource, Saver } from "./services";
 import type { NoticeKind, SideTab } from "./store";
@@ -106,16 +106,24 @@ export class MaxLinkState {
     this.unchecked.value = todo.length - now.length;
     if (!now.length) return true;
     const found: LinkedEvidence[] = [];
+    const db = new Set(this.host.sources.value.filter((s) => s.info.kind === "otzaria-db").flatMap((s) => s.books.map((b) => b.key)));
     const ok = await this.host.runTask(`בודק אילו ספרים כבר מקושרים במסד כפירוש ובסיס (${now.length.toLocaleString("he")} ספרים)…`, async (opts) => {
       let done = 0;
-      for (const k of now) {
+      const read = async (k: string, of: number) => {
         opts.signal?.throwIfAborted();
         const s = await summary(k, opts.signal ? { signal: opts.signal } : {});
         this.checked.add(k);
         this.checkedCount.value++;
         if ("byBook" in s) for (const e of evidenceFromCounts(k, s.byBook)) if (books.has(e.dependant) && books.has(e.base)) found.push(e);
-        opts.onProgress?.(++done, now.length);
-      }
+        opts.onProgress?.(++done, of);
+      };
+      for (const k of now) await read(k, now.length);
+      // the books they are most linked to, when only their own links tell what those are written on
+      // (plan.ts evidenceToFollow: "ספרא" for "מלבי"ם על ויקרא")
+      const next = evidenceToFollow(found, books)
+        .filter((k) => db.has(k) && !this.checked.has(k))
+        .slice(0, Math.max(0, EVIDENCE_BOOKS - now.length));
+      for (const k of next) await read(k, now.length + next.length);
       return true;
     });
     if (found.length) {
@@ -137,8 +145,7 @@ export class MaxLinkState {
         ...this.host.refOf(b.key),
         ...(b.bases && { bases: b.bases }),
         ...(b.dependence && { dependence: b.dependence }),
-        ...(fields && { linkedBases: fields.linkedBases }),
-        ...(fields && Object.keys(fields.linkedKinds).length && { linkedKinds: fields.linkedKinds }),
+        ...linkedProps(fields),
       };
     });
     return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }) });

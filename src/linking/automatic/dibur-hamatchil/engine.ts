@@ -78,8 +78,12 @@ export interface DhOptions {
    * without it every unlabeled line was searched in the commentator's words and matched wherever both
    * quote the same verse or Gemara (library benchmark, 2026-11-12: ~87K suggestions in pairs the
    * database never links, "אבן עזרא על תהילים" → "רש"י על תהילים", "רש"י על חולין" → "ריטב"א על חולין").
+   * "cap": every line is searched, but one that does not name the commentator is left for review
+   * (possible at most, dh/not-addressed-cap): for a pair the database already links (plan.ts
+   * siblingRelations), where a book on רש"י names it on few lines ("גור אריה", "מזרחי") and a book on the
+   * Gemara names it on the lines that are about it (מהרש"א, מהר"ם שיף).
    */
-  readonly addressedOnly?: boolean;
+  readonly addressedOnly?: boolean | "cap";
   /**
    * a paragraph without a ד"ה of its own (no bold opening) after a ד"ה line of the same section belongs
    * to that ד"ה's place, in a book whose ד"ה lines are bold and whose sections hold few of them
@@ -167,6 +171,10 @@ function lowerBound(arr: readonly number[], below: (v: number) => boolean): numb
 
 const BOLD_LINE_RE = /^\s*(?:[([][^)\]<]{0,8}[)\]]\s*)?<(b|strong)\b/i;
 const NOTE_RE = /class\s*=\s*["']?footnote/i;
+/** addressedOnly "cap": a book names the base's commentator when this many of its ד"ה lines do… */
+const NAMES_MIN = 5;
+/** …and this share of them */
+const NAMES_SHARE = 0.05;
 
 /** A placement of one commentary line on the base, before it is shaped into a Suggestion. */
 interface Placement {
@@ -254,7 +262,6 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored);
   const notes: Reason[] = [policy.reason];
   const routeIntermediates = options.intermediates !== false;
-  const addressedOnly = options.addressedOnly === true;
   const continueItems = options.continueItems !== false;
   /** the intermediate commentator the base book is (רש"י על …, תוספות על …), else null */
   const baseIs: Commentator | null = commentatorOfTitle(base.book.title);
@@ -276,6 +283,30 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const tableOf = (p: number): StepTable => (bTables[p] ??= stepTable(bTokens[p]!, bProfiles[p]!));
   const cExtract = new Map<number, ExtractedDh>();
   for (const l of commentary.lines) cExtract.set(l.index, extractDh(l, maxWords));
+  /*
+   * addressedOnly "cap": a book that names the base's commentator on its lines (מהרש"א, ערוך לנר: "תוד"ה …"
+   * on a fifth to a third of them) tells which lines are about it, and the others are about the text — as
+   * addressedOnly; searching them too pushed correct lines out of the order (ערוך לנר על יבמות → רש"י:
+   * 321 → 272 of the database's links). A book that hardly ever names it (מזרחי, גור אריה: under 1%) is
+   * about it throughout: every line is searched, and the unnamed ones are left for review.
+   */
+  let dhLines = 0;
+  let naming = 0;
+  for (const e of cExtract.values())
+    if (e.kind === "dh") {
+      dhLines++;
+      if (e.addressee?.kind === "named" && e.addressee.commentator.key === baseIs?.key) naming++;
+    }
+  const names = naming >= NAMES_MIN && naming >= NAMES_SHARE * dhLines;
+  const addressedOnly = options.addressedOnly === true || (options.addressedOnly === "cap" && names);
+  /** addressedOnly "cap", in a book that does not name the commentator: its lines (capped to possible) */
+  const unaddressed = options.addressedOnly === "cap" && !names && baseIs ? new Set<number>() : null;
+  if (options.addressedOnly === "cap" && baseIs)
+    notes.push(
+      names
+        ? r("dh/addressed-labels", `הפירוש מזכיר את ${baseIs.name} בשמו ב־${naming} מתוך ${dhLines} שורות דיבור המתחיל, ולכן רק השורות האלה (וההמשך שלהן) מחופשות בדבריו.`)
+        : r("dh/addressed-rarely", `הפירוש כמעט אינו מזכיר את ${baseIs.name} בשמו (${naming} מתוך ${dhLines} שורות), ולכן הוא כתוב עליו כולו: כל שורה מחופשת בדבריו, ושורה שאינה מזכירה אותו נשארת לבדיקה.`),
+    );
   /*
    * Item paragraphs (continueItems): a book whose ד"ה lines open with bold, and whose sections hold few
    * of them — the median section (with any) has at most 3 — writes one ד"ה per item and continues it in
@@ -429,6 +460,14 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
         `כותרות הפירוש (${plan.distrusted.matched.slice(0, 3).join(", ")}) נמצאו בספר הבסיס רק בתוך הקטע "${plan.distrusted.section}", שהפירוש אינו מזכיר. המבנה של שני הספרים שונה, ולכן החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש.`,
       ),
     );
+  for (const o of plan.ownNumbering ?? [])
+    if (!options.windows)
+      notes.push(
+        r(
+          "dh/own-numbering",
+          `ה"${o.kind}" של הפירוש הוא מספור משלו, לא של שורות הבסיס: ב־${o.exceeding} מתוך ${o.sections} קטעים המספר הגבוה בפירוש גדול מהמספר הגבוה בבסיס. לכן שורות תחת "${o.kind}" מחופשות בכל הקטע שמעליו, ולא רק בשורה בעלת אותו מספר.`,
+        ),
+      );
   const first = bLines[0]?.index ?? 0;
   const last = bLines.at(-1)?.index ?? 0;
   const windowFor = (cLine: number): SearchWindow => {
@@ -1023,6 +1062,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       itemHead = null;
       continue;
     }
+    if (unaddressed && !active) unaddressed.add(line.index);
     const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
     if (marked) {
       crossedHeading = false;
@@ -1157,6 +1197,12 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    let confidence = p.confidence;
+    if (unaddressed?.has(p.cLine) && (confidence === "certain" || confidence === "high")) {
+      confidence = "possible";
+      rules.push("dh/not-addressed-cap");
+      warnings.push(r("dh/not-addressed-cap", `השורה אינה מזכירה את ${baseIs!.name}, ולכן לא ברור שהיא מפרשת את דבריו ולא את הטקסט; לבדיקה.`));
+    }
     let anchor: RawAnchor | undefined;
     if (policy.anchors && p.words) {
       if (baseLine && NOTE_RE.test(baseLine.text))
@@ -1177,7 +1223,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       id: `dibur-hamatchil:${commentary.book.key}#${p.cLine}>${base.book.key}#${p.base}`,
       engine: "dibur-hamatchil" as const,
       score: p.score,
-      confidence: p.confidence,
+      confidence,
       reasons,
       rules,
       alternatives,

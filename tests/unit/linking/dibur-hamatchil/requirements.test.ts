@@ -87,6 +87,34 @@ describe("§2 intermediate commentators: a line on רש\"י/תוספות belongs
     expect(baseSide(byLine(res, 3)!).line).toBe(4);
   });
 
+  it('addressedOnly "cap": every line is searched, and one that names no one is left for review', () => {
+    const plain = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>וצריך לעצים</b> חייב שתים כו' הנה", "<b>שם תוס'</b> בד\"ה וצריך לעצים עיין בדבריהם"];
+    const res = run(plain, TOS, TOSAFOT, { addressedOnly: "cap" });
+    // searched (addressedOnly: true would skip it), but never above possible
+    expect(["possible", "ambiguous"]).toContain(byLine(res, 2)!.confidence);
+    // a line that would be certain or high: lowered, and says why
+    const strong = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>ואין עושין עוגיות גומות סביב הגפנים.</b> כן הוא"];
+    expect(["certain", "high"]).toContain(byLine(run(strong, TOS, TOSAFOT), 2)!.confidence);
+    const capped = byLine(run(strong, TOS, TOSAFOT, { addressedOnly: "cap" }), 2)!;
+    expect(capped.confidence).toBe("possible");
+    expect(capped.rules).toContain("dh/not-addressed-cap");
+    // a line that names תוספות keeps the confidence it has without the option
+    const named = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>שם תוס'</b> בד\"ה וצריך לעצים עיין בדבריהם"];
+    const kept = byLine(run(named, TOS, TOSAFOT, { addressedOnly: "cap" }), 2)!;
+    expect(kept.confidence).toBe(byLine(run(named, TOS, TOSAFOT), 2)!.confidence);
+    expect(kept.rules).not.toContain("dh/not-addressed-cap");
+  });
+
+  it('addressedOnly "cap" in a book that names the commentator on its lines: only those lines, as addressedOnly', () => {
+    const labeled = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>ואין עושין עוגיות גומות סביב הגפנים.</b> כן הוא"];
+    for (const dh of ["משקין בית השלחין", "ואין עושין עוגיות", "וצריך לעצים", "חייב שתים", "משקין בית השלחין", "וצריך לעצים"]) labeled.push(`<b>שם תוס'</b> בד"ה ${dh} עיין בדבריהם`);
+    const res = run(labeled, TOS, TOSAFOT, { addressedOnly: "cap" });
+    expect(res.notes.map((n) => n.code)).toContain("dh/addressed-labels");
+    expect(byLine(res, 2)).toBeUndefined();
+    expect(why(res, 2)).toEqual(["dh/not-addressed"]);
+    expect(run(labeled.slice(0, 3), TOS, TOSAFOT, { addressedOnly: "cap" }).notes.map((n) => n.code)).toContain("dh/addressed-rarely");
+  });
+
   it("the option `intermediates: false` links every line to the base, as before", () => {
     const res = run(comm, DAF, GEMARA, { intermediates: false });
     expect(why(res, 3)).not.toContain("dh/intermediate");

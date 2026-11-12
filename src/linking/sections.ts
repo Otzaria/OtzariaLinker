@@ -65,3 +65,29 @@ export function sectionFor(book: EngineBook, baseTitle: string): Section | null 
   }
   return { book: { book: book.book, lines: picked }, heading: stripTags(lines[hits[0]!]!.text).trim(), lines: picked.length };
 }
+
+/** A part of the book: a heading at the shallowest level below the title, and the lines up to the next one. */
+export interface Part {
+  /** the heading text as written */
+  readonly heading: string;
+  /** positions in `book.lines` of the part's lines (after the heading) */
+  readonly from: number;
+  readonly to: number;
+}
+
+/** The book's parts: the headings at the shallowest level below the title ("משבצות זהב", "אשל אברהם"), in order. */
+export function partsOf(book: EngineBook): Part[] {
+  const lines = book.lines;
+  let level = Infinity;
+  for (const l of lines) if (l.heading !== null && l.heading > 1 && l.heading < level) level = l.heading;
+  if (level === Infinity) return [];
+  const starts: number[] = [];
+  for (let i = 0; i < lines.length; i++) if (lines[i]!.heading === level) starts.push(i);
+  return starts.map((at, k) => ({ heading: stripTags(lines[at]!.text).trim(), from: at + 1, to: (starts[k + 1] ?? lines.length) - 1 }));
+}
+
+/** The book cut to one part (see partsOf). */
+export function partSection(book: EngineBook, part: Part): Section {
+  const picked = book.lines.slice(part.from, part.to + 1);
+  return { book: { book: book.book, lines: picked }, heading: part.heading, lines: picked.length };
+}

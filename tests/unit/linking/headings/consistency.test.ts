@@ -66,6 +66,83 @@ describe("headings guard — the commentary's own numbering (הגהות מנחם
   });
 });
 
+describe("headings guard — a level counting the commentary's own notes, past the base's numbers (ש\"ך על חושן משפט)", () => {
+  const SIMANIM = ["סימן א", "סימן ב", "סימן ג", "סימן ד"];
+  // the base has 5 סעיפים in each סימן; the ש"ך's "סעיף N" is its own ס"ק, up to 8
+  const base = sectioned("b:sa", "שולחן ערוך", SIMANIM, () => range(1, 5));
+
+  it("is detected; each line goes to its whole סימן, possible", () => {
+    const shach = sectioned("c:shach", "שפתי כהן", SIMANIM, (s) => range(1, [8, 7, 3, 6][s]!));
+    const r = runHeadingsEngine(shach, base);
+    expect(r.notes.map((n) => n.code)).toContain("heading/beyond-base");
+    expect(strong(r)).toEqual([]);
+    // "סימן ב › סעיף ב" (commentary line 22): the whole סימן ב of the base (lines 14–22), not its סעיף ב (line 16)
+    const s = at(r, 22);
+    expect(s.target).toMatchObject({ line: 14, end: 22 });
+    expect(s.confidence).toBe("possible");
+    expect(s.warnings.map((w) => w.code)).toContain("heading/beyond-base");
+  });
+
+  it("a commentary on the base's own סעיפים (never past them) keeps its certain links", () => {
+    const gra = sectioned("c:gra", "ביאור הגר\"א", SIMANIM, (s) => [[1, 3, 5], [2, 4], [1, 5], [3]][s]!);
+    const r = runHeadingsEngine(gra, base);
+    expect(r.notes.map((n) => n.code)).not.toContain("heading/beyond-base");
+    expect(r.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("past the base in only two sections is not a pattern", () => {
+    const two = sectioned("c:two", "פירוש", SIMANIM, (s) => range(1, [8, 7, 3, 4][s]!));
+    expect(runHeadingsEngine(two, base).notes.map((n) => n.code)).not.toContain("heading/beyond-base");
+  });
+});
+
+describe("headings guard — a base that marks its pages inside its lines (the Zohar)", () => {
+  const page = (v: string) => `<i data-overlay="Vilna Pages" data-value="${v}"></i>`;
+  const zohar = ["<h1>ספר הזהר</h1>", "<h2>בראשית</h2>"];
+  for (let n = 2; n <= 13; n++) zohar.push(`${page(`${n}a`)}שורה של דף ${n} א`, `${page(`${n}b`)}שורה של דף ${n} ב`);
+  zohar.push("<h2>תוספות</h2>", "<h3>כרך א</h3>", "שורה בנספח");
+
+  it("lines placed by a daf are left to dibur-hamatchil, with a note; other headings still link", () => {
+    const base = book("b:zohar", "ספר הזהר", zohar);
+    const mm = book("c:mm", "מקדש מלך", ["<h1>מקדש מלך</h1>", "<h2>כרך א</h2>", "<h3>דף ה.</h3>", "פירוש על הדף", "<h2>בראשית</h2>", "פירוש על הפרשה"]);
+    const r = runHeadingsEngine(mm, base);
+    expect(r.notes.map((n) => n.code)).toContain("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 3)).toBeUndefined();
+    expect(r.unmatched.find((u) => u.line === 3)!.reasons[0]!.code).toBe("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 5)).toBeDefined();
+  });
+
+  it("…not when the base has daf headings of its own", () => {
+    const base = book("b:talmud", "מסכת", ["<h1>מסכת</h1>", "<h2>דף ה.</h2>", ...zohar.slice(2, 26)]);
+    const c = book("c:c", "פירוש", ["<h1>פירוש</h1>", "<h2>דף ה.</h2>", "פירוש על הדף"]);
+    const r = runHeadingsEngine(c, base);
+    expect(r.notes.map((n) => n.code)).not.toContain("heading/paged-base");
+    expect(r.suggestions.find((s) => s.source.line === 2)).toBeDefined();
+  });
+});
+
+describe("headings guard — a line under a name the base does not have (קובץ שיטות קמאי)", () => {
+  const base = book("b:pes", "פסחים", ["<h1>פסחים</h1>", "<h2>דף ב.</h2>", "אור לארבעה עשר", "בודקין את החמץ", "<h2>דף ב:</h2>", "גמרא"]);
+
+  it("the daf of an anthology's source is the parent's place, not the line's: possible", () => {
+    const kovetz = book("c:k", "קובץ שיטות קמאי", ["<h1>קובץ שיטות קמאי</h1>", "<h2>דף ב.</h2>", "<h3>רבינו חננאל</h3>", "פירוש של רבינו חננאל", "<h2>דף ב:</h2>", "פירוש בלי כותרת"]);
+    const r = runHeadingsEngine(kovetz, base);
+    const s = at(r, 3);
+    expect(s.target).toMatchObject({ line: 2, end: 3 });
+    expect(s.confidence).toBe("possible");
+    expect(s.rules).toContain("headings.unplaced-name");
+    // a line right under the daf keeps its confidence
+    expect(at(r, 5).confidence).toBe("certain");
+  });
+
+  it("a named grouping ABOVE the numbered levels (\"דרושים נאים › פרק ו\") is not this", () => {
+    const tanakh = book("b:gen", "בראשית", ["<h1>בראשית</h1>", "<h2>פרק ו</h2>", "(א) ויהי כי החל", "(ב) ויראו בני האלהים"]);
+    const c = book("c:c", "פירוש", ["<h1>פירוש</h1>", "<h2>דרושים נאים</h2>", "<h3>פרק ו</h3>", "<h4>פסוק ב</h4>", "פירוש"]);
+    const s = at(runHeadingsEngine(c, tanakh), 4);
+    expect(s.rules).not.toContain("headings.unplaced-name");
+  });
+});
+
 describe("headings guard — numbers the base does not have (ראב\"ד על ספרא)", () => {
   // the base's section numbers its 8 rules "(א)…(ח)"; the commentary counts its own paragraphs פסקה א…יב
   const base = book("b:sifra", "ספרא", [

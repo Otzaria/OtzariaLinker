@@ -113,6 +113,22 @@ describe("maxlinkJob", () => {
   });
 });
 
+describe("maxlinkJob — notes on a main book with no note marks (Sefaria's notes on מכילתא דרשב\"י)", () => {
+  it("when the footnotes engine finds nothing, the notes are linked by headings, as a commentary", async () => {
+    const main = text("ספר בלי סימנים.txt", ["<h1>ספר בלי סימנים</h1>", "<h2>פרק א</h2>", "(א) שורה ראשונה של הפרק", "(ב) שורה שנייה של הפרק", "<h2>פרק ב</h2>", "(א) שורה אחרת"]);
+    const notes = text("הערות לספר בלי סימנים.txt", ["<h1>הערות לספר בלי סימנים</h1>", "<h2>פרק א</h2>", "<h3>פסוק ב</h3>", "הערה על השורה השנייה בלי מספר", "<h2>פרק ב</h2>", "<h3>פסוק א</h3>", "הערה אחרת"]);
+    const reg = new SourceRegistry();
+    const books = (await reg.open([main, notes])).sources.flatMap((s) => s.books);
+    const plan = planMaxLink({ selected: [books.find((b) => b.title.startsWith("הערות"))!.key], library: books, singleEngines: [] });
+    expect(plan.steps.map((s) => s.engine)).toEqual(["footnotes"]);
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    const r = res.items[0]!.result!;
+    expect(r.notes[0]!.code).toBe("maxlink/notes-by-headings");
+    // the note under "פרק א › פסוק ב" → the main book's line "(ב)" of פרק א
+    expect(r.suggestions.map((x) => [x.engine, x.source.line, x.target.line])).toContainEqual(["headings", 3, 3]);
+  });
+});
+
 describe("maxlinkJob — the citations engine (single-book)", () => {
   it("runs once on the selected book, through its registered runner", async () => {
     const { reg, all, byTitle } = await setup();
@@ -163,6 +179,16 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
     expect(through.suggestions.map((s) => `${s.source.line}>${s.target.book.key}#${s.target.line}`)).toEqual(["3>d:1#4", "5>d:1#2"]);
     expect(through.suggestions.every((s) => s.rules.includes("maxlink/through") && s.declaredType === "source")).toBe(true);
     expect(through.notes[0]!.text).toContain("דרך");
+  });
+
+  it("a citation inside the intermediate (REFERENCE, LINKER) is not where its line stands on the base", async () => {
+    const far: Record<string, ReturnType<typeof lines>> = { ...BOOKS, "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון", "סעיף שני", "סעיף שלישי", "שורה", "שורה", "שורה", "שורה", "סימן אחר"]) };
+    const cited = [...links, { id: "l3", source: { book: mid, line: 3 }, target: { book: base, line: 9 }, declaredType: "reference" }];
+    const reg = { lines: async (key: string) => far[key]!, existingLinks: async (key: string) => cited.filter((l) => l.source.book.key === key || l.target.book.key === key) } as unknown as SourceRegistry;
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    // line 3 is still carried to the base's line 4 (its COMMENTARY link), not dropped as spread over 4..9
+    expect(res.items[1]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`)).toEqual(["3>4", "5>2"]);
   });
 
   it("an intermediate place with no link to the base carries nothing", async () => {

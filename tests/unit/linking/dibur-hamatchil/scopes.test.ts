@@ -87,6 +87,30 @@ describe("unit windows: a heading that names a line the base numbers itself", ()
     const twice = ["<h1>ס</h1>", "<h2>פרק א</h2>", "(א) שורה", "(ב) שורה", "(א) שורה", "(ב) שורה"];
     expect(plan(["<h2>פרק א</h2>", "<h3>פסוק ב</h3>", "x"], twice).windowOf(2).kind).toBe("heading");
   });
+
+  // the ש"ך on חושן משפט heads its notes "סעיף טו" where טו is its own ס"ק: the note on סעיף יד
+  const SA = ["<h1>שולחן ערוך</h1>"];
+  for (let s = 1; s <= 4; s++) SA.push(`<h2>סימן ${["א", "ב", "ג", "ד"][s - 1]}</h2>`, "(א) דין ראשון של הסימן", "(ב) וכן אם נזכר לדבר ואם העד תלמיד חכם שפיר דמי", "(ג) דין שלישי של הסימן");
+  const SHACH = ["<h1>שפתי כהן</h1>"];
+  for (let s = 1; s <= 4; s++) SHACH.push(`<h2>סימן ${["א", "ב", "ג", "ד"][s - 1]}</h2>`, "<h3>סעיף א</h3>", "<b>דין ראשון.</b> פירוש", "<h3>סעיף ב</h3>", "<b>דין ראשון.</b> עוד", "<h3>סעיף ג</h3>", "<b>ואם העד תלמיד חכם כו'.</b> פירוש", "<h3>סעיף ד</h3>", "<b>דין שלישי.</b> פירוש");
+
+  it("a kind the commentary numbers by its own count (its numbers run past the base's in section after section): the section, not the line", () => {
+    const p = plan(SHACH, SA);
+    expect(p.ownNumbering).toEqual([{ kind: "סעיף", sections: 4, exceeding: 4 }]);
+    // "סעיף ג" of the ש"ך is searched in the whole סימן, not in "(ג)"
+    expect(p.windowOf(7)).toMatchObject({ kind: "heading", from: 1, to: 4 });
+    const res = run(SHACH, SA);
+    expect(res.notes.some((n) => n.code === "dh/own-numbering")).toBe(true);
+    expect(baseSide(byLine(res, 7)!).line).toBe(3);
+  });
+
+  it("…but not a commentary that counts the base's lines, nor one that runs past them in fewer than 3 sections", () => {
+    const counts = SHACH.filter((l) => l !== "<h3>סעיף ד</h3>" && l !== "<b>דין שלישי.</b> פירוש");
+    expect(plan(counts, SA).ownNumbering).toBeUndefined();
+    expect(plan(counts, SA).windowOf(7)).toMatchObject({ kind: "unit" });
+    const twoSections = SHACH.slice(0, 1 + 2 * 9);
+    expect(plan(twoSections, SA).ownNumbering).toBeUndefined();
+  });
 });
 
 describe("page windows: inline page markers of a base with no daf headings (the Zohar)", () => {

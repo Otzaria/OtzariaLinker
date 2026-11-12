@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
-import { evidenceFromCounts, LINKED_MIN, linkedFields, notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
+import { EVIDENCE_MIN, evidenceFromCounts, evidenceToFollow, LINKED_MIN, linkedFields, linkedProps, notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
 
 const book = (key: string, title: string, more: Partial<PlanBook> = {}): PlanBook => ({ key, title, origin: "otzaria", ...more });
 /** the pair relations alone: the citations engine (single-book) would add a step for every selected book */
@@ -302,9 +302,201 @@ describe("planMaxLink — TARGUM and MIDRASH links as evidence (PlanBook.linkedK
       bookKey, title: bookKey, origin: "sefaria" as const, out: 0, in: 0, commentaryOut: 0, commentaryIn: 0, targumOut: 0, targumIn: 0, midrashOut: 0, midrashIn: 0, ...c,
     });
     const ev = evidenceFromCounts("db:1", [row("a", { commentaryOut: 1 }), row("b", { targumOut: LINKED_MIN }), row("c", { midrashOut: LINKED_MIN - 1 }), row("d", { midrashIn: 400 })]);
-    expect(ev).toEqual([{ dependant: "a", base: "db:1" }, { dependant: "b", base: "db:1", kind: "targum" }, { dependant: "db:1", base: "d", kind: "midrash" }]);
-    expect(linkedFields(ev).get("b")).toEqual({ linkedBases: ["db:1"], linkedKinds: { "db:1": "targum" } });
+    // counted; "complete" only for this book's own side (its summary counts every book it is linked to)
+    expect(ev).toEqual([
+      { dependant: "a", base: "db:1", count: 1 },
+      { dependant: "b", base: "db:1", kind: "targum", count: LINKED_MIN },
+      { dependant: "db:1", base: "d", kind: "midrash", count: 400, complete: true },
+    ]);
+    expect(linkedFields(ev).get("b")).toEqual({ linkedBases: ["db:1"], linkedKinds: { "db:1": "targum" }, linkedCounts: { "db:1": LINKED_MIN }, linkedComplete: false });
+    expect(linkedFields(ev).get("db:1")!.linkedComplete).toBe(true);
     expect(linkedFields([{ dependant: "b", base: "db:1" }, { dependant: "b", base: "db:1", kind: "targum" }]).get("b")!.linkedKinds).toEqual({});
+  });
+
+  it("linkedFields: the larger count per type when both sides were read, summed over the types", () => {
+    // "ספרא" ← "ויקרא": 3 COMMENTARY links and 1,833 MIDRASH ones
+    const f = linkedFields([
+      { dependant: "s", base: "v", count: 3, complete: true },
+      { dependant: "s", base: "v", count: 3 },
+      { dependant: "s", base: "v", kind: "midrash", count: 1833 },
+    ]).get("s")!;
+    expect(f.linkedCounts).toEqual({ v: 1836 });
+    expect(f.linkedKinds).toEqual({}); // a commentary stays a commentary
+    expect(linkedProps(f)).toEqual({ linkedBases: ["v"], linkedCounts: { v: 1836 }, linkedComplete: true });
+    expect(linkedProps(undefined)).toEqual({});
+  });
+});
+
+describe("planMaxLink — the existing links beside the declaration and the title (counted evidence)", () => {
+  type Pair = Extract<ReturnType<typeof planMaxLink>["steps"][number], { kind: "pair" }>;
+  const pairs = (p: ReturnType<typeof planMaxLink>) => p.steps.filter((s): s is Pair => s.kind === "pair");
+  const lib = [
+    book("db:1", "ברכות", { origin: "sefaria", isBaseBook: true }),
+    book("db:2", 'פסקי הרא"ש על ברכות', { origin: "sefaria", dependence: "commentary" }),
+    book("db:3", "מעדני יום טוב על ברכות", { origin: "sefaria", bases: ["db:1"], linkedBases: ["db:2", "db:1"], linkedCounts: { "db:2": 1503, "db:1": 81 }, linkedComplete: true }),
+    book("db:4", "ויקרא", { origin: "sefaria", isBaseBook: true }),
+    // a midrash on ויקרא by its MIDRASH links alone (3 COMMENTARY + 1,833 MIDRASH)
+    book("db:5", "ספרא", { origin: "sefaria", isBaseBook: true, linkedBases: ["db:4"], linkedCounts: { "db:4": 1836 } }),
+    book("db:6", 'מלבי"ם על ויקרא', { origin: "sefaria", bases: ["db:4"], linkedBases: ["db:4", "db:5"], linkedCounts: { "db:4": 1911, "db:5": 1905 }, linkedComplete: true }),
+    book("db:7", "דברים", { origin: "sefaria", isBaseBook: true }),
+    // the haftarot: one COMMENTARY link from דברים does not make ישעיהו a commentary on it
+    book("db:8", "ישעיהו", { origin: "sefaria", isBaseBook: true, linkedBases: ["db:7"], linkedCounts: { "db:7": 1 } }),
+    book("db:9", "פירוש על דברים", { origin: "sefaria", bases: ["db:7"], linkedBases: ["db:7", "db:8"], linkedCounts: { "db:7": 3000, "db:8": 233 }, linkedComplete: true }),
+  ];
+
+  it('a commentary the library links to another commentary on its base gets that one too ("מעדני יום טוב" on the Rosh)', () => {
+    const p = planPairs({ selected: ["db:3"], library: lib });
+    expect(steps(p)).toEqual(expect.arrayContaining(['headings:מעדני יום טוב על ברכות>פסקי הרא"ש על ברכות', 'dibur-hamatchil:מעדני יום טוב על ברכות>פסקי הרא"ש על ברכות', "headings:מעדני יום טוב על ברכות>ברכות"]));
+    const r = pairs(p).find((s) => s.target.key === "db:2")!.relation;
+    expect(r.via).toBe("links");
+    expect(r.scope).toBeUndefined();
+    expect(r.caveats.join(" ")).toContain("1,503");
+  });
+
+  it("below EVIDENCE_MIN, or a book not written on one of its bases, is not a base", () => {
+    const few = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: { "db:2": EVIDENCE_MIN - 1, "db:1": 81 } } : b));
+    expect(steps(planPairs({ selected: ["db:3"], library: few })).some((s) => s.includes('>פסקי הרא"ש'))).toBe(false);
+    expect(steps(planPairs({ selected: ["db:9"], library: lib })).some((s) => s.includes(">ישעיהו"))).toBe(false);
+    // counted only from the other side (no linkedCounts): the declaration alone, as before
+    const uncounted = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: undefined, linkedComplete: undefined } : b));
+    expect(steps(planPairs({ selected: ["db:3"], library: uncounted })).some((s) => s.includes('>פסקי הרא"ש'))).toBe(false);
+  });
+
+  it('a midrash on the same base counts by its MIDRASH links; a text of its own gets dibur-hamatchil only ("מלבי"ם על ויקרא" ← "ספרא")', () => {
+    const s = steps(planPairs({ selected: ["db:6"], library: lib }));
+    expect(s).toEqual(expect.arrayContaining(['dibur-hamatchil:מלבי"ם על ויקרא>ספרא', 'headings:מלבי"ם על ויקרא>ויקרא']));
+    expect(s).not.toContain('headings:מלבי"ם על ויקרא>ספרא');
+  });
+
+  it("an intermediate commentator as the sibling: dibur-hamatchil only, the lines that do not name it left for review", () => {
+    const talmud = [
+      book("k:1", "כתובות", { origin: "sefaria", isBaseBook: true }),
+      book("k:2", "תוספות על כתובות", { origin: "sefaria", bases: ["k:1"] }),
+      book("k:3", 'רש"י על כתובות', { origin: "sefaria", bases: ["k:1"] }),
+      book("k:4", 'מהרש"א - חידושי הלכות על מסכת כתובות', { origin: "sefaria", bases: ["k:1"], linkedBases: ["k:1", "k:2"], linkedCounts: { "k:1": 629, "k:2": 645 }, linkedComplete: true }),
+    ];
+    const p = planPairs({ selected: ["k:4"], library: talmud });
+    const toTos = p.steps.filter((x): x is Pair => x.kind === "pair" && x.target.key === "k:2");
+    expect(toTos.map((x) => x.engine)).toEqual(["dibur-hamatchil"]);
+    expect(toTos[0]!.options).toEqual({ addressedOnly: "cap" });
+    expect(toTos[0]!.relation.dhOnly).toBe("intermediate");
+    // רש"י, with no links counted, keeps the planner's usual step to the other commentators
+    const toRashi = p.steps.find((x): x is Pair => x.kind === "pair" && x.target.key === "k:3")!;
+    expect(toRashi.options).toEqual({ addressedOnly: true });
+  });
+
+  it("a sibling written on this book is its commentary, not its base", () => {
+    const l2 = [...lib, book("db:10", "הגהות על מעדני יום טוב", { bases: ["db:3"] })];
+    const l3 = l2.map((b) => (b.key === "db:3" ? { ...b, linkedBases: ["db:2", "db:10"], linkedCounts: { "db:2": 1503, "db:10": 500 } } : b));
+    expect(steps(planPairs({ selected: ["db:3"], library: l3 })).some((s) => s.includes("מעדני יום טוב על ברכות>הגהות"))).toBe(false);
+  });
+
+  const torah = [
+    book("tn:1", "בראשית", { origin: "sefaria", isBaseBook: true }),
+    book("tn:2", "שמות", { origin: "sefaria", isBaseBook: true }),
+    book("tn:3", 'רש"י על בראשית', { origin: "sefaria", bases: ["tn:1"] }),
+    book("tn:4", 'רש"י על שמות', { origin: "sefaria", bases: ["tn:2"] }),
+    book("tn:5", "מזרחי", { origin: "sefaria", bases: ["tn:1", "tn:2"], linkedBases: ["tn:3", "tn:4"], linkedCounts: { "tn:3": 1601, "tn:4": 1188 }, linkedComplete: true }),
+    book("tn:6", "יריעות שלמה על התורה", { origin: "sefaria", bases: ["tn:1", "tn:2"], linkedBases: ["tn:5", "tn:3"], linkedCounts: { "tn:5": 522, "tn:3": 361 }, linkedComplete: true }),
+    book("tn:7", "שפתי חכמים", { origin: "sefaria", bases: ["tn:3", "tn:4"], linkedBases: ["tn:1", "tn:2"], linkedCounts: { "tn:1": 1470, "tn:2": 1145 }, linkedComplete: true }),
+  ];
+
+  it("in a book on several bases, the sibling is read in the part of the base it is written on", () => {
+    const p = planPairs({ selected: ["tn:5"], library: torah });
+    const r = pairs(p).filter((s) => s.target.key === "tn:3" || s.target.key === "tn:4");
+    // רש"י is an intermediate commentator: dibur-hamatchil only (Relation.dhOnly)
+    expect(r.map((s) => `${s.engine}>${s.target.title}@${s.relation.scope?.section}`).sort()).toEqual(['dibur-hamatchil>רש"י על בראשית@בראשית', 'dibur-hamatchil>רש"י על שמות@שמות']);
+  });
+
+  it('a sibling written on two parts of the book has no one part to read ("יריעות שלמה" ← "מזרחי")', () => {
+    const s = steps(planPairs({ selected: ["tn:6"], library: torah }));
+    expect(s.some((x) => x.endsWith(">מזרחי"))).toBe(false);
+    expect(s).toContain('dibur-hamatchil:יריעות שלמה על התורה>רש"י על בראשית');
+  });
+
+  it('the base of its base, in the part of the commentary it explains ("שפתי חכמים" → "בראשית")', () => {
+    const p = planPairs({ selected: ["tn:7"], library: torah });
+    const r = pairs(p).filter((s) => s.target.key === "tn:1");
+    expect(r.map((s) => s.relation.scope?.section)).toEqual(['רש"י על בראשית', 'רש"י על בראשית']);
+  });
+
+  it('a handful of links to the base of its base is not a relation ("ר"ן על פסחים" → "פסחים", 4 links)', () => {
+    const rif = [
+      book("r:1", "פסחים", { origin: "sefaria", isBaseBook: true }),
+      book("r:2", 'רי"ף פסחים', { origin: "sefaria", bases: ["r:1"] }),
+      book("r:3", 'ר"ן על פסחים', { origin: "sefaria", bases: ["r:2"], linkedBases: ["r:2", "r:1"], linkedCounts: { "r:2": 900, "r:1": 4 }, linkedComplete: true }),
+    ];
+    expect(steps(planPairs({ selected: ["r:3"], library: rif })).some((s) => s.endsWith(">פסחים"))).toBe(false);
+    const many = rif.map((b) => (b.key === "r:3" ? { ...b, linkedCounts: { "r:2": 900, "r:1": LINKED_MIN } } : b));
+    expect(steps(planPairs({ selected: ["r:3"], library: many })).some((s) => s.endsWith(">פסחים"))).toBe(true);
+  });
+
+  const zohar = [
+    book("z:1", "תקוני הזהר", { origin: "otzaria" }),
+    book("z:2", "תקוני הזהר מסודר על פי הגרא", { origin: "otzaria" }),
+    book("z:3", "ביאור הגרא על תקוני הזהר", { origin: "otzaria", linkedBases: ["z:2"], linkedCounts: { "z:2": 9052 }, linkedComplete: true }),
+  ];
+
+  it('a title whose base the library never links the book to gives way to the one it does ("ביאור הגרא על תקוני הזהר")', () => {
+    const p = planPairs({ selected: ["z:3"], library: zohar });
+    expect(steps(p)).toEqual(["headings:ביאור הגרא על תקוני הזהר>תקוני הזהר מסודר על פי הגרא", "dibur-hamatchil:ביאור הגרא על תקוני הזהר>תקוני הזהר מסודר על פי הגרא"]);
+    expect(p.books[0]!.decisions.join(" ")).toContain('השם מציין את "תקוני הזהר"');
+  });
+
+  it("…only when the book's own links were read, and never over a declaration", () => {
+    const partial = zohar.map((b) => (b.key === "z:3" ? { ...b, linkedComplete: undefined } : b));
+    expect(steps(planPairs({ selected: ["z:3"], library: partial }))[0]).toBe("headings:ביאור הגרא על תקוני הזהר>תקוני הזהר");
+    const declared = zohar.map((b) => (b.key === "z:3" ? { ...b, bases: ["z:1"] } : b));
+    expect(steps(planPairs({ selected: ["z:3"], library: declared })).some((s) => s.endsWith(">תקוני הזהר"))).toBe(true);
+    const linkedToo = zohar.map((b) => (b.key === "z:3" ? { ...b, linkedBases: ["z:2", "z:1"], linkedCounts: { "z:2": 9052, "z:1": 3 } } : b));
+    expect(steps(planPairs({ selected: ["z:3"], library: linkedToo }))[0]).toBe("headings:ביאור הגרא על תקוני הזהר>תקוני הזהר");
+  });
+
+  it('a base book is not a commentary on another by a stray link ("שמות" → "יחזקאל", 1 COMMENTARY link)', () => {
+    const tanakh = [
+      book("y:1", "שמות", { origin: "sefaria", isBaseBook: true }),
+      book("y:2", "יחזקאל", { origin: "sefaria", isBaseBook: true, linkedBases: ["y:1"], linkedCounts: { "y:1": 1 }, linkedComplete: true }),
+      book("y:3", "חידושים על שמות בלי שם", { origin: "sefaria", linkedBases: ["y:1"], linkedCounts: { "y:1": 1 }, linkedComplete: true }),
+    ];
+    expect(planPairs({ selected: ["y:2"], library: tanakh }).steps).toEqual([]);
+    const many = tanakh.map((b) => (b.key === "y:2" ? { ...b, linkedCounts: { "y:1": LINKED_MIN } } : b));
+    expect(planPairs({ selected: ["y:2"], library: many }).steps.length).toBe(2);
+    // a book that is not a base text keeps its single link, as before; so does an uncounted one
+    expect(planPairs({ selected: ["y:3"], library: tanakh }).steps.length).toBe(2);
+    const uncounted = tanakh.map((b) => (b.key === "y:2" ? { ...b, linkedCounts: undefined } : b));
+    expect(planPairs({ selected: ["y:2"], library: uncounted }).steps.length).toBe(2);
+  });
+
+  it('a declaration that names one book of a series: every book the links show, each in its part ("פרדס יוסף")', () => {
+    const torah5 = [
+      book("p:1", "בראשית", { origin: "sefaria", isBaseBook: true }),
+      book("p:2", "שמות", { origin: "sefaria", isBaseBook: true }),
+      book("p:3", "ויקרא", { origin: "sefaria", isBaseBook: true }),
+      book("p:4", "תהילים", { origin: "sefaria", isBaseBook: true }),
+      book("p:5", "פרדס יוסף", { origin: "sefaria", bases: ["p:1"], linkedBases: ["p:1", "p:2", "p:3", "p:4"], linkedCounts: { "p:1": 916, "p:2": 1061, "p:3": 881, "p:4": 150 }, linkedComplete: true }),
+    ];
+    const p = planPairs({ selected: ["p:5"], library: torah5 });
+    const rel = (k: string) => p.steps.find((x): x is Pair => x.kind === "pair" && x.target.key === k && x.engine === "headings")?.relation;
+    expect(rel("p:1")?.scope).toEqual({ section: "בראשית" });
+    expect(rel("p:2")?.scope).toEqual({ section: "שמות" });
+    expect(rel("p:3")?.scope).toEqual({ section: "ויקרא" });
+    // a book quoted now and then (under a quarter of the links) is not a base
+    expect(rel("p:4")).toBeUndefined();
+    // nor when the declared base is the only one the links show
+    const one = torah5.map((b) => (b.key === "p:5" ? { ...b, linkedBases: ["p:1", "p:4"], linkedCounts: { "p:1": 916, "p:4": 150 } } : b));
+    expect(planPairs({ selected: ["p:5"], library: one }).steps.every((x) => x.kind !== "pair" || !x.relation.scope)).toBe(true);
+  });
+
+  it("evidenceToFollow: the strongly linked bases whose own base only their links tell", () => {
+    const books = new Map(lib.map((b) => [b.key, b] as const));
+    const ev = [
+      { dependant: "db:6", base: "db:5", count: 1905, complete: true },
+      { dependant: "db:6", base: "db:4", count: 1911, complete: true },
+      { dependant: "db:3", base: "db:2", count: 1503, complete: true }, // "… על ברכות": its title says
+      { dependant: "db:9", base: "db:8", count: EVIDENCE_MIN - 1, complete: true },
+      { dependant: "x", base: "db:8", count: 5000 }, // the other side's summary
+    ];
+    expect(evidenceToFollow(ev, books)).toEqual(["db:5"]); // not "ויקרא": the dependant's declared base
   });
 });
 
