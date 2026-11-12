@@ -101,7 +101,13 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const f = storedForm(link);
   if (f.skipped === "linker") add("error", "export/linker", 'קישורים מסוג "קישור אוטומטי" (linker) אינם מיובאים לאוצריא. בחרו סוג אחר.');
   if (f.skipped === "sefaria-both") add("error", "export/sefaria-both", "שני הספרים הם ספרי ספריא. אוצריא אינה מייבאת קישור כזה מקובץ.");
-  if (!f.knownType) add("warning", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
+  // The generator stores an unknown type as OTHER, but the app's personal import rejects the WHOLE
+  // file for one unknown type (otzaria upstream/dev user_import_parser.dart:496-502 and
+  // user_content_importer.dart:142-144), so for private use it is an error.
+  if (!f.knownType)
+    ctx.purpose === "private"
+      ? add("error", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא. ייבוא אישי באוצריא דוחה את כל הקובץ בגלל קישור אחד כזה. בחרו סוג מוכר.`)
+      : add("warning", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
   if (f.downgraded)
     add("warning", "export/downgraded", `"${t.book.title}" הוא ספר בסיס ו"${s.book.title}" אינו בצורה "X על ${t.book.title}", ולכן הקישור יישמר כ"אחר" ולא יופיע בפאנל המפרשים.`);
   // Compatibility review #1: a commentary file that says "commentary" toward its own base book is

@@ -29,6 +29,10 @@ describe("validateLink — generator gates", () => {
     expect(codes(link({ declaredType: "linker" }))).toContain("error:export/linker");
     expect(codes(link({ declaredType: "sifrei mitsvot" }))).toContain("warning:export/unknown-type");
   });
+  it("for private use an unknown type is an error: the app's personal import rejects the whole file for it", () => {
+    const priv = validateLink(link({ declaredType: "sifrei mitsvot" }), { ...ctx, purpose: "private" }).map((p) => `${p.severity}:${p.code}`);
+    expect(priv).toContain("error:export/unknown-type");
+  });
   it("a links file whose source title is no open book: the generator drops the whole file", () => {
     // real library case: "וזה לשונו - שובבי׳׳ם_links.json" — the database spells the book "…שובבי״ם"
     const unknown: BookRef = { key: "unresolved:וזה לשונו - שובבי׳׳ם", title: "וזה לשונו - שובבי׳׳ם", origin: "unknown" };

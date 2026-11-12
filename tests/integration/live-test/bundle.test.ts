@@ -61,6 +61,9 @@ describe("the bundle is what the tool writes", () => {
       ["N1a", []],
       ["N1b", ["warning:export/unknown-type"]],
     ]);
+    // for private use the tool itself stops it: the app would reject the whole file
+    const priv = validateExport(bundle.plans.negative.written, validationContext());
+    expect([...priv.values()].flat().map((p) => `${p.severity}:${p.code}`)).toContain("error:export/unknown-type");
   });
 
   it("every links file passes the tool's own parser and the library's byte rules, and reads back as the same links", () => {

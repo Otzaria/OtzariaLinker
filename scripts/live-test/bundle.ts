@@ -344,7 +344,11 @@ export function buildLiveTestBundle(): LiveTestBundle {
   }
 
   const negative = negativeCases();
-  const negativePlan = planExport(negative.map((c) => c.link), ctx);
+  // For private use the tool now STOPS this file (export/unknown-type is an error there, because the
+  // app rejects the whole file). The case exists to show the app doing that, so the file is written
+  // with the submission rules, where the type is only a warning (the generator stores OTHER).
+  const negativeCtx: ValidationContext = { ...ctx, purpose: "submission" };
+  const negativePlan = planExport(negative.map((c) => c.link), negativeCtx);
 
   const files: BundleFile[] = [
     ...Object.entries(BOOKS).map(([title, lines]) => ({ path: `${BOOKS_DIR}/${title}.txt`, text: bookText(lines) })),
@@ -357,7 +361,7 @@ export function buildLiveTestBundle(): LiveTestBundle {
     ...negativePlan.files.map((f) => ({ path: `negative/${f.name}`, text: f.text })),
   ];
 
-  const report = [...reportCases(main, mainPlan, ctx, BOOKS_DIR), ...reportCases(negative, negativePlan, ctx, "negative")];
+  const report = [...reportCases(main, mainPlan, ctx, BOOKS_DIR), ...reportCases(negative, negativePlan, negativeCtx, "negative")];
   files.push({ path: "manifest.json", text: `${JSON.stringify({ format: "otzaria-linker-live-test", version: 1, cases: report, relinked }, null, 2)}\n` });
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { files, cases: report, plans: { main: mainPlan, update: updatePlan, negative: negativePlan }, relinked };
