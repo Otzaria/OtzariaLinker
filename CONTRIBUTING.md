@@ -7,7 +7,7 @@ AI: גם [`AGENTS.md`](AGENTS.md), שכלליו מחייבים כל שינוי.
 
 ## התקנה
 
-- Node.js 22 ומעלה.
+- Node.js 24 ומעלה (בדיקות zstd יוצרות מסגרות עם מילון דרך `node:zlib`, שקיים רק בגרסאות החדשות).
 - `npm ci` (הגרסאות נעולות: `.npmrc` עם `save-exact`, ו־`package-lock.json`).
 - לבדיקות E2E: Chrome ו־Edge מותקנים במחשב (Playwright משתמש בהם ישירות), ו־Firefox של Playwright: `npx playwright install firefox`. CI מריץ את שלושתם.
 

@@ -43,7 +43,7 @@
 
 ## 4. CI (`.github/workflows/ci.yml`)
 
-רץ על push ל־`main` ול־`rewrite/**`, ועל כל pull request, ב־`ubuntu-latest` עם Node 22:
+רץ על push ל־`main` ול־`rewrite/**`, ועל כל pull request, ב־`ubuntu-latest` עם Node 24 (כמו בפיתוח; בדיקות zstd צריכות את `zstdCompressSync` עם מילון):
 
 `npm ci` → `npm run typecheck` → `npm test` (עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3) →
 `npm run build` (כולל הסריקה ותקציב הגודל, §2) → התקנת Chrome, Edge ו־Firefox (`npx playwright install

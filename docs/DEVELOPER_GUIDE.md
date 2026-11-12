@@ -8,7 +8,7 @@
 ## 1. התקנה ובנייה
 
 ```
-npm ci              # Node 22 ומעלה; גרסאות נעולות
+npm ci              # Node 24 ומעלה; גרסאות נעולות
 npm run dev         # שרת פיתוח של Vite
 npm run build       # dist/OtzariaLinker.html
 ```
