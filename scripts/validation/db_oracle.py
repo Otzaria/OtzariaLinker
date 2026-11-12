@@ -18,6 +18,7 @@ commands
     presence  <db> <out.jsonl> <in.jsonl>        DB links between given line pairs (for library records)
     gold      <db> <out.json> <pairs.json>       links between pairs of books (engine ground truth)
     divine    <db> <out.json> [n]                a deterministic sample of line_divine_name rows
+    typepairs <db> <out.json>                    link counts per (stored type, source book, target book)
 """
 import hashlib
 import json
@@ -409,6 +410,19 @@ def cmd_divine(db, out, n=400):
     json.dump(rows, open(out, "w", encoding="utf-8"), ensure_ascii=False)
 
 
+def cmd_typepairs(db, out):
+    """
+    The library benchmark's population (tests/validation/library-benchmark.test.ts): one row per
+    (connection type name, source book id, target book id) with its number of links, in stored
+    direction. One full scan of `link` (about a minute on the 6.9M-link database).
+    """
+    c = connect(db)
+    names = dict(c.execute("select id, name from connection_type"))
+    rows = [[names.get(t, "OTHER"), s, g, n] for t, s, g, n in c.execute(
+        "select connectionTypeId, sourceBookId, targetBookId, count(*) from link group by 1, 2, 3 order by 1, 2, 3")]
+    json.dump({"rows": rows}, open(out, "w", encoding="utf-8"), ensure_ascii=False)
+
+
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:]
-    {"books": cmd_books, "sample": cmd_sample, "pairs": cmd_pairs, "truth": cmd_truth, "anchors": cmd_anchors, "presence": cmd_presence, "gold": cmd_gold, "divine": cmd_divine}[cmd](*args)
+    {"books": cmd_books, "sample": cmd_sample, "pairs": cmd_pairs, "truth": cmd_truth, "anchors": cmd_anchors, "presence": cmd_presence, "gold": cmd_gold, "divine": cmd_divine, "typepairs": cmd_typepairs}[cmd](*args)
