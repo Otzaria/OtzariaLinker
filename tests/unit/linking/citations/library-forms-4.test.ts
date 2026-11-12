@@ -449,3 +449,19 @@ describe('"רמ"א שם" resolved', () => {
     expect(out.map((s) => `${s.target.book.key}:${s.target.line}`)).toEqual(["ma:4", "sa-oc:6"]);
   });
 });
+
+describe("a chapter by an ordinal word", () => {
+  it(`"בפרק קמא דבבא בתרא", "ברכות פרק בתרא דף נ"ו": the Gemara's — books mean its discussion there`, () => {
+    expect(books(scan([`כדאיתא בפרק קמא דבבא בתרא שאמרו`])[0])).toEqual(["bb"]);
+    expect(loc(scan([`כדאיתא ברכות פרק בתרא דף נ"ו שאמרו`])[0])).toBe("perek:0 daf:56");
+    // with a word for the Mishna it stays there
+    expect(books(scan([`כדתנן במשנה בפרק קמא דבבא בתרא`])[0])).toContain("m-bb");
+  });
+  it(`"בפרק בתרא דברכות", "במסכת ברכות פרק בתרא": the book's last chapter`, () => {
+    for (const line of [`כדאיתא בפרק בתרא דברכות שאמרו`, `כדאיתא במסכת ברכות פרק בתרא שאמרו`]) {
+      const [s] = run(line);
+      expect(s?.target.book.key, line).toBe("ber");
+      expect(s!.target.line, line).toBe(17);
+    }
+  });
+});

@@ -1,5 +1,5 @@
 import type { BookRef } from "../../../core/links/model";
-import { amudOnlyAt, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
+import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
 import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { toGematria } from "../../../core/text/gematria";
@@ -290,6 +290,8 @@ export class CitationScanner {
         if (own.length) cands = own;
       }
       let elems = addr.elems;
+      // "ברכות פרק בתרא דף נ"ו", "במסכת כתובות פרק בתרא": a chapter by an ordinal word is the Gemara's
+      if (elems[0]!.ordinal && cands.some((x) => x.collection === "bavli") && !qualifierBefore(toks, i)) cands = cands.filter((x) => x.collection === "bavli");
       // "ובמדרש רבה [ויקרא פכ"ב]", "ברבות [בראשית פי"א]", "ובמד"ר [במדבר פי"ב]": the midrash on that book, not the book
       if (m.entry.targets.every((t) => t.collection === "tanakh") && rabbahBefore(toks, i)) {
         const midrash = this.midrashOf(m.entry.targets);
@@ -585,8 +587,10 @@ export class CitationScanner {
     let cands = this.own(topic ? [topic.target] : m!.entry.targets);
     // "בפ"ק דיבמו'": a name only the Bavli has (a truncation, a nickname) — a chapter is the Mishna's as well
     if (!topic && cands.length && cands.every((x) => x.collection === "bavli")) cands = [...cands, ...this.siblings(cands, "mishna").map((x) => ({ ...x, tier: "secondary" as const }))];
-    // "ובגמרא (פרק חמישי דב"ב)", "בש"ס פ"ב דכתובות": the Gemara's chapter, not the Mishna's
-    if (!topic && qualifierBefore(toks, i) === "bavli" && cands.some((x) => x.collection === "bavli")) cands = cands.filter((x) => x.collection === "bavli");
+    // "ובגמרא (פרק חמישי דב"ב)", "בש"ס פ"ב דכתובות": the Gemara's chapter, not the Mishna's — and a chapter by an
+    // ordinal word ("בפרק קמא דבבא בתרא", "בפרק בתרא דר"ה"): books mean the Gemara's discussion in it (LINKER links there)
+    const q = qualifierBefore(toks, i);
+    if (!topic && (q === "bavli" || (head.ordinal && !q)) && cands.some((x) => x.collection === "bavli")) cands = cands.filter((x) => x.collection === "bavli");
     if (!cands.length) return this.drop("self");
     const name = topic ? topic.target.book.title : m!.entry.text;
     return this.emit(toks, line, { from: i, to, candidates: cands, name, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, ...(m && !topic && { m }), ...(topic && { rule: `rambam-topic-${topic.how}` }), ...(head.ordinal && { ordinal: true }) });
@@ -1698,8 +1702,8 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; or
     if (word || abbrev) {
       const num = toks[i + 1];
       // "בפרק קמא דסנהדרין", "פ' שני דכתובות": an ordinal word (the reversed form needs the book after it)
-      const ordinal = num?.kind === "word" && !num.gershayim && !num.geresh ? ORDINALS[num.key] : undefined;
-      if (ordinal) return { n: ordinal, next: i + 2, ordinal: true };
+      const ordinal = num?.kind === "word" && !num.gershayim && !num.geresh && Object.hasOwn(ORDINALS, num.key) ? ORDINALS[num.key] : undefined;
+      if (ordinal !== undefined) return { n: ordinal, next: i + 2, ordinal: true };
       if (num?.kind === "word" && (num.gershayim || num.geresh)) {
         const n = num.gershayim ? (num.gershayimAt === num.text.length - 1 ? strictValue(num.text) : null) : strictValue(num.text);
         if (n && (word || n <= 30)) return { n, next: i + 2 };
@@ -1713,7 +1717,7 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; or
 const NUMERIC_TANAKH: Readonly<Record<string, string>> = { 'ש"א': "שמואל א", 'ש"ב': "שמואל ב", 'מ"א': "מלכים א", 'מ"ב': "מלכים ב" };
 
 /** ordinal words for a chapter ("פרק קמא", "פ' שלישי") */
-const ORDINALS: Readonly<Record<string, number>> = { קמא: 1, ראשונ: 1, תנינא: 2, שני: 2, שלישי: 3, רביעי: 4, חמישי: 5, ששי: 6, שישי: 6, שביעי: 7, שמיני: 8, תשיעי: 9, עשירי: 10 };
+const ORDINALS = CHAPTER_ORDINALS;
 
 /** words for "הלכות" between the ד/מ and a Rambam topic ("מה' מכירה", "מהלכו' אישות") */
 const HILCHOT = new Set(["ה'", "הל'", "הלכות", "הלכו'", "הלכ'"]);

@@ -46,7 +46,12 @@ export interface AddrElem {
    * tries both readings in the cited book (engine.ts, alternativeReading)
    */
   readonly afterPeh?: true;
+  /** a chapter written as an ordinal word ("פרק קמא", "פרק בתרא"); n 0 is the last chapter ("בתרא") */
+  readonly ordinal?: true;
 }
+
+/** ordinal words for a chapter ("פרק קמא", "פרק שלישי"); "בתרא" / "אחרון" — the last (0, told by the book) */
+export const CHAPTER_ORDINALS: Readonly<Record<string, number>> = { קמא: 1, ראשונ: 1, תנינא: 2, שני: 2, שלישי: 3, רביעי: 4, חמישי: 5, ששי: 6, שישי: 6, שביעי: 7, שמיני: 8, תשיעי: 9, עשירי: 10, בתרא: 0, אחרונ: 0 };
 
 export interface Address {
   readonly elems: readonly AddrElem[];
@@ -318,6 +323,9 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null, inBrackets
   // "ד' ע"א" is daf 4 side a, not "דף ע"א"
   if (m && !amudAt(toks, j + m.width)) {
     const k = j + m.width;
+    // "ברכות פרק בתרא דף נ"ו", "במסכת כתובות פרק בתרא": the full word "פרק" and an ordinal word
+    const ord = m.kind === "perek" && /פרק$/.test(shape(t)) && toks[k]?.kind === "word" && !toks[k]!.gershayim && !toks[k]!.geresh && Object.hasOwn(CHAPTER_ORDINALS, toks[k]!.key) ? CHAPTER_ORDINALS[toks[k]!.key]! : undefined;
+    if (ord !== undefined) return { elem: { kind: "perek", n: ord, explicit: true, numeral: { n: ord, form: "bare", common: false }, ordinal: true }, next: k + 1 };
     const num = numeralOf(toks[k]) ?? oldStyleNumeral(toks[k]);
     // "(דניאל ד', כ"ד)": "ד'" with no numeral after it is the numeral 4, not "דף"
     if (!num && !(m.width === 1 && m.kind === "daf" && shape(t) === "ד'")) return null;

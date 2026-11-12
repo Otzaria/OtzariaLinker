@@ -314,7 +314,9 @@ export class CitationRun {
         // one) is its Nth chapter in the book's own structure (alt_toc "Chapters") — the whole chapter
         if (index.daf && chapterByNumber(p.citation)) {
           const n = p.citation.elems[0]!.n;
-          const u = (this.units.byBook.get(book.key) ?? bookUnits ?? []).find((x) => x.kind === "chapter" && x.ordinal === n);
+          const chapters = (this.units.byBook.get(book.key) ?? bookUnits ?? []).filter((x) => x.kind === "chapter");
+          // "פרק בתרא": the last chapter
+          const u = n === 0 ? chapters.at(-1) : chapters.find((x) => x.ordinal === n);
           if (u) p.resolved.push({ target: t, res: { book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, heRef: null });
           continue;
         }
@@ -558,7 +560,7 @@ function chapterByNumber(c: Citation): boolean {
   const e = c.elems[0];
   // "רשב"א [שבת פ"ח]" after the name is chapter 8 or daf 88 (LINKER reads the daf): only a chapter that cannot be a
   // number — before the name ("פ"ב דכתובות"), or "ספ"ב"
-  return c.elems.length === 1 && e!.kind === "perek" && e!.alsoNumber === undefined && !c.unit && (c.commentator !== undefined || c.qualifier === "bavli");
+  return c.elems.length === 1 && e!.kind === "perek" && e!.alsoNumber === undefined && !c.unit && (c.commentator !== undefined || c.qualifier === "bavli" || !!c.ordinal || !!e!.ordinal);
 }
 
 /** A book's own unit of that name: the same name, or else the only one whose name starts with the cited words ("שלח" → "שלח לך"). */
