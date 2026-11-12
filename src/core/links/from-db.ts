@@ -84,7 +84,8 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
 
   // heRef_2 is not in the database: the file target's own reference (line.heRef), with the anchor label
   const targetLine = ctx.line(chosen.target.book, chosen.target.line);
-  let heRef2 = targetLine?.heRef ?? `${chosen.target.book.title} ${chosen.target.line + 1}`;
+  // never blank: the weekly sync rejects an empty heRef_2 (B3)
+  let heRef2 = targetLine?.heRef?.trim() ? targetLine.heRef : `${chosen.target.book.title} ${chosen.target.line + 1}`;
 
   let anchor: RawAnchor | undefined;
   if (anchors0.length && !f.flipped) {

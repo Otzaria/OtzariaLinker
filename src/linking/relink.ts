@@ -1,3 +1,4 @@
+import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
 import type { LineFate, LineMapping } from "../matching/line-diff";
 import { visibleSlice } from "../matching/hebrew-tokens";
@@ -126,8 +127,12 @@ function planOne(link: Link, inSource: boolean, inTarget: boolean, input: Relink
     ...(inTarget && { targetPath: undefined }),
   };
   if (inTarget) delete (moved as { targetPath?: string }).targetPath;
+  // the sync's anchor fields describe the OLD source line and anchor (B2); the refs name the same
+  // passage in the new edition, so they stay and the sync realigns the line from them
+  const fresh = dropStalePipelineFields(link, moved, { keepRefs: true, sourceTextChanged: inSource && input.mapping.fate[link.source.line] === "changed" });
+  if (fresh.dropped.length) reasons.push(`${fresh.dropped.join(" ו־")} של הסנכרון השבועי הוסרו מהרשומה, כי שורת המקור או העוגן השתנו.`);
   if (!reasons.length) reasons.push("השורה זהה במהדורה החדשה.");
-  return { link, verdict, reasons, moved };
+  return { link, verdict, reasons, moved: fresh.link };
 }
 
 /** The anchor's words in the old line, found exactly once in the new line → new raw offsets. */

@@ -175,7 +175,7 @@ export class DbBookSource implements BookSource {
       source: end(r.source),
       target: end(r.target),
       declaredType: canonicalTypeString(r.type),
-      heRef2: r.target.heRef ?? `${ref(r.target.bookId).title} ${r.target.lineIndex + 1}`,
+      heRef2: r.target.heRef?.trim() ? r.target.heRef : `${ref(r.target.bookId).title} ${r.target.lineIndex + 1}`,
       ...(r.anchors.length > 0 && { dbAnchors: r.anchors }),
       ...(r.suppressedSides.length > 0 && { dbSuppressed: [...r.suppressedSides].sort() }),
     };

@@ -228,7 +228,7 @@ export class CitationRun {
         ...(anchor && { anchor }),
         target,
         declaredType: "reference",
-        heRef2: best.heRef ?? res.label,
+        heRef2: best.heRef?.trim() ? best.heRef : res.label,
         score: round(best.score),
         confidence,
         reasons,

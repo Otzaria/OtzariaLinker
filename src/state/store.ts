@@ -7,6 +7,7 @@ import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { normalizeTitle, path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
+import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { stripTags } from "../core/text/html";
 import { linkToRecord, recordToLink } from "../formats/links-json/convert";
 import { recordToObject } from "../formats/links-json/serialize";
@@ -186,23 +187,36 @@ export class AppStore {
     const { anchor: _a, ref1: _r1, ref2: _r2, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
     const ref1 = this.draftRef1.value.trim();
     const ref2 = this.draftRef2.value.trim();
-    return {
+    const d: Link = {
       ...kept,
       source,
       target,
       declaredType: this.draftType.value,
-      heRef2: this.draftHeRef.value ?? this.autoHeRef(t),
+      // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
+      heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
       ...(s.anchor && { anchor: { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) } }),
       ...(ref1 && { ref1 }),
       ...(ref2 && { ref2 }),
       ...(base && base.target.book.title !== target.book.title && { targetPath: path2ForTitle(target.book.title) }),
     };
+    // an edited record never keeps the sync's fields for an anchor or line it no longer has (B2)
+    return base ? dropStalePipelineFields(base, d).link : d;
   });
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
     const { linksFile: _f, ...ctx } = this.validation();
-    return d ? validateLink(d, ctx) : [];
+    if (!d) return [];
+    const out = validateLink(d, ctx);
+    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    if (base) {
+      const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
+      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ref_1 הישן ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
+      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ref_2 הישן ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
+      const fields = dropped.filter((x) => x.startsWith("anchor_"));
+      if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: `${fields.join(" ו־")} של הסנכרון השבועי יוסרו מהרשומה, כי העוגן או השורה השתנו.` });
+    }
+    return out;
   });
 
   private noticeSeq = 0;
@@ -369,6 +383,11 @@ export class AppStore {
       const hi = Math.max(cur.end ?? cur.line, line, cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
+    if (side === "source" && this.editing.value) {
+      // a new source line makes the old ref_1 wrong — the sync would move the link back to it (B2)
+      const edited = this.linkState.value.links.get(this.editing.value);
+      if (edited && !(this.sameBook(edited.source.book, bookKey) && edited.source.line === this.pick.source.value?.line)) this.draftRef1.value = "";
+    }
     if (side === "target") {
       // a new target makes the old reference wrong — also while editing (UX review #3)
       const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
@@ -420,7 +439,7 @@ export class AppStore {
     const book = this.books.value.get(t.bookKey);
     const title = book?.title ?? this.refOf(t.bookKey).title;
     const line = this.lines.peek(t.bookKey, t.line);
-    if (line?.heRef) return line.heRef;
+    if (line?.heRef?.trim()) return line.heRef;
     const trail: string[] = [];
     let level = 7;
     for (let i = t.line; i >= 0 && i > t.line - 3000 && level > 1; i--) {
@@ -659,7 +678,8 @@ export class AppStore {
       source: s.source,
       target: s.target,
       declaredType: s.declaredType,
-      heRef2: s.heRef2,
+      // every engine's reference, never blank (B3): the target's title and line otherwise
+      heRef2: s.heRef2.trim() ? s.heRef2 : `${s.target.book.title} ${s.target.line + 1}`,
       ...(s.anchor && { anchor: s.anchor }),
     };
   }

@@ -85,3 +85,10 @@ describe("validateExport", () => {
     expect(res.get("b")!.map((p) => p.code)).toContain("export/duplicate");
   });
 });
+
+describe("heRef_2 is never blank (compatibility review B3)", () => {
+  it("an empty or whitespace heRef_2 is an error: the weekly sync rejects it", () => {
+    expect(codes(link({ heRef2: "" }))).toContain("error:export/heref-missing");
+    expect(codes(link({ heRef2: "   " }))).toContain("error:export/heref-missing");
+  });
+});

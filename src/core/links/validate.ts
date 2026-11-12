@@ -104,8 +104,9 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
     add("warning", "export/reversed-dependency", `הקישור יישמר הפוך: "${f.storedTarget.book.title}" יופיע כמפרש של "${f.storedSource.book.title}". בקישור מפירוש אל הספר שעליו נכתב בחרו את הסוג "מקור" (source).`);
   if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
 
-  // the key is required (its absence rejects the whole file — the parser catches that); an empty value is legal
-  if (!link.heRef2.trim()) add("warning", "export/heref-missing", "שם המקום ביעד (heRef_2) ריק. אוצריא תקבל את הקישור, אבל בלי שם מקום לתצוגה ובלי תווית עוגן.");
+  // The generator accepts an empty heRef_2, but the library's weekly sync rejects a blank one
+  // (ManualLinksJson.kt:271,302-304) and fails the whole refresh — an error (compatibility review B3).
+  if (!link.heRef2.trim()) add("error", "export/heref-missing", "שם המקום ביעד (heRef_2) ריק. הסנכרון השבועי של הספרייה דוחה רשומה כזו ונכשל כולו. כתבו שם מקום, למשל שם הספר ומספר השורה.");
   // The source title is the links file's name: when no book has it, the generator matches nothing
   // and drops the WHOLE file (seen in the library: "וזה לשונו - שובבי׳׳ם_links.json", whose book is
   // "…שובבי״ם" in the database — real-data validation, check 3).
