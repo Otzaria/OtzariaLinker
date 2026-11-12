@@ -78,8 +78,8 @@ const SAMPLE: readonly { group: string; title: string }[] = [
 ];
 
 /**
- * Floors the full sample must keep (measured 2026-11-11: certain 86.3% strict / 99.9% judged, high 75.8% /
- * 99.8%). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
+ * Floors the full sample must keep (measured 2026-11-12, with units cited by name: certain 85.9% strict /
+ * 99.9% judged, high 73.3% / 99.8%). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
  * of those put the true precision near 99% (certain) and 95% (high) — docs/AUTOMATION_ENGINE.md §6.8.
  */
 const MIN = { certain: { strict: 0.85, judged: 0.99 }, high: { strict: 0.72, judged: 0.98 } } as const;
