@@ -1,6 +1,7 @@
 import type { BookRef } from "../../../core/links/model";
 import type { AltTocStructure } from "../../../core/alt-toc/model";
 import { collectionOf, normTitle, type Collection } from "./aliases";
+import { numeralOf } from "./numbers";
 import { citationTokens, type Tok } from "./text";
 
 /*
@@ -49,6 +50,8 @@ export interface UnitMatches {
   readonly matches: readonly UnitMatch[];
   /** token index just past the matched words */
   readonly to: number;
+  /** the name was written as its initials ("אע"פ") */
+  readonly initials?: boolean;
 }
 
 /** The alt_toc structure that names a book's units, by the structure's key (or its Hebrew title). */
@@ -91,7 +94,9 @@ export function unitsFromAltToc(book: BookRef, kind: UnitKind, structures: reado
  */
 export function looseWord(key: string): string {
   if (key.length < 3) return key;
-  return key[0]! + key.slice(1, -1).replace(/[וי]/g, "") + key.at(-1)!;
+  // the Aramaic plural: "ארבעה אחין" for the structure's "ארבעה אחין" / "אחים"
+  const last = /[נןם]/.test(key.at(-1)!) ? "מ" : key.at(-1)!;
+  return key[0]! + key.slice(1, -1).replace(/[וי]/g, "") + last;
 }
 
 /** A name as compared (loose words joined by a space), or null when it has no Hebrew word. */
@@ -105,6 +110,8 @@ export class NamedUnitIndex {
   private readonly byFirst = new Map<string, { words: readonly string[]; units: NamedUnit[] }[]>();
   /** book key → its units, in order */
   readonly byBook = new Map<string, readonly NamedUnit[]>();
+  /** the initials of a name of two words or more ("אע"פ" — אף על פי) → its units */
+  private readonly byInitials = new Map<string, NamedUnit[]>();
 
   static build(sources: readonly NamedUnitSource[]): NamedUnitIndex {
     const ix = new NamedUnitIndex();
@@ -127,6 +134,11 @@ export class NamedUnitIndex {
           ix.byFirst.set(entry.words[0]!, first);
         }
         entry.units.push(unit);
+        const words = key.split(" ");
+        if (words.length >= 2) {
+          const initials = words.map((w) => w[0]).join("");
+          ix.byInitials.set(initials, [...(ix.byInitials.get(initials) ?? []), unit]);
+        }
       });
       ix.byBook.set(s.book.key, [...(ix.byBook.get(s.book.key) ?? []), ...list]);
     }
@@ -145,7 +157,13 @@ export class NamedUnitIndex {
    */
   matchAt(toks: readonly Tok[], i: number, kinds: readonly UnitKind[]): UnitMatches | null {
     const t = toks[i];
-    if (!t || t.kind !== "word" || t.gershayim || t.geresh) return null;
+    if (!t || t.kind !== "word" || t.geresh) return null;
+    // "פ' אע"פ": the initials of a whole name (a numeral is a chapter number, not a name)
+    if (t.gershayim) {
+      if (numeralOf(t)) return null;
+      const units = (this.byInitials.get(t.key) ?? []).filter((u) => kinds.includes(u.kind));
+      return units.length ? { matches: units.map((unit) => ({ unit, full: true })), to: i + 1, initials: true } : null;
+    }
     let best = 0;
     let out: UnitMatch[] = [];
     for (const e of this.byFirst.get(looseWord(t.key)) ?? []) {

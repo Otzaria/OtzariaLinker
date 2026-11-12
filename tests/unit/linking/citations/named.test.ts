@@ -192,6 +192,32 @@ describe("named units: chapters", () => {
   });
 });
 
+describe("named units: a shared name told apart by its daf, initials, the Aramaic plural", () => {
+  it("a name two tractates share: the one whose chapter holds the daf; neither — no link", () => {
+    // ברכות' "היה קורא" runs from daf ד., שבת's from daf ב.
+    const [b] = run(["כדאיתא בפרק היה קורא (דף ד:) ע״ש"]).suggestions;
+    expect(b!.target.book).toEqual(BER);
+    expect(b!.confidence).toBe("high");
+    expect(b!.rules).toContain("citations.unit-context-unique");
+    expect(run(["כדאיתא בפרק היה קורא (דף ב.) ע״ש"]).suggestions.map((s) => s.target.book.key)).toEqual(["shab"]);
+    expect(run(["כדאיתא בפרק היה קורא (דף ו.) ע״ש"]).suggestions).toHaveLength(0);
+    // without a daf it is still not guessed
+    expect(run(["כדאיתא בפרק היה קורא ע״ש"]).suggestions).toHaveLength(0);
+  });
+
+  it("a name written as its initials (\"פ' אע\"פ\"), never a numeral", () => {
+    const lib = library([alt(KID, "chapter", [["אף על פי", 1]], kidRefs.length - 1)]);
+    const [k] = run(["כדאיתא בפ' אע\"פ (דף ב:) ע״ש"], SRC, lib).suggestions;
+    expect(k!.target.book).toEqual(KID);
+    expect(run(["כדאיתא בפ' י\"ב (דף ב:) ע״ש"], SRC, lib).suggestions.every((s) => s.target.book.key !== "kid" || !s.rules.includes("citations.named"))).toBe(true);
+  });
+
+  it("the Aramaic plural ending compares as the Hebrew one", () => {
+    expect(looseWord("אחין")).toBe(looseWord("אחים"));
+    expect(looseWord("ממנו")).not.toBe(looseWord("מומין"));
+  });
+});
+
 describe("named units: parshiyot", () => {
   it("בפרשת נח → the parsha's range in the Torah book (possible); 'פ' נח' and 'הפרשת' are not parsha citations", () => {
     const [s] = run(["כמו שכתבנו בפרשת נח ע״ש"]).suggestions;

@@ -205,3 +205,210 @@ describe("citations: a bare siman next to another book's name", () => {
     expect(mb('וכמ"ש בסימן רצ"ו ס"ב וקידוש')).toHaveLength(1);
   });
 });
+
+describe("citations: a Rambam topic after a chapter (\"רמב\"ם פ\"ט מתרומות\")", () => {
+  // the library's titles; "איגרות הרמב"ם" carries the author's name as its book_acronym, "משנה מעשר שני" carries "מ"ש"
+  const RAMBAM = [
+    ...CATALOG,
+    book("r-trum", "משנה תורה, הלכות תרומות"),
+    book("r-ib", "משנה תורה, הלכות איסורי ביאה"),
+    book("r-gz", "משנה תורה, הלכות גזילה ואבידה"),
+    book("r-ish", "משנה תורה, הלכות אישות"),
+    book("r-mech", "משנה תורה, הלכות מכירה"),
+    book("r-gir", "משנה תורה, הלכות גירושין"),
+    book("r-maas", "משנה תורה, הלכות מעשרות"),
+    book("r-ms", "משנה תורה, הלכות מעשר שני ונטע רבעי"),
+    book("m-trum", "משנה תרומות"),
+    book("m-ms", "משנה מעשר שני", "sefaria", ['מ"ש']),
+    book("ket", "כתובות"),
+    book("igrot", 'איגרות הרמב"ם', "otzaria", ['הרמב"ם']),
+    book("sa-eh", "שולחן ערוך, אבן העזר"),
+  ];
+  const scanR = (line: string): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(RAMBAM), "src", {}, "ספר כלשהו");
+    sc.scanLine(0, line, null);
+    return sc.citations;
+  };
+  const oneR = (line: string) => {
+    const c = scanR(line);
+    expect(c, line).toHaveLength(1);
+    return c[0]!;
+  };
+
+  it("the author's name before it, or a word for הלכות, makes the words a topic of the Rambam", () => {
+    const a = oneR('כמ"ש רמב"ם פ"ט מתרומות הל\' ה\' ורמז');
+    expect(books(a)).toEqual(["r-trum"]);
+    expect(loc(a)).toBe("perek:9 halacha:5");
+    expect(a.rule).toBe("rambam-topic-full");
+    expect(books(oneR('וכן בפ"ה מה\' מכירה ע"ש'))).toEqual(["r-mech"]);
+    expect(loc(oneR("ובפרק ו' מהלכו' אישות כתב"))).toBe("perek:6");
+    // "רפ"י" = ריש פרק י
+    expect(loc(oneR('ושיטת רמב"ם רפ"י מגירושין וכבר'))).toBe("perek:10");
+  });
+
+  it("the first word of a topic, or its initials, when only one topic fits", () => {
+    const g = oneR("ובפ' ט' מהל' גזלה כתב");
+    expect(books(g)).toEqual(["r-gz"]);
+    expect(g.rule).toBe("rambam-topic-first");
+    const i = oneR('הרמב"ם פ"ג מא"ב הלכה ב\' אבל');
+    expect(books(i)).toEqual(["r-ib"]);
+    expect(i.rule).toBe("rambam-topic-initials");
+    // "מעשר" is the first word of מעשר שני and the start of מעשרות: no guess
+    expect(scanR('כמ"ש רמב"ם סוף פ\' י"ב מהל\' מעשר והכא')).toHaveLength(0);
+  });
+
+  it("a commentary on the Rambam named before it: its words on that chapter, when the library has it", () => {
+    const withMlm = [...RAMBAM, book("mlm-trum", "משנה למלך על משנה תורה, הלכות תרומות"), book("km-trum", "כסף משנה על משנה תורה, הלכות תרומות")];
+    const scanC = (line: string) => {
+      const sc = new CitationScanner(AliasIndex.build(withMlm), "src", {}, "ספר כלשהו");
+      sc.scanLine(0, line, null);
+      return sc.citations;
+    };
+    const a = scanC(`וכמש"כ המל"מ [בפ"ט מהל' תרומות] א"כ`)[0]!;
+    expect(books(a)).toEqual(["mlm-trum"]);
+    expect(a.commentator).toBe("משנה למלך");
+    expect(books(scanC(`וכתב הכ"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["km-trum"]);
+    // "וכ"מ" is "וכן משמע": the Rambam
+    expect(books(scanC(`וכ"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["r-trum"]);
+    // not in the library: the Rambam's chapter stays
+    expect(books(scanC(`וכתב הלח"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["r-trum"]);
+  });
+
+  it("the author's name is not a book: it does not swallow the place", () => {
+    expect(scanR('וזהו דעת הרמב"ם פ"ד מהל\' תרומות ע"ש').map(books)).toEqual([["r-trum"]]);
+  });
+
+  it("without the author or הלכות the words are the tractate; with the author, a tractate is not guessed", () => {
+    expect(books(oneR('וכדתנן פ"ט מתרומות'))).toEqual(["m-trum"]);
+    expect(scanR('והרמב"ם פ"ב דכתובות כתב')).toHaveLength(0);
+    // a chapter over 30 after ר/ס is not "ריש/סוף פרק"
+    expect(scanR('ספ"ר דכתובות')).toHaveLength(0);
+  });
+
+  it("\"מ\"ש\" opens no citation (מה שכתב), but is the tractate after a chapter", () => {
+    expect(books(oneR('כמ"ש באה"ע סי\' קמ"א ס"ל'))).toEqual(["sa-eh"]);
+    expect(books(oneR('וכדאיתא בפ"ב דמ"ש ובירושלמי'))).toEqual(["m-ms"]);
+  });
+});
+
+describe("citations: a daf as the library writes it (§6.2)", () => {
+  const TALMUD = [...CATALOG, book("hul", "חולין"), book("men", "מנחות"), book("ket", "כתובות"), book("kid", "קידושין"), book("az", "עבודה זרה"), book("m-az", "משנה עבודה זרה")];
+  const scanT = (lines: string[]): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(TALMUD), "src", {}, "ספר כלשהו");
+    lines.forEach((l, i) => sc.scanLine(i, l, null));
+    return sc.citations;
+  };
+  const oneT = (line: string) => {
+    const c = scanT([line]);
+    expect(c, line).toHaveLength(1);
+    return c[0]!;
+  };
+
+  it("\"דף ע\"א\" / \"דף ע\"ב\" is daf 71 / 72; \"ד' ע\"א\" stays daf 4", () => {
+    expect(loc(oneT('כמו שכתבו בחולין (דף ע"ב) שכתב'))).toBe("daf:72");
+    expect(loc(oneT('ובב"ק דף ע"ב ע"ב וכן'))).toBe("daf:72b");
+    expect(loc(oneT('בבבא קמא ד\' ע"א איתא'))).toBe("daf:4a");
+  });
+
+  it("a ד for \"דף\" glued to the number, before an amud", () => {
+    expect(loc(oneT('ואמרו (מנחות דמ"ג ע"ב) ראיה'))).toBe("daf:43b");
+    expect(loc(oneT('עיין בגמרא ברכות ד"ז ע"א וכו\''))).toBe("daf:7a");
+    expect(scanT(['ואמרו מנחות דמ"ג ראיה'])).toHaveLength(0);
+  });
+
+  it("an amud after a comma; an amud makes even an everyday word a daf", () => {
+    expect(loc(oneT('כי "החטא ממית" (ברכות ל"ג, ע"א). וכשאדם'))).toBe("daf:33a");
+    expect(loc(oneT('ובקידושין ה\' ע"ב והרי'))).toBe("daf:5b");
+    expect(scanT(["שמות ה' הם קדושים"])).toHaveLength(0);
+  });
+
+  it("the words after a daf with its amud are the quote, not more levels", () => {
+    const a = oneT('[א.] שבת דף מ"ד ת"ר מותר השמן');
+    expect(loc(a)).toBe("daf:44");
+    expect(a.text).toBe('שבת דף מ"ד');
+    expect(loc(oneT('ועיין יבמות ל"א ע"ב לא שייך'))).toBe("daf:31b");
+  });
+
+  it("a daf in brackets after a chapter; a \".\" before a closing bracket is the amud", () => {
+    expect(loc(oneT("ואנן קיי\"ל בפ\"ב דכתובות (כ'.) דאין"))).toBe("perek:2 daf:20a");
+    expect(loc(oneT("ומייתי לה במנחות פ\"ק (ז'.) אמר"))).toBe("perek:1 daf:7a");
+    expect(loc(oneT('כמו שמצינו (שבת י"א.) באותן'))).toBe("daf:11a");
+    expect(loc(oneT('כמו שמצינו שבת י"א. ואמר'))).toBe("?:11");
+  });
+
+  it("a tractate whose name is a numeral, with a daf and its amud; without the amud it is a number", () => {
+    expect(books(oneT('ועי\' במס\' ע"ז נ"ב ע"א מאי'))).toContain("az");
+    expect(scanT(['והוא ע"ז נ"ב שנה'])).toHaveLength(0);
+  });
+
+  it("\"בנזיר (שם)\": the book, at the last citation's place", () => {
+    const c = scanT(["כדאיתא בשבת כג. ואמר", "ובשבת (שם) אמר"]);
+    expect(c.map((x) => x.ibid)).toEqual(["none", "book"]);
+    expect(loc(c[1]!)).toBe("daf:23a");
+  });
+});
+
+describe("citations: \"(שם)\" after an author's name is that author's book", () => {
+  it("past the bracket and ז\"ל; not after a running-text word", () => {
+    const lines = (second: string) => scan(['כדאיתא בשבת כג. ואמר', second]);
+    expect(lines('ובזה יתבאר מה שהקשה המ"ל (שם) ע"ז')).toHaveLength(1);
+    expect(lines('והנה הרשב"א [שם] הקשה')).toHaveLength(1);
+    expect(lines('לשונו של הרמב"ם ז"ל (שם) שכתב')).toHaveLength(1);
+    expect(lines('וכתבו תוס\' (שם) דאיכא')).toHaveLength(1);
+    // "וגו' (שם כז)", "קיי"ל (שם)", "הגמ' (שם)": the last citation
+    expect(lines("ויקח משה וגו' (שם כד.) ואם")).toHaveLength(2);
+    expect(lines('ואע"ג דקיי"ל (שם) אין')).toHaveLength(2);
+    expect(lines("ועל זה מקשה הגמ' (שם) והא")).toHaveLength(2);
+  });
+});
+
+describe("citations: \"דף X\" with no tractate, in a commentary on a tractate", () => {
+  const onYev = (line: string) => scan([line], "פסקי תוספות על יבמות", "pt-yev");
+  it("is a daf of that tractate", () => {
+    const [c] = onYev('לא תחנם בכל עובדי כוכבים. ד"ה ההוא: [דף כג]');
+    expect(books(c!)).toEqual(["yev"]);
+    expect(loc(c!)).toBe("daf:23");
+    expect(c!.rule).toBe("base-daf");
+    expect(loc(onYev('וכן מבואר בדף מ"ו ע"ב ע"ש')[0]!)).toBe("daf:46b");
+  });
+  it("not \"ד'\", not after a book we do not know, and not without a base tractate", () => {
+    expect(onYev("והם ד' ט' אנשים")).toHaveLength(0);
+    expect(onYev("ועיין במהרש\"א דף ט' ע\"ש")).toHaveLength(0);
+    expect(scan(['ד"ה ההוא: [דף כג]'], "ספר כלשהו")).toHaveLength(0);
+    // a tractate named a few words before (past a full stop) is the daf's book
+    expect(onYev('וכן בסוף גיטין מייתי לה הש"ס. [דף פ"ט] גם')).toHaveLength(0);
+  });
+});
+
+describe("citations: a chapter by its ordinal word", () => {
+  it("\"בפרק קמא דיבמות\", \"פ' שני דשבת\"; not without the book after it", () => {
+    const a = one("כדאיתא בפרק קמא דיבמות ושם");
+    expect(books(a)).toEqual(["yev"]);
+    expect(loc(a)).toBe("perek:1");
+    expect(loc(one("ועיין פ' שני דשבת"))).toBe("perek:2");
+    expect(scan(["כדאיתא בפרק קמא ושם"])).toHaveLength(0);
+  });
+});
+
+describe("citations: abbreviations of the Tanakh's books", () => {
+  const TN = [...CATALOG, book("kings2", "מלכים ב"), book("sam1", "שמואל א"), book("ch1", "דברי הימים א"), book("shir", "שיר השירים")];
+  const scanN = (line: string): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(TN), "src", {}, "ספר כלשהו");
+    sc.scanLine(0, line, null);
+    return sc.citations;
+  };
+  it("\"תה'\", \"שיה\"ש\", \"דהי\"א\", \"דה\"י א'\"", () => {
+    expect(scanN("כמו בעמוד ענן (תה' צט ז) על משה").map(books)).toEqual([["ps"]]);
+    expect(scanN('שנאמר (שיה"ש ה, י) דודי').map(books)).toEqual([["shir"]]);
+    expect(scanN('שנאמר (דהי"א כט, כג) וישב').map(books)).toEqual([["ch1"]]);
+    expect(scanN("כתיב (דה\"י א' כ\"ח) דע").map(books)).toEqual([["ch1"]]);
+  });
+  it("\"(מ\"א יד י)\": a numeral name with chapter and verse in brackets is the Tanakh book only; bare, it is a number", () => {
+    const k = scanN('כאשר יבער הגלל (מ"א יד י) על כן');
+    expect(k.map(books)).toEqual([["kings1"]]);
+    expect(scanN('ושם האחד סנה (ש"א יד ד), ואחר').map(books)).toEqual([["sam1"]]);
+    expect(scanN('והוא בן מ"א יד שנה')).toHaveLength(0);
+    // "מ"א סי' ש"ז": a siman is the Magen Avraham's
+    expect(books(scanN('מג"א סי\' ש"ז ס"ק ח')[0]!)).toEqual(["ma"]);
+  });
+});
