@@ -145,6 +145,7 @@ npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 | `tests/validation/library-links.test.ts` | 3. כל `_links.json` בספרייה: ייבוא וייצוא בית־בבית, פסקי הבדיקה, והשוואה למה שהגנרטור שמר בפועל |
 | `tests/validation/library-texts.test.ts` | 4. ספרי ‎.txt מהספרייה מול אותם ספרים במסד |
 | `tests/validation/engines.test.ts` | 5. המנועים מול הקישורים שכבר במסד (ומול רשומות ההערות של הספרייה). מנוע חדש = רשומה אחת ב־`engine-harness.ts` |
+| `tests/validation/multibase.test.ts` | 5ב. קישור מרבי על ספרים שכתובים על כמה בסיסים (חלק לכל בסיס; בלי חלק רק ד"ה, עד "אפשרית"), מול קישורי COMMENTARY שבמסד, לפי מנוע ושלב. `VALIDATE_MULTIBASE_N` (ברירת מחדל 30) |
 | `tests/validation/foreign-dbs.test.ts` | 6. מסדים זרים: מסד אוצריא, אשף המיפוי או סירוב מנומק; בלי כתיבה |
 | `tests/validation/performance.test.ts` | 7. זמנים וזיכרון על המסד האמיתי |
 | `tests/validation/browser/real-db.spec.ts` | 8. הקובץ הבנוי ב־Chrome פותח את המסד האמיתי דרך בוחר הקבצים (`npm run validate:browser`) |
