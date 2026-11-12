@@ -92,7 +92,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .hidden-tabs { display: flex; flex-direction: column; gap: 4px; }
 
 /* sources panel */
-.sources-list { padding: 6px; display: grid; gap: 6px; }
+/* minmax(0, 1fr): a grid track sizes to its items' min-content, and a source row's nowrap label would widen the
+   column past the panel (the panel body then scrolled sideways and clipped the close button) */
+.sources-list { padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .source-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius); background: var(--surface-container-low); }
 .source-row .meta { font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .book-search { padding: 6px; border-bottom: 1px solid var(--outline-variant); display: grid; gap: 6px; }
