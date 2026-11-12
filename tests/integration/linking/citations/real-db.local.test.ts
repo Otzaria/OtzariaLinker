@@ -6,7 +6,7 @@ import type { EngineResult } from "../../../../src/linking/automatic";
 import type { SourceBook } from "../../../../src/sources/book-source";
 import { SourceRegistry } from "../../../../src/sources/registry";
 import { citationsJob } from "../../../../src/workers/citations-job";
-import { visibleUnits } from "../../../../src/core/text/offsets";
+import { countVisibleChars, visibleUnits } from "../../../../src/core/text/offsets";
 import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, type Tally } from "./measure";
 
 /*
@@ -14,7 +14,7 @@ import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, ty
  * has (LINKER from LinkerToOtzaria, REFERENCE, QUOTATION — see measure.ts). The database is opened
  * read-only through the same registry and worker job the app uses (a file-backed Blob, never copied):
  *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db npx vitest run tests/integration/linking/citations/real-db.local.test.ts
- * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title> runs one book;
+ * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title>[;<title>…] runs only those books;
  * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then).
  *
  * The sample: 17 category groups, from each the 3 books with the smallest sha1(book id) among those with
@@ -78,8 +78,8 @@ const SAMPLE: readonly { group: string; title: string }[] = [
 ];
 
 /**
- * Floors the full sample must keep (measured 2026-11-11: certain 86.3% strict / 99.9% judged, high 75.8% /
- * 99.8%). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
+ * Floors the full sample must keep (measured 2026-11-12, with units cited by name: certain 85.9% strict /
+ * 99.9% judged, high 73.3% / 99.8%). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
  * of those put the true precision near 99% (certain) and 95% (high) — docs/AUTOMATION_ENGINE.md §6.8.
  */
 const MIN = { certain: { strict: 0.85, judged: 0.99 }, high: { strict: 0.72, judged: 0.98 } } as const;
@@ -101,12 +101,12 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const byLevel = new Map<string, Tally>(LEVELS.map((l) => [l, emptyTally()]));
     const byGroup = new Map<string, Map<string, Tally>>();
     const recall = new Map<string, { linker: number; found: number }>();
-    const all: (Judged & { group: string; book: string })[] = [];
+    const all: (Judged & { group: string; book: string; context?: string })[] = [];
     const misses: { book: string; line: number; target: string; heRef: string; span: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
     for (const [k, { group, title }] of SAMPLE.entries()) {
-      if (only && title !== only) continue;
+      if (only && !only.split(";").includes(title)) continue;
       if (k % shards !== shard) continue;
       const b = books.find((x) => x.title === title);
       if (!b) {
@@ -125,7 +125,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       for (const j of judged) {
         add(byLevel.get(j.s.confidence)!, j);
         add(g.get(j.s.confidence)!, j);
-        all.push({ ...j, group, book: title });
+        all.push({ ...j, group, book: title, ...(process.env.CITATIONS_REPORT && { context: around(text.get(j.s.source.line) ?? "", j.s.id) }) });
       }
       if (process.env.CITATIONS_REPORT) {
         const missed = gold.filter((x) => x.type === "linker" && !found.has(x));
@@ -167,7 +167,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       writeFileSync(
         process.env.CITATIONS_REPORT,
         JSON.stringify(
-          all.map((j) => ({ group: j.group, book: j.book, verdict: j.verdict, exact: j.exact, confidence: j.s.confidence, score: j.s.score, line: j.s.source.line, target: j.s.target.book.title, tline: j.s.target.line, tend: j.s.target.end, heRef2: j.s.heRef2, rules: j.s.rules, reason: j.s.reasons.map((r) => r.text).join(" | ") })),
+          all.map((j) => ({ group: j.group, book: j.book, verdict: j.verdict, exact: j.exact, confidence: j.s.confidence, score: j.s.score, line: j.s.source.line, target: j.s.target.book.title, tline: j.s.target.line, tend: j.s.target.end, heRef2: j.s.heRef2, rules: j.s.rules, reason: j.s.reasons.map((r) => r.text).join(" | "), context: j.context })),
         ),
       );
     if (!only && shards === 1) {
@@ -179,6 +179,16 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     }
   }, 3_600_000);
 });
+
+/** the visible text around a suggestion's span (its raw offsets are in the id), the span in [brackets] — for hand checks */
+function around(html: string, id: string): string {
+  const m = /@(\d+)-(\d+)>/.exec(id);
+  const vis = visible(html);
+  if (!m) return vis.slice(0, 160).join("");
+  const a = countVisibleChars(html, Number(m[1]));
+  const b = countVisibleChars(html, Number(m[2]));
+  return `${vis.slice(Math.max(0, a - 70), a).join("")}[${vis.slice(a, b).join("")}]${vis.slice(b, b + 70).join("")}`;
+}
 
 /** the visible characters of a line (one per unit, an entity as one char) — to show a missed LINKER span */
 function visible(html: string): string[] {

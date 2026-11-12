@@ -1,5 +1,6 @@
-import { closesAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
-import { SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
+import { normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { numeralOf, strictValue } from "./numbers";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
@@ -41,13 +42,34 @@ export interface Citation {
   readonly ibid: IbidKind;
   /** seq of the citation an ibid refers to */
   readonly ibidOf?: number;
-  /** forward: name then location; reversed: "פ"ג מהל' שבת"; relative: "לעיל/לקמן" + daf of the base book */
-  readonly form: "forward" | "reversed" | "relative";
+  /**
+   * forward: name then location; reversed: "פ"ג מהל' שבת"; relative: "לעיל/לקמן" + daf of the base book;
+   * named: a unit cited by its name ("בפרק הזהב", "בפרשת וירא"), maybe with a location after it
+   */
+  readonly form: "forward" | "reversed" | "relative" | "named";
+  /** form "named": the unit the name stands for */
+  readonly unit?: CitedUnit;
   /** a collection word right before ("ירושלמי", "רמב"ם", "גמ'") */
   readonly qualifier?: Collection;
   /** the citation was moved to a commentary named right before it ("תוס'") */
   readonly commentator?: string;
   readonly numericName: boolean;
+}
+
+/** A chapter or parsha cited by its name. */
+export interface CitedUnit {
+  readonly kind: UnitKind;
+  /** the name as the library's structure writes it, or as written for a level of a named book */
+  readonly name: string;
+  /** the cited words' loose key (named.ts): how the unit is found in another book's structure or references */
+  readonly key: string;
+  /** the unit in the book the names were read from (a Bavli tractate, a book of the Torah); absent for a
+   * level of a named book's references ("בזוהר פרשת ויקהל") */
+  readonly base?: NamedUnit;
+  /** how the book was told: named next to the unit, the commentary's base, or the name alone */
+  readonly context: "named" | "base" | "unique";
+  /** the words written are only the start of the structure's name ("פרק האשה" for "האשה שהיא עושה") */
+  readonly partial: boolean;
 }
 
 export interface DetectOptions {
@@ -114,7 +136,9 @@ export class CitationScanner {
     private readonly aliases: AliasIndex,
     private readonly sourceKey: string,
     options: DetectOptions = {},
-    sourceTitle = "",
+    private readonly sourceTitle = "",
+    /** chapter and parsha names (from the library's alt_toc); without it no unit is cited by name */
+    private readonly units?: NamedUnitIndex,
   ) {
     this.ibidOn = options.ibid ?? true;
     this.window = options.ibidWindow ?? 6;
@@ -135,7 +159,7 @@ export class CitationScanner {
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
-      const next = this.forward(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? (this.ibidOn ? this.ibid(toks, i, line) : null);
+      const next = this.forward(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? (this.ibidOn ? this.ibid(toks, i, line) : null);
       if (next !== null) i = next - 1;
     }
   }
@@ -196,6 +220,167 @@ export class CitationScanner {
     const cands = this.own(m.entry.targets);
     if (!cands.length) return this.drop("self");
     return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, m });
+  }
+
+  /**
+   * A unit cited by its NAME: "בפרק הזהב", "פ' המדיר דכתובות", "ביבמות פרק האשה רבה", "בפרשת וירא",
+   * "בזוהר פרשת ויקהל". The names are the library's own (alt_toc: the Bavli's chapters, the Torah's
+   * parshiyot). A name shared by several units is not guessed: a tractate named next to it, or the
+   * book this commentary is on, must pick one. A location right after it ("(דף ס"ד ע"ב)", "[יבמות צ:]",
+   * "(י"ב, י"ד)") is resolved in the unit's book, and only inside the unit (engine.ts).
+   */
+  private named(toks: readonly Tok[], i: number, line: number): number | null {
+    if (!this.units?.size) return null;
+    const head = unitWordAt(toks, i);
+    if (!head) return null;
+    const found = this.units.matchAt(toks, head.next, head.kinds);
+    if (!found) return null;
+    // the span starts at "ריש"/"סוף" before the chapter word, so a commentator before it is seen
+    const prev = toks[i - 1];
+    const from = prev?.kind === "word" && !prev.gershayim && !prev.geresh && POSITION_BEFORE.test(prev.text) ? i - 1 : i;
+    // "בירושלמי דשבת פרק במה מדליקין", "במשנה פ' הזהב": another collection's chapter (numbered
+    // differently in places), or a chapter of the Rambam / the Tur — not the Bavli's
+    if (found.matches.some((x) => x.unit.kind === "chapter"))
+      for (let back = 1; back <= 3; back++) {
+        const q = wordIn(before(toks, from, back), QUALIFIERS);
+        if (q && q !== "bavli") return this.drop("unit-other-collection");
+      }
+    let k = found.to;
+    // what names the book: a tractate/book right before ("ביבמות פרק", "בזוהר פרשת") or right after
+    // ("דכתובות", "בכתובות", "דמס' שבת"), or a book with a location in brackets ("[יבמות צ:]")
+    const beforeBook = this.bookBefore(toks, from);
+    let afterBook: AliasMatch | null = null;
+    let addr: Address | null = null;
+    const glued = this.aliases.matchAt(toks, k).find((m) => m.prefix !== "" && /[דבמ]$/.test(m.prefix));
+    if (glued) {
+      afterBook = glued;
+      k = glued.to;
+      addr = parseAddress(toks, k, { after: "perek" });
+    } else if (opensAt(toks, k)) {
+      const inside = this.aliases.matchAt(toks, k + 1).find((m) => m.prefix === "");
+      const a = inside ? parseAddress(toks, inside.to, { enclosed: true }) : parseAddress(toks, k);
+      if (a) {
+        afterBook = inside ?? null;
+        addr = a;
+      }
+    } else addr = parseAddress(toks, k);
+    if (addr && addr.elems.some((e) => e.kind === "perek")) addr = null; // "פרק X פרק ב": not this unit's location
+
+    // a partial name must be distinctive — one word of 4+ letters ("פרק זה", "בפרק אחד" are not "זה
+    // בורר", "אחד דיני ממונות") — and, when two or more words matched, the next word must not
+    // contradict the name ("פרק אלו הן הנשרפין" is not "אלו הן הנחנקין")
+    const matched = found.to - head.next;
+    const nextTok = toks[found.to];
+    const contradicts = matched >= 2 && nextTok?.kind === "word" && !nextTok.gershayim && !nextTok.geresh && !this.aliases.matchAt(toks, found.to).length;
+    let matches = found.matches.filter((x) => x.full || (!contradicts && (matched >= 2 || toks[head.next]!.key.length >= 4)));
+    if (!matches.length) return this.drop("unit-partial-name");
+    let context: CitedUnit["context"] = "unique";
+    // a book that is not one of the indexed ones (the Zohar, a midrash) before a parsha: a level of ITS references
+    const ofBook = beforeBook && !beforeBook.some((t) => matches.some((x) => x.unit.book.key === t.book.key)) && !this.tractateKeys(beforeBook).size ? beforeBook : null;
+    if (ofBook && matches.every((x) => x.unit.kind === "parsha")) {
+      const cands = this.own(ofBook);
+      if (!cands.length) return this.drop("self");
+      const name = matches[0]!.unit.name;
+      const key = toks.slice(head.next, found.to).map((t) => looseWord(t.key)).join(" ");
+      const to = addr ? (addr.bracketed && addr.closed ? addr.to + 1 : addr.to) : found.to;
+      const unit: CitedUnit = { kind: "parsha", name, key, context: "named", partial: false };
+      return this.emitUnit(toks, line, from, to, cands, unit, addr, false);
+    }
+    if (ofBook) return this.drop("unit-of-another-book");
+    // the unit's book: named next to it (a tractate for a chapter, a book of the Torah for a parsha),
+    // else the book this commentary is on
+    if (afterBook && !this.tractateKeys(afterBook.entry.targets).size && !afterBook.entry.targets.some((t) => matches.some((x) => x.unit.book.key === t.book.key))) {
+      // "פ' X (ויקרא י, א)": a location of another book follows — the unit alone, the location is its own citation
+      afterBook = null;
+      addr = null;
+    }
+    const near = [...(afterBook ? afterBook.entry.targets : []), ...(beforeBook ?? [])];
+    const tractates = this.tractateKeys(near);
+    const torah = new Set(near.filter((t) => t.collection === "tanakh").map((t) => t.book.key));
+    const namedFor = (x: { unit: NamedUnit }) => (x.unit.kind === "chapter" ? tractates : torah);
+    if (matches.some((x) => namedFor(x).size)) {
+      matches = matches.filter((x) => namedFor(x).has(x.unit.book.key));
+      context = "named";
+    } else if (this.baseTractate && matches.some((x) => x.unit.book.key === this.baseTractate)) {
+      matches = matches.filter((x) => x.unit.book.key === this.baseTractate);
+      context = "base";
+    } else if (matches.some((x) => x.full)) {
+      // the name alone: the unit whose whole name it is — unless the words also start the names of two
+      // or more other units ("ר"פ האשה" may be פסחים' "האשה", or יבמות' "האשה רבה", כתובות' "האשה שנפלו"…)
+      if (matches.filter((x) => !x.full).length >= 2) return this.drop("unit-ambiguous");
+      matches = matches.filter((x) => x.full);
+    }
+    if (matches.length > 1 && matches.some((x) => x.full)) matches = matches.filter((x) => x.full);
+    if (matches.length !== 1) return this.drop(matches.length ? "unit-ambiguous" : "unit-not-in-book");
+    const u = matches[0]!.unit;
+    // the tier of the name that told the book ("יבמות" written as the title), else a derived reading
+    const told = context === "named" ? near.find((t) => t.book.key === u.book.key && (t.tier === "title" || t.tier === "derived")) : undefined;
+    const candidates = this.own([{ book: u.book, tier: told?.tier ?? "derived", collection: u.collection }]);
+    if (!candidates.length) return this.drop("self");
+    const end = addr ? (addr.bracketed && addr.closed ? addr.to + 1 : addr.to) : afterBook && !addr ? afterBook.to : found.to;
+    const unit: CitedUnit = {
+      kind: u.kind,
+      name: u.name,
+      key: toks.slice(head.next, found.to).map((t) => looseWord(t.key)).join(" "),
+      base: u,
+      context,
+      partial: !matches[0]!.full,
+    };
+    return this.emitUnit(toks, line, from, end, candidates, unit, addr, u.kind === "chapter");
+  }
+
+  private emitUnit(toks: readonly Tok[], line: number, from: number, to: number, candidates: readonly AliasTarget[], unit: CitedUnit, addr: Address | null, commentators: boolean): number | null {
+    if (isDate(toks, to)) return this.drop("date");
+    const next = this.emit(toks, line, {
+      from,
+      to,
+      candidates,
+      name: unit.name,
+      elems: addr ? addr.elems : [],
+      evidence: addr ? addr.evidence : "strong",
+      bracketed: !!addr?.closed,
+      ibid: "none",
+      form: "named",
+      numericName: false,
+      unit,
+      commentators,
+    });
+    // "שם" after a unit cited by name alone has no location to complete
+    if (!addr) this.last = null;
+    return next;
+  }
+
+  /** a book named right before toks[i] ("ביבמות פרק", "בזוהר פרשת", "במס' שבת פ'"), with its targets */
+  private bookBefore(toks: readonly Tok[], i: number): AliasTarget[] | null {
+    // the longest name first: "בתוספות על ברכות פרשת" is not "ברכות"
+    for (let j = Math.max(0, i - 4); j < i; j++) {
+      const m = this.aliases.matchAt(toks, j).find((x) => x.to === i && (x.prefix === "" || /^ו?[בד]$/.test(x.prefix)));
+      if (m) return m.entry.targets;
+    }
+    return null;
+  }
+
+  /** the Bavli books of the tractates among `targets` (a tractate named as the Bavli, the Mishna, "מס' X") */
+  private tractateKeys(targets: readonly AliasTarget[]): Set<string> {
+    const out = new Set<string>();
+    for (const t of targets) {
+      if (!TALMUDIC_COLLECTIONS.has(t.collection)) continue;
+      const tr = tractateOfTitle(t.book.title, t.collection);
+      const b = tr ? this.aliases.tractates.get(tr)?.get("bavli") : undefined;
+      if (b) out.add(b.book.key);
+    }
+    return out;
+  }
+
+  /** the Bavli book of the tractate this commentary is on ("… על כתובות", "… על משנה נזיר" → that tractate) */
+  private baseTractateCache: string | null | undefined;
+  private get baseTractate(): string | null {
+    if (this.baseTractateCache === undefined) {
+      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1];
+      const targets = on ? (this.aliases.lookup(on)?.targets.filter((t) => t.tier === "title") ?? []) : [];
+      this.baseTractateCache = [...this.tractateKeys(targets)][0] ?? null;
+    }
+    return this.baseTractateCache;
   }
 
   /**
@@ -276,12 +461,15 @@ export class CitationScanner {
       form: Citation["form"];
       numericName: boolean;
       m?: AliasMatch;
+      unit?: CitedUnit;
+      /** a commentator's name before it retargets the citation (default true) */
+      commentators?: boolean;
     },
   ): number | null {
     let candidates = c.candidates;
     const qualifier = qualifierBefore(toks, c.from);
     let commentator: string | undefined;
-    if (c.ibid === "none" || c.ibid === "book") {
+    if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
       if (qualifier && !candidates.some((x) => x.collection === qualifier)) candidates = [...candidates, ...this.siblings(candidates, qualifier)];
       // a commentator named right before ("תוס' פסחים ל"א") or right after ("לעיל כ"ג ע"א תוס' ד"ה"):
@@ -323,6 +511,7 @@ export class CitationScanner {
       form: c.form,
       ...(qualifier && { qualifier }),
       ...(commentator && { commentator }),
+      ...(c.unit && { unit: c.unit }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -499,6 +688,37 @@ function commentatorAfter(toks: readonly Tok[], i: number): { who: string; next:
   while (toks[j]?.kind === "punct" && ")],".includes(toks[j]!.text)) j++;
   const who = wordIn(toks[j], COMMENTATORS);
   return who ? { who, next: j + 1 } : undefined;
+}
+
+const TALMUDIC_COLLECTIONS: ReadonlySet<Collection> = new Set(["bavli", "mishna", "yerushalmi", "tosefta"]);
+
+/** "ריש", "בסוף", "ובתחילת" right before a chapter word: part of the span */
+const POSITION_BEFORE = /^ו?ב?(?:ריש|סוף|תחלת|תחילת)$/;
+
+/**
+ * The word that opens a unit cited by name: "פרק", "פ'", "פר'", "ר"פ", "ס"פ" (a chapter) and "פרשת"
+ * (a parsha), with up to two prefix letters ("בפרק", "ובפ'", "דר"פ", "לפרשת"). Measured on the real
+ * library (docs/AUTOMATION_ENGINE.md §6.8): "פ' X" / "פרשה X" / "פרש' X" with a parsha name are nearly
+ * always a section of the citing book or of another book arranged by parshiyot ("עיין לקמן פ'
+ * ואתחנן הגה י"ד"), not the Torah — so a parsha needs "פרשת". No ה: "הפרשת תרומה" is a noun.
+ */
+function unitWordAt(toks: readonly Tok[], i: number): { next: number; kinds: UnitKind[] } | null {
+  const t = toks[i];
+  if (!t || t.kind !== "word") return null;
+  for (let p = 0; p <= 2; p++) {
+    if (p && !/^[ובדמל]$/.test(t.text[p - 1]!)) break;
+    const rest = t.text.slice(p);
+    if (!rest) break;
+    if (!t.gershayim && !t.geresh) {
+      if (rest === "פרק") return { next: i + 1, kinds: ["chapter"] };
+      if (rest === "פרשת") return { next: i + 1, kinds: ["parsha"] };
+    } else if (t.geresh && !t.gershayim) {
+      // "מפ'" is usually "מפרש" (explains): no מ before the abbreviation
+      if (p && t.text.slice(0, p).includes("מ")) continue;
+      if (rest === "פ" || rest === "פר") return { next: i + 1, kinds: ["chapter"] };
+    } else if (t.gershayim && !t.geresh && t.gershayimAt - p === 1 && (rest === "רפ" || rest === "ספ")) return { next: i + 1, kinds: ["chapter"] };
+  }
+  return null;
 }
 
 /** A perek opening a reversed citation: "פ"ג", "בפי"א", "דבפ"ק", "פרק ג'", "בפרק ב'". */

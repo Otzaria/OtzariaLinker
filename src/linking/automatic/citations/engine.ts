@@ -15,6 +15,7 @@ import {
 import type { AddrElem } from "./address";
 import { AliasIndex, type AliasTarget, type CatalogBook, type Collection } from "./aliases";
 import { CitationScanner, type Citation } from "./detect";
+import { NamedUnitIndex, unitKindOf, unitNameKey, type NamedUnit, type NamedUnitSource } from "./named";
 import type { Resolution, TargetIndex } from "./resolve";
 
 /*
@@ -81,11 +82,25 @@ const PENALTY = {
   relative: 0.03,
   /** "במשנה (ב"ק דף ט:)": a collection word that does not fit the book */
   qualifierMismatch: 0.08,
+  /** a unit cited by name with a location found inside it ("בפ' הזהב (דף מד.)"), the book not named */
+  named: 0.02,
+  /**
+   * the link is the whole unit ("בפרק הזהב", "בפרשת וירא"): a coarse target, and the share the
+   * database confirms is low (it rarely links these) — at most "possible" (§6.8)
+   */
+  unitRange: 0.16,
+  /** no book named next to it and no base book: the name alone told the book */
+  unitAlone: 0.04,
+  /** the words are only the start of the unit's name ("פרק האשה" for "האשה שהיא עושה") */
+  unitPartial: 0.03,
+  /** a location after the name was not found in the book; the unit itself is linked */
+  unitFallback: 0.03,
 } as const;
 
 export interface Pending {
   readonly citation: Citation;
-  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null }[];
+  /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was */
+  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
 }
@@ -102,6 +117,8 @@ export class CitationRun {
     readonly source: BookRef,
     readonly aliases: AliasIndex,
     options: CitationsOptions = {},
+    /** chapter and parsha names (alt_toc of the Bavli and the Torah); without it no unit is cited by name */
+    readonly units: NamedUnitIndex = NamedUnitIndex.build([]),
   ) {
     this.opts = {
       minConfidence: options.minConfidence ?? "possible",
@@ -112,11 +129,21 @@ export class CitationRun {
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
     };
-    this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid }, source.title);
+    this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid }, source.title, units);
   }
 
-  static fromCatalog(source: BookRef, catalog: readonly CatalogBook[], options: CitationsOptions = {}): CitationRun {
-    return new CitationRun(source, AliasIndex.build(catalog), options);
+  static fromCatalog(source: BookRef, catalog: readonly CatalogBook[], options: CitationsOptions = {}, units: readonly NamedUnitSource[] = []): CitationRun {
+    return new CitationRun(source, AliasIndex.build(catalog), options, NamedUnitIndex.build(units));
+  }
+
+  /**
+   * Whether resolving against `book` needs its own named units, beyond the indexed ones: a chapter
+   * cited by name and moved to a commentary ("תוס' פ' השולח" → תוספות על גיטין, its own chapters).
+   */
+  needsUnits(book: BookRef): boolean {
+    if (this.units.byBook.has(book.key)) return false;
+    for (const p of this.pending.values()) if (p.citation.unit && p.citation.candidates.some((c) => c.book.key === book.key)) return true;
+    return false;
   }
 
   /** Step 1: lines of the source book, in order (any chunk size). */
@@ -141,11 +168,20 @@ export class CitationRun {
     return [...out.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
-  /** Step 2b: resolves every citation that may mean `index.book`. `heRefAt` gives a target line's reference, if known. */
-  resolveWith(index: TargetIndex | null, book: BookRef, heRefAt?: (line: number) => string | null): void {
+  /**
+   * Step 2b: resolves every citation that may mean `index.book`. `heRefAt` gives a target line's
+   * reference, if known; `bookUnits` the book's own named units when needsUnits() asked for them.
+   */
+  resolveWith(index: TargetIndex | null, book: BookRef, heRefAt?: (line: number) => string | null, bookUnits?: readonly NamedUnit[] | null): void {
     for (const p of this.pending.values()) {
       for (const t of p.citation.candidates) {
         if (t.book.key !== book.key) continue;
+        if (p.citation.unit) {
+          const res = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
+          if (res) p.resolved.push({ target: t, res: res.r, heRef: res.r.line === res.r.end && heRefAt ? heRefAt(res.r.line) : null, ...(res.fallback && { fallback: true }), ...(res.addressed && { addressed: true }) });
+          else if (!index || index.via === "none") p.unindexed++;
+          continue;
+        }
         if (!index || index.via === "none") {
           p.unindexed++;
           continue;
@@ -191,7 +227,7 @@ export class CitationRun {
         unmatched.set(c.line, list);
         continue;
       }
-      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
+      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
       const best = scored[0]!;
       // the same book reached through two names (a title and an acronym) is not a rival
       const rival = scored.find((o) => o.target.book.key !== best.target.book.key);
@@ -294,8 +330,48 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
   "siman-of-another-book": "סימן של ספר אחר שנזכר לידו",
 };
 
+/**
+ * A unit cited by name in one candidate book. The unit's range is the indexed one (the Bavli tractate,
+ * the book of the Torah), or the book's own structure by the same name (a commentary on the tractate),
+ * or a named level of the book's references (the Zohar's parshiyot). A location after the name is
+ * resolved as usual but must fall inside the unit; when the book has no such location the unit itself
+ * is linked (a fallback, scored lower).
+ */
+function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, units: readonly NamedUnit[] | null): { r: Resolution; fallback: boolean; addressed?: boolean } | null {
+  const u = c.unit!;
+  const own = u.base && u.base.book.key === t.book.key ? u.base : ownUnit(u.kind, u.name, u.key, units ?? []);
+  const indexed = index && index.via !== "none" ? index : null;
+  if (c.elems.length && indexed) {
+    // a level of the book's references: the location is under it; else the location in the whole book
+    const r = u.base ? indexed.resolve(c.elems, t.collection, t.section) : (indexed.resolveNamed?.(u.key, c.elems) ?? null);
+    if (r) {
+      // "בפרק הזהב (דף ס.)": a daf outside the chapter contradicts the name — no guess
+      if (own && (r.end < own.line || r.line > own.end)) return null;
+      return { r, fallback: false, addressed: true };
+    }
+  }
+  const fallback = c.elems.length > 0;
+  if (own) {
+    const word = u.kind === "chapter" ? "פרק" : "פרשת";
+    return { r: { book: t.book, line: own.line, end: own.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${t.book.title}, ${word} ${own.name}`, via: "named", daf: false }, fallback };
+  }
+  if (!u.base && indexed?.resolveNamed) {
+    const r = indexed.resolveNamed(u.key, []);
+    return r ? { r, fallback } : null;
+  }
+  return null;
+}
+
+/** A book's own unit of that name: the same name, or else the only one whose name starts with the cited words ("שלח" → "שלח לך"). */
+function ownUnit(kind: NamedUnit["kind"], name: string, key: string, units: readonly NamedUnit[]): NamedUnit | undefined {
+  const same = units.filter((x) => x.kind === kind && (x.name === name || unitNameKey(x.name) === unitNameKey(name) || unitNameKey(x.name) === key));
+  if (same.length) return same.length === 1 ? same[0] : undefined;
+  const longer = units.filter((x) => x.kind === kind && unitNameKey(x.name)?.startsWith(`${key} `));
+  return longer.length === 1 ? longer[0] : undefined;
+}
+
 /** The score of one reading: the name's strength minus everything that makes the reading less sure. */
-export function scoreOf(c: Citation, t: AliasTarget, r: Resolution): number {
+export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = false): number {
   let s: number = TIER_SCORE[t.tier];
   if (c.evidence === "medium") s -= PENALTY.medium;
   if (!r.daf && c.elems.length === 1 && c.elems[0]!.kind === "?") s -= PENALTY.singleBare;
@@ -315,6 +391,15 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution): number {
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
+  // a unit whose location was found inside it: the location is the citation and the name confirms
+  // it — with the book named next to it, as sure as "<tractate> <daf>"
+  if (c.unit) {
+    if (!addressed) s -= PENALTY.unitRange;
+    else if (c.unit.context !== "named") s -= PENALTY.named;
+    // a parsha name is unique by itself; a chapter name told its tractate only by being unique
+    if (c.unit.context !== "named" && (c.unit.kind === "chapter" || !addressed)) s -= PENALTY.unitAlone;
+    if (c.unit.partial && !addressed) s -= PENALTY.unitPartial;
+  }
   return Math.max(0, Math.min(1, s));
 }
 
@@ -345,7 +430,15 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, ranged: boolean, an
     reasons.push({ code: `citations/ibid-${c.ibid}`, text: c.ibid === "book" ? `"${c.text}": אותו מקום כמו ההפניה הקודמת ל${t.book.title}` : c.ibid === "full" ? `"שם": אותו מקום כמו ההפניה הקודמת (${t.book.title})` : `"${c.text}": ההפניה הקודמת (${t.book.title}), עם המקום החדש שצוין` });
   }
   const loc = c.elems.map((e) => (e.kind === "?" ? "" : `${KIND_WORD[e.kind] ?? ""} `) + e.n + (e.to ? `–${e.to}` : "")).join(", ");
-  reasons.push({ code: `citations/location-${r.via}`, text: r.via === "heref" ? `המקום (${loc}) נמצא לפי ציוני המקום של השורות בספר: ${r.label}` : `המקום (${loc}) נמצא לפי כותרות הספר: ${r.label}` });
+  reasons.push({
+    code: `citations/location-${r.via}`,
+    text:
+      r.via === "heref"
+        ? `המקום (${loc || c.unit?.name}) נמצא לפי ציוני המקום של השורות בספר: ${r.label}`
+        : r.via === "named"
+          ? `ה${c.unit?.kind === "parsha" ? "פרשה" : "פרק"} נמצא לפי מבנה התוכן החלופי של הספר: ${r.label}`
+          : `המקום (${loc}) נמצא לפי כותרות הספר: ${r.label}`,
+  });
   rules.push(`citations.via-${r.via}`);
   if (c.bracketed) reasons.push({ code: "citations/brackets", text: "ההפניה כתובה בסוגריים" });
   if (c.commentator) {
@@ -353,6 +446,20 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, ranged: boolean, an
     reasons.push({ code: "citations/commentator", text: `לפני ההפניה כתוב "${c.commentator}", ולכן הקישור הוא אל ${t.book.title} ולא אל ספר הבסיס` });
   }
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
+  if (c.unit) {
+    const u = c.unit;
+    rules.push(`citations.unit-${u.kind}`, `citations.unit-context-${u.context}`);
+    if (u.partial) rules.push("citations.unit-partial");
+    const what = u.kind === "chapter" ? "פרק" : "פרשה";
+    const how =
+      u.context === "named"
+        ? `והספר נזכר לידו (${t.book.title})`
+        : u.context === "base"
+          ? `והספר הוא זה שהחיבור נכתב עליו (${t.book.title})`
+          : `והשם קיים רק ב${u.base?.book.title ?? t.book.title}`;
+    reasons.push({ code: "citations/unit", text: `"${u.name}" הוא שם של ${what} לפי מבני התוכן החלופיים של הספרייה, ${how}` });
+    if (u.partial) warnings.push({ code: "citations/unit-partial", text: `נכתבו רק המילים הראשונות של שם ה${what} "${u.name}"` });
+  }
   if (r.wholeDaf) {
     rules.push("citations.whole-daf");
     warnings.push({ code: "citations/whole-daf", text: "לא צוין עמוד, ולכן הקישור הוא לשני עמודי הדף" });
@@ -380,15 +487,22 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, ranged: boolean, an
 
 export interface CitationLibrary {
   readonly catalog: readonly CatalogBook[];
+  /** named units (alt_toc chapters and parshiyot) of the indexed books, and of any book that has them */
+  readonly units?: readonly NamedUnitSource[];
   /** the index of a cited book, or null when it cannot be read */
   index(book: BookRef): TargetIndex | null;
   heRefAt?(book: BookRef, line: number): string | null;
 }
 
 export function runCitationsEngine(source: EngineBook, library: CitationLibrary, options: CitationsOptions = {}, ctx: EngineContext = {}): EngineResult {
-  const run = CitationRun.fromCatalog(source.book, library.catalog, options);
+  // the names are read from the Bavli and the Torah (as the worker job does); other books' units resolve a moved citation
+  const indexed = (library.units ?? []).filter((u) => unitKindOf(u.book.title) === u.kind);
+  const run = CitationRun.fromCatalog(source.book, library.catalog, options, indexed);
   run.scan(source.lines);
-  for (const b of run.targets()) run.resolveWith(library.index(b), b, library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined);
+  for (const b of run.targets()) {
+    const own = run.needsUnits(b) ? (library.units ?? []).find((u) => u.book.key === b.key) : undefined;
+    run.resolveWith(library.index(b), b, library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined, own ? NamedUnitIndex.build([own]).byBook.get(b.key) : null);
+  }
   return run.finish(ctx);
 }
 
