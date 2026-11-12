@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
+import { qaAction } from "../../linking/qa";
 import type { ExportBundle } from "../../state/exchange";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -178,7 +179,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   </ul>
                 </details>
               )}
-              {outputs === 0 && !(asCsv && !csv) && <p>אין מה לייצא: אין קישורים או מבני כותרות שנוצרו או יובאו (קישורים מתוך מסד אינם נכתבים לקובץ).</p>}
+              {outputs === 0 && !(asCsv && !csv) && <NothingWritten plan={plan} onPrivate={() => ((store.exportPurpose.value = "private"), replan())} />}
             </>
           )}
         </div>
@@ -202,6 +203,33 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </footer>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * Why nothing will be written. "Nothing to export: no links were made" next to "11 held back" read as
+ * a contradiction (product audit F9): when links were held back, say that all of them were, point at
+ * the reasons, and offer the switch that releases them when it would.
+ */
+function NothingWritten({ plan, onPrivate }: { plan: ExportBundle; onPrivate: () => void }) {
+  const store = useStore();
+  const held = plan.heldBack.length + plan.altToc.heldBack.length;
+  if (!held) return <p>אין מה לייצא: אין קישורים או מבני כותרות שנוצרו או יובאו (קישורים מתוך מסד אינם נכתבים לקובץ).</p>;
+  const purpose = store.exportPurpose.value;
+  const privateHelps = plan.heldBack.some((h) => h.problems.some((p) => qaAction(p, purpose) === "private"));
+  return (
+    <p role="status">
+      {held === 1 ? "הקישור היחיד נעצר" : `כל ${held.toLocaleString("he")} הקישורים נעצרו`}, ולכן אין קובץ לייצא. הסיבה כתובה ליד כל אחד ברשימה שלמעלה.
+      {privateHelps && (
+        <>
+          {" "}
+          אם הקישורים לשימוש שלכם ולא לשליחה לספרייה:{" "}
+          <button class="btn text small" onClick={onPrivate}>
+            ייצוא לשימוש פרטי
+          </button>
+        </>
+      )}
+    </p>
   );
 }
 
