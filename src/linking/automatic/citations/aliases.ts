@@ -158,6 +158,13 @@ const SA_NAMES = ["שולחן ערוך", 'שו"ע', "שלחן ערוך", 'ש"ע'
 
 const SA_COMMENTARY_TITLES = new Set(["משנה ברורה", "מגן אברהם", "שער הציון", "ביאור הלכה", "באר היטב", "טורי זהב", "שפתי כהן"]);
 
+/**
+ * A title in the library's spelling of the Shulchan Aruch: "שלחן ערוך" (16 commentaries: "אליה רבה על שלחן ערוך
+ * אורח חיים", "הגהות רבי עקיבא איגר על שלחן ערוך …") and "חשן משפט" are the same work and part as "שולחן ערוך",
+ * "חושן משפט".
+ */
+export const saSpelling = (title: string): string => title.replace(/(^|\s)שלחן ערוך(?=\s|,|$)/g, "$1שולחן ערוך").replace(/(^|\s)חשן משפט(?=\s|,|$)/g, "$1חושן משפט");
+
 const BAVLI_SET = new Set(BAVLI);
 /** the Mishna's tractates the Bavli has not: "משנה כסף", "משנה לחם" (books of the library) are no tractates */
 const MISHNA_ONLY = new Set(["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות", "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים", "שקלים", "עדיות", "אבות", "מדות", "קינים", "כלים", "אהלות", "נגעים", "פרה", "טהרות", "מקואות", "מכשירין", "זבים", "טבול יום", "ידים", "עוקצים"]);
@@ -174,7 +181,7 @@ export function collectionOf(title: string): Collection {
   if (t.startsWith("שולחן ערוך, ")) return "sa";
   if (t === "טור") return "tur";
   if (t.startsWith("משנה ") && (BAVLI_SET.has(t.slice(5)) || MISHNA_ONLY.has(t.slice(5)))) return "mishna";
-  if (SA_COMMENTARY_TITLES.has(t) || / על שולחן ערוך/.test(t)) return "sa-commentary";
+  if (SA_COMMENTARY_TITLES.has(t) || / על שולחן ערוך/.test(saSpelling(t))) return "sa-commentary";
   return "other";
 }
 

@@ -110,6 +110,38 @@ describe("internal references: a place in the citing book itself", () => {
     expect(r.suggestions.filter((x) => x.target.book.key === "ys")).toHaveLength(0);
   });
 
+  it('the author\'s own "as explained / will be explained in siman X" (ערוך השולחן): a siman of the book itself, in the line\'s part', () => {
+    // the library's shape: "ערוך השולחן, אורח חיים, ו, י" under "סימן ו" headings; the database links these
+    // words to the book itself (1,853 of 3,008 such references in ערוך השולחן)
+    const AH = ref("ah", "ערוך השולחן", "sefaria");
+    const g = ["", "א", "ב", "ג", "ד"];
+    const lines: { index: number; text: string; heading: number | null; heRef: string | null }[] = [{ index: 0, text: "<h2>אורח חיים</h2>", heading: 2, heRef: null }];
+    for (let s = 1; s <= 4; s++) {
+      lines.push({ index: lines.length, text: `<h3>סימן ${g[s]}</h3>`, heading: 3, heRef: null });
+      for (let k = 1; k <= 3; k++) lines.push({ index: lines.length, text: `דין ${s}.${k}`, heading: null, heRef: `ערוך השולחן, אורח חיים,  ${g[s]}, ${g[k]}` });
+    }
+    const refs = lines.map((l) => ({ index: l.index, heRef: l.heRef }));
+    const at = (s: number, k: number) => lines.findIndex((l) => l.heRef === `ערוך השולחן, אורח חיים,  ${g[s]}, ${g[k]}`);
+    const run = (where: number, t: string) =>
+      runCitationsEngine({ book: AH, lines: lines.map((l) => ({ ...l, text: l.index === where ? t : l.text })) }, libraryOf({ book: AH, refs }))
+        .suggestions.filter((s) => s.target.book.key === "ah")
+        .map((s) => [s.target.line, s.target.end, s.confidence]);
+    // the future: a later siman (the whole siman: a range in a Sefaria book is its first line)
+    expect(run(at(1, 2), 'ונטילה זו תקנו חכמים, ועוד יתבאר בסימן ג\' בסייעתא דשמיא')).toEqual([[at(3, 1), undefined, "high"]]);
+    expect(run(at(4, 1), 'דאם לא כן הוה ליה ברכה לבטלה, כמו שנתבאר בסימן ב\' סעיף ג\'.')).toEqual([[at(2, 3), undefined, "high"]]);
+    expect(run(at(4, 1), "ועיין מה שכתבתי בסימן א' בזה")).toEqual([[at(1, 1), undefined, "high"]]);
+    // the tense says the direction: "נתבאר" of a siman that comes later is not the book's own
+    expect(run(at(1, 2), "כמו שנתבאר בסימן ג'")).toEqual([]);
+    // another book named right after it is that book's siman
+    expect(run(at(4, 1), "כמו שנתבאר בסימן א' בט\"ז")).toEqual([]);
+    // "כמבואר" (as is explained — anywhere) is no word of the author's own book
+    expect(run(at(4, 1), "כמבואר בסימן א'")).toEqual([]);
+    // "(וע"ל סי' קס"ט)" — the Shulchan Aruch's עיין לעיל / עיין לקמן: either way, never the siman it stands in
+    expect(run(at(1, 2), "ואם שכח אינו חוזר (וע\"ל סי' ג')")).toEqual([[at(3, 1), undefined, "high"]]);
+    expect(run(at(4, 1), "וע\"ל סי' ב' סעיף ג'")).toEqual([[at(2, 3), undefined, "high"]]);
+    expect(run(at(1, 2), "וע\"ל סי' א'")).toEqual([]);
+  });
+
   it("the tracker learns a level's kind from the headings over the references, ignoring a stray match", () => {
     const t = new StructureTracker("חכמת אדם");
     t.heading(2, "<h2>כלל א</h2>");

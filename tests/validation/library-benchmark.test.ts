@@ -64,6 +64,8 @@ import {
  *   BENCH_STEP_S    a step that runs longer is stopped and its partial result kept (default 600)
  *   BENCH_DESIGN    the owners the report measures: sample | full (default: full only for BENCH_MODE=full)
  *   BENCH_RERUN_STOPPED=1  run again the books whose steps hit BENCH_STEP_S (give it more time)
+ *   BENCH_ONLY      "<title>;<title>": run only these books, cached or not (into runs-~only-<k>of<n>.jsonl,
+ *                   which is read after the other files and so replaces their records)
  *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
@@ -73,6 +75,8 @@ const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report
 /** which owners the report measures: the sample (default) or all of them (default for BENCH_MODE=full) */
 const DESIGN = (process.env.BENCH_DESIGN ?? (MODE === "full" ? "full" : "sample")) as "sample" | "full";
 const RERUN_STOPPED = !!process.env.BENCH_RERUN_STOPPED;
+/** BENCH_ONLY="<title>;<title>": run only these books (again), for a before/after of a few owners */
+const ONLY_BOOKS = process.env.BENCH_ONLY?.split(";").map((t) => t.trim()).filter(Boolean);
 const ONLY_TYPES = process.env.BENCH_TYPES?.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
 const N = Number(process.env.BENCH_N ?? 60);
 const SEED = process.env.BENCH_SEED ?? "otzaria-bench-1";
@@ -281,8 +285,12 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines, `next in this shard: ${next.join("; ")}`].join("\n"));
       }
       if (MODE !== "report") {
-        const mine = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id) || (RERUN_STOPPED && done.get(id)!.stopped.length > 0));
-        const out = join(DIR, `runs-${SHARD}of${SHARDS}.jsonl`);
+        // BENCH_ONLY: run (again) just these books, whatever the cache holds — into runs-~only.jsonl, read last
+        const only = ONLY_BOOKS && new Set(books.filter((b) => ONLY_BOOKS.includes(b.title)).map((b) => idOf(b.key)));
+        const mine = only
+          ? [...only].filter((_, i) => i % SHARDS === SHARD)
+          : order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id) || (RERUN_STOPPED && done.get(id)!.stopped.length > 0));
+        const out = join(DIR, only ? `runs-~only-${SHARD}of${SHARDS}.jsonl` : `runs-${SHARD}of${SHARDS}.jsonl`);
         console.log(`[bench] ${MODE}: ${order.length} books in the design, ${done.size} cached; this shard runs ${mine.length}`);
         for (const [i, id] of mine.entries()) {
           if (performance.now() - t0 > BUDGET_MS) {

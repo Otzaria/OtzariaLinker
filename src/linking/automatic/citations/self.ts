@@ -40,8 +40,8 @@ export interface Here {
 
 /** An internal reference: which way it points, and where it was written. */
 export interface InternalRef {
-  /** -1 "לעיל" (before the citing line), 1 "לקמן"/"להלן" (after it) */
-  readonly dir: -1 | 1;
+  /** -1 "לעיל" (before the citing line), 1 "לקמן"/"להלן" (after it), 0 either ("וע"ל": עיין לעיל or עיין לקמן) */
+  readonly dir: -1 | 0 | 1;
   readonly here: Here;
 }
 
@@ -181,7 +181,7 @@ export function resolveInternal(ref: InternalRef, line: number, elems: readonly 
   const r = index.via === "heref" ? byKeys(ref.here, elems, index, depthKinds) : index.via === "headings" ? byHeadings(ref.here, elems, index) : null;
   if (!r) return null;
   if (r.line <= line && line <= r.end) return null;
-  if (ref.dir < 0 ? r.end >= line : r.line <= line) return null;
+  if (ref.dir < 0 ? r.end >= line : ref.dir > 0 && r.line <= line) return null;
   return r;
 }
 

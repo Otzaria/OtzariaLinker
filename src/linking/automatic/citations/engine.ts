@@ -684,7 +684,7 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   reasons.push({ code: "citations/span", text: `ההפניה בטקסט: "${c.text}"` });
   const tierText = { title: "שם הספר המלא", derived: "צורה מקובלת של שם הספר", acronym: "כינוי של הספר מתוך רשימת הכינויים במסד", secondary: "שם המסכת, שבצירוף מקום של פרק ומשנה מפנה למשנה" }[t.tier];
   if (c.internal && c.ibid === "none") {
-    reasons.push({ code: "citations/internal", text: `"${c.name}": מקום בספר עצמו, ${c.internal.dir < 0 ? "לפני" : "אחרי"} השורה המצטטת. סוג הרמה (${c.elems.map((e) => KIND_WORD[e.kind] ?? e.kind).join(", ")}) נקבע לפי הכותרות של הספר` });
+    reasons.push({ code: "citations/internal", text: `"${c.name}": מקום בספר עצמו, ${c.internal.dir < 0 ? "לפני" : c.internal.dir > 0 ? "אחרי" : "לפני או אחרי"} השורה המצטטת. סוג הרמה (${c.elems.map((e) => KIND_WORD[e.kind] ?? e.kind).join(", ")}) נקבע לפי הכותרות של הספר` });
   } else if (c.ibid === "none") reasons.push({ code: `citations/name-${t.tier}`, text: `"${c.name}" — ${tierText}: ${t.book.title}${COLLECTION_WORD[t.collection] && t.collection !== "other" ? ` (${COLLECTION_WORD[t.collection]})` : ""}` });
   else {
     rules.push(`citations.ibid-${c.ibid}`);

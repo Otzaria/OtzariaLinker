@@ -89,6 +89,15 @@ describe("a location in brackets with no book: the context's book", () => {
     // a book named a few words before is the place's book (it would be read with it, or not at all)
     expect(scan([["<h2>ספר שמות</h2>", 2], 'כדאיתא בגיטין שם (ב, ג) וגו\'']).every((x) => !books(x).includes("ex"))).toBe(true);
   });
+
+  it('a work "על ספר <book>" ("מדרש תנאים על ספר דברים"): that book, as a "ספר <book>" heading would', () => {
+    // the library's line (מדרש תנאים על ספר דברים, כ, יז, ב); the database links "(לא ה)" to דברים לא, ה
+    const sc = new CitationScanner(AliasIndex.build([...CATALOG, book("deut", "דברים")]), "mt", {}, "מדרש תנאים על ספר דברים", UNITS);
+    sc.scanLine(0, "מנ' ת״ל כאשר צוך ה' אלהיך הרי אתה דן נאמר כאן צווי ונאמר להלן (לא ה) צווי", null);
+    expect(books(sc.citations[0])).toEqual(["deut"]);
+    expect(sc.citations[0]!.rule).toBe("implicit-context");
+    expect(loc(sc.citations[0])).toBe("?:31 ?:5");
+  });
 });
 
 describe("a named level after a book, and the Zohar by its pages", () => {

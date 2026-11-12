@@ -1,6 +1,6 @@
 import type { BookRef } from "../../../core/links/model";
 import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
-import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, saSpelling, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
@@ -176,8 +176,14 @@ export class CitationScanner {
   readonly dropped = new Map<string, number>();
   private readonly ibidOn: boolean;
   private readonly window: number;
-  /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן" */
-  private readonly base: AliasTarget | null;
+  /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן"; per line in a book of partBases */
+  private base: AliasTarget | null;
+  /**
+   * A work named a Shulchan Aruch whose parts are its own first level ("שולחן ערוך הרב, אורח חיים, תלו, יח",
+   * "קול יעקב על שולחן ערוך, אורח חיים, …"): the part of the Shulchan Aruch each line is in, by name. Its
+   * simanim are the Shulchan Aruch's, so a bare "כמו שנתבאר בסימן תל"ג" is that siman of the line's part.
+   */
+  private readonly partBases: ReadonlyMap<string, AliasTarget> | null;
   /** the citing book's own levels, for its internal references (self.ts) */
   readonly structure: StructureTracker;
   private readonly selfTarget: AliasTarget | null;
@@ -193,6 +199,7 @@ export class CitationScanner {
     this.ibidOn = options.ibid ?? true;
     this.window = options.ibidWindow ?? 6;
     this.base = baseOf(aliases, sourceTitle);
+    this.partBases = this.base ? null : saPartBases(aliases, sourceTitle);
     this.structure = new StructureTracker(sourceTitle);
     this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
     this.titleCommentator = titleCommentatorOf(sourceTitle);
@@ -217,6 +224,10 @@ export class CitationScanner {
       return;
     }
     this.structure.content(heRef);
+    if (this.partBases) {
+      const first = this.structure.here().keys?.[0];
+      this.base = first?.startsWith("$") ? (this.partBases.get(saSpelling(first.slice(1))) ?? null) : null;
+    }
     const toks = citationTokens(text);
     if (!hasHebrewText(toks)) return;
     if (this.last && (line - this.last.line > FAR_WINDOW || this.headingSince)) this.last = null;
@@ -312,7 +323,11 @@ export class CitationScanner {
         const siman = this.hereSiman();
         const base = normTitle(this.base.book.title);
         const same = cands.filter((c) => c.collection === "sa-commentary" && saBaseOf(c.book.title) === base);
-        if (siman !== null && same.length) {
+        // not when the line has named another siman ("ובסי' צ"ב סעיף ב' והוא שם במג"א סק"ב", "בסי' ע"ו כמ"ש המג"א
+        // שם סק"ג"): the ס"ק is that siman's. Measured in לבושי שרד (a commentary the "שלחן ערוך" spelling let in):
+        // 19 of 74 confirmed-or-contradicted were such, the database's LINKER pointing to the siman named before
+        const otherSiman = (this.last?.line === line && this.last.elems[0]?.kind === "siman") || [before(toks, i, 1), before(toks, i, 2), toks[m.to]].some((x) => isWord(x, "שם"));
+        if (siman !== null && same.length && !otherSiman) {
           cands = same;
           elems = [{ kind: "siman", n: siman, explicit: true, numeral: { n: siman, form: "gershayim", common: false } }, ...elems];
           rule = "sk-here";
@@ -840,10 +855,18 @@ export class CitationScanner {
    */
   private internal(toks: readonly Tok[], i: number, line: number): number | null {
     const t = toks[i]!;
-    if (!this.selfTarget || t.gershayim || t.geresh || !RELATIVE.test(t.text)) return null;
+    if (!this.selfTarget || t.geresh) return null;
+    // "כמו שנתבאר בסימן ל"ח", "ויתבאר בסי' צ"ו", "כמו שכתבתי בסימן ח": the author's own book, the tense its
+    // direction; "(וע"ל סי' קס"ט)" — עיין לעיל or עיין לקמן, either way (AUTHOR_WORDS)
+    const word = t.gershayim ? (SEE_ABOVE.test(wordShape(t)) ? 0 : null) : AUTHOR_PAST.test(t.text) ? -1 : AUTHOR_FUTURE.test(t.text) ? 1 : null;
+    if (word === null && (t.gershayim || !RELATIVE.test(t.text))) return null;
+    // a commentary on the Shulchan Aruch: a siman is its base's (relative(), at the marker word)
+    if (word !== null && this.base) return null;
     const addr = parseAddress(toks, i + 1, { enclosed: opensBefore(toks, i) });
     const e = addr?.elems[0];
     if (!addr || !e || !e.explicit || e.kind === "daf" || e.kind === "?" || addr.elems.some((x) => x.kind === "daf" || x.amud !== undefined)) return null;
+    // measured before a siman only (the library's ערוך השולחן, the Shulchan Aruch, the ב"ח)
+    if (word !== null && e.kind !== "siman") return null;
     const named = (x: Tok | undefined) => !!x && x.kind === "word" && !RELATIVE.test(x.text) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && (((x.gershayim || x.geresh) && !numeralOf(x) && !LOCATION_WORD.test(wordShape(x))) || OTHER_WORK.test(x.text));
     const titled = (at: number) => at >= 0 && toks[at]?.kind === "word" && this.aliases.matchAt(toks, at).length > 0;
     if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(beforeIndex(toks, i, 1)) || titled(beforeIndex(toks, i, 2))) return this.drop("internal-of-another-book");
@@ -853,7 +876,7 @@ export class CitationScanner {
     // "(לעיל פסוק טו)" in a midrash is a verse of the Torah, of a chapter the text does not say: the citation
     // before it was another verse's in two of three cases checked by hand (§6.8) — no link
     if (e.kind === "pasuk") return null;
-    const dir = /לעיל$/.test(t.text) ? -1 : 1;
+    const dir = word ?? (/לעיל$/.test(t.text) ? -1 : 1);
     return this.emit(toks, line, { from: i, to, candidates: [this.selfTarget], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "internal", numericName: false, commentators: false, internal: { dir, here: this.structure.here() } });
   }
 
@@ -1066,7 +1089,8 @@ export class CitationScanner {
       }
     }
     if (!found) {
-      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1];
+      // "מדרש תנאים על ספר דברים": the book of the Tanakh after "ספר", as in the headings above
+      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1]?.replace(/^ספר /, "");
       found = (on && this.aliases.lookup(on)?.targets.find((x) => x.tier === "title" && x.collection === "tanakh")) || null;
     }
     return (this.contextCache = found);
@@ -1373,7 +1397,7 @@ const keyOfName = (s: string): string => unifyFinals(s.replace(/["'׳״]/g, ""))
 
 /** The part of the Shulchan Aruch a commentary on it is on ("שולחן ערוך, אורח חיים"), or null. */
 function saBaseOf(title: string): string | null {
-  const t = normTitle(title);
+  const t = saSpelling(normTitle(title));
   if (Object.hasOwn(SA_COMMENTARY_BASE, t)) return SA_COMMENTARY_BASE[t]!;
   const part = / על שולחן ערוך,? (.+)$/.exec(t)?.[1];
   return part ? `שולחן ערוך, ${part}` : null;
@@ -1387,13 +1411,27 @@ const SA_COMMENTARY_BASE: Readonly<Record<string, string>> = {
   "שער הציון": "שולחן ערוך, אורח חיים",
 };
 
+/** The parts of the Shulchan Aruch by name, for a work whose title names it but no part of it (CitationScanner.partBases). */
+function saPartBases(aliases: AliasIndex, sourceTitle: string): Map<string, AliasTarget> | null {
+  const title = saSpelling(normTitle(sourceTitle));
+  if (!/(?:^|\s)שולחן ערוך(?:\s|,|$)/.test(title) || collectionOf(sourceTitle) === "sa" || Object.keys(SA_PARTS).some((p) => title.endsWith(p))) return null;
+  const out = new Map<string, AliasTarget>();
+  for (const part of Object.keys(SA_PARTS)) {
+    const t = aliases.lookup(`שולחן ערוך, ${part}`)?.targets.find((x) => x.tier === "title" && x.collection === "sa");
+    if (t) out.set(part, t);
+  }
+  return out.size ? out : null;
+}
+
 /**
  * The book a commentary is on — the target of "לעיל/לקמן <daf>" (a tractate) and of a bare "סימן"
  * (the Shulchan Aruch): "… על גיטין" → גיטין; "… על שולחן ערוך אורח חיים" → "שולחן ערוך, אורח חיים".
  */
 function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
-  const title = sourceTitle.replace(/[״]/g, '"');
+  const title = saSpelling(sourceTitle.replace(/[״]/g, '"'));
   const on = / על (.+)$/.exec(title)?.[1];
+  // "קול יעקב על שולחן ערוך": no part in the title — the part is each line's (partBaseHere)
+  if (on === "שולחן ערוך") return null;
   const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, Object.hasOwn(SA_COMMENTARY_BASE, title) ? SA_COMMENTARY_BASE[title] : undefined];
   for (const n of names) {
     if (!n) continue;
@@ -1442,6 +1480,18 @@ const DAF_WORD = /^(?:ו?ב)?דף$/;
 
 /** "לעיל", "לקמן", with a prefix ("ולקמן", "דלעיל", "כדלקמן") */
 const RELATIVE = /^(?:[ודכ]{0,2})(?:לעיל|לקמן|להלן)$/;
+/*
+ * AUTHOR_WORDS: the author pointing into his own book without "לעיל"/"לקמן" — "כמו שנתבאר בסימן ל"ח", "ויתבאר
+ * בסי' צ"ו", "כמו שכתבתי בסימן ח'" (the tense is the direction), and "(וע"ל סי' קס"ט)", which the Shulchan
+ * Aruch writes for עיין לעיל and עיין לקמן alike. Measured on the database's links of these words to a siman
+ * (DB links of the line to the book itself at that siman / to the Shulchan Aruch / to none): the verbs in
+ * ערוך השולחן 1,853 / 471 / 684, בית יוסף 377 / 86 / 855, ב"ח 85 / 32 / 121, responsa almost never; "וע"ל" in
+ * the four parts of the Shulchan Aruch 558 / 17 / 57, ב"ח 200 / 28 / 398. "כמבואר"/"כמ"ש" (as is explained —
+ * anywhere) and "עיין" are no word of the book's own: not taken.
+ */
+const AUTHOR_PAST = /^(?:[וכ]{0,2}ש?)(?:נתבאר|נתבארו|ביארנו|בארנו|ביארתי|בארתי|כתבתי|כתבנו)$/;
+const AUTHOR_FUTURE = /^(?:[וכ]{0,2}ש?)(?:יתבאר|יתבארו|יבואר|נבאר|אבאר)$/;
+const SEE_ABOVE = /^ו?ע"ל$/;
 
 /** the tractate of a Talmud/Mishna title (the inverse of the derived names) */
 function tractateOfTitle(title: string, coll: Collection): string | null {
@@ -1685,8 +1735,9 @@ function unitWordAt(toks: readonly Tok[], i: number): { next: number; kinds: Uni
 
 /** A perek opening a reversed citation: "פ"ג", "בפי"א", "דבפ"ק", "פרק ג'", "בפרק ב'". */
 function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; ordinal?: true } | null {
-  const t = toks[i]!;
-  if (t.kind !== "word") return null;
+  const t = toks[i];
+  // past the line's end: "… כסף משנה" closing a line (forward() looks two words on) threw, and the whole book's step with it
+  if (t?.kind !== "word") return null;
   for (let p = 0; p <= 2; p++) {
     if (p && !PREFIX_LETTERS.test(t.text.slice(0, p))) break;
     const text = t.text.slice(p);
