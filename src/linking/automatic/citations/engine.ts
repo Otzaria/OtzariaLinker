@@ -13,7 +13,7 @@ import {
   type Suggestion,
 } from "../types";
 import type { AddrElem } from "./address";
-import { AliasIndex, type AliasTarget, type CatalogBook, type Collection } from "./aliases";
+import { AliasIndex, COMMON_TITLES, type AliasTarget, type CatalogBook, type Collection } from "./aliases";
 import { CitationScanner, type Citation } from "./detect";
 import { NamedUnitIndex, unitKindOf, unitNameKey, type NamedUnit, type NamedUnitSource } from "./named";
 import type { Resolution, TargetIndex } from "./resolve";
@@ -81,7 +81,10 @@ const PENALTY = {
   headings: 0.1,
   /** a title that is also an everyday word ("דברים", "שבת"), with one number and nothing else */
   commonTitle: 0.07,
-  /** "תהלים פ"ו": chapter 6 or Psalm 86 */
+  /**
+   * "תהלים פ"ו": chapter 6 or Psalm 86; "תה' פ' ב": chapter 2 or Psalm 80 verse 2 — only when the book has
+   * both places (in בראשית "פ"ו" can only be chapter 6)
+   */
   compactOrNumber: 0.12,
   numericName: 0.05,
   otherCollection: 0.06,
@@ -133,6 +136,13 @@ const PENALTY = {
   /** "הריב"ש סי' ת"ו": an author's responsa by his name alone (no "בתשו'"): his only work in the library */
   responsaAuthor: 0.05,
   /**
+   * the author's other work, when his responsa were cited by his name alone: when both have the place the
+   * responsa win (the margin of "ambiguous" is 0.05) — before, a siman in both was a tie and nothing was linked
+   */
+  otherWork: 0.06,
+  /** "ובמדרש רבה [ויקרא פכ"ב]": the midrash of the book named, told by the word before it — at most "high" */
+  midrashRabbah: 0.05,
+  /**
    * a daf of a book's printed pagination (the Zohar): the page by the alt_toc, while the database's links
    * put about one quote in ten tens of lines away (פנחס, where sections printed beside the page interleave) —
    * "possible" until the two are reconciled (§6.3ג)
@@ -149,6 +159,8 @@ export interface Pending {
   readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
+  /** the numbers' other reading ("פ"ב" as 82) names a place in one of the candidate books */
+  altElsewhere?: boolean;
 }
 
 export class CitationRun {
@@ -305,6 +317,12 @@ export class CitationRun {
         // book_acronym is too noisy to trust without the target's own references: a database name
         // located only by headings ("בתרא" → a commentary's headings) is not a reading
         if (res && res.via === "headings" && t.tier === "acronym") continue;
+        // "תהלים פ"ו", "תה' פ' ב": the numbers have a second reading; it costs only when some book the name may
+        // mean has that place too — this one, or another candidate ("בכתובות פ"ב": chapter 2 of the Mishna, or
+        // daf 82 of the Bavli). In a midrash rabbah "פי"א" is its parsha 11, the way it is cited.
+        const alt = !res?.daf && p.citation.rule !== "midrash-rabbah" ? alternativeReading(p.citation.elems) : null;
+        const other = alt ? index.resolve(alt, t.collection, t.section) : null;
+        if (other && (!res || other.line !== res.line || other.end !== res.end)) p.altElsewhere = true;
         if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
       }
     }
@@ -343,7 +361,7 @@ export class CitationRun {
         unmatched.set(c.line, list);
         continue;
       }
-      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
+      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
       const best = scored[0]!;
       // the same book reached through two names (a title and an acronym) is not a rival
       const rival = scored.find((o) => o.target.book.key !== best.target.book.key);
@@ -434,6 +452,18 @@ export class CitationRun {
   }
 }
 
+/**
+ * The other reading of numbers that can be read two ways: a compact "פ"ו" as the number 86, "פ' ב" as the
+ * numbers 80 and 2. Null when there is none.
+ */
+function alternativeReading(elems: readonly AddrElem[]): AddrElem[] | null {
+  const [first, ...rest] = elems;
+  if (!first) return null;
+  if (first.alsoNumber !== undefined) return [{ kind: "?", n: first.alsoNumber, explicit: false, numeral: { n: first.alsoNumber, form: "gershayim", common: false } }, ...rest];
+  if (first.afterPeh && first.kind === "?" && elems.length === 1) return [{ kind: "?", n: 80, explicit: false, numeral: { n: 80, form: "geresh", common: false } }, { ...first, explicit: false }];
+  return null;
+}
+
 const SECTION_KINDS: ReadonlySet<string> = new Set(["klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]);
 
 const isDafElem = (e: AddrElem): boolean => e.kind === "daf" || e.amud !== undefined;
@@ -470,6 +500,10 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
   "daf-of-another-book": "דף של ספר אחר שנזכר לידו",
   "rambam-topic-unknown": 'פרק אחרי "רמב"ם" בלי שם הלכות שאפשר לזהות',
   "internal-of-another-book": '"לעיל"/"לקמן" של ספר אחר שנזכר לידו',
+  "note-number": "מספר הערה בסוגריים (ספרות), לא מקום",
+  quantity: 'מספר שסופר דבר ("ח\' ימים", "שני דברים"), לא מקום',
+  "part-of-another-work": 'חלק של השולחן ערוך אחרי שם של ספר תשובות ("שו"ת … או"ח סי\'") — החלק של ספר התשובות',
+  "midrash-not-in-library": "מדרש רבה על הספר אינו פתוח בכלי",
 };
 
 /**
@@ -493,8 +527,9 @@ function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, uni
     }
   }
   const fallback = c.elems.length > 0;
-  // a name several tractates share is told apart only by its daf: no daf inside, no link
-  if (u.bases) return null;
+  // a name several tractates share is told apart only by its daf: no daf inside, no link; and a name written
+  // with no "פרק" is a chapter only by the daf inside it
+  if (u.bases || c.rule === "named-bare") return null;
   if (own) {
     const word = u.kind === "chapter" ? "פרק" : "פרשת";
     return { r: { book: t.book, line: own.line, end: own.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${t.book.title}, ${word} ${own.name}`, via: "named", daf: false }, fallback };
@@ -515,7 +550,7 @@ function ownUnit(kind: NamedUnit["kind"], name: string, key: string, units: read
 }
 
 /** The score of one reading: the name's strength minus everything that makes the reading less sure. */
-export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = false): number {
+export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = false, twoReadings = false): number {
   let s: number = TIER_SCORE[t.tier];
   if (c.evidence === "medium") s -= PENALTY.medium;
   if (!r.daf && c.elems.length === 1 && c.elems[0]!.kind === "?") s -= PENALTY.singleBare;
@@ -528,10 +563,11 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (r.via === "headings") s -= PENALTY.headings;
   if (r.via === "pages") s -= r.split ? PENALTY.pagesSplit : PENALTY.pages;
   if (COMMON_TITLES.has(t.book.title) && c.ibid === "none" && !c.bracketed && c.elems.length === 1 && !c.elems[0]!.explicit && c.elems[0]!.amud === undefined) s -= PENALTY.commonTitle;
-  if (c.elems[0]?.alsoNumber !== undefined && !r.daf) s -= PENALTY.compactOrNumber;
+  if (twoReadings) s -= PENALTY.compactOrNumber;
   if (c.numericName) s -= PENALTY.numericName;
   // a book outside the known corpora, read positionally from bare numbers
-  if (t.collection === "other" && !r.daf && c.elems.some((e) => e.kind === "?")) s -= PENALTY.otherCollection;
+  // (or by a number that may be read two ways: "מנחת חינוך (פ"ד)" — chapter 4, or mitzva 84)
+  if (t.collection === "other" && !r.daf && (twoReadings || c.elems.some((e) => e.kind === "?"))) s -= PENALTY.otherCollection;
   if (c.elems.some((e) => e.numeral.common && !e.explicit)) s -= PENALTY.commonNumeral;
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
@@ -541,10 +577,20 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "implicit-context") s -= PENALTY.implicitContext;
   if (c.rule === "implicit-previous-far") s -= PENALTY.implicitFar;
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
+  if (t.otherWork) s -= PENALTY.otherWork;
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
+  // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
+  if (c.rule === "dibur-here") s -= PENALTY.ibidPartial;
+  // the book is told by a word before the name, not by the name: "ברבות [בראשית פי"א]", a glossary of Rashi's words
+  if (c.rule === "midrash-rabbah") s -= PENALTY.midrashRabbah;
+  if (c.rule === "title-commentator") s -= PENALTY.baseDaf;
   if (c.ordinal && c.elems.length === 1 && TALMUDIC.has(t.collection)) s -= PENALTY.ordinalChapter;
+  // "[פ"ק דברכות] בשר ודם…": a chapter alone sent to the Mishna, though the book did not say "משנה" — books
+  // mostly mean the Gemara's discussion in it (on the held-out sample 874 of 1,230 such "high" were not
+  // confirmed by the database; LIBRARY_BENCHMARK §4.3): at most "possible"
+  else if (c.form === "reversed" && c.elems.length === 1 && t.collection === "mishna" && c.qualifier !== "mishna" && !c.commentator) s -= PENALTY.ordinalChapter;
   if (c.commentator && t.collection === "rambam" && !r.leaf) s -= PENALTY.rambamCommentaryChapter;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   // a unit whose location was found inside it: the location is the citation and the name confirms
@@ -558,11 +604,6 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   }
   return Math.max(0, Math.min(1, s));
 }
-
-/** titles that are everyday words: "לב' דברים, א'" is "two things", "בשבת כ"ח" may be a date */
-const COMMON_TITLES: ReadonlySet<string> = new Set([
-  "דברים", "שמות", "במדבר", "שופטים", "עזרא", "יונה", "רות", "שבת", "ברכות", "ביצה", "סוכה", "תמיד", "מכות", "נדרים", "חולין", "מנחות", "ערכין", "כריתות", "נזיר", "שבועות", "גיטין", "תענית", "מגילה", "חגיגה", "סוטה", "תמורה", "מעילה", "נדה", "בכורות", "זבחים", "פסחים",
-]);
 
 const TALMUDIC: ReadonlySet<Collection> = new Set(["bavli", "mishna", "yerushalmi", "tosefta"]);
 
@@ -583,6 +624,12 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "part-book": "\"ח\"א\", \"ח\"ב\" אחרי שם החיבור: הכרך, שהוא ספר נפרד בספרייה",
   "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
   "dibur-context": "שם המפרש ו\"ד\"ה\" בלי שם מסכת: הדף נלקח מההפניה שלפניו (או מהמסכת שהחיבור נכתב עליה), והקישור הוא לפירוש על הדף הזה",
+  "dibur-here": "שם המפרש ו\"ד\"ה\" בלי דף ובלי הפניה לפניו: הדף הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), במסכת שהחיבור נכתב עליה",
+  "named-bare": "שם של פרק בלי המילה \"פרק\", ואחריו בסוגריים דף שנמצא בתוך הפרק הזה",
+  "midrash-rabbah": "לפני שם הספר כתוב \"מדרש רבה\" / \"ברבות\" / \"במד\"ר\": ההפניה היא למדרש רבה על הספר הזה, לא לפסוק",
+  "title-commentator": "הספר הוא אוצר של מילות מפרש אחד, ולכן המקום הוא בפירוש שלו על הדף או על הפרק",
+  "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
+  "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
   "responsa-named": "שם המחבר ומילה לתשובות (\"בתשו'\", \"שו\"ת\") לפני הסימן: ספר התשובות שלו בספרייה",
   "responsa-author": "שם המחבר לפני הסימן, וספר התשובות הוא החיבור היחיד שלו בספרייה",

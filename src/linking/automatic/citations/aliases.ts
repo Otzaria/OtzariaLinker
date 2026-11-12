@@ -44,6 +44,11 @@ export interface AliasTarget {
   readonly collection: Collection;
   /** a named first level of the book's references the name stands for ("אורח חיים" of the Tur) */
   readonly section?: string;
+  /**
+   * another work of an author cited by name and a siman ("הריב"ש סי' קמ"ב" may be צוואת הריב"ש): a candidate
+   * the place may confirm, scored below his responsa so that a place both have is no tie
+   */
+  readonly otherWork?: true;
 }
 
 export interface AliasWord {
@@ -126,6 +131,11 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["ספר הזהר", "זוהר", "זהר", "הזוהר", "הזהר", "ספר הזוהר", 'זוה"ק', 'זה"ק'],
   ["תקוני הזהר", "תיקוני זוהר", "תיקוני הזוהר", "תקוני זוהר", "תקוני הזוהר", "תיקוני הזהר", "תקוני זהר", 'תקו"ז', 'תיקו"ז'],
 ];
+
+/** titles that are everyday words: "לב' דברים, א'" is "two things", "בשבת כ"ח" may be a date */
+export const COMMON_TITLES: ReadonlySet<string> = new Set([
+  "דברים", "שמות", "במדבר", "שופטים", "עזרא", "יונה", "רות", "שבת", "ברכות", "ביצה", "סוכה", "תמיד", "מכות", "נדרים", "חולין", "מנחות", "ערכין", "כריתות", "נזיר", "שבועות", "גיטין", "תענית", "מגילה", "חגיגה", "סוטה", "תמורה", "מעילה", "נדה", "בכורות", "זבחים", "פסחים",
+]);
 
 /** the parts of the Shulchan Aruch and the Tur: name → its abbreviations */
 export const SA_PARTS: Readonly<Record<string, readonly string[]>> = {
@@ -441,6 +451,9 @@ export class AliasIndex {
     for (const prefix of prefixesOf(t)) {
       const first = t.key.slice(prefix.length);
       for (const e of this.byFirst.get(first) ?? []) {
+        // "כפסחים ח' ע"ב" is a title with כ, "כאה"ע" a quoted name; "כתלים" is "walls", not כ + a spelling of
+        // תהילים: with כ only a title or a quoted name
+        if (prefix.endsWith("כ") && !e.targets.some((x) => x.tier === "title") && !e.words.some((w) => w.gershayimFromEnd || w.geresh)) continue;
         const end = matchWords(e.words, toks, i, prefix.length);
         if (end !== null) out.push({ entry: e, from: i, to: end, prefix });
       }
@@ -473,7 +486,8 @@ const GENERIC_WORDS = new Set(["משנה", "תוס'", "תוספות", "תוספ'
 const AUTHOR_NAMES = new Set(['רמב"ם', 'רמב"ן', 'רמ"א', 'רשב"א', 'רא"ש', 'ריטב"א', 'ר"ן', 'רי"ף', 'רש"י', 'מהרש"א', 'מהרש"ל', 'רשב"ם', 'ראב"ד', 'ר"מ', 'רמב"ה', 'רא"ה']);
 
 /** common abbreviations that are never a book's name ("חלק א", "עמוד א", "דיבור המתחיל") */
-const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל']);
+// "מ"ע", "ל"ת": מצוות עשה / לא תעשה ("סמ"ג [מ"ע סימן כ"א]"), not מאירת עיניים, whose name is "סמ"ע"
+const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל', 'מ"ע', 'ל"ת', 'מל"ת']);
 
 /**
  * book_acronym is machine-made and noisy (42K names; "מלכות" for a commentary on הלכות שביתת יום
@@ -490,8 +504,10 @@ export function plausibleAcronym(name: string, title: string): boolean {
   const titleKeys = (nameWords(title) ?? []).map((w) => w.key);
   if (words.length > 1) return true;
   const w = words[0]!;
-  // an unquoted single word must START the title ("חתם" no, "שמואל" for "אגרת שמואל על רות" no)
-  if (!w.gershayimFromEnd && !w.geresh) return titleKeys.length > 0 && (titleKeys[0] === w.key || (w.key.length >= 4 && titleKeys[0]!.startsWith(w.key)));
+  // an unquoted single word must BE the title's first word ("חתם" no, "שמואל" for "אגרת שמואל על רות" no). Not
+  // only its start: the database's truncations ("קידוש", "שבוע", "נדרי", "מצוד") lost their geresh and are
+  // everyday words — "[בקידוש י"ט]" is the Kiddush of a festival; with the geresh they are read as truncations
+  if (!w.gershayimFromEnd && !w.geresh) return titleKeys.length > 0 && titleKeys[0] === w.key;
   const letters = titleKeys.join("");
   const want = w.key.replace(/^ה/, "");
   let at = 0;
