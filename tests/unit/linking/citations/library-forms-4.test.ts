@@ -303,6 +303,12 @@ describe("a commentator on the Gemara, as notes write it", () => {
   it(`"שם" is never the number 340`, () => {
     expect(loc(scan([`כמ"ש בתפארת ישראל פט"ז שם`])[0])).toBe("perek:16");
   });
+  it(`"והב"י [או"ח סימן ג]": the part of a work on the Tur in a bracket after its name`, () => {
+    const sc = new CitationScanner(AliasIndex.build([...CATALOG, book("by", "בית יוסף", "sefaria", ['ב"י'])]), "src", {}, "ספר כלשהו", NamedUnitIndex.build([]));
+    sc.scanLine(0, `וכן כתב והב"י [או"ח סימן ג] בשם`, null);
+    expect(sc.citations.map(books)).toEqual([["by"]]);
+    expect(sc.citations[0]!.candidates[0]!.section).toBe("אורח חיים");
+  });
   it(`"המג"א [או"ח סימן תלב ס"ק א]": a commentary on one part of the Shulchan Aruch, named before the part`, () => {
     const [c] = scan([`וכן כתב המג"א [או"ח סימן תלב ס"ק א] בשם`]);
     expect(books(c)).toEqual(["ma"]);

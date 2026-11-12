@@ -1454,7 +1454,9 @@ function tractateOfTitle(title: string, coll: Collection): string | null {
 }
 
 /** A part of the Tur / Shulchan Aruch at toks[i] ("או"ח", "חו"מ", "אורח חיים"). */
-function sectionAt(toks: readonly Tok[], i: number): { part: string; next: number } | null {
+function sectionAt(toks: readonly Tok[], at: number): { part: string; next: number } | null {
+  // "והב"י [או"ח סימן ג]": the part may open a bracket after the name
+  const i = isOpen(toks[at]) ? at + 1 : at;
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
   // "ב"ח בח"מ סי' רמ"ב": the part may carry a ב
