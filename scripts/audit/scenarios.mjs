@@ -250,3 +250,273 @@ export async function s4(s, { IN }) {
   s.verdict = "works with friction";
 }
 s4.title = "תיקייה עם תתי־תיקיות";
+
+async function dbVsDb(s, p, IN, from, to, toLabel) {
+  await s.click(task(p, "מסד מול מסד"), "'מסד מול מסד'");
+  await s.pick(sheetBtn(p, "המסד שממנו מקשרים: מסד נתונים"), [from], `שלב 1: 'מסד נתונים' ← ${from.split("/").pop()}`);
+  await wait(p, 1500);
+  await s.pick(sheetBtn(p, "המסד שאליו מקשרים: מסד נתונים"), [to], `שלב 2: 'מסד נתונים' ← ${toLabel}`);
+  await wait(p, 1500);
+  await s.shot("start-sheet");
+  s.note(`הגיליון: ${(await p.getByRole("dialog").innerText()).replace(/\s+/g, " ").slice(0, 500)}`);
+  await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  await idle(p);
+  await wait(p, 1500);
+  await s.shot("workspace");
+  s.note(`מקורות: ${(await p.locator(".sources-panel").innerText()).replace(/\s+/g, " ").slice(0, 400)}`);
+}
+
+export async function s5(s, { IN }) {
+  const p = await s.open();
+  await dbVsDb(s, p, IN, `${IN}/db/אישי-פירושים.db`, OTZ(IN), "seforim.db");
+  await runMaxLink(s, p);
+  await approveAll(s, p);
+  await s.shot("approved");
+  await exportFlow(s, p, "export");
+  s.note("אחרי הייצוא: קובצי _links.json. אין דרך לכתוב את הקישורים חזרה לתוך המסד האישי (הכלי קורא מסדים בלבד).");
+  s.verdict = "works with friction";
+}
+s5.title = "מסד אוצריא ומסד אישי יחד";
+
+export async function s6(s, { IN }) {
+  const p = await s.open();
+  s.decide("אין משימה 'לראות קישורים שבמסד': מה לבחור? (עריכת קישורים קיימים מבקשת קובצי json)");
+  await s.pick(p.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }), [OTZ(IN)], "במסך הפתיחה, בצד: 'מסד נתונים' ← seforim.db");
+  await idle(p);
+  await wait(p, 1500);
+  await s.shot("workspace");
+  await setBook(s, p, 'רש"י על בראשית', "source", "'מקור' ליד 'רש\"י על בראשית'");
+  s.decide("איפה רואים את הקישורים שכבר במסד? (לשונית 'קישורים' ← 'קישורים מהמסד')");
+  await s.click(p.getByRole("tab", { name: /^קישורים/ }), "לשונית 'קישורים'");
+  await s.shot("links-tab");
+  await s.click(p.getByRole("tab", { name: /קישורים מהמסד/ }), "'קישורים מהמסד'");
+  await idle(p);
+  await wait(p, 1500);
+  await s.shot("db-links");
+  s.note(`קישורים מהמסד: ${(await sideText(p)).slice(0, 700)}`);
+  const mark = p.getByRole("button", { name: "סימון המוצגים" });
+  if (await mark.count()) {
+    await s.click(mark, "'סימון המוצגים'");
+    await s.click(p.getByRole("button", { name: /העתקה לפרויקט \(/ }), "'העתקה לפרויקט'");
+    await idle(p);
+    await wait(p, 1000);
+    await s.shot("copied");
+  }
+  await exportFlow(s, p, "export", { tryPrivate: false });
+  s.verdict = "works with friction";
+}
+s6.title = "טעינת קישורים שכבר קיימים במסד";
+
+export async function s7(s, { IN }) {
+  const p = await s.open();
+  await s.click(task(p, "עריכת קישורים קיימים"), "'עריכת קישורים קיימים'");
+  await s.pick(sheetBtn(p, "קובצי הקישורים: תיקייה"), `${IN}/s7/links`, "שלב 1: 'תיקייה' ← links (שלושה קבצים, אחד שבור)");
+  await wait(p, 1500);
+  await s.shot("start-sheet-1");
+  await s.pick(sheetBtn(p, "הספרים שהקישורים מצביעים אליהם: תיקייה"), `${IN}/s7/books`, "שלב 2: 'תיקייה' ← books");
+  await wait(p, 1500);
+  await s.shot("start-sheet-2");
+  await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  await idle(p);
+  await wait(p, 1500);
+  await s.shot("workspace");
+  s.note(`קישורים: ${(await sideText(p)).slice(0, 700)}`);
+  s.verdict = "works with friction";
+}
+s7.title = "טעינת קובצי קישורים קיימים מתיקייה";
+
+export async function s8(s, { IN }) {
+  const p = await s.open();
+  await dbVsDb(s, p, IN, `${IN}/db/אישי-פירושים.db`, `${IN}/db/אישי-מקורות.db`, "אישי-מקורות.db");
+  await runMaxLink(s, p);
+  await approveAll(s, p);
+  await s.shot("approved");
+  await exportFlow(s, p, "export");
+  s.verdict = "works with friction";
+}
+s8.title = "קישור בין שני מסדים אישיים";
+
+import { execSync } from "node:child_process";
+import { mkdirSync, writeFileSync, statSync } from "node:fs";
+import { unzipSync, strFromU8 } from "fflate";
+
+/** Working set of the Chrome processes Playwright launched (their profile dir is playwright's), in MB. */
+export function chromeMb() {
+  try {
+    const ps = "(Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*playwright*' } | Measure-Object -Property WorkingSetSize -Sum).Sum";
+    const out = execSync(`powershell -NoProfile -EncodedCommand ${Buffer.from(ps, "utf16le").toString("base64")}`, { encoding: "utf8" });
+    return Math.round(Number(out.trim()) / 1048576);
+  } catch {
+    return -1;
+  }
+}
+
+export async function s9(s, { IN }) {
+  const p = await s.open();
+  s.note(`זיכרון Chrome בהתחלה: ${chromeMb()} MB`);
+  await s.click(task(p, "תיקייה מול אוצריא"), "'תיקייה מול אוצריא'");
+  let t = Date.now();
+  await s.pick(sheetBtn(p, "התיקייה: תיקייה"), `${IN}/s9/מאות`, "שלב 1: 'תיקייה' ← 300 פירושים");
+  await p.locator(".start-task .opened").first().waitFor({ timeout: 300_000 });
+  s.timings.openFolder = Date.now() - t;
+  await s.pick(sheetBtn(p, "מסד אוצריא: מסד נתונים"), [OTZ(IN)], "שלב 2: 'מסד נתונים' ← seforim.db");
+  await wait(p, 2000);
+  await s.shot("start-sheet");
+  await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  await idle(p);
+  await wait(p, 1500);
+  await s.shot("workspace");
+  s.note(`זיכרון אחרי פתיחה: ${chromeMb()} MB`);
+  await runMaxLink(s, p);
+  s.note(`זיכרון אחרי הקישור המרבי: ${chromeMb()} MB`);
+  t = Date.now();
+  await approveAll(s, p);
+  s.timings.approve = Date.now() - t;
+  await s.shot("approved");
+  s.note(`אחרי אישור: ${(await p.locator(".sug-head").innerText()).replace(/\s+/g, " ")}`);
+  t = Date.now();
+  const out = await exportFlow(s, p, "export");
+  s.timings.export = Date.now() - t;
+  if (out.path && out.file.endsWith(".zip")) {
+    const z = unzipSync(new Uint8Array(readFileSync(out.path)));
+    s.note(`ZIP: ${Object.keys(z).length} קבצים, למשל ${Object.keys(z).slice(0, 3).join(", ")}`);
+  }
+  s.note(`זיכרון בסוף: ${chromeMb()} MB`);
+  s.verdict = "works with friction";
+}
+s9.title = "אצווה של מאות ספרים";
+
+const FOUR = ["בראשית", "ביאור חדש על בראשית", "ספר דוגמה", "הערות על ספר דוגמה"];
+
+/** Builds a small project (four TXT books, max-link, approve certain) and saves it. */
+async function buildAndSave(s, p, IN, dir) {
+  await s.pick(p.locator(".drop-strip").getByRole("button", { name: "קבצים" }), FOUR.map((t) => `${IN}/s3/${t}.txt`), "'קבצים' ← ארבעה ספרים");
+  await idle(p);
+  await runMaxLink(s, p, "כל הספרים הפתוחים");
+  await approveAll(s, p);
+  const dl = p.waitForEvent("download", { timeout: 20_000 });
+  await s.click(p.getByRole("button", { name: "שמירת פרויקט" }), "שמירת הפרויקט (סמל הדיסקט)");
+  const d = await dl;
+  mkdirSync(dir, { recursive: true });
+  const file = `${dir}/${d.suggestedFilename()}`;
+  await d.saveAs(file);
+  s.note(`נשמר: ${d.suggestedFilename()} (${Math.round(statSync(file).size / 1024)} KB)`);
+  return file;
+}
+
+export async function s10(s, { IN }) {
+  const p = await s.open();
+  const file = await buildAndSave(s, p, IN, `${IN}/../out/s10`);
+  await s.shot("saved");
+  const before = (await p.locator(".app-bar .export").innerText()).trim();
+  // a reload in the same browser: the recovery banner
+  await p.reload();
+  await wait(p, 2500);
+  await s.shot("reload-recovery");
+  s.note(`אחרי רענון: ${(await p.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 300)}`);
+  await s.context.close();
+  // another day: a fresh browser profile, the saved file
+  await s.open();
+  const q = s.page;
+  s.decide("איך ממשיכים? ('פרויקט שמור' בצד מסך הפתיחה)");
+  await s.pick(q.locator(".drop-strip").getByRole("button", { name: "פרויקט שמור" }), [file], "'פרויקט שמור' ← הקובץ");
+  await idle(q);
+  await wait(q, 2000);
+  await s.shot("reopened");
+  s.note(`ייצוא לפני: ${before}; אחרי פתיחה: ${(await q.locator(".app-bar .export").innerText().catch(() => "—")).trim()}`);
+  s.note(`אחרי פתיחה: ${(await q.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 700)}`);
+  const books = await q.locator(".book-list li").count();
+  s.note(`ספרים ברשימה אחרי פתיחת הפרויקט: ${books}`);
+  if (!books) {
+    s.repeat("צריך לפתוח שוב את ארבעת הספרים");
+    const group = q.getByRole("group", { name: "סוג המקור להוספה" });
+    if (!(await group.isVisible().catch(() => false))) await s.click(q.getByRole("button", { name: "הוספת מקור" }), "'הוספת מקור'");
+    await s.pick(group.getByRole("button", { name: "קבצים", exact: true }), FOUR.map((t) => `${IN}/s3/${t}.txt`), "'קבצים' ← ארבעת הספרים שוב");
+    await idle(q);
+    await wait(q, 1500);
+    await s.shot("reopened-books");
+    s.note(`אחרי פתיחת הספרים: ${(await q.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 500)}`);
+  }
+  s.verdict = "works with friction";
+}
+s10.title = "שמירת פרויקט ופתיחה מחדש";
+
+export async function s11(s, { IN }) {
+  const p = await s.open();
+  await s.click(task(p, "עריכת קישורים קיימים"), "'עריכת קישורים קיימים'");
+  await s.pick(sheetBtn(p, "קובצי הקישורים: תיקייה"), `${IN}/s7/links`, "שלב 1: 'תיקייה' ← links");
+  await wait(p, 1000);
+  await s.pick(sheetBtn(p, "הספרים שהקישורים מצביעים אליהם: תיקייה"), `${IN}/s7/books`, "שלב 2: 'תיקייה' ← books");
+  await wait(p, 1000);
+  await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  await idle(p);
+  const det = p.locator(".notice details summary").first();
+  if (await det.count()) {
+    await s.click(det, "'פרטים' בהודעה על הקובץ");
+    s.note(`פרטי ההודעה: ${(await p.locator(".notice").first().innerText()).replace(/\s+/g, " ").slice(0, 1200)}`);
+    await s.shot("load-details");
+  }
+  for (const x of await p.locator(".notice .icon-btn[aria-label='סגירה']").all()) await x.click().catch(() => {});
+  await s.click(p.getByRole("tab", { name: /^בדיקה/ }), "לשונית 'בדיקה'");
+  await s.shot("qa-empty");
+  await s.click(p.locator(".side-panel .panel-body .btn.filled").first(), "הרצת הבדיקה");
+  await idle(p);
+  await wait(p, 1000);
+  await s.shot("qa-report");
+  s.note(`דוח הבדיקה: ${(await sideText(p)).slice(0, 1500)}`);
+  const fix = p.getByRole("button", { name: "תיקון" }).first();
+  if (await fix.count()) {
+    await s.click(fix, "'תיקון' ליד הבעיה הראשונה");
+    await wait(p, 800);
+    await s.shot("qa-fix-builder");
+    s.note(`הבונה אחרי 'תיקון': ${(await sideText(p)).slice(0, 700)}`);
+    s.decide("מה בדיוק לתקן? לבחור שורת יעד אחרת? איזו?");
+    await s.click(p.locator('.reader.target .ln[data-i="5"] .tx'), "לחיצה על שורת יעד נכונה");
+    await wait(p, 500);
+    await s.shot("qa-fix-picked");
+    const save = p.locator(".builder").getByRole("button", { name: /עדכון|שמירה|יצירת קישור/ }).first();
+    if (await save.count()) await s.click(save, `'${(await save.innerText()).trim()}'`);
+    await wait(p, 500);
+  }
+  await s.click(p.getByRole("tab", { name: /^בדיקה/ }), "חזרה ללשונית 'בדיקה'");
+  const del = p.getByRole("button", { name: "מחיקה" }).first();
+  if (await del.count()) await s.click(del, "'מחיקה' ליד בעיה");
+  const rerun = p.locator(".side-panel").getByRole("button", { name: /הרצה מחדש|בדיקה מחדש/ }).first();
+  if (await rerun.count()) await s.click(rerun, "הרצת הבדיקה מחדש");
+  await idle(p);
+  await wait(p, 800);
+  await s.shot("qa-after");
+  s.note(`אחרי תיקון: ${(await sideText(p)).slice(0, 900)}`);
+  await exportFlow(s, p, "export");
+  s.verdict = "works with friction";
+}
+s11.title = "בדיקת קישורים ותיקון שגיאות";
+
+export async function s12(s, { IN }) {
+  const p = await s.open();
+  await buildAndSave(s, p, IN, `${IN}/../out/s12`);
+  const out = await exportFlow(s, p, "export");
+  let report = "";
+  if (out.path && out.file.endsWith(".zip")) {
+    const z = unzipSync(new Uint8Array(readFileSync(out.path)));
+    s.note(`ZIP: ${Object.keys(z).join(", ")}`);
+    report = z["_report.txt"] ? strFromU8(z["_report.txt"]) : "";
+  } else {
+    await s.click(p.locator(".app-bar .export"), "'ייצוא' שוב, בשביל הדוח");
+    const dl = p.waitForEvent("download", { timeout: 20_000 });
+    await s.click(p.getByRole("dialog").getByRole("button", { name: /הורדת הדוח/ }), "'הורדת הדוח'");
+    report = readFileSync(await (await dl).path(), "utf8");
+    await s.click(p.getByRole("dialog").getByRole("button", { name: "סגירה" }), "'סגירה'");
+  }
+  mkdirSync(`${IN}/../out/s12`, { recursive: true });
+  writeFileSync(`${IN}/../out/s12/_report.txt`, report, "utf8");
+  s.note(`הדוח: ${report.replace(/\s+/g, " ").slice(0, 1500)}`);
+  await s.click(p.getByRole("button", { name: "עזרה" }), "עזרה (F1)");
+  await wait(p, 1000);
+  const help = (await p.getByRole("dialog").innerText()).replace(/\s+/g, " ");
+  const hits = [...help.matchAll(/.{0,200}(MoreBooks|links\/|תיקיית הספרייה|להכניס לאוצריא|לשלוח|Pull Request|PR\b).{0,200}/g)].map((m) => m[0]);
+  s.note(`עזרה — ${help.length} תווים; קטעים על החזרה לאוצריא: ${hits.slice(0, 4).join(" ‖ ") || "לא נמצא"}`);
+  await s.shot("help");
+  s.verdict = "works with friction";
+}
+s12.title = "ייצוא והחזרה לאוצריא";
