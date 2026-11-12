@@ -301,13 +301,13 @@ function PlanStep() {
         <Stat value={n(plan.identified)} label="נמצא להם קשר" />
         <Stat value={n(engines.length)} label={engines.length === 1 ? "שיטה" : "שיטות"} />
         <Stat value={n(plan.steps.length)} label="הרצות" />
-        <Stat value={durationText(g.estimateMs.value)} label="זמן משוער" />
+        <Stat value={durationText(g.estimateMs.value)} label="זמן משוער" text />
       </div>
       <ul class="guided-books">
         {engines.map((e) => (
           <li key={e}>
             <b>{ENGINE_TITLE.get(e) ?? e}</b> — {n(plan.perEngine[e]!)} {plan.perEngine[e] === 1 ? "הרצה" : "הרצות"}
-            <div class="muted">{ENGINES.find((x) => x.id === e)?.description}</div>
+            {store.prefs.advanced.value && <div class="muted">{ENGINES.find((x) => x.id === e)?.description}</div>}
           </li>
         ))}
       </ul>
@@ -521,9 +521,9 @@ function FinishStep() {
   );
 }
 
-function Stat({ value, label }: { value: string; label: string }) {
+function Stat({ value, label, text }: { value: string; label: string; text?: boolean }) {
   return (
-    <div class="stat">
+    <div class={`stat${text ? " text" : ""}`}>
       <b>{value}</b>
       <span class="muted">{label}</span>
     </div>

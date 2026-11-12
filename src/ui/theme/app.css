@@ -419,3 +419,4 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
   .app-bar .guided-back span { display: none; }
 }
 .guided-card label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
+.stat.text b { font-size: 17px; line-height: 1.6; }

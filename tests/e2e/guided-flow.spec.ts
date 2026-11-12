@@ -52,7 +52,16 @@ async function plain(page: Page) {
   return text;
 }
 async function shot(page: Page, name: string) {
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/guided-${name}.png` });
+  if (!SHOTS) return;
+  // the step itself, without the notices that fade over it
+  await page.locator(".notices").evaluate((e) => ((e as HTMLElement).style.visibility = "hidden")).catch(() => {});
+  await page.screenshot({ path: `${SHOTS}/guided-${name}.png` });
+  await page.locator(".notices").evaluate((e) => ((e as HTMLElement).style.visibility = "")).catch(() => {});
+}
+/** The notices too: the flow's own steps raise some (opening, the run, the references filled before the export). */
+async function plainNotices(page: Page) {
+  const text = await page.locator(".notices").innerText().catch(() => "");
+  expect(text, "a technical term in a notice").not.toMatch(JARGON);
 }
 
 test("guided flow: folder → books → database → plan → run → approve → check → download, no workspace", async ({ page }) => {
@@ -157,8 +166,8 @@ test("guided flow: folder → books → database → plan → run → approve �
   const download = main.getByRole("button", { name: /^הורדת/ });
   await expect(download).toBeEnabled({ timeout: 30_000 });
   await expect(main.locator(".guided-card").first()).toContainText(/הכול תקין|מה לעשות/);
-  await shot(page, "6-finish");
   await plain(page);
+  await plainNotices(page);
   const dl = page.waitForEvent("download");
   await download.click();
   const file = await dl;
@@ -171,6 +180,7 @@ test("guided flow: folder → books → database → plan → run → approve �
   expect(records.length).toBeGreaterThan(0);
   expect(records.every((r) => typeof r["heRef_2"] === "string" && Number.isInteger(r["line_index_1"]))).toBe(true);
   await expect(main.getByRole("heading", { name: "מה עכשיו?" })).toBeVisible();
+  await shot(page, "6-finish");
   await plain(page);
 
   expect((await hashes(page)).filter((h) => h.startsWith("#/workspace") || h.startsWith("#/maxlink"))).toEqual([]);
