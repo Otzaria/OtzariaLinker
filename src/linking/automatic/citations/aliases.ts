@@ -172,6 +172,14 @@ export class AliasIndex {
   readonly commentariesOn = new Map<string, { book: BookRef; author: string }[]>();
   /** "כתובות" → the Bavli, Mishna, Yerushalmi and Tosefta books of that tractate (a qualifier picks one) */
   readonly tractates = new Map<string, Map<Collection, AliasTarget>>();
+  /** the Rambam's topics ("תרומות" for "משנה תורה, הלכות תרומות"), for "רמב"ם פ"ט מתרומות" (detect.ts) */
+  readonly rambamTopics: { readonly topic: string; readonly target: AliasTarget }[] = [];
+  private rambamWordsCache: { readonly words: readonly string[]; readonly target: AliasTarget }[] | null = null;
+  /** the topics' words (letters, final forms unified) */
+  get rambamTopicWords(): readonly { readonly words: readonly string[]; readonly target: AliasTarget }[] {
+    this.rambamWordsCache ??= this.rambamTopics.map((x) => ({ words: (nameWords(x.topic) ?? []).map((w) => w.key), target: x.target }));
+    return this.rambamWordsCache;
+  }
   /** "יבמו'" → "יבמות": truncated one-word names of the Bavli and Tanakh (only written with a geresh) */
   private readonly truncated = new Map<string, AliasEntry | null>();
   /** names dropped by the guards (for the run's notes) */
@@ -191,6 +199,8 @@ export class AliasIndex {
       const coll = ix.collections.get(c.book.key)!;
       const title = normTitle(c.book.title);
       ix.add(title, { book: c.book, tier: "title", collection: coll });
+      const topic = coll === "rambam" ? /^משנה תורה, הלכות (.+)$/.exec(title)?.[1] : undefined;
+      if (topic) ix.rambamTopics.push({ topic, target: { book: c.book, tier: "derived", collection: coll } });
       for (const d of derivedNames(title, coll, byTitle)) ix.add(d.name, { book: c.book, tier: d.secondary ? "secondary" : "derived", collection: coll, ...(d.section && { section: d.section }) });
       for (const a of c.aliases ?? []) {
         const name = normTitle(a);
@@ -364,7 +374,15 @@ export class AliasIndex {
 }
 
 /** words that start many titles: alone they name a genre, not a book ("תשובות רמ"א" is not the Radbaz) */
-const GENERIC_WORDS = new Set(["תוס'", "תוספות", "תוספ'", "תשובות", "תשובה", 'שו"ת', "שות", "חידושי", "חדושי", "ספר", "פירוש", "הגהות", "ביאור", "באור", "שאלות", "דרשות", "ליקוטי", "לקוטי", "קונטרס", "הלכות", "מסכת", "פרק", "ילקוט", "מדרש", "אגרת", "אגרות", "סדר", "תורת", "שער", "ספרי", "מאמר"]);
+const GENERIC_WORDS = new Set(["משנה", "תוס'", "תוספות", "תוספ'", "תשובות", "תשובה", 'שו"ת', "שות", "חידושי", "חדושי", "ספר", "פירוש", "הגהות", "ביאור", "באור", "שאלות", "דרשות", "ליקוטי", "לקוטי", "קונטרס", "הלכות", "מסכת", "פרק", "ילקוט", "מדרש", "אגרת", "אגרות", "סדר", "תורת", "שער", "ספרי", "מאמר"]);
+
+/**
+ * an author's name alone ("הרמב"ם", "רמ"א", "הרא"ש") is how a citation says WHOSE words, before the place
+ * ("הרמב"ם פ"ד מהל' תרומות", "הרא"ש פ"ק דב"ב"): book_acronym gives it to one of the author's books
+ * (איגרות הרמב"ם, שו"ת רמ"א, תשובות הרא"ש), which then swallowed the place — 179 missed LINKER
+ * citations in the sample of §6.8. Titles that start with the name ("רמב"ם …") are not affected.
+ */
+const AUTHOR_NAMES = new Set(['רמב"ם', 'רמב"ן', 'רמ"א', 'רשב"א', 'רא"ש', 'ריטב"א', 'ר"ן', 'רי"ף', 'רש"י', 'מהרש"א', 'מהרש"ל', 'רשב"ם', 'ראב"ד', 'ר"מ', 'רמב"ה', 'רא"ה']);
 
 /** common abbreviations that are never a book's name ("חלק א", "עמוד א", "דיבור המתחיל") */
 const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל']);
@@ -378,6 +396,7 @@ const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו',
 export function plausibleAcronym(name: string, title: string): boolean {
   if (NOT_NAMES.has(name)) return false;
   if (GENERIC_WORDS.has(name)) return false;
+  if (AUTHOR_NAMES.has(name.replace(/^ה(?=.*")/, ""))) return false;
   const words = nameWords(name);
   if (!words) return false;
   const titleKeys = (nameWords(title) ?? []).map((w) => w.key);

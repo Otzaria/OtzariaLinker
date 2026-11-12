@@ -95,6 +95,8 @@ const PENALTY = {
   unitPartial: 0.03,
   /** a location after the name was not found in the book; the unit itself is linked */
   unitFallback: 0.03,
+  /** a Rambam topic read from its initials ("פ"ג מא"ב"): one topic has them, but an abbreviation is a guess */
+  rambamInitials: 0.04,
 } as const;
 
 export interface Pending {
@@ -392,6 +394,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.elems.some((e) => e.numeral.common && !e.explicit)) s -= PENALTY.commonNumeral;
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
+  if (c.rule === "rambam-topic-initials") s -= PENALTY.rambamInitials;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   // a unit whose location was found inside it: the location is the citation and the name confirms
   // it — with the book named next to it, as sure as "<tractate> <daf>"
@@ -411,6 +414,13 @@ const COMMON_TITLES: ReadonlySet<string> = new Set([
 ]);
 
 const TALMUDIC: ReadonlySet<Collection> = new Set(["bavli", "mishna", "yerushalmi", "tosefta"]);
+
+/** what a rule beyond the form did (Citation.rule), in words */
+const RULE_REASON: Readonly<Record<string, string>> = {
+  "rambam-topic-full": `שם ההלכות נכתב בלי "הלכות" (או בקיצור "ה'"), ונמצא בשמות ספרי משנה תורה`,
+  "rambam-topic-first": "נכתבה רק המילה הראשונה של שם ההלכות, ואין עוד הלכות שמתחילות בה",
+  "rambam-topic-initials": "שם ההלכות נכתב בראשי תיבות, ורק הלכות אחת מתאימות להם",
+};
 
 const KIND_WORD: Readonly<Record<string, string>> = {
   perek: "פרק", pasuk: "פסוק", siman: "סימן", seif: "סעיף", sk: "סעיף קטן", halacha: "הלכה", mishna: "משנה", daf: "דף", os: "אות", mizmor: "מזמור", chelek: "חלק",
@@ -448,6 +458,11 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
     reasons.push({ code: "citations/commentator", text: `לפני ההפניה כתוב "${c.commentator}", ולכן הקישור הוא אל ${t.book.title} ולא אל ספר הבסיס` });
   }
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
+  if (c.rule) {
+    rules.push(`citations.${c.rule}`);
+    const why = RULE_REASON[c.rule];
+    if (why) reasons.push({ code: `citations/${c.rule}`, text: why });
+  }
   if (c.unit) {
     const u = c.unit;
     rules.push(`citations.unit-${u.kind}`, `citations.unit-context-${u.context}`);

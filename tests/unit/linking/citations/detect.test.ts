@@ -205,3 +205,71 @@ describe("citations: a bare siman next to another book's name", () => {
     expect(mb('וכמ"ש בסימן רצ"ו ס"ב וקידוש')).toHaveLength(1);
   });
 });
+
+describe("citations: a Rambam topic after a chapter (\"רמב\"ם פ\"ט מתרומות\")", () => {
+  // the library's titles; "איגרות הרמב"ם" carries the author's name as its book_acronym, "משנה מעשר שני" carries "מ"ש"
+  const RAMBAM = [
+    ...CATALOG,
+    book("r-trum", "משנה תורה, הלכות תרומות"),
+    book("r-ib", "משנה תורה, הלכות איסורי ביאה"),
+    book("r-gz", "משנה תורה, הלכות גזילה ואבידה"),
+    book("r-ish", "משנה תורה, הלכות אישות"),
+    book("r-mech", "משנה תורה, הלכות מכירה"),
+    book("r-gir", "משנה תורה, הלכות גירושין"),
+    book("r-maas", "משנה תורה, הלכות מעשרות"),
+    book("r-ms", "משנה תורה, הלכות מעשר שני ונטע רבעי"),
+    book("m-trum", "משנה תרומות"),
+    book("m-ms", "משנה מעשר שני", "sefaria", ['מ"ש']),
+    book("ket", "כתובות"),
+    book("igrot", 'איגרות הרמב"ם', "otzaria", ['הרמב"ם']),
+    book("sa-eh", "שולחן ערוך, אבן העזר"),
+  ];
+  const scanR = (line: string): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(RAMBAM), "src", {}, "ספר כלשהו");
+    sc.scanLine(0, line, null);
+    return sc.citations;
+  };
+  const oneR = (line: string) => {
+    const c = scanR(line);
+    expect(c, line).toHaveLength(1);
+    return c[0]!;
+  };
+
+  it("the author's name before it, or a word for הלכות, makes the words a topic of the Rambam", () => {
+    const a = oneR('כמ"ש רמב"ם פ"ט מתרומות הל\' ה\' ורמז');
+    expect(books(a)).toEqual(["r-trum"]);
+    expect(loc(a)).toBe("perek:9 halacha:5");
+    expect(a.rule).toBe("rambam-topic-full");
+    expect(books(oneR('וכן בפ"ה מה\' מכירה ע"ש'))).toEqual(["r-mech"]);
+    expect(loc(oneR("ובפרק ו' מהלכו' אישות כתב"))).toBe("perek:6");
+    // "רפ"י" = ריש פרק י
+    expect(loc(oneR('ושיטת רמב"ם רפ"י מגירושין וכבר'))).toBe("perek:10");
+  });
+
+  it("the first word of a topic, or its initials, when only one topic fits", () => {
+    const g = oneR("ובפ' ט' מהל' גזלה כתב");
+    expect(books(g)).toEqual(["r-gz"]);
+    expect(g.rule).toBe("rambam-topic-first");
+    const i = oneR('הרמב"ם פ"ג מא"ב הלכה ב\' אבל');
+    expect(books(i)).toEqual(["r-ib"]);
+    expect(i.rule).toBe("rambam-topic-initials");
+    // "מעשר" is the first word of מעשר שני and the start of מעשרות: no guess
+    expect(scanR('כמ"ש רמב"ם סוף פ\' י"ב מהל\' מעשר והכא')).toHaveLength(0);
+  });
+
+  it("the author's name is not a book: it does not swallow the place", () => {
+    expect(scanR('וזהו דעת הרמב"ם פ"ד מהל\' תרומות ע"ש').map(books)).toEqual([["r-trum"]]);
+  });
+
+  it("without the author or הלכות the words are the tractate; with the author, a tractate is not guessed", () => {
+    expect(books(oneR('וכדתנן פ"ט מתרומות'))).toEqual(["m-trum"]);
+    expect(scanR('והרמב"ם פ"ב דכתובות כתב')).toHaveLength(0);
+    // a chapter over 30 after ר/ס is not "ריש/סוף פרק"
+    expect(scanR('ספ"ר דכתובות')).toHaveLength(0);
+  });
+
+  it("\"מ\"ש\" opens no citation (מה שכתב), but is the tractate after a chapter", () => {
+    expect(books(oneR('כמ"ש באה"ע סי\' קמ"א ס"ל'))).toEqual(["sa-eh"]);
+    expect(books(oneR('וכדאיתא בפ"ב דמ"ש ובירושלמי'))).toEqual(["m-ms"]);
+  });
+});

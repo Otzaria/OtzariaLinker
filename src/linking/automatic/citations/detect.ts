@@ -54,6 +54,11 @@ export interface Citation {
   /** the citation was moved to a commentary named right before it ("תוס'") */
   readonly commentator?: string;
   readonly numericName: boolean;
+  /**
+   * the rule that read the book or the place, beyond the form (engine.ts scores and explains it):
+   * "rambam-topic-full" / "-first" / "-initials" — "רמב"ם פ"ט מתרומות"
+   */
+  readonly rule?: string;
 }
 
 /** A chapter or parsha cited by its name. */
@@ -173,6 +178,8 @@ export class CitationScanner {
   private forward(toks: readonly Tok[], i: number, line: number): number | null {
     const matches = this.aliases.matchAt(toks, i);
     for (const m of matches) {
+      // "כמ"ש באה"ע סי' קמ"א": a name that is also running text ("מ"ש" — מה שכתב) is a name only after a chapter ("פ"ב דמ"ש")
+      if (RUNNING_TEXT_NAMES.has(m.entry.text)) continue;
       // "בחולין שם": the book with the last citation's location
       if (this.ibidOn && isWord(toks[m.to], "שם") && this.last) {
         const cands = this.own(m.entry.targets).filter((c) => this.last!.c.candidates.some((p) => p.book.key === c.book.key));
@@ -207,8 +214,18 @@ export class CitationScanner {
     let j = head.next;
     // "ממסכת טהרות" / "דמסכת" — the name follows the word "מסכת"
     const m = this.aliases.matchAt(toks, j).find((x) => x.prefix.endsWith("ד") || x.prefix.endsWith("מ"));
-    if (!m) return null;
-    j = m.to;
+    // "רמב"ם פ"ט מתרומות", "פ"ה מה' מכירה", "פרק ו' מהלכו' אישות": a topic of the Rambam, told by the
+    // author's name right before or by a word for "הלכות"; the same words without them are the tractate
+    const rambamBefore = [1, 2].some((b) => wordIn(before(toks, i, b), QUALIFIERS) === "rambam");
+    let topic: RambamTopic | null = null;
+    if (!m?.entry.targets.some((t) => t.collection === "rambam")) {
+      topic = rambamTopicAt(this.aliases, toks, j);
+      if (topic && !topic.hilchot && !rambamBefore) topic = null;
+      // "הרמב"ם פ"ב דכתובות" is not the tractate; a topic we cannot read is not guessed
+      if (!topic && rambamBefore) return m ? this.drop("rambam-topic-unknown") : null;
+    }
+    if (!m && !topic) return null;
+    j = topic ? topic.to : m!.to;
     const elems: AddrElem[] = [{ kind: "perek", n: head.n, explicit: true, numeral: { n: head.n, form: "gershayim", common: false } }];
     let to = j;
     const rest = parseAddress(toks, j, { after: "perek" });
@@ -217,9 +234,10 @@ export class CitationScanner {
       to = rest.to;
     }
     if (isDate(toks, to)) return this.drop("date");
-    const cands = this.own(m.entry.targets);
+    const cands = this.own(topic ? [topic.target] : m!.entry.targets);
     if (!cands.length) return this.drop("self");
-    return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, m });
+    const name = topic ? topic.target.book.title : m!.entry.text;
+    return this.emit(toks, line, { from: i, to, candidates: cands, name, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, ...(m && !topic && { m }), ...(topic && { rule: `rambam-topic-${topic.how}` }) });
   }
 
   /**
@@ -464,6 +482,8 @@ export class CitationScanner {
       unit?: CitedUnit;
       /** a commentator's name before it retargets the citation (default true) */
       commentators?: boolean;
+      /** the rule that read it, beyond its form (Citation.rule) */
+      rule?: string;
     },
   ): number | null {
     let candidates = c.candidates;
@@ -512,6 +532,7 @@ export class CitationScanner {
       ...(qualifier && { qualifier }),
       ...(commentator && { commentator }),
       ...(c.unit && { unit: c.unit }),
+      ...(c.rule && { rule: c.rule }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -575,6 +596,9 @@ function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
   }
   return null;
 }
+
+/** names that are far more often words of running text when they open a citation: "מ"ש" (מעשר שני / מה שכתב) */
+const RUNNING_TEXT_NAMES = new Set(['מ"ש']);
 
 /** quoted abbreviations of running text that name no book ("כמ"ש בסימן…", "ע"ש") */
 const COMMON_ABBREVIATIONS = new Set(['כמ"ש', 'וכמ"ש', 'כמש"כ', 'וכמש"כ', 'ע"ש', 'וע"ש', 'עיי"ש', "וכו'", "כו'", 'א"כ', 'מ"מ', 'הנ"ל', 'כנ"ל', 'ז"ל', 'ע"פ', "עי'", "ועי'", 'ס"ל', 'דס"ל', 'וכ"כ', 'כ"כ', "כדאי'", "עיין", 'ר"ל', 'ג"כ', 'וכ"ש', 'כ"ש', "אפי'", "ואפי'"]);
@@ -733,15 +757,96 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number } |
       const n = rest === "ק" ? 1 : strictValue(rest);
       if (n) return { n, next: i + 1 };
     }
-    if (text === "פרק" && !t.gershayim && !t.geresh) {
+    // "רפ"ב", "ספ"ג" (ריש / סוף פרק): a chapter of at most 30 ("ספ"ר" is not chapter 200)
+    if (t.gershayim && !t.geresh && t.gershayimAt - p >= 2 && t.gershayimAt === t.text.length - 1 && /^[רס]פ/.test(text)) {
+      const rest = text.slice(2);
+      const n = rest === "ק" ? 1 : strictValue(rest);
+      if (n && n <= 30) return { n, next: i + 1 };
+    }
+    // "פרק ג'", and "פ' ז'" / "פר' י"ב" — the abbreviation with a quoted numeral (a bare one is a word)
+    const word = !t.gershayim && !t.geresh && text === "פרק";
+    const abbrev = t.geresh && !t.gershayim && (text === "פ" || text === "פר");
+    if (word || abbrev) {
       const num = toks[i + 1];
       if (num?.kind === "word" && (num.gershayim || num.geresh)) {
         const n = num.gershayim ? (num.gershayimAt === num.text.length - 1 ? strictValue(num.text) : null) : strictValue(num.text);
-        if (n) return { n, next: i + 2 };
+        if (n && (word || n <= 30)) return { n, next: i + 2 };
       }
     }
   }
   return null;
+}
+
+/** words for "הלכות" between the ד/מ and a Rambam topic ("מה' מכירה", "מהלכו' אישות") */
+const HILCHOT = new Set(["ה'", "הל'", "הלכות", "הלכו'", "הלכ'"]);
+
+interface RambamTopic {
+  readonly target: AliasTarget;
+  /** token index just past the topic */
+  readonly to: number;
+  /** a word for "הלכות" was written */
+  readonly hilchot: boolean;
+  /** all the topic's words, its first word alone, or its initials ("מא"ב" — איסורי ביאה) */
+  readonly how: "full" | "first" | "initials";
+}
+
+/**
+ * A Rambam topic after a chapter ("פ"ט מתרומות", "מה' אישות", "מהל' גזלה", "מא"ב"): the ד/מ is glued to
+ * the first word (with an article: "מהמ"א"), maybe a word for "הלכות" first. The topic is read from
+ * the library's own titles ("משנה תורה, הלכות X"), compared loosely (named.ts: "גזלה" = "גזילה"):
+ * all its words; or its first word, when that is the first word of no other topic and starts no other
+ * topic's first word ("מעשר" may be מעשרות); or its initials, when only one topic has them.
+ */
+function rambamTopicAt(aliases: AliasIndex, toks: readonly Tok[], j: number): RambamTopic | null {
+  const t = toks[j];
+  if (!t || t.kind !== "word" || !aliases.rambamTopics.length) return null;
+  for (const p of [1, 2]) {
+    if (!/^(?:[דמ]|[דמ]ה)$/.test(t.text.slice(0, p))) continue;
+    const rest = shapeOf(t, p);
+    if (HILCHOT.has(rest)) {
+      const r = topicAt(aliases, toks, j + 1, 0);
+      return r && { ...r, hilchot: true };
+    }
+    // the article only before initials ("מהמ"א"); "מהלכות" is מ + הלכות, handled above
+    if (p === 2 && !t.gershayim) continue;
+    const r = topicAt(aliases, toks, j, p);
+    if (r) return { ...r, hilchot: false };
+  }
+  return null;
+}
+
+function topicAt(aliases: AliasIndex, toks: readonly Tok[], k: number, strip: number): Omit<RambamTopic, "hilchot"> | null {
+  const t = toks[k];
+  if (!t || t.kind !== "word" || t.key.length - strip < 2) return null;
+  const topics = aliases.rambamTopicWords;
+  if (t.gershayim) {
+    const letters = t.key.slice(strip);
+    const hit = topics.filter((x) => x.words.length >= letters.length && [...letters].every((ch, n) => x.words[n]![0] === ch));
+    return hit.length === 1 ? { target: hit[0]!.target, to: k + 1, how: "initials" } : null;
+  }
+  if (t.geresh) return null;
+  const key = (n: number): string | null => {
+    const x = toks[k + n];
+    if (!x || x.kind !== "word" || x.gershayim || x.geresh) return null;
+    return looseWord(n ? x.key : x.key.slice(strip));
+  };
+  let best: (typeof topics)[number] | null = null;
+  let tie = false;
+  for (const x of topics) {
+    if (!x.words.every((w, n) => key(n) === looseWord(w))) continue;
+    if (best && best.words.length === x.words.length) tie = true;
+    else if (!best || x.words.length > best.words.length) {
+      best = x;
+      tie = false;
+    }
+  }
+  if (best && !tie) return { target: best.target, to: k + best.words.length, how: "full" };
+  const first = key(0);
+  if (!first || first.length < 3) return null;
+  const raw = t.key.slice(strip);
+  const same = topics.filter((x) => looseWord(x.words[0]!) === first);
+  if (same.length !== 1 || topics.some((x) => x !== same[0] && x.words[0]!.startsWith(raw) && x.words[0] !== raw)) return null;
+  return { target: same[0]!.target, to: k + 1, how: "first" };
 }
 
 /**
