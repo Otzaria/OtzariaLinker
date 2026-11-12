@@ -429,6 +429,14 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
         `כותרות הפירוש (${plan.distrusted.matched.slice(0, 3).join(", ")}) נמצאו בספר הבסיס רק בתוך הקטע "${plan.distrusted.section}", שהפירוש אינו מזכיר. המבנה של שני הספרים שונה, ולכן החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש.`,
       ),
     );
+  for (const o of plan.ownNumbering ?? [])
+    if (!options.windows)
+      notes.push(
+        r(
+          "dh/own-numbering",
+          `ה"${o.kind}" של הפירוש הוא מספור משלו, לא של שורות הבסיס: ב־${o.exceeding} מתוך ${o.sections} קטעים המספר הגבוה בפירוש גדול מהמספר הגבוה בבסיס. לכן שורות תחת "${o.kind}" מחופשות בכל הקטע שמעליו, ולא רק בשורה בעלת אותו מספר.`,
+        ),
+      );
   const first = bLines[0]?.index ?? 0;
   const last = bLines.at(-1)?.index ?? 0;
   const windowFor = (cLine: number): SearchWindow => {

@@ -160,11 +160,40 @@ export interface HeadingWindows {
    * headings match only inside one minor base section the commentary never names (see below).
    */
   readonly distrusted?: { readonly section: string; readonly matched: readonly string[] };
+  /**
+   * Line kinds whose numbers are the commentary's own count, not the base's (ownNumbering): their
+   * headings give no "unit" window, the window stays the section their parent resolved to.
+   */
+  readonly ownNumbering?: readonly OwnNumbering[];
   /** how many commentary lines got each window kind (for the run's notes) */
   readonly kinds: Readonly<Partial<Record<WindowKind, number>>>;
   /** the line numbered `n` inside `w` ("(ה)" for a commentary line's "(סעיף ה')"), when the base numbers its lines there */
   readonly unitOf: (w: SearchWindow, n: number) => SearchWindow | null;
 }
+
+/** A line kind the commentary numbers by its own count ("סעיף" of the ש"ך = its ס"ק), with the evidence. */
+export interface OwnNumbering {
+  readonly kind: string;
+  /** sections (resolved parent windows whose base lines are numbered) the kind was compared in */
+  readonly sections: number;
+  /** of them, sections where the commentary's highest number is above the base's highest */
+  readonly exceeding: number;
+}
+
+/*
+ * A commentary may number its notes under a base section with the kind word of the base's lines while
+ * counting its OWN notes: Otzaria's "שפתי כהן על שולחן ערוך חושן משפט" heads its notes "סעיף טו" where
+ * "טו" is the ש"ך's ס"ק — the note on the שולחן ערוך's סעיף יד ("ואם העד ת"ח"). A "unit" window then
+ * searches the wrong סעיף, and the words are not found. A commentary that counts the base's lines never
+ * names a line the section does not have; one that counts its own notes does, in section after section:
+ * measured on the real database, the highest "סעיף" under a סימן is above the שולחן ערוך's in 197 of 386
+ * סימנים of that ש"ך (306/401 in יורה דעה, all 697 of כף החיים, 50/323 of קצות החושן), and in 4 of 665
+ * of ביאור הגר"א and 0 of 524 of ביאור הלכה, which do count the base's סעיפים.
+ */
+/** sections in which the commentary's numbers must exceed the base's before the kind is its own count */
+const OWN_MIN_SECTIONS = 3;
+/** …and their share of the sections compared */
+const OWN_MIN_SHARE = 0.1;
 
 /** Per commentary line index → the base window derived from matching headings. */
 export function headingWindows(commentary: EngineBook, base: EngineBook): (commentaryLine: number) => SearchWindow {
@@ -234,6 +263,9 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
     return { from: start, to: next !== undefined ? next - 1 : w.to, kind: "unit", label: `${w.label ? `${w.label}, ` : ""}(${toGematria(n)})` };
   };
 
+  /** per kind: section ("from-to") → [the commentary's highest number, the base's highest] */
+  const seen = new Map<string, Map<string, [number, number]>>();
+  let own: ReadonlySet<string> = new Set<string>();
   const resolve = (): SearchWindow => {
     let from = first;
     let to = last;
@@ -276,8 +308,16 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
       missed = null;
     }
     // the deepest heading names a line the base numbers itself ("פסוק ג" ↔ "(ג) …")
-    if (missed && missed === stack.at(-1) && missed.n !== null && UNIT_KINDS.has(missed.kind) && label !== undefined) {
-      const at = unitsIn(from, to)?.get(missed.n);
+    if (missed && missed === stack.at(-1) && missed.n !== null && UNIT_KINDS.has(missed.kind) && label !== undefined && !own.has(missed.kind)) {
+      const units = unitsIn(from, to);
+      if (units?.size) {
+        const bySection = seen.get(missed.kind) ?? new Map<string, [number, number]>();
+        const k = `${from}-${to}`;
+        const prev = bySection.get(k);
+        bySection.set(k, [Math.max(prev?.[0] ?? 0, missed.n), Math.max(...units.keys())]);
+        seen.set(missed.kind, bySection);
+      }
+      const at = units?.get(missed.n);
       if (at && at.length === 1) {
         const start = at[0]!;
         const next = contentIdx.find((i) => i > start && i <= to && openingNoteNumbers(lineByIndex.get(i)!.text).length > 0);
@@ -287,15 +327,33 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
     return label === undefined ? whole : { from, to, kind, label };
   };
 
-  for (const l of commentary.lines) {
-    const level = levelOf(l);
-    if (level !== null) {
-      while (stack.length && stack.at(-1)!.level >= level) stack.pop();
-      const key = headingKey(l.text);
-      if (key.key) stack.push({ level, ...key });
-      current = resolve();
+  const walk = () => {
+    stack.length = 0;
+    current = whole;
+    for (const l of commentary.lines) {
+      const level = levelOf(l);
+      if (level !== null) {
+        while (stack.length && stack.at(-1)!.level >= level) stack.pop();
+        const key = headingKey(l.text);
+        if (key.key) stack.push({ level, ...key });
+        current = resolve();
+      }
+      byLine.set(l.index, current);
     }
-    byLine.set(l.index, current);
+  };
+  walk();
+  // the kinds the commentary counts by itself: walked again without their unit windows
+  const ownNumbering: OwnNumbering[] = [];
+  for (const [kind, bySection] of seen) {
+    const sections = bySection.size;
+    let exceeding = 0;
+    for (const [c, b] of bySection.values()) if (c > b) exceeding++;
+    if (exceeding >= OWN_MIN_SECTIONS && exceeding >= OWN_MIN_SHARE * sections) ownNumbering.push({ kind, sections, exceeding });
+  }
+  if (ownNumbering.length) {
+    own = new Set(ownNumbering.map((o) => o.kind));
+    outermost.clear();
+    walk();
   }
   const kinds: Partial<Record<WindowKind, number>> = {};
   for (const w of byLine.values()) kinds[w.kind] = (kinds[w.kind] ?? 0) + 1;
@@ -314,7 +372,7 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
   const [section] = sections;
   if (outermost.size && sections.size === 1 && section && !named.has(section.key) && !(section.key && titleKey.includes(normalize(section.text))) && (section.end - section.index + 1) * 2 < last - first + 1)
     return { windowOf: () => whole, distrusted: { section: section.text, matched: [...outermost].map((h) => h.text) }, kinds: { book: byLine.size }, unitOf };
-  return { windowOf: (i) => byLine.get(i) ?? whole, kinds, unitOf };
+  return { windowOf: (i) => byLine.get(i) ?? whole, kinds, unitOf, ...(ownNumbering.length && { ownNumbering }) };
 }
 
 /** Rung C of the ladder: the window widened by its own width on each side (the neighbouring sections). */

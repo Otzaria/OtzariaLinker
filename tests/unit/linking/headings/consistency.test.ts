@@ -66,6 +66,36 @@ describe("headings guard — the commentary's own numbering (הגהות מנחם
   });
 });
 
+describe("headings guard — a level counting the commentary's own notes, past the base's numbers (ש\"ך על חושן משפט)", () => {
+  const SIMANIM = ["סימן א", "סימן ב", "סימן ג", "סימן ד"];
+  // the base has 5 סעיפים in each סימן; the ש"ך's "סעיף N" is its own ס"ק, up to 8
+  const base = sectioned("b:sa", "שולחן ערוך", SIMANIM, () => range(1, 5));
+
+  it("is detected; each line goes to its whole סימן, possible", () => {
+    const shach = sectioned("c:shach", "שפתי כהן", SIMANIM, (s) => range(1, [8, 7, 3, 6][s]!));
+    const r = runHeadingsEngine(shach, base);
+    expect(r.notes.map((n) => n.code)).toContain("heading/beyond-base");
+    expect(strong(r)).toEqual([]);
+    // "סימן ב › סעיף ב" (commentary line 22): the whole סימן ב of the base (lines 14–22), not its סעיף ב (line 16)
+    const s = at(r, 22);
+    expect(s.target).toMatchObject({ line: 14, end: 22 });
+    expect(s.confidence).toBe("possible");
+    expect(s.warnings.map((w) => w.code)).toContain("heading/beyond-base");
+  });
+
+  it("a commentary on the base's own סעיפים (never past them) keeps its certain links", () => {
+    const gra = sectioned("c:gra", "ביאור הגר\"א", SIMANIM, (s) => [[1, 3, 5], [2, 4], [1, 5], [3]][s]!);
+    const r = runHeadingsEngine(gra, base);
+    expect(r.notes.map((n) => n.code)).not.toContain("heading/beyond-base");
+    expect(r.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("past the base in only two sections is not a pattern", () => {
+    const two = sectioned("c:two", "פירוש", SIMANIM, (s) => range(1, [8, 7, 3, 4][s]!));
+    expect(runHeadingsEngine(two, base).notes.map((n) => n.code)).not.toContain("heading/beyond-base");
+  });
+});
+
 describe("headings guard — numbers the base does not have (ראב\"ד על ספרא)", () => {
   // the base's section numbers its 8 rules "(א)…(ח)"; the commentary counts its own paragraphs פסקה א…יב
   const base = book("b:sifra", "ספרא", [

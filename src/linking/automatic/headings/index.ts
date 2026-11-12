@@ -13,7 +13,7 @@ import {
   type Suggestion,
 } from "../types";
 import { align, type AlignContext, type AlignEvent, type Alignment } from "./align";
-import { assessNumbering, numberingNote, numberingWarning, targetElement } from "./consistency";
+import { assessNumbering, numberingNote, numberingWarning, targetElement, type LevelStats } from "./consistency";
 import { QuoteChecker } from "./quote";
 import { dafElement, kindThe, kindWord, type NumberingMode, type PathElement } from "./numbering";
 import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "./structure";
@@ -145,7 +145,17 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     const info = cs.lines[p]!;
     const srcIndex = commentary.lines[p]!.index;
     if (info.skip) { skipped++; continue; }
-    const P = useMarkers && info.marker !== null ? [...info.path, { kind: "?", n: info.marker, label: `(${toGematria(info.marker)})` }] : info.path;
+    let P: readonly PathElement[] = useMarkers && info.marker !== null ? [...info.path, { kind: "?", n: info.marker, label: `(${toGematria(info.marker)})` }] : info.path;
+    // a level the commentary numbers by its own count is not a place: the section above it is (consistency.ts)
+    let beyond: LevelStats | undefined;
+    for (let i = 1; i < P.length; i++) {
+      const s = numbering.suspect.get(P[i]!.kind);
+      if (P[i]!.kind !== "name" && s?.verdict === "beyond-base") {
+        beyond = s;
+        P = P.slice(0, i);
+        break;
+      }
+    }
     if (!P.length) {
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/no-position", text: "השורה אינה נמצאת תחת אף כותרת, ולכן אין לה מיקום מבני" }] });
       continue;
@@ -178,7 +188,7 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       }
     }
     const el = targetElement(chosen.alignment);
-    const suspect = el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined;
+    const suspect = beyond ?? (el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined);
     let score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
     if (suspect || outsideSection) score = Math.min(score, belowHigh);
     // the line's own quote, when it marks one, must not sit in the neighbouring stretch instead (./quote.ts)

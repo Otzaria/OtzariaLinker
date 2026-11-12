@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
 import type { EngineId } from "../../src/linking/automatic/types";
@@ -20,9 +21,12 @@ import { indexDbLinks, scoreBook } from "./library-benchmark";
  *
  *   OTZARIA_DB=… BENCH_SELECT="משנה שבת;תרגום ותפסיר רסג" npx vitest run --config vitest.validation.config.ts tests/validation/planner-gaps.test.ts --silent=false
  *   BENCH_ENGINES="dibur-hamatchil"   only these pair engines
+ *   BENCH_DUMP=<file.jsonl>           every scored suggestion (and every database link the run missed), one
+ *                                     JSON line each, for a hand look at placement ("סעיף" vs. the heading line)
  */
 const SELECT = (process.env.BENCH_SELECT ?? "משנה שבת;משנה יבמות;משנה בבא מציעא;תרגום ותפסיר רסג;מדרש אגדה").split(";").map((s) => s.trim()).filter(Boolean);
 const ENGINES = process.env.BENCH_ENGINES ? new Set(process.env.BENCH_ENGINES.split(",") as EngineId[]) : undefined;
+const DUMP = process.env.BENCH_DUMP;
 
 type Cell = { certain: [number, number, number]; high: [number, number, number]; possible: [number, number, number]; ambiguous: [number, number, number] };
 
@@ -94,6 +98,22 @@ describe.runIf(DB)("max-link planner gaps on the real database", () => {
       }
       const dbByType = new Map<string, number>();
       for (const l of links) dbByType.set(l.declaredType.toUpperCase(), (dbByType.get(l.declaredType.toUpperCase()) ?? 0) + 1);
+      if (DUMP) {
+        const hit = new Set([...sc.matched.values()].flatMap((x) => [...x]));
+        const out: string[] = [];
+        for (const x of sc.scored) {
+          const here = (db.byLine.get(x.bLine) ?? []).filter((e) => e.other === x.other);
+          const m = merged.suggestions.find((y) => y === x.s);
+          out.push(JSON.stringify({ pair: `${dep.title} → ${base.title}`, kind: "s", line: x.bLine, to: [x.oFrom, x.oTo], conf: x.s.confidence, engines: x.engines, rules: m?.rules ?? x.s.rules, verdict: x.verdict, db: here.map((e) => [e.oFrom, e.oTo]) }));
+        }
+        for (const l of links) {
+          const id = Number(l.id.slice(l.id.lastIndexOf(":") + 1));
+          if (hit.has(id)) continue;
+          const [mine, other] = l.source.book.key === dep.key ? [l.source, l.target] : [l.target, l.source];
+          out.push(JSON.stringify({ pair: `${dep.title} → ${base.title}`, kind: "miss", type: l.declaredType, line: mine.line, to: [other.line, other.end ?? other.line] }));
+        }
+        appendFileSync(DUMP, out.map((x) => `${x}\n`).join(""));
+      }
       const matched = (t: string) => [...sc.matched].filter(([k]) => k.startsWith(`${t}|`)).reduce((a, [, s]) => a + s.size, 0);
       rows.push({
         pair: `${dep.title} → ${base.title}`,
