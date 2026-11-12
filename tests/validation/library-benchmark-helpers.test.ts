@@ -66,6 +66,9 @@ describe("library benchmark helpers", () => {
     const text = "0123456789abcdefghijklmnopqrstuvwxyz";
     const r = scoreBook("s1:5", [{ s: sug("x@0-4>s1:1", [5, 0], [1, 3]), engines: ["citations"] }, { s: sug("y@11-13>s1:1", [5, 0], [1, 2]), engines: ["citations"] }], db, () => text);
     expect(r.scored.map((x) => x.verdict)).toEqual(["unconfirmed", "wrong"]);
+    // a merged suggestion ("mx:…") carries the words in its raw member's id
+    const m = scoreBook("s1:5", [{ s: sug("mx:5#0>1#3", [5, 0], [1, 3]), engines: ["citations"], spanId: "x@0-4>s1:1" }], db, () => text);
+    expect(m.scored.map((x) => x.verdict)).toEqual(["unconfirmed"]);
   });
 
   it("ids survive the compact encoding", () => {

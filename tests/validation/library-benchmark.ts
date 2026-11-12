@@ -107,6 +107,8 @@ export interface DbEnd {
 
 export interface ScoredSuggestion {
   s: Suggestion;
+  /** the id that carries a citation's words ("…@start-end>…"): a merged suggestion's own id ("mx:…") does not */
+  spanId: string;
   engines: readonly EngineId[];
   group: Group;
   verdict: Verdict;
@@ -194,13 +196,13 @@ export function suggestionSpan(id: string, lineText: string | undefined): [numbe
  */
 export function scoreBook(
   bookKey: string,
-  suggestions: readonly { s: Suggestion; engines: readonly EngineId[] }[],
+  suggestions: readonly { s: Suggestion; engines: readonly EngineId[]; spanId?: string }[],
   db: { byLine: Map<number, DbEnd[]>; pairType: Map<number, string> },
   lineText: (line: number) => string | undefined,
 ): BookScore {
   const matched = new Map<string, Set<number>>();
   const scored: ScoredSuggestion[] = [];
-  for (const { s, engines } of suggestions) {
+  for (const { s, engines, spanId = s.id } of suggestions) {
     const sides: [LinkSide, LinkSide][] = [];
     if (s.source.book.key === bookKey) sides.push([s.source, s.target]);
     if (s.target.book.key === bookKey) sides.push([s.target, s.source]);
@@ -229,14 +231,14 @@ export function scoreBook(
       }
       if (verdict === "correct") continue;
       if (group === "citations") {
-        const span = suggestionSpan(s.id, lineText(mine.line));
+        const span = suggestionSpan(spanId, lineText(mine.line));
         const sameWords = here.some((e) => e.type === "LINKER" && (!e.span || !span || (e.span[0] < span[1] && span[0] < e.span[1])));
         if (sameWords) verdict = "wrong";
       } else verdict = "wrong";
     }
     const [mine, other] = first;
     const oId = idOfKey(other.book.key);
-    scored.push({ s, engines, group, verdict, pairType: db.pairType.get(oId) ?? "NONE", bLine: mine.line, other: oId, oFrom: other.line, oTo: endOf(other) });
+    scored.push({ s, spanId, engines, group, verdict, pairType: db.pairType.get(oId) ?? "NONE", bLine: mine.line, other: oId, oFrom: other.line, oTo: endOf(other) });
   }
   return { scored, matched, byLine: db.byLine, pairType: db.pairType };
 }

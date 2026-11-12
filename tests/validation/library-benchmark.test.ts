@@ -5,7 +5,7 @@ import type { SourceBook } from "../../src/core/books";
 import { pushTo } from "../../src/core/collections";
 import type { Link } from "../../src/core/links/model";
 import type { EngineContext, EngineId } from "../../src/linking/automatic/types";
-import { mergeSuggestions, type MergeItem } from "../../src/linking/merge";
+import { mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../src/linking/merge";
 import { planMaxLink, type PlanBook, type PlanStep } from "../../src/linking/plan";
 import { SourceRegistry } from "../../src/sources/registry";
 import { maxlinkJob } from "../../src/workers/maxlink-job";
@@ -408,7 +408,9 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     // the book's lines, only when a citation needs its words or examples are kept
     if (keep || merged.suggestions.some((s) => s.engines.length === 1 && s.engines[0] === "citations" && db.byLine.has(s.source.line)))
       text = new Map((await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => [l.index, l.anchorText] as const));
-    const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[] })), db, lineText);
+    // a merged suggestion's id is "mx:…"; the citation's words are in its raw member's id
+    const spanIdOf = (s: MergedSuggestion) => s.members.find((m) => m.suggestion.engine === "citations" && /@\d+-\d+>/.test(m.suggestion.id))?.suggestion.id ?? s.id;
+    const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText);
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
     if (keep) {
@@ -430,7 +432,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
             pairType: x.pairType,
             engines: [...x.engines],
             line: x.bLine,
-            text: excerpt(lineText(x.bLine), x.group === "citations" ? suggestionSpan(x.s.id, lineText(x.bLine)) : null),
+            text: excerpt(lineText(x.bLine), x.group === "citations" ? suggestionSpan(x.spanId, lineText(x.bLine)) : null),
             target: byId.get(x.other)?.title ?? `#${x.other}`,
             tLine: x.oFrom,
             tEnd: x.oTo,
