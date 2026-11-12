@@ -120,3 +120,19 @@ describe("word weights (link-generator wordWeights.ts)", () => {
     expect(wordWeight("נדיר", idf, false)).toBe(1);
   });
 });
+
+describe("hostile input (security review A8)", () => {
+  it("a line of bare '&' is tokenized in linear time: the entity scan looks at most 10 characters ahead", () => {
+    const time = (n: number) => {
+      const line = "&א ".repeat(n);
+      const t0 = performance.now();
+      hebrewTokens(line);
+      return performance.now() - t0;
+    };
+    time(2_000); // warm-up
+    const small = Math.max(time(20_000), 1);
+    const large = time(80_000);
+    // 4× the input: a quadratic scan grew ~16×; linear stays well under 8×
+    expect(large / small).toBeLessThan(8);
+  });
+});

@@ -83,8 +83,14 @@ export function hebrewTokens(html: unknown): HebToken[] {
       continue;
     }
     if (c === "&") {
-      const semi = s.indexOf(";", i + 1);
-      if (semi > i && semi - i < 10) {
+      // an entity is at most 10 characters (offsets.ts): look only that far, never to the end of the line
+      let semi = -1;
+      for (let j = i + 1; j < Math.min(s.length, i + 10); j++)
+        if (s[j] === ";") {
+          semi = j;
+          break;
+        }
+      if (semi > i) {
         const ent = s.slice(i + 1, semi).toLowerCase();
         if (ent === "quot") quote(2, semi);
         else if (ent === "#39" || ent === "apos") quote(1, semi);
