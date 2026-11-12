@@ -109,6 +109,9 @@ test("a folder, the Otzaria database and a second folder: grouped books, a link 
   const download = page.waitForEvent("download");
   await dialog.getByRole("button", { name: /^הורדת (ZIP|הקובץ)$/ }).click();
   expect((await download).suggestedFilename()).toMatch(/\.(zip|json)$/);
+  // after the download the dialog stays open on the next steps (audit F13); closing it is the user's move
+  await expect(dialog.getByRole("heading", { name: "מה עכשיו?" })).toBeVisible();
+  await dialog.getByRole("button", { name: "סגירה" }).click();
   await expect(dialog).toBeHidden();
   await expect(page).toHaveURL(/#\/maxlink$/); // closing the dialog went back to the screen under it
 
