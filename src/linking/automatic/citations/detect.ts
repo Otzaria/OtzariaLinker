@@ -1088,6 +1088,7 @@ export class CitationScanner {
   /**
    * "רמ"א שם סעי' ב'": the Shulchan Aruch (where the Rema's glosses are) at the siman of the last citation — of the
    * Shulchan Aruch itself or of a commentary on one part of it ("מג"א סי' ש"ו") — and the seif written after "שם".
+   * Another book than the last citation's, so no `ibidOf` (that would keep it to the book chosen there).
    */
   private remaIbid(toks: readonly Tok[], i: number, line: number): number | null {
     const last = this.last;
@@ -1102,7 +1103,7 @@ export class CitationScanner {
     }
     const cands = this.own([...parts.values()]);
     if (cands.length !== 1) return null;
-    return this.emit(toks, line, { from: i - 1, to: addr.to, candidates: cands, name: 'רמ"א', elems: [last.elems[0]!, ...addr.elems], evidence: "strong", bracketed: false, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, commentators: false, rule: "rema-ibid" });
+    return this.emit(toks, line, { from: i - 1, to: addr.to, candidates: cands, name: 'רמ"א', elems: [last.elems[0]!, ...addr.elems], evidence: "strong", bracketed: false, ibid: "partial", form: "forward", numericName: false, commentators: false, rule: "rema-ibid" });
   }
 
   /** The siman the citing line is on: the first level of its own reference, when it is a number ("משנה ברורה, תמה, א" → 445). */

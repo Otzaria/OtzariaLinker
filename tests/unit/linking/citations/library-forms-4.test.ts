@@ -399,3 +399,21 @@ describe("a chapter by number in a book by daf", () => {
     expect(out.map((s) => s.target.book.key)).toEqual(["m-ber"]);
   });
 });
+
+describe('"רמ"א שם" resolved', () => {
+  it("links the Shulchan Aruch at the siman of the commentary just cited — another book than the one before it", () => {
+    const SA = ref("sa-oc", "שולחן ערוך, אורח חיים");
+    const MA = ref("ma", "מגן אברהם");
+    const twoLevels = (title: string): RefLine[] => {
+      const out: RefLine[] = [{ index: 0, heRef: null }];
+      for (let a = 1; a <= 3; a++) for (let b = 1; b <= 3; b++) out.push({ index: out.length, heRef: `${title}, ${g[a]}, ${g[b]}` });
+      return out;
+    };
+    const refs: Record<string, RefLine[]> = { "sa-oc": twoLevels("שולחן ערוך, אורח חיים"), ma: twoLevels("מגן אברהם") };
+    const out = runCitationsEngine(source([`כמ"ש מג"א סי' ב' סק"א וע"פי מ"ש רמ"א שם סעי' ג' באתרא`]), {
+      catalog: [{ book: SA }, { book: MA, aliases: ['מג"א'] }],
+      index: (b) => buildRefIndex(b, refs[b.key]!),
+    }).suggestions;
+    expect(out.map((s) => `${s.target.book.key}:${s.target.line}`)).toEqual(["ma:4", "sa-oc:6"]);
+  });
+});
