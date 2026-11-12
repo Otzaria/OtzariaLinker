@@ -63,8 +63,9 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 - עוגן שיובא מקובץ נשמר כאופסט גולמי ונכתב חזרה כמו שהוא.
 
 ### 2.5 קישורים משתנים רק דרך `history.commit`
-מסכים קוראים signals וקוראים למתודות של `AppStore`. כל שינוי בקישורים עובר ב־`store.apply` ←
-`commit` (`src/state/history.ts`), וכל פעולת משתמש היא פקודה אחת שאפשר לבטל.
+מסכים קוראים signals וקוראים למתודות של `AppStore` ושל המודולים שלו (`store.suggestions`, `store.exchange`,
+`store.quality`, `store.ranges`, `store.altToc`, `store.dbLinks`, `store.maxLink`). כל שינוי בקישורים עובר ב־`commit`
+(`src/state/history.ts`) — דרך `store.apply` או ישירות מהמודול — וכל פעולת משתמש היא פקודה אחת שאפשר לבטל.
 
 ### 2.6 גבולות השכבות
 נאכפים ב־`tests/unit/architecture.test.ts`: כל שכבה מייבאת רק את השכבות שמותרות לה, ו־`core`,

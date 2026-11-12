@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { CONFIDENCE_LABELS, ENGINES, type Confidence, type EngineId, type Suggestion } from "../../linking/automatic";
-import { stripTags } from "../../core/text/html";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import type { SuggestionsView } from "../../state/preferences";
