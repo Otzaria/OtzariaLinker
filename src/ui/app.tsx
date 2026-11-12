@@ -55,7 +55,10 @@ export function App() {
         setDropping(false);
         if (!isFiles(e) || !e.dataTransfer) return;
         e.preventDefault();
-        await store.openFiles(await fromDataTransfer(e.dataTransfer));
+        const files = await fromDataTransfer(e.dataTransfer);
+        // in the guided flow a drop anywhere on its first step chooses the books; on a later step it adds bases
+        if (store.screen.value === "guided") await (store.guided.step.value === "files" ? store.guided.addBooks(files) : store.guided.addBases(files));
+        else await store.openFiles(files);
       }}
     >
       <AppBar onExport={() => (store.dialog.value = "export")} />

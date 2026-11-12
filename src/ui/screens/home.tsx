@@ -182,7 +182,8 @@ export function Home() {
   return (
     <main class="home">
       <section>
-        {store.recovery.value && (
+        {/* an unfinished guided flow brings its links back itself ("המשך"): one card, not two */}
+        {store.recovery.value && !(store.guided.saved.value && !store.guided.active.value) && (
           <div class="recovery" role="alert">
             <Icon name="fl_history" size={24} />
             <span class="grow">נמצאה עבודה שלא נשמרה מהפעם הקודמת: {store.recovery.value.links.toLocaleString("he")} קישורים.</span>
