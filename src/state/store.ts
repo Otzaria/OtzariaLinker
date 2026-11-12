@@ -121,7 +121,7 @@ export class AppStore {
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
-  readonly intent = signal<{ engine?: EngineId; sourceId?: string } | null>(null);
+  readonly intent = signal<{ engine?: EngineId; sourceId?: string; allBooks?: boolean } | null>(null);
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);

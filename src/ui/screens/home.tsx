@@ -10,7 +10,8 @@ import { SourceBadge } from "../workspace/source-badge";
 import { ltr } from "../shell/file-name";
 
 /*
- * Home (ADR 0005 §1): the plan's eight guided workflows, with a drop strip at the side. A workflow
+ * Home (ADR 0005 §1): the plan's eight guided workflows and two the product audit asked for (F15:
+ * several books together, links already in a database), with a drop strip at the side. A workflow
  * opens a short sheet ("#/start/<id>") that asks for each source it needs — the folder, then the
  * Otzaria database; a personal database; the old and the new edition — shows what was opened, and
  * starts the workspace where the work happens (the engine, max-link on the right source, the links
@@ -38,6 +39,10 @@ interface TaskDef {
     dialog?: "relink";
     /** the step whose source max-link or a batch should run on */
     scopeStep?: number;
+    /** max-link over every open book (several books together) */
+    allBooks?: boolean;
+    /** the links tab opens on the database's own links */
+    dbLinks?: boolean;
   };
 }
 
@@ -63,6 +68,18 @@ export const TASKS: readonly TaskDef[] = [
       { label: "הספר שעליו ההערות, אם הוא במקור אחר", hint: "קובץ, תיקייה או מסד.", options: ["files", "db"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "footnotes", mode: "pair" },
+  },
+  {
+    // audit F15: several books that link to each other, with no fixed roles — max-link over all of them
+    id: "several",
+    icon: "oz_links",
+    title: "כמה ספרים יחד",
+    hint: "כמה פירושים, ספרי הערות וספרי בסיס — הכלי מזהה מי קשור למי ומקשר את כולם",
+    steps: [
+      { label: "הספרים", hint: `קבצים (${ltr(".txt")}), תיקייה, ZIP או מסד — אפשר כמה יחד.`, options: ["files", "folder", "zip", "db"] },
+      { label: "ספרי הבסיס, אם הם במקור אחר", hint: "למשל מסד אוצריא, כשהפירושים מתייחסים לספרים שבו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
+    ],
+    then: { tab: "suggestions", mode: "maxlink", allBooks: true },
   },
   {
     id: "folder-otzaria",
@@ -104,6 +121,15 @@ export const TASKS: readonly TaskDef[] = [
       { label: "הספרים שהקישורים מצביעים אליהם", hint: "כדי לראות ולבדוק אותם מול הטקסט: מסד אוצריא או התיקייה.", options: ["db", "folder", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "links" },
+  },
+  {
+    // audit F15: the links a database already has, without a links file
+    id: "db-links",
+    icon: "oz_search_in_links",
+    title: "הקישורים שכבר במסד",
+    hint: "מה שמסד אוצריא או מסד אישי כבר מקשר לכל ספר — לקריאה, לבדיקה ולהעתקה לפרויקט",
+    steps: [{ label: "המסד", hint: "מסד אוצריא (seforim.db) או מסד אישי. בוחרים ספר בקורא, והקישורים שלו מוצגים.", options: ["db"], dbHint: true }],
+    then: { tab: "links", dbLinks: true },
   },
   {
     id: "relink",
@@ -240,8 +266,9 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
     const then = task.then;
     const scoped = then.scopeStep !== undefined ? done[then.scopeStep] : undefined;
     const sourceId = Array.isArray(scoped) ? scoped[0] : undefined;
-    store.intent.value = { ...(then.engine && { engine: then.engine }), ...(sourceId && { sourceId }) };
+    store.intent.value = { ...(then.engine && { engine: then.engine }), ...(sourceId && { sourceId }), ...(then.allBooks && { allBooks: true }) };
     if (then.mode) store.suggestMode.value = then.mode;
+    if (then.dbLinks) store.dbLinks.tab.value = "db";
     store.sideTab.value = then.tab;
     store.screen.value = "workspace";
     // the relink dialog takes the sheet's place in the address; otherwise the sheet closes into the workspace
