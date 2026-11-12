@@ -54,14 +54,28 @@ describe("validateLink — generator gates", () => {
 });
 
 describe("validateLink — Sefaria rules (legacy §10 ref_1/ref_2)", () => {
-  // v3 made this an error. 2.0 makes it a warning (UX review, 2026-11-11): only the library's weekly
-  // sync needs ref_2; the generator ignores it, and blocking every link into Tanakh was unusable.
-  it("יעד ספריא בלי ref_2 → אזהרה (לא חוסם) ; עם ref_2 — בלי אזהרה", () => {
-    expect(codes(link({ target: { book: SEF, line: 2 } }))).toContain("warning:sefaria/ref2-required");
-    expect(codes(link({ target: { book: SEF, line: 2 }, ref2: "Genesis 1:3" }))).not.toContain("warning:sefaria/ref2-required");
+  // Compatibility review B1: for a submission to the library (the default) a missing ref_2 is an
+  // ERROR — the weekly sync throws new_target_ref_required and the whole refresh fails. For private use
+  // it is a warning. (The builder never blocks on it: it validates as "private", and the export fills
+  // the ref from the database heRef when it can.) An untouched imported record is written anyway.
+  it("יעד ספריא בלי ref_2 → שגיאה לשליחה לספרייה, אזהרה לשימוש פרטי ; עם ref_2 — כלום", () => {
+    expect(codes(link({ target: { book: SEF, line: 2 } }))).toContain("error:sefaria/ref2-required");
+    expect(validateLink(link({ target: { book: SEF, line: 2 } }), { ...ctx, purpose: "private" }).map((p) => `${p.severity}:${p.code}`)).toContain("warning:sefaria/ref2-required");
+    expect(codes(link({ target: { book: SEF, line: 2 }, ref2: "Genesis 1:3" })).filter((c) => c.includes("ref2-required"))).toEqual([]);
   });
-  it("legacy: רשומה שיובאה בלי ref_2 = אזהרה", () => {
-    expect(codes(link({ target: { book: SEF, line: 2 }, status: "existing", provenance: "file" }))).toContain("warning:sefaria/ref2-required");
+  it("legacy: רשומה שיובאה בלי ref_2 — השגיאה מדווחת, והייצוא כותב אותה כמו שהיא", () => {
+    expect(codes(link({ target: { book: SEF, line: 2 }, status: "existing", provenance: "file" }))).toContain("error:sefaria/ref2-required");
+  });
+  it("a range end on a Sefaria side drifts in the sync: sefaria/range-side", () => {
+    expect(codes(link({ target: { book: SEF, line: 2, end: 4 }, ref2: "Genesis 1:3" }))).toContain("error:sefaria/range-side");
+    expect(codes(link({ source: { book: A, line: 1, end: 3 }, target: { book: SEF, line: 2 }, ref2: "Genesis 1:3" }))).not.toContain("error:sefaria/range-side");
+  });
+  it("Sefaria-owned is the library's list when given (B6): a DB-Sefaria book outside it must not carry ref_2", () => {
+    const lecha = book("לכה דודי", { origin: "sefaria" });
+    const owned = (b: BookRef) => b.title === "בראשית";
+    const c2 = (l: Link) => validateLink(l, { ...ctx, sefariaOwned: owned }).map((p) => `${p.severity}:${p.code}`);
+    expect(c2(link({ target: { book: lecha, line: 2 } })).filter((c) => c.startsWith("error:sefaria"))).toEqual([]);
+    expect(c2(link({ target: { book: lecha, line: 2 }, ref2: "Lekha Dodi 1" }))).toContain("error:sefaria/ref2-side");
   });
   it("legacy: ref_1 ו-ref_2 יחד → שגיאה ; ref_2 על יעד שאינו ספריא → שגיאה", () => {
     expect(codes(link({ ref1: "a", ref2: "b" }))).toContain("error:sefaria/both-refs");

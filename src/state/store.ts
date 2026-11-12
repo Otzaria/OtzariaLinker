@@ -8,6 +8,8 @@ import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { normalizeTitle, path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
+import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
+import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
 import { linkToRecord, recordToLink } from "../formats/links-json/convert";
 import { recordToObject } from "../formats/links-json/serialize";
@@ -160,6 +162,13 @@ export class AppStore {
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
+  /**
+   * The titles the library's sync and PR gate count as Sefaria books (B6): embedded at build time,
+   * replaced by the library's own file when the user opens a library folder that has it.
+   */
+  readonly sefariaTitles = signal<SefariaTitles>(embeddedSefariaTitles());
+  /** what the export is for (B1): the library (its sync's rules are errors) or private use (warnings) */
+  readonly exportPurpose = signal<"submission" | "private">("submission");
 
   readonly books = computed(() => {
     const m = new Map<string, SourceBook>();
@@ -185,8 +194,9 @@ export class AppStore {
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
     const { anchor: _a, ref1: _r1, ref2: _r2, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
-    const ref1 = this.draftRef1.value.trim();
-    const ref2 = this.draftRef2.value.trim();
+    // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
+    const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
+    const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
     const d: Link = {
       ...kept,
       source,
@@ -205,9 +215,10 @@ export class AppStore {
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
+    // the library's rules are checked at export (purpose); here they warn, so a link is never blocked from being made
     const { linksFile: _f, ...ctx } = this.validation();
     if (!d) return [];
-    const out = validateLink(d, ctx);
+    const out = validateLink(d, { ...ctx, purpose: "private" });
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (base) {
       const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
@@ -1014,9 +1025,49 @@ export class AppStore {
     return ok === true;
   }
 
+  /** Whether the library's sync and PR gate count a book as Sefaria-owned (B6). */
+  isSefariaOwned(book: { readonly title: string }): boolean {
+    return isSefariaOwned(book, this.sefariaTitles.value);
+  }
+
+  /** The library's own list of Sefaria titles (`.github/data/sefaria_he_titles.txt`) replaces the embedded one. */
+  loadSefariaTitles(path: string, text: string): boolean {
+    const list = parseSefariaTitles(text, path);
+    if (!list) return void this.notify("warning", `"${path}": אין בקובץ שמות ספרים, ולכן הכלי ממשיך עם הרשימה המובנית.`), false;
+    this.sefariaTitles.value = list;
+    this.notify("info", `נטענה רשימת ספרי ספריא של הספרייה מ־"${path}" (${list.titles.size.toLocaleString("he")} ספרים). לפיה הכלי קובע איפה נדרש ref_1/ref_2.`);
+    return true;
+  }
+
+  /**
+   * Fills the Sefaria refs the library's sync needs where the user did not, from the database heRef of
+   * the line (core/links/sefaria-ref.ts) — ONE undoable action, said in a notice. Only links the user
+   * made or changed; an untouched library record is left as it is in the library (B1).
+   */
+  private fillSefariaRefs(): void {
+    const s = this.linkState.value;
+    const changes: Change[] = [];
+    for (const l of s.links.values()) {
+      if (l.status === "deleted" || l.provenance === "db" || (l.provenance === "file" && l.status === "existing")) continue;
+      const srcSef = this.isSefariaOwned(l.source.book);
+      const tgtSef = this.isSefariaOwned(l.target.book);
+      if (srcSef === tgtSef) continue;
+      const side = srcSef ? l.source : l.target;
+      if ((srcSef ? l.ref1 : l.ref2) !== undefined) continue;
+      const b = this.bookOf(side.book);
+      const ref = b && sefariaRefFromHeRef(this.lines.peek(b.key, side.line)?.heRef);
+      if (!ref) continue;
+      changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
+    }
+    if (!changes.length) return;
+    this.apply(`השלמת ציוני ספריא (ref_1/ref_2) ל־${linksCount(changes.length)}`, changes);
+    this.notify("info", `הכלי השלים ציון ספריא באנגלית (ref_1/ref_2) ל־${linksCount(changes.length)} מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+  }
+
   /** Loads every line the export must check (ends of every link, alt_toc lines) and returns the plan. */
   async prepareExport(): Promise<ExportBundle | null> {
     if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
+    if (this.exportPurpose.value === "submission") this.fillSefariaRefs();
     await this.altToc.loadLines();
     const files = this.linkState.value.files;
     return { ...planExport(this.allLinks.value, this.validation(), { layouts: (t) => files.get(t)?.layout, loadedFile: (t) => files.get(t)?.verified === true }), altToc: this.altToc.plan() };
@@ -1103,6 +1154,8 @@ export class AppStore {
         return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
       },
       linksFile: (title) => this.dbLinks.linksFile(title),
+      sefariaOwned: (book) => this.isSefariaOwned(book),
+      purpose: this.exportPurpose.value,
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),
     };

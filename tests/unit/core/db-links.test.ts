@@ -196,3 +196,16 @@ describe("validation of copied links and of links already in the database", () =
     expect(categoryOf("export/in-db")).toBe("in-db");
   });
 });
+
+describe("copying a database link with a range on a Sefaria side (compatibility review B1)", () => {
+  it("keeps the start line only, and says why", () => {
+    // שער הציון → משנה ברורה, a reference over three lines of the Sefaria book
+    const db = dbLink(SHAAR, 4, MB, 10, "reference", { target: { book: MB, line: 10, end: 12 } });
+    const r = adoptDbLink(db, "c:1", ctx({ hasLinksFile: () => true }));
+    expect(r.link!.target).toEqual({ book: MB, line: 10 });
+    expect(codes(r)).toContain("warning:adopt/sefaria-range");
+    // an Otzaria side keeps its range
+    const local = adoptDbLink(dbLink(SHAAR, 4, ARZOT, 10, "reference", { target: { book: ARZOT, line: 10, end: 12 } }), "c:2", ctx({ hasLinksFile: () => true }));
+    expect(local.link!.target).toEqual({ book: ARZOT, line: 10, end: 12 });
+  });
+});

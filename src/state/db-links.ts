@@ -29,6 +29,8 @@ export interface DbLinksHost {
   readonly pick: Record<Side, Signal<Pick | null>>;
   bookOf(ref: BookRef): SourceBook | undefined;
   importLinksFile(path: string, text: string): void;
+  loadSefariaTitles(path: string, text: string): boolean;
+  isSefariaOwned(book: { readonly title: string }): boolean;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
 }
@@ -190,6 +192,7 @@ export class DbLinksState {
         return l ? { anchorText: l.anchorText, heRef: l.heRef } : undefined;
       },
       hasLinksFile: (title: string) => this.linksFile(title) !== "missing",
+      sefariaOwned: (book: BookRef) => this.host.isSefariaOwned(book),
     };
     const index = this.projectIndex.peek();
     const made: Link[] = [];
@@ -263,6 +266,9 @@ export class DbLinksState {
   async loadLinksFiles(files: readonly InputFile[], titles: readonly string[]): Promise<string[]> {
     const want = new Set(titles);
     const found: string[] = [];
+    // a library checkout carries the list of Sefaria titles its sync and gate use: it wins over the embedded one (B6)
+    const list = files.find((f) => f.path.replace(/\\/g, "/").endsWith(".github/data/sefaria_he_titles.txt"));
+    if (list) this.host.loadSefariaTitles(list.path, await list.blob.text());
     for (const f of files) {
       const title = sourceTitleFromLinksFileName(f.path.split(/[\\/]/).at(-1) ?? f.path);
       if (!title || !want.has(title) || found.includes(title)) continue;

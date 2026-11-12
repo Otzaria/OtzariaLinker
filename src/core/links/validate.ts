@@ -47,6 +47,13 @@ export interface ValidationContext {
    * so the library may hold a links file for it. Absent or false = not known.
    */
   libraryMayHaveFile?(sourceTitle: string): boolean;
+  /**
+   * Whether the library's weekly sync and PR gate treat a book as Sefaria-owned (an exact title in
+   * the library's list, core/links/sefaria-titles.ts). Absent: the database origin.
+   */
+  sefariaOwned?(book: BookRef): boolean;
+  /** "submission" (default): rules of the library's sync are errors; "private": warnings (B1). */
+  purpose?: "submission" | "private";
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
 }
@@ -127,7 +134,7 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   sideChecks("ספר המקור", link.source, ctx, add);
   sideChecks("ספר היעד", link.target, ctx, add);
   anchorChecks(link, f.flipped, ctx, add);
-  sefariaChecks(link, add);
+  sefariaChecks(link, ctx, add);
   return out;
 }
 
@@ -194,17 +201,30 @@ function anchorChecks(link: Link, flipped: boolean, ctx: ValidationContext, add:
     add("warning", "export/anchor-end-ignored", "סוף העוגן אינו תקין, ואוצריא תשמור עוגן נקודה בלבד.");
 }
 
-function sefariaChecks(link: Link, add: Add) {
-  const srcSef = link.source.book.origin === "sefaria";
-  const tgtSef = link.target.book.origin === "sefaria";
+/*
+ * The library's weekly sync and PR gate (LINK_FORMATS §1.8). Which side is "Sefaria" is THEIR
+ * decision — an exact title in Sefaria's index (ctx.sefariaOwned: the library's list, B6) — not the
+ * database's origin. For a submission to the library (the default) a missing ref is an ERROR: the
+ * sync throws new_target_ref_required / new_source_ref_required and the whole weekly refresh fails,
+ * and the PR gate fails too; a range end on a Sefaria side is never remapped by the sync, so the range
+ * drifts (sefaria/range-side). For private use (ctx.purpose "private") these are warnings (B1).
+ */
+function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
+  const owned = (b: BookRef) => (ctx.sefariaOwned ? ctx.sefariaOwned(b) : b.origin === "sefaria");
+  const srcSef = owned(link.source.book);
+  const tgtSef = owned(link.target.book);
+  const submit = ctx.purpose !== "private";
+  const need: Severity = submit ? "error" : "warning";
+  const forSubmission = submit ? "חובה לשליחה לספריית אוצריא: בלעדיו הסנכרון השבועי של הספרייה נכשל כולו. הכלי משלים אותו לבד מהמסד כשהוא יודע (לפני הייצוא); אחרת כתבו אותו, או בחרו בחלון הייצוא \"לשימוש פרטי\"." : "לשימוש פרטי אפשר בלעדיו; לשליחה לספריית אוצריא הוא חובה.";
   if (link.ref1 !== undefined && link.ref2 !== undefined) add("error", "sefaria/both-refs", "ברשומה יש גם ref_1 וגם ref_2. מותר רק אחד מהם.");
-  if (link.ref1 !== undefined && !srcSef) add("error", "sefaria/ref1-side", "ref_1 מותר רק כשספר המקור הוא ספר ספריא.");
-  if (link.ref2 !== undefined && !tgtSef) add("error", "sefaria/ref2-side", "ref_2 מותר רק כשספר היעד הוא ספר ספריא.");
-  if (srcSef && !tgtSef && link.ref1 === undefined)
-    // a warning, not an error: only the library's weekly sync needs it; the generator ignores it (UX review #8)
-    add("warning", "sefaria/ref1-required", "ספר המקור הוא ספר ספריא. כדי לשלוח את הקישור לספריית אוצריא, הוסיפו את ציון ספריא באנגלית (ref_1). לשימוש פרטי אפשר בלי.");
-  if (tgtSef && !srcSef && link.ref2 === undefined)
-    add("warning", "sefaria/ref2-required", "ספר היעד הוא ספר ספריא. כדי לשלוח את הקישור לספריית אוצריא, הוסיפו את ציון ספריא באנגלית (ref_2). לשימוש פרטי אפשר בלי.");
+  if (link.ref1 !== undefined && !srcSef) add("error", "sefaria/ref1-side", `ref_1 מותר רק כשספר המקור הוא ספר ספריא, ו"${link.source.book.title}" אינו ברשימת ספרי ספריא של הספרייה.`);
+  if (link.ref2 !== undefined && !tgtSef) add("error", "sefaria/ref2-side", `ref_2 מותר רק כשספר היעד הוא ספר ספריא, ו"${link.target.book.title}" אינו ברשימת ספרי ספריא של הספרייה. הסירו את ref_2.`);
+  if (srcSef && tgtSef && !(link.source.book.origin === "sefaria" && link.target.book.origin === "sefaria"))
+    add(need, "sefaria/both-sides", "שני הספרים ברשימת ספרי ספריא של הספרייה. הסנכרון השבועי דוחה קישור ספריא↔ספריא מקובץ.");
+  if (srcSef && !tgtSef && link.ref1 === undefined) add(need, "sefaria/ref1-required", `ספר המקור הוא ספר ספריא, וחסר ציון ספריא באנגלית של השורה (ref_1). ${forSubmission}`);
+  if (tgtSef && !srcSef && link.ref2 === undefined) add(need, "sefaria/ref2-required", `ספר היעד הוא ספר ספריא, וחסר ציון ספריא באנגלית של השורה (ref_2). ${forSubmission}`);
+  if ((tgtSef && isRange(link.target)) || (srcSef && isRange(link.source)))
+    add(need, "sefaria/range-side", `טווח בצד של ספר ספריא: הסנכרון השבועי מעדכן רק את שורת ההתחלה לפי ה־ref, וסוף הטווח נשאר במקום ונסחף. ${submit ? "לשליחה לספרייה קשרו שורה אחת." : "לשימוש פרטי זה עובד, עד שספריא תשתנה."}`);
   if ((srcSef || tgtSef) && link.anchor?.rawEnd !== undefined)
     add("error", "sefaria/anchor-range", "עוגן עם סוף (end) אינו נתמך בקישור שנוגע בספר ספריא.");
   if (tgtSef && !srcSef && link.anchor)

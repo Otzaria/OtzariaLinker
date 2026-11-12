@@ -64,12 +64,13 @@ describe("citations engine (in memory)", () => {
     expect(runCitationsEngine(source(["<h2>בראשית ב, ג</h2>"]), library()).suggestions).toHaveLength(0);
   });
 
-  it("a daf with its amud links to the amud's range; a daf without one to both sides", () => {
+  it("a daf with its amud links to the amud's start — no range into a Sefaria book (B1); a daf without one is weaker", () => {
     const r = runCitationsEngine(source(["עיין ברכות ג. ושם", 'ועיין ברכות דף ה\' ובתוך']), library());
     const [a, b] = r.suggestions;
-    // daf ב: heading(1) 2-4, heading(5) 6-8; daf ג.: heading 9, lines 10-12
-    expect(a!.target).toEqual({ book: BER, line: 10, end: 12 });
-    expect(b!.target.line).toBeLessThan(b!.target.end!);
+    // daf ב: heading(1) 2-4, heading(5) 6-8; daf ג.: heading 9, lines 10-12. The weekly sync remaps only
+    // line_index_2 from ref_2, so a range end on a Sefaria side would drift: the start line only.
+    expect(a!.target).toEqual({ book: BER, line: 10 });
+    expect(b!.target.end).toBeUndefined();
     expect(b!.warnings.map((w) => w.code)).toContain("citations/whole-daf");
     expect(CONF(b!)).toBeLessThan(CONF(a!));
   });

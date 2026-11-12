@@ -52,8 +52,9 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
 
     store.pickLine("source", comm.key, 1);
     store.pickLine("target", bereshit.key, verse);
-    expect(store.draftProblems.value.map((p) => p.code)).toContain("sefaria/ref2-required"); // Bereshit is a Sefaria book
-    store.draftRef2.value = "Genesis 1:1";
+    // Bereshit is a Sefaria book: the library needs ref_2, and the builder builds it from the line heRef (B1)
+    expect(store.draft.value!.ref2).toBe("Genesis 1:1");
+    expect(store.draftProblems.value.map((p) => p.code)).not.toContain("sefaria/ref2-required");
     // "פירוש על בראשית" names its base: the type follows the titles → "source" (stored base → commentary)
     expect(store.draft.value).toMatchObject({ declaredType: "source", source: { line: 1 }, target: { line: verse } });
     expect(store.draft.value!.heRef2).toBe(store.lines.peek(bereshit.key, verse)!.heRef);
@@ -72,7 +73,7 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     expect(plan.counts).toMatchObject({ new: 1, heldBack: 0, files: 1 });
     store.saveExport(plan);
     expect(saved[0]!.name).toBe("פירוש על בראשית_links.json");
-    expect(JSON.parse(saved[0]!.data as string)[0]).toMatchObject({ line_index_1: 2, path_2: "בראשית.txt", line_index_2: verse + 1, "Conection Type": "source" });
+    expect(JSON.parse(saved[0]!.data as string)[0]).toMatchObject({ line_index_1: 2, path_2: "בראשית.txt", line_index_2: verse + 1, ref_2: "Genesis 1:1", "Conection Type": "source" });
     expect(store.dirty.value).toBe(false);
   });
 
