@@ -162,6 +162,8 @@ export interface HeadingWindows {
   readonly distrusted?: { readonly section: string; readonly matched: readonly string[] };
   /** how many commentary lines got each window kind (for the run's notes) */
   readonly kinds: Readonly<Partial<Record<WindowKind, number>>>;
+  /** the line numbered `n` inside `w` ("(ה)" for a commentary line's "(סעיף ה')"), when the base numbers its lines there */
+  readonly unitOf: (w: SearchWindow, n: number) => SearchWindow | null;
 }
 
 /** Per commentary line index → the base window derived from matching headings. */
@@ -222,6 +224,14 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
     const out = content >= 2 && count * 10 >= content * 6 ? by : null;
     numbered.set(k, out);
     return out;
+  };
+
+  const unitOf = (w: SearchWindow, n: number): SearchWindow | null => {
+    const at = unitsIn(w.from, w.to)?.get(n);
+    if (!at || at.length !== 1) return null;
+    const start = at[0]!;
+    const next = contentIdx.find((i) => i > start && i <= w.to && openingNoteNumbers(lineByIndex.get(i)!.text).length > 0);
+    return { from: start, to: next !== undefined ? next - 1 : w.to, kind: "unit", label: `${w.label ? `${w.label}, ` : ""}(${toGematria(n)})` };
   };
 
   const resolve = (): SearchWindow => {
@@ -303,8 +313,8 @@ export function headingWindowPlan(commentary: EngineBook, base: EngineBook): Hea
   const sections = new Set([...outermost].map(enclosing));
   const [section] = sections;
   if (outermost.size && sections.size === 1 && section && !named.has(section.key) && !(section.key && titleKey.includes(normalize(section.text))) && (section.end - section.index + 1) * 2 < last - first + 1)
-    return { windowOf: () => whole, distrusted: { section: section.text, matched: [...outermost].map((h) => h.text) }, kinds: { book: byLine.size } };
-  return { windowOf: (i) => byLine.get(i) ?? whole, kinds };
+    return { windowOf: () => whole, distrusted: { section: section.text, matched: [...outermost].map((h) => h.text) }, kinds: { book: byLine.size }, unitOf };
+  return { windowOf: (i) => byLine.get(i) ?? whole, kinds, unitOf };
 }
 
 /** Rung C of the ladder: the window widened by its own width on each side (the neighbouring sections). */

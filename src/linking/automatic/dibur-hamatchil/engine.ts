@@ -18,6 +18,7 @@
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import { storedForm } from "../../../core/links/stored-form";
 import { skeleton, stem } from "../../../core/text/hebrew";
+import { approximateOccurrence } from "../../../matching/similarity";
 import { headingLevel, stripTags } from "../../../core/text/html";
 import { hebrewTokens, visibleSlice, type HebToken } from "../../../matching/hebrew-tokens";
 import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, stepTable, type StepProfile, type StepTable } from "../../../matching/token-match";
@@ -38,6 +39,7 @@ import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEv
 import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
+import { commentatorOfTitle, type Commentator } from "./addressee";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
 
 export interface DhOptions {
@@ -62,6 +64,20 @@ export interface DhOptions {
   readonly ladderWide?: boolean;
   /** בא"ד / שם lines take the previous line's place (default true) */
   readonly inherit?: boolean;
+  /**
+   * a line that quotes an intermediate commentator ("רש"י ד"ה X", "<b>תוס'</b> בד"ה X", and the lines
+   * that continue it) is linked only to that commentator's book, never to the text it comments on
+   * (default true; requirements §2)
+   */
+  readonly intermediates?: boolean;
+  /**
+   * a paragraph without a ד"ה of its own (no bold opening) after a ד"ה line of the same section belongs
+   * to that ד"ה's place, in a book whose ד"ה lines are bold and whose sections hold few of them
+   * (default true; the "item" of build_artzot_hachaim_links.py)
+   */
+  readonly continueItems?: boolean;
+  /** drop or demote what does not fit the order of the whole commentary (default true; see "the order of the whole commentary" in the engine) */
+  readonly order?: boolean;
 }
 
 const r = (code: string, text: string): Reason => ({ code, text });
@@ -73,12 +89,51 @@ const BOUNDARY_REASON: Readonly<Record<string, Reason>> = {
   dash: r("dh/boundary-dash", "הדיבור המתחיל מסתיים במקף"),
   none: r("dh/boundary-none", "בשורה אין סימן לסוף הדיבור המתחיל, ולכן נבדקו המילים הראשונות שלה"),
 };
+const COLOPHON_RE = /^(?:\s|<[^>]*>)*(?:סליק|סליקו|תם ונשלם|נשלם|תמו ונשלמו|ותשלם)(?![\u05d0-\u05ea])/;
 const RUNG_TEXT: Readonly<Record<Rung, string>> = {
   A: "נמצא רק אחרי הקלה בחיפוש (שלב א: גם באמצע שורת הבסיס)",
   B: "נמצא רק אחרי הקלה בחיפוש (שלב ב: בלי משקל לפי נדירות המילים)",
   C: "נמצא רק אחרי הקלה בחיפוש (שלב ג: גם בקטעים הסמוכים)",
   D: "נמצא רק אחרי הקלה בחיפוש (שלב ד: בסף התאמה נמוך)",
+  L: "נמצא רק בהשוואת האותיות (מרחק עריכה), כי המילים עצמן לא נמצאו ברצף",
 };
+
+/**
+ * The placements that lie on one heaviest chain whose base lines never go back (a commentary follows
+ * its base): a weighted longest non-decreasing subsequence over (commentary order, base line), weight =
+ * the placement's score, by a Fenwick tree of prefix maxima. Returns the commentary lines on it.
+ */
+export function monotoneChain(items: readonly { readonly cLine: number; readonly base: number; readonly score: number }[]): Set<number> {
+  const out = new Set<number>();
+  if (!items.length) return out;
+  const lines = [...new Set(items.map((x) => x.base))].sort((a, b) => a - b);
+  const rank = new Map(lines.map((l, i) => [l, i + 1]));
+  const m = lines.length;
+  const treeVal = new Float64Array(m + 1);
+  const treeAt = new Int32Array(m + 1).fill(-1);
+  const best = new Float64Array(items.length);
+  const prevOf = new Int32Array(items.length);
+  items.forEach((x, k) => {
+    let v = 0;
+    let at = -1;
+    for (let q = rank.get(x.base)!; q > 0; q -= q & -q)
+      if (treeVal[q]! > v) {
+        v = treeVal[q]!;
+        at = treeAt[q]!;
+      }
+    best[k] = v + x.score;
+    prevOf[k] = at;
+    for (let q = rank.get(x.base)!; q <= m; q += q & -q)
+      if (best[k]! > treeVal[q]!) {
+        treeVal[q] = best[k]!;
+        treeAt[q] = k;
+      }
+  });
+  let k = 0;
+  for (let i = 1; i < items.length; i++) if (best[i]! > best[k]!) k = i;
+  for (; k !== -1; k = prevOf[k]!) out.add(items[k]!.cLine);
+  return out;
+}
 
 /** First index of `arr` whose element is not `below` (`below` holds for a prefix of `arr`). */
 function lowerBound(arr: readonly number[], below: (v: number) => boolean): number {
@@ -123,6 +178,8 @@ interface Cand {
   readonly rank: number;
   readonly lineTokens: number;
   readonly contLine: number | null;
+  /** the run is the base line's own lemma head (a ד"ה-style base: רש"י, תוספות, a ש"ך…) */
+  readonly lemmaHead: boolean;
 }
 
 /** Which record shape can carry an anchor on the base words (see DH_ANCHOR_DIRECTION.md). */
@@ -160,6 +217,10 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const inherit = options.inherit !== false;
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto");
   const notes: Reason[] = [policy.reason];
+  const routeIntermediates = options.intermediates !== false;
+  const continueItems = options.continueItems !== false;
+  /** the intermediate commentator the base book is (רש"י על …, תוספות על …), else null */
+  const baseIs: Commentator | null = commentatorOfTitle(base.book.title);
 
   // ── base preparation ──────────────────────────────────────────────────────────────────────
   const bLines = base.lines;
@@ -178,7 +239,27 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const tableOf = (p: number): StepTable => (bTables[p] ??= stepTable(bTokens[p]!, bProfiles[p]!));
   const cExtract = new Map<number, ExtractedDh>();
   for (const l of commentary.lines) cExtract.set(l.index, extractDh(l, maxWords));
-
+  /*
+   * Item paragraphs (continueItems): a book whose ד"ה lines open with bold, and whose sections hold few
+   * of them — the median section (with any) has at most 3 — writes one ד"ה per item and continues it in
+   * plain paragraphs (ארץ יהודה on ארצות החיים: a ס"ק heading, a bold ד"ה, then up to 20 paragraphs).
+   * Measured on the 51 pairs (REAL_DATA_REPORT.md §7.2): such a paragraph, not found by its own words,
+   * belonged to the place of the strong bold ד"ה above it in 514 of 530.
+   */
+  const itemBook = (() => {
+    const perSection: number[] = [];
+    let n = 0;
+    for (const l of commentary.lines) {
+      const e = cExtract.get(l.index)!;
+      if (e.kind === "heading") {
+        if (n) perSection.push(n);
+        n = 0;
+      } else if (e.bold) n++;
+    }
+    if (n) perSection.push(n);
+    perSection.sort((a, b) => a - b);
+    return perSection.length > 0 && perSection[Math.floor((perSection.length - 1) / 2)]! <= 3;
+  })();
   const idf = idfFactors([...bTokens.map((t) => t.map((x) => x.key)), ...[...cExtract.values()].map((e) => e.tokens.map((x) => x.key))]);
   const weightIdf = (k: string) => wordWeight(k, idf);
   const weightStatic = (k: string) => wordWeight(k);
@@ -244,6 +325,17 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const startsWithDh =
     options.targetStartsWithDh ?? (contentPositions.length > 0 && contentPositions.filter((i) => BOLD_LINE_RE.test(bLines[i]!.text)).length / contentPositions.length >= 0.6);
   const strict: SearchSpec = { ...STRICT_SPEC, requireTargetStart: startsWithDh };
+  /** words of a base line's own lemma (its opening bold run), 0 when it has none */
+  const lemmaLen: (number | undefined)[] = [];
+  const lemmaOf = (pos: number): number => {
+    let n = lemmaLen[pos];
+    if (n === undefined) {
+      const e = extractDh(bLines[pos]!, 24);
+      // the base tokens drop a leading verse/item number; so does extractDh
+      n = lemmaLen[pos] = e.kind === "dh" && e.boundary === "bold" ? e.dh.length + Math.max(0, e.from - leadingMarkerTokens(bLines[pos]!.text, e.tokens)) : 0;
+    }
+    return n;
+  };
 
   // inverted index for wide windows (built on first use)
   let keyIndex: Map<string, number[]> | null = null;
@@ -483,8 +575,23 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
             contLine = bestCont.line;
           }
         }
+        /*
+         * A base whose lines open with their own lemma (רש"י, תוספות, a ש"ך): a run from the line's first
+         * word over most of that lemma IS the quoted lemma (the owner's lemma_head_match.py: "align the
+         * dibur's leading words against each candidate's own lemma head"). The evidence is then measured
+         * against the lemma, not against the whole commentary line, which marks no ד"ה boundary.
+         */
+        let lemmaHead = false;
+        if (startsWithDh && run.tgtStart === 0 && !ex.explicit) {
+          const head = lemmaOf(p);
+          const covered = Math.min(run.tgtEnd, head);
+          if (head > 0 && covered >= Math.min(head, 2) && covered * 10 >= head * 6 && run.steps >= Math.min(2, src.length)) {
+            lemmaHead = true;
+            ww = Math.min(ww, tg.slice(0, head).reduce((s, t) => s + w(t.key), 0));
+          }
+        }
         const rank = ((exact ? 10 : 0) + matchedWeight) * orderFactor(line.index, prev);
-        found.set(p, { pos: p, line: line.index, run, exact, matchedWeight, windowWeight: ww, rank, lineTokens: tg.length, contLine });
+        found.set(p, { pos: p, line: line.index, run, exact, matchedWeight, windowWeight: ww, rank, lineTokens: tg.length, contLine, lemmaHead });
       }
       const best = ranked()[0];
       if (best && (best.exact || !ex.explicit)) return ranked();
@@ -517,10 +624,57 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       const run: Run = { score: anchorWeight, simSum: n, srcStart: 0, srcUsed: n, tgtStart: at, tgtEnd: at + n, steps: n, kinds: new Set(["exact"]) };
       return {
         n,
-        cand: { pos: hit, line: bLines[hit]!.index, run, exact: n > 1, matchedWeight: anchorWeight, windowWeight, rank: anchorWeight, lineTokens: bTokens[hit]!.length, contLine: null },
+        cand: { pos: hit, line: bLines[hit]!.index, run, exact: n > 1, matchedWeight: anchorWeight, windowWeight, rank: anchorWeight, lineTokens: bTokens[hit]!.length, contLine: null, lemmaHead: false },
       };
     }
     return null;
+  };
+
+  /*
+   * Rung L: the ד"ה as one string of letters, found by edit distance (approximateOccurrence) inside
+   * the stretch of a base line around a word it shares with the ד"ה — the owner's "Levenshtein ≤ 34%"
+   * (build_artzot_hachaim_links.py), for quotations whose words drifted beyond what a word step
+   * bridges. Only an explicit ד"ה of 8+ letters, only base lines holding one of its words (the inverted
+   * index), and only a clear winner: the best line at least 2 edits better than any other.
+   */
+  const letterRung = (ex: ExtractedDh, window: SearchWindow): Cand | null => {
+    const src = ex.dh;
+    const pattern = src.map((t) => t.key).join("");
+    if (src.length < 2 || pattern.length < 8) return null;
+    const max = Math.floor(pattern.length * 0.34);
+    const keys = new Set(src.filter((t) => t.key.length >= 3 && !STOP_WORDS.has(t.key)).flatMap((t) => [t.key, `~${indexKey(t.key)}`]));
+    if (!keys.size) return null;
+    const positions = positionsIn(window.from, window.to, hitsOf(src.filter((t) => t.key.length >= 3 && !STOP_WORDS.has(t.key)), src.length));
+    if (positions.length > 200) return null;
+    let best: { pos: number; dist: number; from: number; to: number } | null = null;
+    let second = Infinity;
+    for (const pos of positions) {
+      const tg = bTokens[pos]!;
+      let lineBest: { dist: number; from: number; to: number } | null = null;
+      for (let i = 0; i < tg.length; i++) {
+        if (!keys.has(tg[i]!.key) && !keys.has(`~${indexKey(tg[i]!.key)}`)) continue;
+        const from = Math.max(0, i - src.length - 1);
+        const to = Math.min(tg.length, i + src.length + 2);
+        const seg = tg.slice(from, to);
+        const hit = approximateOccurrence(pattern, seg.map((t) => t.key).join(""), max);
+        if (!hit || (lineBest && hit.dist >= lineBest.dist)) continue;
+        // the token where the occurrence ends, and the ד"ה's length in words back from it
+        let letters = 0;
+        let endTok = from;
+        for (let k = from; k < to && letters < hit.end; k++) (letters += tg[k]!.key.length), (endTok = k + 1);
+        lineBest = { dist: hit.dist, from: Math.max(from, endTok - src.length), to: endTok };
+      }
+      if (!lineBest) continue;
+      if (!best || lineBest.dist < best.dist) {
+        if (best) second = Math.min(second, best.dist);
+        best = { pos, ...lineBest };
+      } else second = Math.min(second, lineBest.dist);
+    }
+    if (!best || second - best.dist < 2) return null;
+    const sim = 1 - best.dist / pattern.length;
+    const ww = src.reduce((s, t) => s + weightIdf(t.key), 0);
+    const run: Run = { score: sim * ww, simSum: sim * src.length, srcStart: 0, srcUsed: src.length, tgtStart: best.from, tgtEnd: best.to, steps: src.length, kinds: new Set(["fuzzy"]) };
+    return { pos: best.pos, line: bLines[best.pos]!.index, run, exact: false, matchedWeight: sim * ww, windowWeight: ww, rank: sim * ww, lineTokens: bTokens[best.pos]!.length, contLine: null, lemmaHead: false };
   };
 
   const evidenceOf = (c: Cand, runnerUp: number): MatchEvidence => ({
@@ -534,13 +688,23 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   });
 
   /** Places one ד"ה line, or explains why not. */
-  const placeDh = (ex: ExtractedDh, cLine: EngineLine, prev: number | null): Placement | Reason[] => {
-    const window = windowFor(cLine.index);
+  const placeDh = (ex0: ExtractedDh, cLine: EngineLine, prev: number | null): Placement | Reason[] => {
+    let ex = ex0;
+    const window0 = windowFor(cLine.index);
+    // "(סעיף ה')" before the quote: the seif the base numbers itself, inside the section
+    const window = (ex.unit?.kind === "סעיף" ? plan.unitOf(window0, ex.unit.n) : null) ?? window0;
     const prevIn = prev !== null && prev >= window.from && prev <= window.to ? prev : null;
     let rung: Rung | null = null;
     const runs: RunCache = new Map();
     const startsCache = new Map<string, Map<number, number[]>[]>();
-    let cands = searchPass(ex, window, prevIn, strict, runs, startsCache);
+    let cands: Cand[] = [];
+    // a one- or two-word bold run that the line's punctuation continues: the longer quote first
+    if (ex.extended.length) {
+      const longer: ExtractedDh = { ...ex, dh: ex.extended, boundary: "punctuation", text: visibleSlice(cLine.text, ex.extended[0]!.rawStart, ex.extended.at(-1)!.rawEnd) };
+      cands = searchPass(longer, window, prevIn, strict, runs, new Map());
+      if (cands.length) ex = longer;
+    }
+    if (!cands.length) cands = searchPass(ex, window, prevIn, strict, runs, startsCache);
     if (!cands.length && ex.explicit && useLadder) {
       const A: SearchSpec = { ...strict, requireTargetStart: false, deepMinRun: 2 };
       const B: SearchSpec = { ...A, useIdf: false };
@@ -563,16 +727,23 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
         uniqueN = u.n;
       }
     }
+    if (!cands.length && ex.explicit && useLadder) {
+      const l = letterRung(ex, window);
+      if (l) {
+        cands = [l];
+        rung = "L";
+      }
+    }
     if (!cands.length)
-      return [r("dh/not-found", `הדיבור המתחיל "${ex.text}" לא נמצא בטווח החיפוש (שורות ${window.from + 1}–${window.to + 1} בספר הבסיס)`)];
+      return [r("dh/not-found", `הדיבור המתחיל "${ex.text}" לא נמצא בטווח החיפוש (שורות ${window.from + 1}–${window.to + 1} בספר הבסיס)`), r(`dh/window-${window.kind}`, window.label ? `טווח החיפוש: "${window.label}"` : "טווח החיפוש: כל ספר הבסיס")];
 
     const win = cands[0]!;
     const rivals = cands.slice(1, 4);
-    const score = matchConfidence({ evidence: evidenceOf(win, rivals[0]?.rank ?? 0), explicit: ex.explicit, rung });
+    const score = matchConfidence({ evidence: evidenceOf(win, rivals[0]?.rank ?? 0), explicit: ex.explicit || win.lemmaHead, rung });
     // every rival is scored on its own measured evidence, against the winner as ITS rival — two
     // verbatim occurrences then score alike and the result is reported as ambiguous (the source
     // kept the verbatim flag for the winner only, which hid exactly these ties)
-    const alternatives = rivals.map((c) => ({ line: c.line, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit, rung }) }));
+    const alternatives = rivals.map((c) => ({ line: c.line, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit || c.lemmaHead, rung }) }));
     alternatives.sort((a, b) => b.score - a.score);
     const confidence = confidenceOf(score, alternatives[0]?.score ?? null, thresholds);
     // A weak match BEFORE the previous line's place is mostly wrong: the commentary moves forward, and
@@ -588,6 +759,18 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const kinds = win.run.kinds;
     const firstLineEnd = Math.min(win.run.tgtEnd, win.lineTokens);
     const tg = bTokens[win.pos]!;
+    if (win.lemmaHead) {
+      rules.push("dh/lemma-head");
+      reasons.push(r("dh/lemma-head", "המילים נמצאו בראש שורת הבסיס, בדיבור המתחיל שלה עצמה"));
+    }
+    if (ex !== ex0) {
+      rules.push("dh/extended");
+      reasons.push(r("dh/extended", "רק תחילת הדיבור המתחיל מודגשת; הוא נמשך עד סימן הפיסוק"));
+    }
+    if (window !== window0) {
+      rules.push("dh/unit-label");
+      reasons.push(r("dh/unit-label", `השורה מציינת סעיף (${ex.unit!.n}), והחיפוש הוגבל לשורה הממוספרת שלו בספר הבסיס`));
+    }
     if (uniqueN) {
       rules.push("dh/unique-anchor");
       reasons.push(r("dh/unique-anchor", uniqueN === 1 ? "עוגן של מילה אחת נדירה, שמופיעה רק בשורה אחת בטווח" : `עוגן של ${uniqueN} המילים הראשונות, שמופיעות יחד רק בשורה אחת בטווח`));
@@ -686,12 +869,73 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     return null;
   };
 
+  /** A line that continues `parent` (בא"ד, שם, עוד כתב, an item paragraph): its place, weakened. */
+  const inherited = (cLine: number, parent: Placement, code: string, text: string, score: number): Placement => ({
+    cLine,
+    base: parent.base,
+    ...(parent.baseEnd !== undefined ? { baseEnd: parent.baseEnd } : {}),
+    score,
+    confidence: confidenceOf(score, null, thresholds),
+    reasons: [r(code, text)],
+    rules: [code],
+    warnings: [],
+    alternatives: [],
+    rootScore: parent.rootScore,
+    depth: parent.depth + 1,
+  });
+
+  /** "ד"ה X … עד ד"ה Y": the line of Y, at or after X's place and inside X's window, else null. */
+  const rangeEnd = (ex: ExtractedDh, cLine: number, start: number): number | null => {
+    const window = windowFor(cLine);
+    const sub: SearchWindow = { ...window, from: start, to: window.to };
+    const end: ExtractedDh = { ...ex, dh: ex.range, continuation: [], explicit: true, range: [] };
+    const cands = searchPass(end, sub, start, strict, new Map(), new Map());
+    const best = cands[0];
+    if (!best || best.line < start) return null;
+    // the end must stand out: a rival as good elsewhere makes it a guess
+    if (cands[1] && cands[1].rank >= best.rank * 0.95 && cands[1].line !== best.line) return null;
+    return best.line;
+  };
+
   // ── the walk over the commentary ─────────────────────────────────────────────────────────
   const placements: Placement[] = [];
+  /** per placed commentary line: its section (between headings), the line it inherits from, and whether it was matched by its own words */
+  const meta = new Map<number, { section: number; root: number; direct: boolean }>();
+  let section = 0;
+  const place = (pl: Placement, direct: boolean, root: number) => {
+    placements.push(pl);
+    meta.set(pl.cLine, { section, root: direct ? pl.cLine : (meta.get(root)?.root ?? root), direct });
+  };
   const unmatched: { line: number; reasons: Reason[] }[] = [];
   let chain: Placement | null = null;
   let prev: number | null = null;
   let crossedHeading = false;
+  let seenHeading = false;
+  const hasHeadings = commentary.lines.some((l) => (l.heading ?? headingLevel(l.text) ?? 1) > 1);
+  /** the strong bold ד"ה placement whose plain paragraphs follow (continueItems) */
+  let itemHead: Placement | null = null;
+  /** the intermediate commentator the lines are about (requirements §2), and the last one named */
+  let active: Commentator | null = null;
+  let lastNamed: Commentator | null = null;
+  /**
+   * The book labels whose words each line quotes (קרן אורה: "<b>שם גמרא</b>", "<b>תוס'</b> בד"ה" on most lines): then a
+   * line with no label of its own stays with the commentator named last (requirements §2). In a book that
+   * does not (most), only the lines that continue — בא"ד, שם, a bare ד"ה, an opener — do.
+   */
+  const labelingBook = (() => {
+    let dh = 0;
+    let labeled = 0;
+    for (const e of cExtract.values()) if (e.kind === "dh") (dh++, e.addressee && labeled++);
+    return dh > 0 && labeled * 2 >= dh;
+  })();
+  const skipFor = (who: Commentator | null, explicitText: boolean): Reason | null => {
+    if (!routeIntermediates) return null;
+    if (who && baseIs?.key !== who.key)
+      return r("dh/intermediate", `השורה מפרשת את דברי ${who.name}, ולא את ספר הבסיס; היא שייכת לשורה של ${who.name}`);
+    if (!who && explicitText && baseIs)
+      return r("dh/not-intermediate", `השורה מפרשת את הטקסט עצמו (גמרא/משנה), ולא את ${baseIs.name} שהוא ספר הבסיס`);
+    return null;
+  };
   const total = commentary.lines.length;
   let done = 0;
   let aborted = false;
@@ -705,12 +949,39 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const ex = cExtract.get(line.index)!;
     if (ex.kind === "heading") {
       crossedHeading = true;
+      section++;
+      if (line.heading !== 1 && headingLevel(line.text) !== 1) seenHeading = true;
+      // a heading is a hard reset (requirements §8): nothing below it inherits from above it
+      active = null;
+      itemHead = null;
+      continue;
+    }
+    // whose words this line quotes (requirements §2)
+    if (ex.addressee?.kind === "named") active = lastNamed = ex.addressee.commentator;
+    else if (ex.addressee?.kind === "text") active = null;
+    else if (ex.addressee?.kind === "bare") active ??= lastNamed;
+    // a new ד"ה that names nobody, in a book that does not label its lines, quotes the base text
+    else if (ex.kind === "dh" && !labelingBook) active = null;
+    // front matter and colophons are not commentary (requirements §9)
+    if (ex.kind === "dh" && !seenHeading && hasHeadings && !ex.explicit && ex.tokens.length <= 12) {
+      unmatched.push({ line: line.index, reasons: [r("dh/front-matter", "שורה שלפני הכותרת הראשונה (שם המחבר, פתיחה), ולא דיבור המתחיל")] });
+      continue;
+    }
+    if (COLOPHON_RE.test(line.text)) {
+      unmatched.push({ line: line.index, reasons: [r("dh/colophon", "סיום הספר או החלק (סליק, תם ונשלם), ולא דיבור המתחיל")] });
+      continue;
+    }
+    const skip = skipFor(active, ex.addressee?.kind === "text");
+    if (skip) {
+      unmatched.push({ line: line.index, reasons: [skip] });
+      chain = null;
+      itemHead = null;
       continue;
     }
     const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
     if (marked) {
       crossedHeading = false;
-      placements.push(marked);
+      place(marked, false, marked.cLine);
       chain = marked;
       prev = marked.base;
       continue;
@@ -722,58 +993,114 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       }
       continue;
     }
-    if (ex.kind === "baad" || ex.kind === "sham") {
-      const allowed = inherit && chain && !(ex.kind === "sham" && crossedHeading);
+    if (ex.kind === "baad" || ex.kind === "sham" || ex.kind === "continuation") {
+      // never across a heading (requirements §8)
+      const allowed = inherit && chain && !crossedHeading;
       crossedHeading = false;
       if (!allowed || !chain) {
-        unmatched.push({ line: line.index, reasons: [r("dh/no-parent", ex.kind === "baad" ? 'שורת "בא"ד" בלי שורה קודמת שקושרה' : 'שורת "שם" בלי שורה קודמת שקושרה')] });
+        const what = ex.kind === "baad" ? 'שורת "בא"ד"' : ex.kind === "sham" ? 'שורת "שם"' : `שורת המשך ("${ex.stripped.join(" ")}")`;
+        unmatched.push({ line: line.index, reasons: [r("dh/no-parent", `${what} בלי שורה קודמת שקושרה באותו קטע`)] });
         chain = null;
         continue;
       }
-      const depth = chain.depth + 1;
-      const score = inheritedConfidence(chain.rootScore, depth);
-      const code = ex.kind === "baad" ? "dh/inherit-baad" : "dh/inherit-sham";
-      const p: Placement = {
-        cLine: line.index,
-        base: chain.base,
-        score,
-        confidence: confidenceOf(score, null, thresholds),
-        reasons: [
-          r(code, ex.kind === "baad" ? 'השורה פותחת ב"בא"ד", ולכן היא מקושרת לאותו מקום כמו השורה הקודמת' : 'השורה היא "שם", ולכן היא מקושרת לאותו מקום כמו השורה הקודמת'),
-        ],
-        rules: [code],
-        warnings: [],
-        alternatives: [],
-        rootScore: chain.rootScore,
-        depth,
-      };
+      const code = ex.kind === "baad" ? "dh/inherit-baad" : ex.kind === "sham" ? "dh/inherit-sham" : "dh/inherit-opener";
+      const text =
+        ex.kind === "baad"
+          ? 'השורה פותחת ב"בא"ד", ולכן היא מקושרת לאותו מקום כמו השורה הקודמת'
+          : ex.kind === "sham"
+            ? 'השורה היא "שם", ולכן היא מקושרת לאותו מקום כמו השורה הקודמת'
+            : `השורה פותחת ב"${ex.stripped.join(" ")}", המשך של השורה הקודמת, ולכן היא מקושרת לאותו מקום`;
+      const p = inherited(line.index, chain, code, text, inheritedConfidence(chain.rootScore, chain.depth + 1));
       if (p.confidence === "none") {
         unmatched.push({ line: line.index, reasons: [r("dh/inherit-weak", "השרשרת של שורות ההמשך ארוכה מדי, והביטחון בקישור נמוך מדי")] });
         chain = null;
         continue;
       }
-      placements.push(p);
+      place(p, false, chain.cLine);
       chain = p;
       continue;
     }
+    const crossed = crossedHeading;
     crossedHeading = false;
-    const placed = placeDh(ex, line, prev);
+    let placed = placeDh(ex, line, prev);
+    if (!Array.isArray(placed) && placed.confidence === "none")
+      placed = [r("dh/weak", `נמצאה התאמה חלשה מדי בשורה ${placed.base + 1} בספר הבסיס`), ...placed.reasons];
     if (Array.isArray(placed)) {
+      // a plain paragraph of the item above it (continueItems)
+      if (continueItems && itemBook && !ex.bold && itemHead && !crossed) {
+        const score = Math.min(0.93, itemHead.rootScore * 0.97);
+        const p = inherited(line.index, itemHead, "dh/inherit-item", "פסקה בלי דיבור המתחיל משלה, אחרי הדיבור המתחיל של הקטע: היא שייכת לאותו מקום", score);
+        place(p, false, itemHead.cLine);
+        chain = p;
+        continue;
+      }
       unmatched.push({ line: line.index, reasons: placed });
       chain = null;
+      if (ex.bold) itemHead = null;
       continue;
     }
-    if (placed.confidence === "none") {
-      unmatched.push({ line: line.index, reasons: [r("dh/weak", `נמצאה התאמה חלשה מדי בשורה ${placed.base + 1} בספר הבסיס`), ...placed.reasons] });
-      chain = null;
-      continue;
+    if (ex.range.length) {
+      const end = rangeEnd(ex, line.index, placed.baseEnd ?? placed.base);
+      if (end !== null && end > (placed.baseEnd ?? placed.base))
+        placed = { ...placed, baseEnd: end, rules: [...placed.rules, "dh/range"], reasons: [...placed.reasons, r("dh/range", `הפירוש מציין טווח ("עד ד"ה"), וסוף הטווח נמצא בשורה ${end + 1} בספר הבסיס`)] };
+      else placed = { ...placed, warnings: [...placed.warnings, r("dh/range-unresolved", 'הפירוש מציין טווח ("עד ד"ה"), אבל סוף הטווח לא נמצא בוודאות; הקישור הוא לתחילת הטווח בלבד')] };
     }
-    placements.push(placed);
+    place(placed, true, placed.cLine);
     chain = placed;
     prev = placed.base;
+    itemHead = ex.bold && (placed.confidence === "certain" || placed.confidence === "high") ? placed : null;
   }
   ctx.progress?.(done, total);
   if (aborted) notes.push(r("engine/aborted", "הריצה הופסקה לפני הסוף. מוצגות רק ההצעות שנמצאו עד כה."));
+
+  /*
+   * ── the order of the whole commentary ─────────────────────────────────────────────────────
+   * A commentary follows its base, so the lines it places by their own words lie on one non-decreasing
+   * chain of base lines — except the wrong ones. Two chains: over the whole book, and inside each
+   * section of the commentary (a section ordered differently from the base keeps its own order).
+   * Measured on the 51 pairs (REAL_DATA_REPORT.md §7.2): a placement off BOTH chains was right in 64 of
+   * 497 (certain 7/20, high 37/136, possible 9/115, ambiguous 11/226) — it is dropped; one off the
+   * book's chain but on its section's was right in 73 of 170 — "possible"/"ambiguous" ones (21/97) are
+   * dropped, "high" (45/65) becomes "ambiguous" and "certain" (7/8) "high". On the chains: certain
+   * 99.0%, high 98.2%, possible 94.9%, ambiguous 77.4%. A line that inherits a dropped line's place
+   * (בא"ד, שם, an item paragraph) goes with it.
+   */
+  if (options.order !== false) {
+    const direct = placements.filter((pl) => meta.get(pl.cLine)?.direct);
+    const onBook = monotoneChain(direct);
+    const bySection = new Map<number, Placement[]>();
+    for (const pl of direct) {
+      const sec = meta.get(pl.cLine)!.section;
+      const list = bySection.get(sec);
+      if (list) list.push(pl);
+      else bySection.set(sec, [pl]);
+    }
+    const onSection = new Set<number>();
+    for (const list of bySection.values()) for (const c of monotoneChain(list)) onSection.add(c);
+    const dropped = new Set<number>();
+    const offText = (pl: Placement) => `ההתאמה (שורה ${pl.base + 1} בספר הבסיס) אינה בסדר של שאר הפירוש: השורות שלפניה ואחריה קושרו למקומות שאינם מתיישבים איתה`;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      if (!meta.get(pl.cLine)?.direct || onBook.has(pl.cLine)) continue;
+      const weak = pl.confidence === "possible" || pl.confidence === "ambiguous";
+      if (!onSection.has(pl.cLine) || weak) {
+        dropped.add(pl.cLine);
+        unmatched.push({ line: pl.cLine, reasons: [r("dh/off-order", `${offText(pl)}; התאמה כזו שגויה ברוב המקרים, ולכן לא הוצעה`)] });
+        continue;
+      }
+      const confidence = pl.confidence === "certain" ? "high" : "ambiguous";
+      placements[i] = { ...pl, confidence, score: Math.min(pl.score, thresholds.certain - 0.01), rules: [...pl.rules, "dh/off-order"], warnings: [...pl.warnings, r("dh/off-order", `${offText(pl)} בספר כולו, אף שהיא בסדר בתוך הקטע שלה; הוודאות הורדה`)] };
+    }
+    if (dropped.size) {
+      for (const pl of placements)
+        if (!dropped.has(pl.cLine) && dropped.has(meta.get(pl.cLine)!.root)) {
+          dropped.add(pl.cLine);
+          unmatched.push({ line: pl.cLine, reasons: [r("dh/off-order-parent", "השורה יורשת את המקום של שורה קודמת שההתאמה שלה בוטלה, כי אינה בסדר של הפירוש")] });
+        }
+      for (let i = placements.length - 1; i >= 0; i--) if (dropped.has(placements[i]!.cLine)) placements.splice(i, 1);
+      unmatched.sort((a, b) => a.line - b.line);
+    }
+  }
 
   // ── shape the suggestions ────────────────────────────────────────────────────────────────
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
