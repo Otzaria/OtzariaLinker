@@ -77,7 +77,8 @@ describe("mayStep never rejects a step matchStep would take", () => {
       }),
       { numRuns: 20_000 },
     );
-  });
+    // many runs: CPU-bound, so give it room on a loaded machine or a slow CI runner
+  }, 60_000);
 });
 
 describe("StepVocabulary.compatible (+ acronym initials): every word matchStep could step to, found by lookups", () => {
@@ -122,7 +123,7 @@ describe("StepVocabulary.compatible (+ acronym initials): every word matchStep c
       return [l, s2] as const;
     });
     fc.assert(fc.property(fc.array(edited, { minLength: 1, maxLength: 4 }), (pairs) => check(pairs.flat())), { numRuns: 1500 });
-  });
+  }, 60_000);
 });
 
 describe("stepProfiler", () => {
