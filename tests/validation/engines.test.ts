@@ -1,10 +1,11 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
 import type { BookRef } from "../../src/core/links/model";
 import { SourceRegistry } from "../../src/sources/registry";
-import { ENGINE_CASES, score, type GoldLink, type Scored } from "./engine-harness";
+import { ENGINE_CASES, lastResult, score, type GoldLink, type Scored } from "./engine-harness";
+import type { Suggestion } from "../../src/linking/automatic/types";
 import { decodeText } from "../../src/core/text/decode";
 import { sourceTitleFromLinksFileName, titleFromPath2 } from "../../src/core/links/titles";
 import { parseLinksJson } from "../../src/formats/links-json/parse";
@@ -24,10 +25,16 @@ import { cleanupTmp, DB, fileBlob, fingerprint, gitBlobs, gitFiles, LIBRARY, ms,
  *   VALIDATE_ENGINES=headings,dibur-hamatchil   (default: every case in ENGINE_CASES)
  *   VALIDATE_PAIRS_STRIDE=104729   a HELD-OUT sample: another fixed stride through the same groups,
  *                                  without the main sample's pairs (results go to engine-<id>-heldout)
+ *   VALIDATE_PAIRS_NAMED="<commentary title>><base title>;…"   a NAMED sample instead (engine-<id>-named):
+ *                                  pairs chosen for a structure the stratified samples rarely hold
+ *   VALIDATE_DUMP=<folder>         per pair, every suggestion, unplaced line and gold link as JSON (analysis)
  */
 const ONLY = process.env.VALIDATE_ENGINES?.split(",");
 const FOOTNOTE_PAIRS = 12;
 const STRIDE = process.env.VALIDATE_PAIRS_STRIDE;
+const NAMED = process.env.VALIDATE_PAIRS_NAMED?.split(";").map((s) => s.split(">").map((t) => t.trim()) as [string, string]).filter((p) => p[0] && p[1]);
+const DUMP = process.env.VALIDATE_DUMP;
+const suffix = NAMED ? "-named" : STRIDE ? "-heldout" : "";
 const SINGLE_BOOKS = (process.env.VALIDATE_CITATION_BOOKS ?? "משנה ברורה;ספר החינוך;מסילת ישרים").split(";");
 
 interface Pair { commentary: number; base: number; origin: string; top: string; sefaria: boolean; gold: number; titles: [string, string]; lines: [number, number] }
@@ -48,7 +55,14 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
     registry = new SourceRegistry();
     const opened = await registry.open([{ path: "seforim.db", blob: await fileBlob(DB!) }]);
     byId = new Map(opened.sources[0]!.books.map((b) => [idOf(b.key), b]));
-    pairs = (JSON.parse(readFileSync(STRIDE ? oracle("pairs", "pairs.json", "36", "12000", "30000", "30", STRIDE) : oracle("pairs", "pairs.json"), "utf8")) as { pairs: Pair[] }).pairs;
+    if (NAMED) {
+      const byTitle = new Map([...byId].map(([id, b]) => [b.title, id]));
+      pairs = NAMED.map(([c, b]) => {
+        const [ci, bi] = [byTitle.get(c), byTitle.get(b)];
+        if (ci === undefined || bi === undefined) throw new Error(`VALIDATE_PAIRS_NAMED: no book ${ci === undefined ? c : b}`);
+        return { commentary: ci, base: bi, origin: "named", top: "", sefaria: false, gold: 0, titles: [c, b], lines: [0, 0] };
+      });
+    } else pairs = (JSON.parse(readFileSync(STRIDE ? oracle("pairs", "pairs.json", "36", "12000", "30000", "30", STRIDE) : oracle("pairs", "pairs.json"), "utf8")) as { pairs: Pair[] }).pairs;
     const singles = SINGLE_BOOKS.map((t) => [...byId.values()].find((b) => b.title === t)).filter((b): b is SourceBook => !!b).map((b) => [idOf(b.key), null]);
     const q = join(tmpDir(), "gold-pairs.json");
     writeFileSync(q, JSON.stringify([...pairs.map((p) => [p.commentary, p.base]), ...(ENGINE_CASES.some((c) => c.pairs === "single-book") ? singles : [])]));
@@ -121,7 +135,7 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
       }
     for (const t of Object.values(total)) t.precision = pct(t.correct, t.judged);
     const goldLines = rows.reduce((n, r) => n + r.goldLines, 0);
-    const summary = record(`engine-${c.id}${STRIDE && c.pairs === "pair" ? "-heldout" : ""}`, {
+    const summary = record(`engine-${c.id}${c.pairs === "pair" ? suffix : ""}`, {
       engine: c.id,
       ...(STRIDE && c.pairs === "pair" && { stride: Number(STRIDE) }),
       goldTypes: c.goldTypes,
@@ -160,6 +174,7 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
         try {
           const s = await c.run({ registry, source: refOf(a), ...(b !== null && { target: refOf(b) }) });
           rows.push({ pair: `${byId.get(a)!.title} → ${b === null ? "*" : byId.get(b)!.title}`, ms: ms(t0), ...score(s, g, byId.get(a)!.key, idOf) });
+          if (DUMP && b !== null) dump(c.id, a, b, s, g);
         } catch (err) {
           rows.push({ pair: `${byId.get(a)!.title} → ${b === null ? "*" : byId.get(b)!.title}`, ms: ms(t0), error: String(err), suggestions: 0, byConfidence: {}, goldLines: 0, recalledStrong: 0, recalledAny: 0, wrong: [] });
         }
@@ -168,5 +183,17 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
     });
   }
 });
+
+/** One pair's suggestions (commentary line → base lines), unplaced lines and gold, for offline analysis. */
+function dump(engine: string, a: number, b: number, s: readonly Suggestion[], g: readonly GoldLink[]): void {
+  mkdirSync(DUMP!, { recursive: true });
+  const aKey = `:${a}`;
+  const sug = s.map((x) => {
+    const [from, to] = x.source.book.key.endsWith(aKey) ? [x.source, x.target] : [x.target, x.source];
+    return { c: from.line, b: to.line, e: to.end ?? to.line, conf: x.confidence, score: x.score, rules: x.rules, alt: x.alternatives.map((y) => y.target.line) };
+  });
+  const unmatched = (lastResult?.unmatched ?? []).map((u) => ({ c: u.line, why: u.reasons.map((r) => r.code) }));
+  writeFileSync(join(DUMP!, `${engine}-${a}-${b}.json`), JSON.stringify({ a, b, sug, unmatched, notes: lastResult?.notes.map((n) => n.code) ?? [], gold: g.map((x) => [x.from, x.to, x.toEnd]) }));
+}
 
 const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(1)}%` : "n/a");
