@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { diffLines } from "../../../src/matching/line-diff";
+import { diffLines, wordDiff } from "../../../src/matching/line-diff";
 
 const book = Array.from({ length: 30 }, (_, i) => `שורה מספר ${i} עם תוכן ייחודי משלה בספר`);
 
@@ -35,6 +35,35 @@ describe("diffLines", () => {
         const m = diffLines(a, b);
         const mapped = [...m.to].filter((j) => j >= 0);
         for (let k = 1; k < mapped.length; k++) expect(mapped[k]).toBeGreaterThan(mapped[k - 1]!);
+      }),
+    );
+  });
+});
+
+describe("wordDiff", () => {
+  it("marks only the words that changed, and the spans join back to the line", () => {
+    const d = wordDiff("אמר רבי יוחנן משום רבי שמעון", "אמר רבי יוחנן בשם רבי שמעון");
+    expect(d.old.filter((s) => s.changed).map((s) => s.text.trim())).toEqual(["משום"]);
+    expect(d.new.filter((s) => s.changed).map((s) => s.text.trim())).toEqual(["בשם"]);
+    expect(d.old.map((s) => s.text).join("")).toBe("אמר רבי יוחנן משום רבי שמעון");
+    expect(d.new.map((s) => s.text).join("")).toBe("אמר רבי יוחנן בשם רבי שמעון");
+  });
+
+  it("a line too long to compare is shown whole as changed", () => {
+    const long = Array.from({ length: 10 }, (_, i) => `מילה${i}`).join(" ");
+    const d = wordDiff(long, long, 5);
+    expect(d.old.every((s) => s.changed || !s.text.trim())).toBe(true);
+  });
+
+  it("property: the spans always join back to both lines", () => {
+    const w = fc.constantFrom("א", "ב", "ג", " ", "  ");
+    fc.assert(
+      fc.property(fc.array(w, { maxLength: 30 }), fc.array(w, { maxLength: 30 }), (x, y) => {
+        const a = x.join("");
+        const b = y.join("");
+        const d = wordDiff(a, b);
+        expect(d.old.map((s) => s.text).join("")).toBe(a);
+        expect(d.new.map((s) => s.text).join("")).toBe(b);
       }),
     );
   });

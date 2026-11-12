@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { RelinkVerdict } from "../../linking/relink";
+import type { RelinkPlan, RelinkVerdict } from "../../linking/relink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { EditionDiffView } from "./edition-diff";
 
 /*
  * Moving links to a new edition of a book (stage 11). The user opens the old and the new edition,
  * the tool aligns their lines and proposes where every link goes. Certain moves can be applied in
  * one step; edited lines are reviewed one by one; links whose line is gone are only listed.
+ * A second view shows the two editions line by line (edition-diff.tsx), and the line mapping
+ * old → new can be saved as CSV (linking/edition-map.ts).
  */
 const VERDICT: Record<RelinkVerdict, { title: string; cls: string }> = {
   certain: { title: "בטוח", cls: "info" },
@@ -22,13 +25,14 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
   const [oldKey, setOld] = useState(withLinks[0]?.key ?? "");
   const [newKey, setNew] = useState(() => books.find((b) => b.key !== oldKey && b.title === store.refOf(oldKey).title)?.key ?? "");
   const [filter, setFilter] = useState<RelinkVerdict>("review");
+  const [view, setView] = useState<"links" | "lines">("links");
   const r = store.relink.value;
   const fresh = r && r.oldKey === oldKey && r.newKey === newKey ? r : null;
 
   useEffect(() => ref.current?.showModal(), []);
 
   return (
-    <dialog ref={ref} onClose={onClose} aria-labelledby="relink-title">
+    <dialog ref={ref} class="relink" onClose={onClose} aria-labelledby="relink-title">
       <div class="dlg">
         <header>
           <Icon name="oz_text_compare" size={24} />
@@ -70,27 +74,18 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
                 <div class={`stat${fresh.plan.counts.lost ? " bad" : ""}`}><b>{fresh.plan.counts.lost.toLocaleString("he")}</b><span class="muted">השורה נמחקה</span></div>
                 <div class="stat"><b>{(fresh.stats.inserted ?? 0).toLocaleString("he")}</b><span class="muted">שורות חדשות</span></div>
               </div>
-              <div class="filters" style="padding:0">
-                {(["review", "lost", "certain"] as const).map((v) => (
-                  <button key={v} class="chip" aria-pressed={filter === v} onClick={() => setFilter(v)}>
-                    {VERDICT[v].title} <span class="count">{fresh.plan.counts[v]}</span>
-                  </button>
-                ))}
+              <div class="row">
+                <div class="filters" style="padding:0">
+                  <button class="chip" aria-pressed={view === "links"} onClick={() => setView("links")}>הקישורים</button>
+                  <button class="chip" aria-pressed={view === "lines"} onClick={() => setView("lines")}>השוואת השורות</button>
+                </div>
+                <button class="btn text" onClick={() => store.saveLineMapping()} title="כל שורה במהדורה הישנה ומספרה במהדורה החדשה, עם המצב שלה">
+                  <Icon name="fl_arrow_download" size={18} />
+                  שמירת מיפוי השורות (CSV)
+                </button>
               </div>
-              <ul class="problems">
-                {fresh.plan.items.filter((i) => i.verdict === filter).slice(0, 300).map((i) => (
-                  <li key={i.link.id} class={VERDICT[i.verdict].cls}>
-                    <span class="grow">
-                      <b>{i.link.source.book.title} {i.link.source.line + 1} ← {i.link.heRef2}</b>
-                      <br />
-                      {i.reasons.join(" ")}
-                    </span>
-                    {i.moved && i.verdict === "review" && (
-                      <button class="btn text" onClick={() => store.applyRelink([i])}>העברה</button>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              {view === "lines" && <EditionDiffView oldKey={oldKey} newKey={newKey} rows={fresh.rows} />}
+              {view === "links" && <PlanList plan={fresh.plan} filter={filter} setFilter={setFilter} />}
             </>
           )}
         </div>
@@ -111,5 +106,35 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
         </footer>
       </div>
     </dialog>
+  );
+}
+
+/** The links of the plan, one verdict at a time; an item for review can be moved on its own. */
+function PlanList({ plan, filter, setFilter }: { plan: RelinkPlan; filter: RelinkVerdict; setFilter: (v: RelinkVerdict) => void }) {
+  const store = useStore();
+  return (
+    <>
+      <div class="filters" style="padding:0">
+        {(["review", "lost", "certain"] as const).map((v) => (
+          <button key={v} class="chip" aria-pressed={filter === v} onClick={() => setFilter(v)}>
+            {VERDICT[v].title} <span class="count">{plan.counts[v]}</span>
+          </button>
+        ))}
+      </div>
+      <ul class="problems">
+        {plan.items.filter((i) => i.verdict === filter).slice(0, 300).map((i) => (
+          <li key={i.link.id} class={VERDICT[i.verdict].cls}>
+            <span class="grow">
+              <b>{i.link.source.book.title} {i.link.source.line + 1} ← {i.link.heRef2}</b>
+              <br />
+              {i.reasons.join(" ")}
+            </span>
+            {i.moved && i.verdict === "review" && (
+              <button class="btn text" onClick={() => store.applyRelink([i])}>העברה</button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }

@@ -6,7 +6,8 @@ import { Icon } from "../icons/icon";
 /*
  * Quality check (stage 16): every project link checked against Otzaria's rules, grouped by what
  * to do about it. Click an issue to see both ends; fix it in the builder; safe bulk fixes only
- * (removing the later copy of exact duplicates). The report can be saved as CSV.
+ * (removing the later copy of exact duplicates). The report can be saved as CSV, or as a full
+ * offline HTML page with a suggested fix for every issue (linking/qa-html.ts).
  */
 const PAGE = 200;
 const SEV_LABEL = { error: "שגיאות", warning: "אזהרות", info: "מידע" } as const;
@@ -50,8 +51,11 @@ export function QaPanel() {
           <Icon name="fl_arrow_sort" size={16} />
           {stale ? "בדיקה מחדש (השתנה)" : "בדיקה מחדש"}
         </button>
-        <button class="icon-btn" onClick={() => store.quality.saveReport()} title="שמירת הדוח כ־CSV" aria-label="שמירת הדוח">
+        <button class="icon-btn" onClick={() => store.quality.saveReport()} title="שמירת הדוח כ־CSV (לגיליון)" aria-label="שמירת הדוח כ־CSV">
           <Icon name="fl_arrow_download" size={18} />
+        </button>
+        <button class="icon-btn" onClick={() => store.quality.saveHtmlReport()} title="שמירת דוח מלא כדף HTML: לשמירה, להדפסה או לשליחה (נפתח בכל דפדפן, בלי רשת)" aria-label="שמירת הדוח כ־HTML">
+          <Icon name="oz_document_text" size={18} />
         </button>
       </div>
       <div class="filters">

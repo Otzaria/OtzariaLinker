@@ -18,6 +18,7 @@ import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
+import { editionRows, lineMappingCsv, type EditionDiff, type EditionRow } from "../linking/edition-map";
 import { loadPreferences, type Preferences } from "./preferences";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
@@ -610,7 +611,8 @@ export class AppStore {
     this.helpSection.value = section;
     this.dialog.value = "help";
   }
-  readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number> } | null>(null);
+  /** the last comparison: the plan for the links, and the aligned lines (the diff view, the mapping file) */
+  readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number>; diff: EditionDiff; rows: EditionRow[] } | null>(null);
 
   async planRelinkFor(oldKey: string, newKey: string): Promise<boolean> {
     const diff = await this.runTask("משווה בין המהדורות…", (opts) => this.service.diffBooks(oldKey, newKey, opts));
@@ -631,8 +633,16 @@ export class AppStore {
       newLine: (i) => this.lines.peek(newKey, i)?.anchorText,
       isOld: (ref) => this.sameBook(ref, oldKey),
     });
-    this.relink.value = { oldKey, newKey, plan, stats: diff.stats };
+    const edition: EditionDiff = { to: diff.to, fate: diff.fate, moves: diff.moves, newLength: diff.newLength, similarity: diff.similarity };
+    this.relink.value = { oldKey, newKey, plan, stats: diff.stats, diff: edition, rows: editionRows(edition) };
     return true;
+  }
+
+  /** Saves the line mapping old → new of the last comparison as CSV (linking/edition-map.ts). */
+  saveLineMapping(): void {
+    const r = this.relink.value;
+    if (!r) return;
+    this.saver.save(`מיפוי-שורות-${new Date().toISOString().slice(0, 10)}.csv`, lineMappingCsv(r.rows, r.diff), "text/csv");
   }
 
   /** Applies chosen items of the relink plan as ONE undoable action. */

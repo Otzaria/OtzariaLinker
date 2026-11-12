@@ -1,6 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import { runEngine, type EngineBook, type EngineContext, type EngineId, type EngineResult } from "../linking/automatic";
-import { diffLines, type LineFate, type LineMapping } from "../matching/line-diff";
+import { diffLines, findMoves, type LineFate, type LineMapping } from "../matching/line-diff";
 import type { SourceRegistry } from "../sources/registry";
 
 /** Reads both whole books from the registry and runs an engine on them (in the worker). */
@@ -44,12 +44,20 @@ export async function batchJob(registry: SourceRegistry, engine: EngineId, pairs
 export interface BookDiff {
   to: number[];
   fate: LineFate[];
+  /** word similarity of each old line to its new line (1 = identical, 0 = none) */
+  similarity: number[];
+  /** [old, new] of lines moved verbatim (findMoves) — for display and the mapping file only */
+  moves: [number, number][];
+  /** number of lines of the new edition */
+  newLength: number;
   stats: LineMapping["stats"];
 }
 
 /** Aligns the lines of two editions of a book (both read here, in the worker). */
 export async function diffJob(registry: SourceRegistry, oldKey: string, newKey: string): Promise<BookDiff> {
   const text = async (key: string) => (await registry.lines(key, 0, Number.MAX_SAFE_INTEGER)).map((l) => l.anchorText);
-  const m = diffLines(await text(oldKey), await text(newKey));
-  return { to: [...m.to], fate: [...m.fate], stats: m.stats };
+  const oldLines = await text(oldKey);
+  const newLines = await text(newKey);
+  const m = diffLines(oldLines, newLines);
+  return { to: [...m.to], fate: [...m.fate], similarity: Array.from(m.similarity, (v) => Math.round(v * 1000) / 1000), moves: findMoves(oldLines, newLines, m.to), newLength: newLines.length, stats: m.stats };
 }

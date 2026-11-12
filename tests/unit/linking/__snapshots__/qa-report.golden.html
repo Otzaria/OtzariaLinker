@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>דוח בדיקת קישורים — 12.11.2026</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff8f4;--fg:#201b13;--muted:#4f4539;--line:#d3c4b4;--card:#ffffff;--head:#f3e6da;--err:#ba1a1a;--warn:#8a5a00;--info:#51643f}
+@media (prefers-color-scheme:dark){:root{--bg:#18120b;--fg:#ede0d4;--muted:#d3c4b4;--line:#4f4539;--card:#201b13;--head:#2f2921;--err:#ffb4ab;--warn:#ffc46b;--info:#b8cea1}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI",Roboto,Arial,"Noto Sans Hebrew",sans-serif}
+main{max-width:1200px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:18px;margin:24px 0 8px}h3{font-size:15px;margin:0;display:inline}
+.muted{color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.tile{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.tile b{display:block;font-size:22px}
+.tile.error b{color:var(--err)}.tile.warning b{color:var(--warn)}
+table{border-collapse:collapse;width:100%;background:var(--card);margin:6px 0 12px}
+th,td{border:1px solid var(--line);padding:4px 8px;text-align:start;vertical-align:top}
+th{background:var(--head)}
+td.num{text-align:end;font-variant-numeric:tabular-nums}
+code{font-family:ui-monospace,Consolas,monospace;font-size:12px;direction:ltr;unicode-bidi:isolate}
+section.error>h2{color:var(--err)}section.warning>h2{color:var(--warn)}section.info>h2{color:var(--info)}
+details{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:8px 0;background:var(--card)}
+section.error details{border-inline-start:4px solid var(--err)}section.warning details{border-inline-start:4px solid var(--warn)}section.info details{border-inline-start:4px solid var(--info)}
+summary{cursor:pointer}
+.fix{font-weight:600}
+@media print{details{break-inside:auto}summary{list-style:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>דוח בדיקת קישורים</h1>
+<p class="muted">מנהל הקישורים של אוצריא 2.0.0-test · 12.11.2026</p>
+</header>
+<section class="summary">
+<h2>סיכום</h2>
+<div class="tiles">
+<div class="tile"><b>5</b><span class="muted">קישורים נבדקו</span></div>
+<div class="tile"><b>1</b><span class="muted">תקינים</span></div>
+<div class="tile error"><b>2</b><span class="muted">שגיאות</span></div>
+<div class="tile warning"><b>2</b><span class="muted">אזהרות</span></div>
+<div class="tile info"><b>0</b><span class="muted">מידע</span></div>
+</div>
+<h3>לפי קטגוריה</h3>
+<table>
+<thead><tr><th>קטגוריה</th><th>שגיאות</th><th>אזהרות</th><th>מידע</th><th>סה"כ</th></tr></thead>
+<tbody>
+<tr><td>כפולים</td><td class="num">0</td><td class="num">1</td><td class="num">0</td><td class="num">1</td></tr>
+<tr><td>מחוץ לספר</td><td class="num">1</td><td class="num">0</td><td class="num">0</td><td class="num">1</td></tr>
+<tr><td>קישור לכותרת</td><td class="num">1</td><td class="num">0</td><td class="num">0</td><td class="num">1</td></tr>
+<tr><td>סוג קשר</td><td class="num">0</td><td class="num">1</td><td class="num">0</td><td class="num">1</td></tr>
+</tbody>
+</table>
+<h3>לפי ספר המקור</h3>
+<table>
+<thead><tr><th>ספר</th><th>שגיאות</th><th>אזהרות</th><th>מידע</th><th>סה"כ</th></tr></thead>
+<tbody>
+<tr><td><bdi>פירוש</bdi></td><td class="num">2</td><td class="num">2</td><td class="num">0</td><td class="num">4</td></tr>
+</tbody>
+</table>
+</section>
+<section class="error">
+<h2>שגיאות (2)</h2>
+<p class="muted">קישור חדש או ערוך עם שגיאה לא ייוצא, ואוצריא או הסנכרון השבועי ידחו אותו.</p>
+<details open>
+<summary><h3>מחוץ לספר (1)</h3> <span class="muted">— שורה או טווח אחרי סוף הספר</span></summary>
+<table>
+<thead><tr><th>מקור</th><th>יעד</th><th>heRef_2</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr></thead>
+<tbody>
+<tr><td><bdi>פירוש</bdi> 5–7</td><td><bdi>בסיס</bdi> 41</td><td><bdi>בסיס ד</bdi></td><td><bdi>commentary</bdi></td><td>שורה 41 בספר היעד אינה קיימת (בספר 10 שורות).</td><td><span class="fix">תקנו בבונה את מספר השורה או את סוף הטווח לשורה שקיימת בספר.</span></td><td><code>export/line-out-of-range</code></td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h3>קישור לכותרת (1)</h3> <span class="muted">— אוצריא מדלגת על קישור שאחד מקצותיו שורת כותרת</span></summary>
+<table>
+<thead><tr><th>מקור</th><th>יעד</th><th>heRef_2</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr></thead>
+<tbody>
+<tr><td><bdi>פירוש</bdi> 3</td><td><bdi>בסיס</bdi> 1</td><td><bdi>בסיס ד</bdi></td><td><bdi>commentary</bdi></td><td>שורה 1 בספר היעד היא שורת כותרת. אוצריא מדלגת על קישור שאחד מקצותיו כותרת — קשרו לשורה שאחריה.</td><td><span class="fix">קשרו לשורה שאחרי הכותרת.</span></td><td><code>export/heading-line</code></td></tr>
+</tbody>
+</table>
+</details>
+</section>
+<section class="warning">
+<h2>אזהרות (2)</h2>
+<p class="muted">הקישור ייוצא, אבל לא כמו שכנראה התכוונתם.</p>
+<details open>
+<summary><h3>כפולים (1)</h3> <span class="muted">— שני קישורים שבמסד יהפכו לקישור אחד</span></summary>
+<table>
+<thead><tr><th>מקור</th><th>יעד</th><th>heRef_2</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr></thead>
+<tbody>
+<tr><td><bdi>פירוש</bdi> 3</td><td><bdi>בסיס</bdi> 4</td><td><bdi>בסיס ד</bdi></td><td><bdi>commentary</bdi></td><td>קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד.</td><td><span class="fix">מחקו את ההעתק (&quot;מחיקת העתקים כפולים&quot; בלשונית הבדיקה), או קשרו אותו לשורה אחרת.</span></td><td><code>export/duplicate</code></td></tr>
+</tbody>
+</table>
+</details>
+<details open>
+<summary><h3>סוג קשר (1)</h3> <span class="muted">— סוג לא מוכר, או קישור שיישמר כ&quot;אחר&quot;</span></summary>
+<table>
+<thead><tr><th>מקור</th><th>יעד</th><th>heRef_2</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr></thead>
+<tbody>
+<tr><td><bdi>פירוש</bdi> 3</td><td><bdi>בסיס</bdi> 4</td><td><bdi>בסיס ד</bdi></td><td><bdi>commantary</bdi></td><td>סוג הקשר &quot;commantary&quot; אינו מוכר לאוצריא, והקישור יישמר כ&quot;אחר&quot;.</td><td><span class="fix">בחרו בבונה סוג קשר מהרשימה.</span></td><td><code>export/unknown-type</code></td></tr>
+</tbody>
+</table>
+</details>
+</section>
+
+<footer class="muted">
+<p>מספרי השורות מתחילים ב־1, כמו בקובץ הקישורים. הקוד של כל בעיה יציב, וזהה לקוד בקובץ ה־CSV של הבדיקה.</p>
+</footer>
+</main>
+</body>
+</html>

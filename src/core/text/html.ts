@@ -57,6 +57,14 @@ export function htmlToPlainText(html: unknown): string {
   return out.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Text → HTML text that is inert anywhere in element content or a quoted attribute: the five
+ * characters that can open a tag, an entity or end an attribute are escaped. For reports the tool
+ * writes from untrusted book text and link fields (docs/SECURITY.md); never for anchor offsets.
+ */
+export const escapeHtml = (text: unknown): string =>
+  String(text ?? "").replace(/[&<>"']/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;"));
+
 /** Removes tags and decodes the common entities. For display/search only — never for offsets. */
 export function stripTags(html: unknown): string {
   return String(html ?? "")
