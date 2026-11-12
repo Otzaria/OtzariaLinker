@@ -156,7 +156,16 @@ interface Group {
   single: boolean;
 }
 
+/*
+ * The representative is the record that gets written. A single-book engine (citations) is never it
+ * while a structural engine (headings, dibur-hamatchil…) is in the group, whatever the confidences:
+ * the citation says REFERENCE where the structural engine says COMMENTARY/source, the generator keeps
+ * the type in the link identity (Generator.kt:2292-2300), and a REFERENCE moves the link from the
+ * commentators panel to the links panel (compatibility review B4). The citation still counts as
+ * agreement (engines, confidence), it only does not choose the record.
+ */
 const better = (a: Raw, b: Raw) =>
+  Number(isSingleBook(a.s.engine)) - Number(isSingleBook(b.s.engine)) ||
   rank(a.s.confidence) - rank(b.s.confidence) || repRank(a.s.engine) - repRank(b.s.engine) || b.s.score - a.s.score || cmp(a.s.id, b.s.id);
 
 function makeGroup(id: string, exact: Raw[]): Group {
