@@ -101,6 +101,38 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
   });
 });
 
+describe("AppStore — which book goes in which reader", () => {
+  const title = (store: AppStore, side: "source" | "target") => {
+    const k = store.view[side].value;
+    return k ? store.refOf(k).title : null;
+  };
+
+  it("the commentary opened first stays in its reader; the database only fills the empty one (audit F3)", async () => {
+    const { store } = makeStore();
+    await store.openFiles([COMMENTARY]);
+    expect(title(store, "source")).toBe("פירוש על בראשית");
+    await store.openFiles([DB]); // the database has its own pair (Onkelos → Bereshit): it must not replace the commentary
+    expect(title(store, "source")).toBe("פירוש על בראשית");
+    expect(title(store, "target")).toBe("בראשית");
+  });
+
+  it("a base opened first keeps its reader; a commentary on it fills the other", async () => {
+    const { store } = makeStore();
+    await store.openFiles([{ path: "בראשית.txt", blob: new Blob([strToU8("<h1>בראשית</h1>\nבראשית ברא")]) }]);
+    await store.openFiles([COMMENTARY]);
+    expect(title(store, "source")).toBe("בראשית");
+    expect(title(store, "target")).toBe("פירוש על בראשית");
+  });
+
+  it("with both readers chosen, opening more books changes neither", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB, COMMENTARY]);
+    const before = [store.view.source.value, store.view.target.value];
+    await store.openFiles([BIUR]);
+    expect([store.view.source.value, store.view.target.value]).toEqual(before);
+  });
+});
+
 describe("AppStore — automatic suggestions", () => {
   it("run → approve all certain (one undo step) → undo returns them to pending → reject is remembered", async () => {
     const { store } = makeStore();

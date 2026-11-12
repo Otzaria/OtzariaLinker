@@ -12,7 +12,7 @@ import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
-import { pairByTitle } from "../linking/batch";
+import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
 import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
@@ -266,14 +266,38 @@ export class AppStore {
   private chooseRoles(opened: readonly SourceBook[]): void {
     if (this.view.source.peek() && this.view.target.peek()) return;
     const all = [...this.books.peek().values()].map((b) => this.refOf(b.key));
+    // a book already in a reader keeps its place: newly opened books only fill the empty reader, with
+    // the kept book's partner if one is open — never a pair of their own (audit F3: opening the
+    // database after the commentary put Onkelos in place of the commentary)
+    const kept = this.view.source.peek() ?? this.view.target.peek();
+    if (kept) {
+      const partner = this.partnerOf(kept, opened, all);
+      if (partner) (this.view.source.peek() ? this.view.target : this.view.source).value = partner;
+      return;
+    }
     const pair = pairByTitle(opened.map((b) => this.refOf(b.key)), all).find((p) => p.target);
     const notes = opened.find((b) => b.title.startsWith("הערות"));
     const main = notes && opened.find((b) => b !== notes && notes.title.includes(b.title));
     batch(() => {
       if (pair?.target) (this.view.source.value = pair.source.key), (this.view.target.value = pair.target.key);
       else if (notes && main) (this.view.source.value = main.key), (this.view.target.value = notes.key);
-      else if (!this.view.source.peek()) this.view.source.value = opened[0]!.key;
+      else this.view.source.value = opened[0]!.key;
     });
+  }
+
+  /**
+   * The open book that goes opposite `key`: the base its title names ("X על Y"), a newly opened
+   * commentary on it, the book a "הערות…" book annotates, or newly opened notes on it. Null when none.
+   */
+  private partnerOf(key: string, opened: readonly SourceBook[], all: readonly BookRef[]): string | null {
+    const self = this.refOf(key);
+    const own = pairOne(self, titleIndex(all)).target;
+    if (own) return own.key;
+    const dependant = pairByTitle(opened.filter((b) => b.key !== key).map((b) => this.refOf(b.key)), all).find((p) => p.target?.key === key);
+    if (dependant) return dependant.source.key;
+    const fresh = opened.filter((b) => b.key !== key);
+    const notesOn = self.title.startsWith("הערות") ? fresh.find((b) => self.title.includes(b.title)) : fresh.find((b) => b.title.startsWith("הערות") && b.title.includes(self.title));
+    return notesOn?.key ?? null;
   }
 
   async closeSource(id: string): Promise<void> {
