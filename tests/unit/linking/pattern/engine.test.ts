@@ -16,33 +16,34 @@ const pairs = (res: EngineResult) => res.suggestions.map((s) => `${s.source.line
 const codes = (xs: readonly { code: string }[]) => xs.map((x) => x.code);
 const unmatchedCodes = (res: EngineResult) => res.unmatched.flatMap((u) => codes(u.reasons));
 
-describe("target = line (v3's default)", () => {
+describe("target = line (v3's default, now the preset \"v3\")", () => {
   const tgt = ["<h1>יעד</h1>", "שורה 2", "שורה 3", "שורה 4"];
+  const v3: PatternOptions = { preset: "v3" };
 
   it("the number is a 1-based line number of the target; Hebrew numerals are read", () => {
-    const res = run(["<h1>מקור</h1>", "עיין סימן ג", "ובדף 4 שם", "בלי הפניה"], tgt);
+    const res = run(["<h1>מקור</h1>", "עיין סימן ג", "ובדף 4 שם", "בלי הפניה"], tgt, v3);
     expect(pairs(res)).toEqual(["1>2", "2>3"]);
     expect(res.suggestions.every((s) => s.confidence === "certain" && s.engine === "pattern" && s.declaredType === "reference")).toBe(true);
   });
 
   it("only the first match of a line by default; every match with matches: all", () => {
     const src = ["סימן ב וסימן ג"];
-    expect(pairs(run(src, tgt))).toEqual(["0>1"]);
-    expect(pairs(run(src, tgt, { matches: "all" }))).toEqual(["0>1", "0>2"]);
+    expect(pairs(run(src, tgt, v3))).toEqual(["0>1"]);
+    expect(pairs(run(src, tgt, { ...v3, matches: "all" }))).toEqual(["0>1", "0>2"]);
   });
 
   it("a number past the end, or pointing at a heading line, is reported and not suggested", () => {
-    const res = run(["סימן ט", "סימן א"], tgt);
+    const res = run(["סימן ט", "סימן א"], tgt, v3);
     expect(res.suggestions).toEqual([]);
     expect(unmatchedCodes(res)).toEqual(["pattern/out-of-range", "pattern/target-heading"]);
   });
 
   it("heading lines of the source are never searched", () => {
-    expect(run(["<h2>סימן ב</h2>"], tgt).suggestions).toEqual([]);
+    expect(run(["<h2>סימן ב</h2>"], tgt, v3).suggestions).toEqual([]);
   });
 
   it("gematria off: letters are not a number", () => {
-    const res = run(["סימן ב"], tgt, { gematria: false });
+    const res = run(["סימן ב"], tgt, { ...v3, gematria: false });
     expect(res.suggestions).toEqual([]);
     expect(unmatchedCodes(res)).toEqual(["pattern/not-a-number"]);
   });
@@ -52,7 +53,7 @@ describe("anchors are generator-exact raw offsets (v3's TD-H4 drift is gone)", (
   const line = "ראה <b>סימן</b> ג &quot;שם&quot;";
 
   it("the match on the visible text maps back to the raw span the generator counts the same way", () => {
-    const res = run([line], ["א", "ב", "ג"], {}, "otzaria");
+    const res = run([line], ["א", "ב", "ג"], { preset: "v3" }, "otzaria");
     const a = res.suggestions[0]!.anchor!;
     expect(line.slice(a.rawStart, a.rawEnd)).toBe("סימן</b> ג");
     expect(countVisibleChars(line, a.rawStart)).toBe(4);
@@ -60,8 +61,8 @@ describe("anchors are generator-exact raw offsets (v3's TD-H4 drift is gone)", (
   });
 
   it("no anchor when a book is not from the Otzaria library, or anchors are off", () => {
-    expect(run([line], ["א", "ב", "ג"]).suggestions[0]!.anchor).toBeUndefined();
-    expect(run([line], ["א", "ב", "ג"], { anchors: "off" }, "otzaria").suggestions[0]!.anchor).toBeUndefined();
+    expect(run([line], ["א", "ב", "ג"], { preset: "v3" }).suggestions[0]!.anchor).toBeUndefined();
+    expect(run([line], ["א", "ב", "ג"], { preset: "v3", anchors: "off" }, "otzaria").suggestions[0]!.anchor).toBeUndefined();
   });
 });
 
@@ -146,8 +147,8 @@ describe("guards", () => {
   });
 
   it("ids are deterministic and unique", () => {
-    const a = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { matches: "all" });
-    const b = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { matches: "all" });
+    const a = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { preset: "v3", matches: "all" });
+    const b = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { preset: "v3", matches: "all" });
     expect(a.suggestions.map((s) => s.id)).toEqual(b.suggestions.map((s) => s.id));
     expect(new Set(a.suggestions.map((s) => s.id)).size).toBe(2);
   });
