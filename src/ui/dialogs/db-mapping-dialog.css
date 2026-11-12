@@ -1,0 +1,19 @@
+/* The mapping wizard (db-mapping-dialog.tsx). Kept beside the component; tokens only (tokens.css). */
+dialog.db-map { width: min(920px, calc(100vw - 32px)); }
+.db-map fieldset { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 8px 12px 12px; margin: 0; }
+.db-map legend { padding-inline: 4px; font-weight: 600; }
+.db-map .map-layout { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.db-map .map-layout label { display: flex; gap: 6px; align-items: center; }
+.db-map .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; }
+.db-map label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.db-map .map-wide { grid-column: 1 / -1; margin: 0; font-size: var(--fs-sm); }
+.db-map .map-summary { padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.db-map .map-sample { display: grid; gap: 4px; font-size: var(--fs-sm); }
+.db-map .map-scroll { overflow: auto; max-height: 220px; border: 1px solid var(--outline-variant); border-radius: var(--radius); }
+.db-map .map-scroll td { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-map .map-scroll tr { cursor: default; }
+.db-map .mapped { background: color-mix(in srgb, var(--primary-container) 55%, transparent); }
+.db-map .map-role { display: block; font-size: 11px; font-weight: 400; color: var(--on-primary-container); }
+.db-map .map-notes { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.db-map footer .task { display: flex; gap: 8px; align-items: center; }
+.db-map footer .task progress { flex: 1; }

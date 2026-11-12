@@ -1,0 +1,30 @@
+/* "קישורים מהמסד" in the links tab (db-links-panel.tsx). Colors only through tokens (AGENTS.md §7). */
+.dbl-head { display: flex; align-items: center; gap: 6px; padding-inline-end: 8px; flex-wrap: wrap; }
+.dbl-head .filters { flex: 1; }
+.dbl-readonly { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-full); background: var(--surface-container-highest); color: var(--on-surface-variant); white-space: nowrap; }
+.dbl-sum { margin: 0; padding: 2px 10px 6px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.dbl-sum b { color: var(--on-surface); }
+.dbl-books { padding: 0 6px 6px; display: grid; gap: 4px; }
+.dbl-books ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: 220px; overflow: auto; border: 1px solid var(--outline-variant); border-radius: var(--radius); }
+.dbl-book { display: flex; width: 100%; gap: 6px; align-items: center; padding: 4px 8px; border: 0; background: transparent; cursor: pointer; font-size: var(--fs-sm); text-align: start; color: inherit; }
+.dbl-book:hover { background: color-mix(in srgb, var(--on-surface) 6%, transparent); }
+.dbl-book[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+.dbl-more { margin: 0; font-size: var(--fs-sm); }
+.dbl-line { margin: 0 6px 6px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.dbl-line summary { cursor: pointer; padding: 6px 8px; font-size: var(--fs-sm); font-weight: 600; }
+.dbl-line h3 { margin: 4px 8px 0; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.dbl-line-body { max-height: 40vh; overflow: auto; padding-bottom: 4px; }
+.dbl-bulk { align-items: center; }
+.dbl-count { flex: 1 1 100%; font-size: var(--fs-sm); }
+.dbl-none { margin: 2px 10px 6px; font-size: var(--fs-sm); }
+.dbl-item { border-style: dashed; }
+.dbl-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.status.dbl-status { background: var(--surface-container-highest); color: var(--on-surface-variant); }
+.dbl-in { color: var(--tertiary); font-weight: 600; }
+/* the export dialog's "load the book's links file first" box (dialogs/db-copy-files.tsx) */
+.dbcopy-files { padding: 8px 10px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); display: grid; gap: 4px; }
+.dbcopy-files b { display: flex; align-items: center; gap: 6px; }
+.dbcopy-files .muted { color: inherit; opacity: 0.85; }
+.dbcopy-files ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.dbcopy-files li { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dbcopy-files .btn { color: inherit; }

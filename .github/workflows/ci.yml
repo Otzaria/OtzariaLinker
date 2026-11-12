@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "rewrite/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Unit, integration and contract tests (property tests seeded from the commit)
+        run: FC_SEED=$((16#${GITHUB_SHA:0:7})) npm test
+      - run: npm run build
+      - name: Install browsers for E2E
+        run: npx playwright install --with-deps chrome msedge firefox
+      - run: npx playwright test
+      - name: Build is reproducible
+        run: |
+          sha1=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
+          rm -rf dist && npm run build
+          sha2=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
+          test "$sha1" = "$sha2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OtzariaLinker-html
+          path: dist/OtzariaLinker.html

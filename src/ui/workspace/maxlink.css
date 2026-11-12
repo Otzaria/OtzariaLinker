@@ -1,0 +1,30 @@
+/* Max-link (קישור מרבי): the plan in the run form and the report above the suggestions. Tokens only. */
+.ml-plan { display: grid; gap: 8px; }
+.ml-plan-line { margin: 0; font-size: var(--fs-sm); font-weight: 600; }
+.ml-engines { display: grid; gap: 4px; margin: 0; padding: 6px 10px; border: 1px solid var(--outline-variant); border-radius: var(--radius); }
+.ml-engines legend { font-size: var(--fs-sm); color: var(--on-surface-variant); padding-inline: 4px; }
+.ml-engines label.check { display: flex; gap: 8px; align-items: center; font-size: var(--fs-sm); cursor: pointer; }
+.ml-books, .ml-steps { margin: 6px 0 0; padding-inline-start: 0; list-style: none; display: grid; gap: 6px; font-size: var(--fs-sm); max-height: 320px; overflow: auto; }
+.ml-steps { list-style: decimal; padding-inline-start: 22px; }
+.ml-books li { display: grid; gap: 2px; padding: 4px 8px; border-radius: var(--radius); background: var(--surface-container-low); }
+.ml-books li.skipped { background: color-mix(in srgb, var(--warning-container) 60%, transparent); }
+.ml-books li span { color: var(--on-surface-variant); }
+.why-not { display: flex; gap: 4px; align-items: start; color: var(--on-warning-container); }
+.ml-steps li.failed .why-not { color: var(--error); }
+
+.ml-report { margin: 0 6px 6px; display: grid; gap: 6px; }
+.ml-report[open] > summary { margin-bottom: 6px; }
+.ml-report > details.held { margin-top: 6px; }
+.ml-report .row { display: flex; gap: 8px; margin-top: 6px; }
+/* compact counters: one wrapping line of "label value" pills, so the suggestions stay in view */
+.ml-tiles { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.ml-tiles .tile { display: inline-flex; align-items: baseline; gap: 6px; padding: 1px 10px; border-radius: var(--radius-full); background: var(--surface-container); }
+.ml-tiles .tile.zero { opacity: 0.6; }
+.ml-tiles dt { font-size: 11px; color: var(--on-surface-variant); }
+.ml-tiles dd { margin: 0; font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ml-tiles .tile-certain:not(.zero) { background: var(--tertiary-container); color: var(--on-tertiary-container); }
+.ml-tiles .tile-conflicts:not(.zero), .ml-tiles .tile-errors:not(.zero) { background: var(--error-container); color: var(--on-error-container); }
+.ml-tiles .tile-certain:not(.zero) dt, .ml-tiles .tile-conflicts:not(.zero) dt, .ml-tiles .tile-errors:not(.zero) dt { color: inherit; }
+.ml-table-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; margin-top: 6px; }
+.ml-table tr { cursor: default; }
+.ml-table td:not(:first-child), .ml-table th:not(:first-child) { text-align: end; font-variant-numeric: tabular-nums; }

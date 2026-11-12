@@ -1,0 +1,715 @@
+{
+ "_comment": "Records with line_index_1_end (source-side range), all \"source\"-typed with ref_2 -> stored flipped, so the range appears on side 1.",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "shape": "R->L+ref_2",
+   "file": "MoreBooks/links/אוצר ההלכה על שולחן ערוך אורח חיים חלק ד_links.json",
+   "recordIndex": 2558,
+   "record": {
+    "line_index_1": 1630,
+    "line_index_1_end": 1632,
+    "line_index_2": 2245,
+    "heRef_2": "שולחן ערוך, אורח חיים רפב, ד",
+    "path_2": "שולחן ערוך, אורח חיים.txt",
+    "ref_2": "Shulchan Arukh, Orach Chayim 282:4",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ד",
+    "targetTitle": "שולחן ערוך, אורח חיים",
+    "sourceBook": {
+     "id": 7506,
+     "source": "MoreBooks",
+     "totalLines": 2220,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 382,
+     "source": "Sefaria",
+     "totalLines": 5554,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9514993,
+     "heRef": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ד 1630"
+    },
+    "targetLine": {
+     "id": 6334090,
+     "heRef": "שולחן ערוך, אורח חיים, רפב, ד"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12505039,
+      "sourceBookId": 382,
+      "targetBookId": 7506,
+      "sourceLineId": 6334090,
+      "targetLineId": 9514993,
+      "targetLineIndex": 1629,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9514995,
+       "endLineIndex": 1631
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "MoreBooks/links/אוצר ההלכה על שולחן ערוך אורח חיים חלק ד_links.json",
+   "recordIndex": 2889,
+   "record": {
+    "line_index_1": 1788,
+    "line_index_1_end": 1791,
+    "line_index_2": 2242,
+    "heRef_2": "שולחן ערוך, אורח חיים רפב, א",
+    "path_2": "שולחן ערוך, אורח חיים.txt",
+    "ref_2": "Shulchan Arukh, Orach Chayim 282:1",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ד",
+    "targetTitle": "שולחן ערוך, אורח חיים",
+    "sourceBook": {
+     "id": 7506,
+     "source": "MoreBooks",
+     "totalLines": 2220,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 382,
+     "source": "Sefaria",
+     "totalLines": 5554,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9515071,
+     "heRef": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ד 1788"
+    },
+    "targetLine": {
+     "id": 6334087,
+     "heRef": "שולחן ערוך, אורח חיים, רפב, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12505115,
+      "sourceBookId": 382,
+      "targetBookId": 7506,
+      "sourceLineId": 6334087,
+      "targetLineId": 9515071,
+      "targetLineIndex": 1787,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9515074,
+       "endLineIndex": 1790
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 3
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "MoreBooks/links/אוצר ההלכה על שולחן ערוך אורח חיים חלק ה_links.json",
+   "recordIndex": 3246,
+   "record": {
+    "line_index_1": 2137,
+    "line_index_1_end": 2141,
+    "line_index_2": 2372,
+    "heRef_2": "שולחן ערוך, אורח חיים רצט, י",
+    "path_2": "שולחן ערוך, אורח חיים.txt",
+    "ref_2": "Shulchan Arukh, Orach Chayim 299:10",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ה",
+    "targetTitle": "שולחן ערוך, אורח חיים",
+    "sourceBook": {
+     "id": 7507,
+     "source": "MoreBooks",
+     "totalLines": 2235,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 382,
+     "source": "Sefaria",
+     "totalLines": 5554,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9515973,
+     "heRef": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ה 2137"
+    },
+    "targetLine": {
+     "id": 6334183,
+     "heRef": "שולחן ערוך, אורח חיים, רצט, י"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12552690,
+      "sourceBookId": 382,
+      "targetBookId": 7507,
+      "sourceLineId": 6334183,
+      "targetLineId": 9515973,
+      "targetLineIndex": 2136,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9515977,
+       "endLineIndex": 2140
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 4
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "MoreBooks/links/אוצר ההלכה על שולחן ערוך אורח חיים חלק ו_links.json",
+   "recordIndex": 3322,
+   "record": {
+    "line_index_1": 2346,
+    "line_index_1_end": 2348,
+    "line_index_2": 2505,
+    "heRef_2": "שולחן ערוך, אורח חיים שו, א",
+    "path_2": "שולחן ערוך, אורח חיים.txt",
+    "ref_2": "Shulchan Arukh, Orach Chayim 306:1",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ו",
+    "targetTitle": "שולחן ערוך, אורח חיים",
+    "sourceBook": {
+     "id": 7508,
+     "source": "MoreBooks",
+     "totalLines": 2945,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 382,
+     "source": "Sefaria",
+     "totalLines": 5554,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9516690,
+     "heRef": "אוצר ההלכה על שולחן ערוך אורח חיים חלק ו 2346"
+    },
+    "targetLine": {
+     "id": 6334302,
+     "heRef": "שולחן ערוך, אורח חיים, שו, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12511574,
+      "sourceBookId": 382,
+      "targetBookId": 7508,
+      "sourceLineId": 6334302,
+      "targetLineId": 9516690,
+      "targetLineIndex": 2345,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9516692,
+       "endLineIndex": 2347
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/אבן ישראל_links.json",
+   "recordIndex": 159,
+   "record": {
+    "line_index_1": 447,
+    "line_index_1_end": 449,
+    "heRef_2": "ספר קדושה, הלכות מאכלות אסורות, פרק יג, כה",
+    "path_2": "משנה תורה, הלכות מאכלות אסורות.txt",
+    "line_index_2": 316,
+    "ref_2": "Mishneh Torah, Forbidden Foods 13:25",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אבן ישראל",
+    "targetTitle": "משנה תורה, הלכות מאכלות אסורות",
+    "sourceBook": {
+     "id": 6988,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 1458,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 323,
+     "source": "Sefaria",
+     "totalLines": 443,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10478872,
+     "heRef": "אבן ישראל 447"
+    },
+    "targetLine": {
+     "id": 6321716,
+     "heRef": "משנה תורה, הלכות מאכלות אסורות, יג, כה"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13420332,
+      "sourceBookId": 323,
+      "targetBookId": 6988,
+      "sourceLineId": 6321716,
+      "targetLineId": 10478872,
+      "targetLineIndex": 446,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9495958,
+       "endLineIndex": 448
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/אור גדול_links.json",
+   "recordIndex": 1,
+   "record": {
+    "line_index_1": 9,
+    "line_index_1_end": 15,
+    "heRef_2": "ספר מדע, הלכות יסודי התורה, פרק ה, ב",
+    "path_2": "משנה תורה, הלכות יסודי התורה.txt",
+    "line_index_2": 57,
+    "ref_2": "Mishneh Torah, Foundations of the Torah 5:2",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אור גדול",
+    "targetTitle": "משנה תורה, הלכות יסודי התורה",
+    "sourceBook": {
+     "id": 7000,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 22,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 296,
+     "source": "Sefaria",
+     "totalLines": 100,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10480630,
+     "heRef": "אור גדול 9"
+    },
+    "targetLine": {
+     "id": 6317318,
+     "heRef": "משנה תורה, הלכות יסודי התורה, ה, ב"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13465025,
+      "sourceBookId": 296,
+      "targetBookId": 7000,
+      "sourceLineId": 6317318,
+      "targetLineId": 10480630,
+      "targetLineIndex": 8,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9496040,
+       "endLineIndex": 14
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 6
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/באר המלך_links.json",
+   "recordIndex": 187,
+   "record": {
+    "line_index_1": 397,
+    "line_index_1_end": 399,
+    "heRef_2": "ספר נזיקין, הלכות גזילה ואבידה, פרק ד, י",
+    "path_2": "משנה תורה, הלכות גזילה ואבידה.txt",
+    "line_index_2": 61,
+    "ref_2": "Mishneh Torah, Robbery and Lost Property 4:10",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "באר המלך",
+    "targetTitle": "משנה תורה, הלכות גזילה ואבידה",
+    "sourceBook": {
+     "id": 7018,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 599,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 353,
+     "source": "Sefaria",
+     "totalLines": 295,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10490277,
+     "heRef": "באר המלך 397"
+    },
+    "targetLine": {
+     "id": 6327340,
+     "heRef": "משנה תורה, הלכות גזילה ואבידה, ד, י"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13462276,
+      "sourceBookId": 353,
+      "targetBookId": 7018,
+      "sourceLineId": 6327340,
+      "targetLineId": 10490277,
+      "targetLineIndex": 396,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9496200,
+       "endLineIndex": 398
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/באר חיים_links.json",
+   "recordIndex": 10,
+   "record": {
+    "line_index_1": 30,
+    "line_index_1_end": 34,
+    "heRef_2": "ספר קורבנות, הלכות חגיגה, פרק ב, א",
+    "path_2": "משנה תורה, הלכות חגיגה.txt",
+    "line_index_2": 16,
+    "ref_2": "Mishneh Torah, Festival Offering 2:1",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "באר חיים",
+    "targetTitle": "משנה תורה, הלכות חגיגה",
+    "sourceBook": {
+     "id": 7019,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 71,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 351,
+     "source": "Sefaria",
+     "totalLines": 37,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10490381,
+     "heRef": "באר חיים 30"
+    },
+    "targetLine": {
+     "id": 6327049,
+     "heRef": "משנה תורה, הלכות חגיגה, ב, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13593988,
+      "sourceBookId": 7019,
+      "targetBookId": 351,
+      "sourceLineId": 10490381,
+      "targetLineId": 6327049,
+      "targetLineIndex": 15,
+      "targetBookOrderIndex": 56,
+      "connectionType": "LINKER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 1930,
+       "charEnd": 1946,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6327062,
+       "endLineIndex": 28
+      }
+     ],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    },
+    {
+     "link": {
+      "id": 13445680,
+      "sourceBookId": 351,
+      "targetBookId": 7019,
+      "sourceLineId": 6327049,
+      "targetLineId": 10490381,
+      "targetLineIndex": 29,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 10490384,
+       "endLineIndex": 33
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 4
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/באר מרים_links.json",
+   "recordIndex": 64,
+   "record": {
+    "line_index_1": 179,
+    "line_index_1_end": 181,
+    "heRef_2": "ספר שופטים, הלכות מלכים ומלחמות, פרק ו, טו",
+    "path_2": "משנה תורה, הלכות מלכים ומלחמות.txt",
+    "line_index_2": 73,
+    "ref_2": "Mishneh Torah, Kings and Wars 6:15",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "באר מרים",
+    "targetTitle": "משנה תורה, הלכות מלכים ומלחמות",
+    "sourceBook": {
+     "id": 7021,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 337,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 379,
+     "source": "Sefaria",
+     "totalLines": 145,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10491030,
+     "heRef": "באר מרים 179"
+    },
+    "targetLine": {
+     "id": 6332338,
+     "heRef": "משנה תורה, הלכות מלכים ומלחמות, ו, טו"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13455627,
+      "sourceBookId": 379,
+      "targetBookId": 7021,
+      "sourceLineId": 6332338,
+      "targetLineId": 10491030,
+      "targetLineIndex": 178,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9496303,
+       "endLineIndex": 180
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "R->L+ref_2",
+   "file": "National-LibraryToOtzaria/links/באר מרים_links.json",
+   "recordIndex": 96,
+   "record": {
+    "line_index_1": 276,
+    "line_index_1_end": 278,
+    "heRef_2": "ספר שופטים, הלכות מלכים ומלחמות, פרק ט, ו",
+    "path_2": "משנה תורה, הלכות מלכים ומלחמות.txt",
+    "line_index_2": 108,
+    "ref_2": "Mishneh Torah, Kings and Wars 9:6",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "באר מרים",
+    "targetTitle": "משנה תורה, הלכות מלכים ומלחמות",
+    "sourceBook": {
+     "id": 7021,
+     "source": "National-LibraryToOtzaria",
+     "totalLines": 337,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 379,
+     "source": "Sefaria",
+     "totalLines": 145,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 10491062,
+     "heRef": "באר מרים 276"
+    },
+    "targetLine": {
+     "id": 6332370,
+     "heRef": "משנה תורה, הלכות מלכים ומלחמות, ט, ו"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13455659,
+      "sourceBookId": 379,
+      "targetBookId": 7021,
+      "sourceLineId": 6332370,
+      "targetLineId": 10491062,
+      "targetLineIndex": 275,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9496350,
+       "endLineIndex": 277
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 2
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  }
+ ]
+}

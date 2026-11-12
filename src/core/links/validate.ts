@@ -1,0 +1,308 @@
+import { SOURCE_VIEW_TYPES } from "./connection-type";
+import { storedLinkIdentity, type LinkMatch } from "./equality";
+import { isRange, type BookRef, type Link } from "./model";
+import { storedForm } from "./stored-form";
+import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn, unsafeFileTitle } from "./titles";
+
+/*
+ * Will this link reach Otzaria as intended? Every rule below is a gate of the generator or of the
+ * library's weekly pipeline (docs/contracts/LINK_FORMATS.md §1.4, §1.6–1.8, §4.2). Pure: the caller
+ * supplies what it knows about the lines; unknown lines produce "not verified" notes, never guesses.
+ *
+ *   error   — the record will be dropped/rejected, or breaks the file for the pipeline
+ *   warning — it will be stored, but not as the user probably expects (part lost, type changed…)
+ *   info    — worth knowing (e.g. could not be verified)
+ */
+export type Severity = "error" | "warning" | "info";
+
+export interface Problem {
+  code: string;
+  severity: Severity;
+  /** plain Hebrew for every user: what happens and what to do, without the file's field names */
+  message: string;
+  /**
+   * The technical side (the links file's field names, the pipeline's terms), for advanced mode and the
+   * saved reports — never the main text (product audit F14; like ParseIssue.detail). Read through problemText.
+   */
+  detail?: string;
+}
+
+/** A problem as a reader sees it: the plain words, with the technical detail only when asked for (advanced mode). */
+export const problemText = (p: Pick<Problem, "message" | "detail">, technical = false): string => (technical && p.detail ? `${p.message} (${p.detail})` : p.message);
+
+export interface LineFacts {
+  /** false: the generator never creates this line (empty heading) */
+  exists: boolean;
+  heading: number | null;
+  /** length of the anchor text (the string the generator counts offsets on) */
+  anchorLength: number;
+  /** the line receives footnote bodies (schema 7 line_note / a merged "הערות על" companion) */
+  hasNotes?: boolean;
+}
+
+export interface ValidationContext {
+  /** undefined when the line is not loaded — the check is then reported as not verified */
+  line(book: BookRef, index: number): LineFacts | undefined;
+  lineCount(book: BookRef): number | undefined;
+  /**
+   * Whether the project holds a book's links file loaded from the library in this session
+   * ("imported"), only a snapshot of it restored from a saved project ("unverified"), the user
+   * confirmed the export may write the book's file without it ("confirmed-new"), or none of these
+   * ("missing"). Absent = unknown: the file rules are skipped.
+   */
+  linksFile?(sourceTitle: string): LinksFileState;
+  /**
+   * The open library database says this book has links of its own (book_has_links.hasSourceLinks),
+   * so the library may hold a links file for it. Absent or false = not known.
+   */
+  libraryMayHaveFile?(sourceTitle: string): boolean;
+  /**
+   * Whether the library's weekly sync and PR gate treat a book as Sefaria-owned (an exact title in
+   * the library's list, core/links/sefaria-titles.ts). Absent: the database origin.
+   */
+  sefariaOwned?(book: BookRef): boolean;
+  /**
+   * The library gives this book's name to a Sefaria book, whatever book of that name is open
+   * (sefaria-titles.ts hasSefariaTitle). Absent: not checked.
+   */
+  sefariaTitle?(book: BookRef): boolean;
+  /** "submission" (default): rules of the library's sync are errors; "private": warnings (B1). */
+  purpose?: "submission" | "private";
+  /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
+  existing?(link: Link): LinkMatch | null;
+}
+
+export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "missing";
+
+/*
+ * Problems that are about the book's WHOLE links file, not one link: the file would replace the
+ * library's file wrongly. Every link of that book is held back — also untouched imports and in expert
+ * mode — or the written file would silently drop the library's other records (security review A1–A4).
+ */
+export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held"]);
+
+export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
+  const out: Problem[] = [];
+  const add: Add = (severity, code, message, detail) => out.push({ code, severity, message, ...(detail && { detail }) });
+  const { source: s, target: t } = link;
+
+  // the source title is the file name: one that is not a plain file name is never written (A4)
+  const unsafe = unsafeFileTitle(s.book.title);
+  if (unsafe) add("error", "export/unsafe-title", `אי אפשר לכתוב קובץ קישורים בשם "${s.book.title}": ${unsafe}. שנו את שם הספר במקור שלו.`);
+  if (link.provenance === "db")
+    add("error", "export/db-link", "זה קישור קיים מהמסד. אי אפשר לכתוב אותו חזרה לקובץ קישורים כאילו נכתב שם (המידע המקורי שלו לא נשמר במסד).");
+  if (link.provenance === "db-copy") {
+    // A links file REPLACES the book's whole file in the library. A copied database link says the
+    // library most likely HAS a file for this book, so writing a new one would delete its other links.
+    if (ctx.linksFile?.(s.book.title) === "missing")
+      add("error", "export/db-copy-no-file", `הקישור הועתק מהמסד, וקובץ הקישורים של "${s.book.title}" לא נטען לפרויקט. קובץ שייוצא יחליף את כל הקובץ שבספרייה וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
+    add("info", "export/db-copy", "הקישור הועתק מהמסד ושוחזר ממנו: שם המקום ביעד, הסוג המקורי והקובץ שבו ישב אינם שמורים במסד. בדקו אותם לפני הייצוא.", "heRef_2");
+  }
+  // The book's file is a snapshot from a saved project, not the library's current file: writing it
+  // would replace the library's file with what may be an old (or forged) copy (security review A3).
+  const fileState = link.provenance !== "db" ? ctx.linksFile?.(s.book.title) : undefined;
+  if (fileState === "unverified")
+    add("error", "export/file-unverified", `קובץ הקישורים של "${s.book.title}" נשמר בפרויקט ולא נטען מהספרייה בהפעלה הזו. ייתכן שהוא ישן, והייצוא היה מחליף בו את הקובץ העדכני שבספרייה. טענו שוב את "${s.book.title}_links.json" מהספרייה, או אשרו במפורש שהעותק שבפרויקט הוא העדכני.`);
+  // A new link of a book whose library file is not loaded, when the database says the book has links
+  // of its own: the exported file would REPLACE that file and drop its records (compatibility review).
+  if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && ctx.libraryMayHaveFile?.(s.book.title))
+    add("error", "export/library-file-not-loaded", `במסד יש קישורים של "${s.book.title}", ולכן כנראה יש לו קובץ קישורים בספרייה. קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
+  const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
+  if (match === "same-link")
+    add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");
+  else if (match === "same-lines") add("info", "export/in-db-other-type", "במסד כבר יש קישור בין שתי השורות האלה, בסוג אחר או בכיוון אחר.");
+
+  const f = storedForm(link);
+  if (f.skipped === "linker") add("error", "export/linker", 'קישורים מסוג "קישור אוטומטי" אינם מיובאים לאוצריא. בחרו סוג אחר.', 'Conection Type "linker"');
+  if (f.skipped === "sefaria-both") add("error", "export/sefaria-both", "שני הספרים הם ספרי ספריא. אוצריא אינה מייבאת קישור כזה מקובץ.");
+  // The generator stores an unknown type as OTHER, but the app's personal import rejects the WHOLE
+  // file for one unknown type (otzaria upstream/dev user_import_parser.dart:496-502 and
+  // user_content_importer.dart:142-144), so for private use it is an error.
+  if (!f.knownType)
+    ctx.purpose === "private"
+      ? add("error", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא. ייבוא אישי באוצריא דוחה את כל הקובץ בגלל קישור אחד כזה. בחרו סוג מוכר.`)
+      : add("warning", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
+  if (f.downgraded)
+    add("warning", "export/downgraded", `"${t.book.title}" הוא ספר בסיס ו"${s.book.title}" אינו בצורה "X על ${t.book.title}", ולכן הקישור יישמר כ"אחר" ולא יופיע בפאנל המפרשים.`);
+  // Compatibility review #1: a commentary file that says "commentary" toward its own base book is
+  // stored commentary → base, so the app shows the BASE in the commentary's commentary panel. Only
+  // Sefaria priority-list books are base books (isBaseBook), so the generator does not fix it.
+  if (!f.skipped && !f.flipped && SOURCE_VIEW_TYPES.has(f.stored) && titleDeclaresDependencyOn(f.storedSource.book.title, f.storedTarget.book.title))
+    add("warning", "export/reversed-dependency", `הקישור יישמר הפוך: "${f.storedTarget.book.title}" יופיע כמפרש של "${f.storedSource.book.title}". בקישור מפירוש אל הספר שעליו נכתב בחרו את הסוג "מקור".`, 'Conection Type "source"');
+  if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
+
+  // The generator accepts an empty heRef_2, but the library's weekly sync rejects a blank one
+  // (ManualLinksJson.kt:271,302-304) and fails the whole refresh — an error (compatibility review B3).
+  if (!link.heRef2.trim()) add("error", "export/heref-missing", "שם המקום ביעד ריק. הסנכרון השבועי של הספרייה דוחה קישור כזה ונכשל כולו. כתבו שם מקום, למשל שם הספר ומספר השורה.", "heRef_2");
+  // The source title is the links file's name: when no book has it, the generator matches nothing
+  // and drops the WHOLE file (seen in the library: "וזה לשונו - שובבי׳׳ם_links.json", whose book is
+  // "…שובבי״ם" in the database — real-data validation, check 3).
+  if (s.book.origin === "unknown") add("warning", "export/source-unknown", `ספר המקור "${s.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, אוצריא תדלג על כל קובץ הקישורים שלו.`);
+  if (t.book.origin === "unknown") add("warning", "export/target-unknown", `הספר "${t.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, הקישור יידחה.`);
+  // "הערות על X" (LINK_FORMATS §1.11, Generator.kt:929-937,1004-1008): merged into the base only when no
+  // record of the base's file has a word anchor on a line that receives a note. An anchored record
+  // CANCELS the merge — the companion stays a book and the links are kept (compatibility review B5).
+  if (isMergeableCompanionTitle(t.book.title)) {
+    if (link.anchor)
+      add("info", "export/companion-merge-cancelled", `"${t.book.title}" מתחיל ב"הערות על", ואוצריא ממזגת ספר כזה לתוך ספר הבסיס. אבל לרשומה הזו יש עוגן על שורה שמקבלת הערה, וזה מבטל את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו.`);
+    else
+      add("warning", "export/companion-merged", `"${t.book.title}" מתחיל ב"הערות על". אם כל תנאי המיזוג מתקיימים, אוצריא תשלב את ההערות בשורות של "${s.book.title}", והרשומות אליו לא יישמרו כקישורים. כדי שההערות יישארו ספר עם קישורים, תנו לו שם כמו "הערות ל…", או קשרו עם עוגן.`);
+  }
+  if (t.book.origin === "otzaria" && t.book.title !== normalizeTitle(t.book.title))
+    add("error", "export/title-not-normalized", `שם הספר "${t.book.title}" כתוב עם מירכאות או רווחים שאוצריא מנרמלת (למשל "→״). במסד הוא נקרא "${normalizeTitle(t.book.title)}", והקישור לא יימצא.`);
+
+  sideChecks("ספר המקור", link.source, ctx, add);
+  sideChecks("ספר היעד", link.target, ctx, add);
+  anchorChecks(link, f.flipped, ctx, add);
+  sefariaChecks(link, ctx, add);
+  return out;
+}
+
+type Add = (severity: Severity, code: string, message: string, detail?: string) => void;
+
+/**
+ * The base's links file in the library merges "הערות על X" today (its records to X have no anchor),
+ * and the export adds or edits a record with a word anchor on one of those note lines: that cancels
+ * the merge (Generator.kt:1004-1008) — X becomes a separate book and the notes leave the base's
+ * lines. Said on every such anchored record (compatibility review B5).
+ */
+function companionMergeChecks(links: readonly Link[], out: Map<string, Problem[]>): void {
+  const noteLines = new Map<string, Set<number>>(); // "<base>|<companion>" → base lines the library merges today
+  for (const l of links)
+    if (l.provenance === "file" && l.status === "existing" && !l.anchor && isMergeableCompanionTitle(l.target.book.title)) {
+      const k = `${l.source.book.title}|${l.target.book.title}`;
+      noteLines.set(k, (noteLines.get(k) ?? new Set()).add(l.source.line));
+    }
+  if (!noteLines.size) return;
+  for (const l of links) {
+    if (!l.anchor || (l.provenance === "file" && l.status === "existing")) continue;
+    for (const [k, lines] of noteLines) {
+      const [base, companion] = k.split("|") as [string, string];
+      if (l.source.book.title !== base || !lines.has(l.source.line)) continue;
+      out.get(l.id)?.push({
+        code: "export/companion-merge-broken",
+        severity: "warning",
+        message: `קובץ הקישורים של "${base}" בספרייה ממזג היום את "${companion}" לתוך הספר (רשומות בלי עוגן). לרשומה הזו יש עוגן על שורה ${l.source.line + 1}, שמקבלת הערה, וזה יבטל את המיזוג: "${companion}" ייכנס לאוצריא כספר נפרד, וההערות לא יופיעו עוד בתוך שורות "${base}". אם זה לא מה שרציתם, הסירו את העוגן.`,
+      });
+      break;
+    }
+  }
+}
+
+function sideChecks(label: string, side: Link["source"], ctx: ValidationContext, add: Add) {
+  const count = ctx.lineCount(side.book);
+  if (side.line < 0 || (count !== undefined && side.line >= count))
+    return add("error", "export/line-out-of-range", `שורה ${side.line + 1} ב${label} אינה קיימת (בספר ${count ?? "?"} שורות).`);
+  const facts = ctx.line(side.book, side.line);
+  if (!facts) add("info", "export/line-not-verified", `שורת ${label} לא נטענה, ולכן לא נבדק אם היא כותרת.`);
+  else if (!facts.exists) add("error", "export/line-not-in-db", `שורה ${side.line + 1} ב${label} היא כותרת ריקה, ואוצריא לא יוצרת אותה במסד. הקישור יידחה.`);
+  else if (facts.heading !== null) add("error", "export/heading-line", `שורה ${side.line + 1} ב${label} היא שורת כותרת. אוצריא מדלגת על קישור שאחד מקצותיו כותרת — קשרו לשורה שאחריה.`);
+
+  if (side.end !== undefined && side.end <= side.line) add("warning", "export/range-ignored", `סוף הטווח ב${label} אינו אחרי ההתחלה, והטווח לא ייחשב.`);
+  if (isRange(side)) {
+    if (count !== undefined && side.end! >= count) add("error", "export/range-out-of-range", `סוף הטווח ב${label} (שורה ${side.end! + 1}) מעבר לסוף הספר.`);
+    const endFacts = ctx.line(side.book, side.end!);
+    if (endFacts?.heading != null) add("warning", "export/range-end-heading", `הטווח ב${label} מסתיים בשורת כותרת. אוצריא תשמיט את הטווח ותשאיר קישור לשורה אחת.`);
+  }
+}
+
+function anchorChecks(link: Link, flipped: boolean, ctx: ValidationContext, add: Add) {
+  const a = link.anchor;
+  if (!a) return;
+  if (flipped) add("warning", "export/anchor-dropped-flip", "הקישור נשמר באוצריא בכיוון ההפוך (מקור/תלוי), ובכיוון הזה העוגן על המילה נזרק.");
+  const facts = ctx.line(link.source.book, link.source.line);
+  // Compatibility review #3: an anchor on a line that receives merged notes cancels the whole
+  // "הערות על" merge in the generator (Generator.kt:937,1004-1008), and the offsets then shift.
+  if (facts?.hasNotes && link.source.book.origin !== "sefaria")
+    add("warning", "export/anchor-on-notes-line", "בשורה הזו משולבות הערות שוליים. עוגן כאן מבטל באוצריא את מיזוג ספר ההערות כולו, והמילים המסומנות יזוזו. עדיף קישור בלי עוגן.");
+  if (a.rawStart < 0 || (facts && a.rawStart > facts.anchorLength))
+    add("warning", "export/anchor-out-of-line", "העוגן מצביע מחוץ לטקסט השורה, ואוצריא תזרוק אותו (הקישור עצמו יישמר).");
+  if (a.rawEnd !== undefined && (a.rawEnd < a.rawStart || (facts && a.rawEnd > facts.anchorLength)))
+    add("warning", "export/anchor-end-ignored", "סוף העוגן אינו תקין, ואוצריא תשמור עוגן נקודה בלבד.");
+}
+
+/*
+ * The library's weekly sync and PR gate (LINK_FORMATS §1.8). Which side is "Sefaria" is THEIR
+ * decision — an exact title in Sefaria's index (ctx.sefariaOwned: the library's list, B6) — not the
+ * database's origin. For a submission to the library (the default) a missing ref is an ERROR: the
+ * sync throws new_target_ref_required / new_source_ref_required and the whole weekly refresh fails,
+ * and the PR gate fails too; a range end on a Sefaria side is never remapped by the sync, so the range
+ * drifts (sefaria/range-side). For private use (ctx.purpose "private") these are warnings (B1).
+ */
+function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
+  const owned = (b: BookRef) => (ctx.sefariaOwned ? ctx.sefariaOwned(b) : b.origin === "sefaria");
+  const srcSef = owned(link.source.book);
+  const tgtSef = owned(link.target.book);
+  const submit = ctx.purpose !== "private";
+  const need: Severity = submit ? "error" : "warning";
+  const forSubmission = submit ? "חובה לשליחה לספריית אוצריא: בלעדיו הסנכרון השבועי של הספרייה נכשל כולו. הכלי משלים אותו לבד מהמסד כשהוא יודע (לפני הייצוא); אחרת כתבו אותו, או בחרו בחלון הייצוא \"לשימוש פרטי\"." : "לשימוש פרטי אפשר בלעדיו; לשליחה לספריית אוצריא הוא חובה.";
+  if (link.ref1 !== undefined && link.ref2 !== undefined) add("error", "sefaria/both-refs", "בקישור יש גם ציון ספריא של המקור וגם ציון ספריא של היעד. מותר רק אחד מהם.", "ref_1, ref_2");
+  if (link.ref1 !== undefined && !srcSef) add("error", "sefaria/ref1-side", `בקישור יש ציון ספריא של המקור, אבל "${link.source.book.title}" אינו ברשימת ספרי ספריא של הספרייה. ציון כזה מותר רק כשספר המקור הוא ספר ספריא.`, "ref_1");
+  if (link.ref2 !== undefined && !tgtSef) add("error", "sefaria/ref2-side", `בקישור יש ציון ספריא של היעד, אבל "${link.target.book.title}" אינו ברשימת ספרי ספריא של הספרייה. ציון כזה מותר רק כשספר היעד הוא ספר ספריא: הסירו אותו.`, "ref_2");
+  if (srcSef && tgtSef && !(link.source.book.origin === "sefaria" && link.target.book.origin === "sefaria"))
+    add(need, "sefaria/both-sides", "שני הספרים ברשימת ספרי ספריא של הספרייה. הסנכרון השבועי דוחה קישור ספריא↔ספריא מקובץ.");
+  if (srcSef && !tgtSef && link.ref1 === undefined) add(need, "sefaria/ref1-required", `ספר המקור הוא ספר ספריא, וחסר ציון ספריא של השורה (באנגלית, למשל Genesis 1:1). ${forSubmission}`, "ref_1");
+  if (tgtSef && !srcSef && link.ref2 === undefined) add(need, "sefaria/ref2-required", `ספר היעד הוא ספר ספריא, וחסר ציון ספריא של השורה (באנגלית, למשל Genesis 1:1). ${forSubmission}`, "ref_2");
+  if ((tgtSef && isRange(link.target)) || (srcSef && isRange(link.source)))
+    add(need, "sefaria/range-side", `טווח בצד של ספר ספריא: הסנכרון השבועי מעדכן רק את שורת ההתחלה לפי ציון ספריא, וסוף הטווח נשאר במקום ונסחף. ${submit ? "לשליחה לספרייה קשרו שורה אחת." : "לשימוש פרטי זה עובד, עד שספריא תשתנה."}`);
+  if ((srcSef || tgtSef) && link.anchor?.rawEnd !== undefined)
+    add("error", "sefaria/anchor-range", "עוגן על כמה מילים אינו נתמך בקישור שנוגע בספר ספריא: אפשר עוגן על מילה אחת בלבד, או בלי עוגן.", "anchor end");
+  if (tgtSef && !srcSef && link.anchor)
+    add("error", "sefaria/anchor-into-sefaria", "עוגן על מילה אינו מותר בקישור מספר של אוצריא אל ספר ספריא.", "start");
+  // The user's own book that only shares its name with a library Sefaria book (a text file, a personal
+  // database: product audit F2). The Sefaria rules are not its rules — but sent to the library, the
+  // record names the LIBRARY's Sefaria book, with the line numbers of the user's: the library would
+  // link the wrong book, and without ref_1/ref_2 its sync fails. Private use is unaffected.
+  if (submit)
+    for (const [side, label] of [[link.source, "ספר המקור"], [link.target, "ספר היעד"]] as const)
+      if (!owned(side.book) && ctx.sefariaTitle?.(side.book))
+        add("error", "sefaria/not-library-edition", `${label} "${side.book.title}" שפתחתם הוא ספר שלכם (מקובץ או ממסד אישי), אבל בספריית אוצריא השם הזה שייך לספר של ספריא. קישור שיישלח לספרייה יחובר לספר של ספריא, במספרי השורות של הספר שלכם. לשימוש שלכם בחרו בחלון הייצוא "לשימוש פרטי". אם זה עותק של הספר מהספרייה, סמנו ברשימת המקורות "ספרי ספריית אוצריא".`);
+  if (link.ref1 !== undefined && link.anchor && link.passthrough?.["anchor_src_hash"] === undefined)
+    add("error", "sefaria/pending-anchor-hash", "עוגן חדש בשורה של ספר ספריא צריך חתימה של הטקסט, שרק הסנכרון של הספרייה מחשב. הסירו את העוגן או השאירו אותו לתהליך של הספרייה.", "ref_1 + anchor_src_hash");
+}
+
+/**
+ * A link's problems as the export ACTS on them — one rule for the export plan and the quality check,
+ * so the two never disagree (product audit F7). An imported record the user did not touch is already
+ * in the library's file: dropping it from the rewritten file would DELETE it there, so the export
+ * writes it as it was, and its errors are warnings that say so. A problem of the whole file
+ * (FILE_LEVEL_CODES) holds the file back always, and stays an error.
+ */
+export function asExported(link: Link, problems: readonly Problem[]): Problem[] {
+  if (link.provenance !== "file" || link.status !== "existing") return [...problems];
+  return problems.map((p) => (p.severity === "error" && !FILE_LEVEL_CODES.has(p.code) ? { ...p, severity: "warning" as const, message: `${p.message} ${KEPT_AS_IS}` } : p));
+}
+
+const KEPT_AS_IS = "(הרשומה כבר נמצאת בקובץ שבספרייה ולא שיניתם אותה, ולכן הייצוא משאיר אותה כמו שהיא. כדי לתקן אותה, ערכו או מחקו אותה.)";
+
+/**
+ * Problems of a whole export: per-link problems plus links that collapse into one in the database —
+ * by the one equality rule (equality.ts storedLinkIdentity: stored ends by TITLE and stored type), so
+ * two editions of a book open together (a text file and the database) are one book here too.
+ */
+export function validateExport(links: readonly Link[], ctx: ValidationContext): Map<string, Problem[]> {
+  const out = new Map<string, Problem[]>();
+  const seen = new Map<string, string>();
+  // the file-level rule: one link that holds its book's file back holds every link of that book
+  const heldFiles = new Map<string, Problem>();
+  for (const l of links) {
+    const problems = validateLink(l, ctx);
+    const key = storedLinkIdentity(l);
+    const first = key === null ? undefined : seen.get(key);
+    if (first !== undefined)
+      problems.push({ code: "export/duplicate", severity: "warning", message: "קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד." });
+    else if (key !== null) seen.set(key, l.id);
+    out.set(l.id, problems);
+    const fileLevel = problems.find((p) => FILE_LEVEL_CODES.has(p.code));
+    if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);
+  }
+  companionMergeChecks(links, out);
+  if (heldFiles.size)
+    for (const l of links) {
+      const why = heldFiles.get(l.source.book.title);
+      const problems = out.get(l.id)!;
+      if (why && !problems.some((p) => FILE_LEVEL_CODES.has(p.code)))
+        problems.push({ code: "export/file-held", severity: "error", message: `כל קובץ הקישורים של "${l.source.book.title}" מוחזק, ולכן גם הקישור הזה: ${why.message}`, ...(why.detail && { detail: why.detail }) });
+    }
+  return out;
+}
