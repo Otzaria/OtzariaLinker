@@ -1642,7 +1642,10 @@ function commentatorAfter(toks: readonly Tok[], i: number): { who: string; next:
   let j = i;
   let opened = false;
   // "ובקדושין דף י"ו ע"ב (תוד"ה והא)": also into a bracket that opens after the place
-  while (toks[j]?.kind === "punct" && ")],([".includes(toks[j]!.text)) opened ||= "([".includes(toks[j++]!.text);
+  while (toks[j]?.kind === "punct" && ")],([".includes(toks[j]!.text)) {
+    if ("([".includes(toks[j]!.text)) opened = true;
+    j++;
+  }
   const who = wordIn(toks[j], COMMENTATORS);
   return who ? { who, next: j + 1, opened } : undefined;
 }

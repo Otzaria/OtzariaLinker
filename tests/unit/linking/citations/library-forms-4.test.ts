@@ -465,3 +465,9 @@ describe("a chapter by an ordinal word", () => {
     }
   });
 });
+
+describe("no hang", () => {
+  it("punctuation that opens twice after a place (a loop that never advanced, found on אוצר לעזי רש\"י)", () => {
+    expect(scan([`ראה (גיטין סט:) ([ובתוך]) וכו'`, `(ר' פירוש רש"י גיטין סט:) [(x)] ✭ [decorative]`])).toBeDefined();
+  });
+});
