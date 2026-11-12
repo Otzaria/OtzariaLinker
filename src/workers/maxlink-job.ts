@@ -72,8 +72,9 @@ function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook
  * footnotes engine found nothing, the headings engine links them as a commentary (notes → main book).
  * Measured: docs/AUTOMATION_ENGINE.md §5.1.
  */
-function notesAsCommentary(r: EngineResult, main: EngineBook, notes: EngineBook, ctx: EngineContext): EngineResult {
-  const h = runEngine("headings", notes, main, {}, ctx);
+function notesAsCommentary(r: EngineResult, main: EngineBook, notes: EngineBook, ctx: EngineContext, sefariaOwned?: readonly string[]): EngineResult {
+  // the library's answer to "is this a Sefaria book" goes along: no range on a Sefaria main book (audit F1)
+  const h = runEngine("headings", notes, main, sefariaOwned ? { sefariaOwned } : {}, ctx);
   const note: Reason = { code: "maxlink/notes-by-headings", text: `שיטת הערות השוליים לא מצאה סימני הערה שמתאימים לשורות "${notes.book.title}", ולכן ההערות קושרו לפי הכותרות של שני הספרים, כמו פירוש.` };
   return { suggestions: h.suggestions, notes: [note, ...r.notes, ...h.notes], unmatched: h.unmatched };
 }
@@ -191,7 +192,7 @@ export async function maxlinkJob(
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
         const byLinks = step.relation.scope && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
         result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks);
-        if (step.engine === "footnotes" && !result.suggestions.length) result = notesAsCommentary(result, loaded.source, loaded.target, inner);
+        if (step.engine === "footnotes" && !result.suggestions.length) result = notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         results.set(`${step.engine}|${key}`, result);
       } else {
         loaded = null;
