@@ -66,12 +66,57 @@ export function baseTitleKey(raw: string): string {
   }
 }
 
-/** The base-title key a dependant title declares ("רש״י על מסכת ברכות" → "ברכות"), or null. */
-export function declaredBaseKey(dependantTitle: string): string | null {
+/** The base title a dependant title names, comparable but with its prefixes ("רש״י על מסכת ברכות" → "מסכת ברכות"), or null. */
+export function declaredBaseTitle(dependantTitle: string): string | null {
   const d = comparableTitle(dependantTitle);
   const at = d.lastIndexOf(" על ");
-  const declaredBase = at === -1 ? "" : d.slice(at + " על ".length);
-  return declaredBase.trim() ? baseTitleKey(declaredBase) : null;
+  const declaredBase = at === -1 ? "" : d.slice(at + " על ".length).trim();
+  return declaredBase || null;
+}
+
+/** The base-title key a dependant title declares ("רש״י על מסכת ברכות" → "ברכות"), or null. */
+export function declaredBaseKey(dependantTitle: string): string | null {
+  const t = declaredBaseTitle(dependantTitle);
+  return t ? baseTitleKey(t) : null;
+}
+
+/*
+ * baseTitleKey folds "משנה ברכות", "תלמוד ירושלמי ברכות" and "ברכות" into one key, so "X על ברכות"
+ * finds three books. The prefix the title had is its corpus, and a dependant's title names the corpus
+ * it is written on the same way: "על משנה ברכות" → the Mishnah, "על ירושלמי ברכות" → the Yerushalmi,
+ * a bare "על ברכות" / "על מסכת ברכות" → the book without a corpus prefix (the Bavli). Measured on the
+ * library benchmark: 391K COMMENTARY links were in pairs the planner refused as ambiguous
+ * (docs/validation/LIBRARY_BENCHMARK.md §6.1).
+ */
+const CORPUS_PREFIXES: readonly (readonly [string, string])[] = [
+  ["משנה ", "mishnah"],
+  ["תלמוד ירושלמי ", "yerushalmi"],
+  ["ירושלמי ", "yerushalmi"],
+];
+
+/** The corpus a title's prefix marks ("mishnah", "yerushalmi"), or "" for none. */
+export function titleCorpus(raw: string): string {
+  let v = comparableTitle(raw);
+  for (;;) {
+    const c = CORPUS_PREFIXES.find(([p]) => v.startsWith(p));
+    if (c) return c[1];
+    const p = DEPENDENCY_TITLE_PREFIXES.find((x) => v.startsWith(x));
+    if (!p) return "";
+    v = v.slice(p.length).trim();
+  }
+}
+
+/*
+ * A looser key, tried only when the exact key finds nothing: the same title in another spelling.
+ * "שלחן ערוך אורח חיים" and "שולחן ערוך, אורח חיים" differ by a mater lectionis and a comma; a
+ * trailing volume ("… חלק ו") names the same book. Letters ו/י are dropped (plene vs. defective
+ * spelling), punctuation and a leading "ירושלמי " are folded. Two books that meet under this key are
+ * ambiguous like any other (batch.ts), so it never picks between them.
+ */
+export function looseTitleKey(raw: string): string {
+  let v = baseTitleKey(raw).replace(/^ירושלמי\s+/, "");
+  v = v.replace(/\s+חלק\s+[א-ת]{1,3}$/u, "");
+  return v.replace(/[,.:;()\-־–]/g, " ").replace(/[וי]/g, "").replace(/\s+/g, " ").trim();
 }
 
 /** True only when a dependant-style title ("X על <base>") explicitly names `baseTitle`. */

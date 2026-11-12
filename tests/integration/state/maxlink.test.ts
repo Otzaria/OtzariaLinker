@@ -111,3 +111,34 @@ describe("AppStore — max-link", () => {
     expect(store.suggestions.run.value!.result.suggestions.find((s) => s.id === victim)).toBeTruthy(); // the same id without dibur-hamatchil
   });
 });
+
+describe("AppStore — max-link pairs by the database's existing links (plan.ts linkedBases)", () => {
+  // the mini database: "שער הציון" has no book_base_text and no "X על Y", but 3 COMMENTARY links from "משנה ברורה"
+  const pairs = (p: ReturnType<AppStore["maxLink"]["plan"]>) => p.steps.flatMap((s) => (s.kind === "pair" ? [`${s.engine}:${s.source.title}>${s.target.title}`] : []));
+
+  it("from the commentary's side and from the base's side, once the summaries are read", async () => {
+    const { store, key } = await opened();
+    const sz = key("שער הציון");
+    expect(pairs(store.maxLink.plan({ kind: "book", key: sz }, PAIRS))).toEqual([]);
+    expect(await store.maxLink.gatherEvidence({ kind: "book", key: sz })).toBe(true);
+    const plan = store.maxLink.plan({ kind: "book", key: sz }, PAIRS);
+    expect(pairs(plan)).toEqual(["headings:שער הציון>משנה ברורה", "dibur-hamatchil:שער הציון>משנה ברורה"]);
+    expect(plan.books[0]!.decisions.join(" ")).toContain("לפי הקישורים שבמסד");
+    expect(store.maxLink.unchecked.value).toBe(0);
+  });
+
+  it("selecting the base finds the commentary", async () => {
+    const { store, key } = await opened();
+    const mb = key("משנה ברורה");
+    await store.maxLink.gatherEvidence({ kind: "book", key: mb });
+    expect(pairs(store.maxLink.plan({ kind: "book", key: mb }, PAIRS))).toContain("headings:שער הציון>משנה ברורה");
+  });
+
+  it("text files have no database links: nothing is read, the plan is unchanged", async () => {
+    const { store, folder } = await opened();
+    const before = store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS).steps.length;
+    expect(await store.maxLink.gatherEvidence({ kind: "source", id: folder.info.id })).toBe(true);
+    expect(store.maxLink.evidence.value.size).toBe(0);
+    expect(store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS).steps.length).toBe(before);
+  });
+});

@@ -36,6 +36,13 @@ export interface DbLinkBookCount {
   origin: BookOrigin;
   out: number;
   in: number;
+  /**
+   * Of those, COMMENTARY links. The library stores every one base → commentary (12,830 pairs in the
+   * full database, none the other way), so "out" means the other book is a commentary on this one and
+   * "in" that this book is a commentary on it — the max-link planner's evidence (linking/plan.ts).
+   */
+  commentaryOut: number;
+  commentaryIn: number;
 }
 
 /** Counts of a book's database links, from the link table's book indexes (no full-table scan). */

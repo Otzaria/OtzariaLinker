@@ -120,6 +120,21 @@ export class OtzariaDbReader {
     return out;
   }
 
+  /**
+   * default_commentator (schema 3+): commentatorBookId → the books it is a default commentator of
+   * (the app opens it beside them). 723 rows in the full library, scanned once; empty when absent.
+   * It pairs commentaries that book_base_text and the title do not ("בית יוסף" on "טור").
+   */
+  async defaultCommentators(): Promise<Map<number, number[]>> {
+    const out = new Map<number, number[]>();
+    const t = await this.file.table("default_commentator");
+    if (!t) return out;
+    const [b, c] = [colIndex(t, "bookId"), colIndex(t, "commentatorBookId")];
+    if (b < 0 || c < 0) return out;
+    for await (const r of this.file.scan(t)) pushTo(out, Number(r.values[c]), Number(r.values[b]));
+    return out;
+  }
+
   /** (lineIndex, lineId) of every line of a book, in order — from the (bookId, lineIndex) index when present. */
   async lineEntries(bookId: number): Promise<{ index: number; id: number }[]> {
     const ix = await this.file.findIndex("line", ["bookId", "lineIndex"]);

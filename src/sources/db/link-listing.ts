@@ -47,13 +47,16 @@ export class LinkListing {
   summary(bookInfo: (key: string) => { title: string; origin: BookOrigin }): DbLinkSummary {
     const { dir, type, other } = this.rows;
     const types = CONNECTION_TYPES.map((t) => ({ type: t, out: 0, in: 0 }));
-    const books = this.otherKeys.map((k) => ({ bookKey: k, ...bookInfo(k), out: 0, in: 0 }));
+    const books = this.otherKeys.map((k) => ({ bookKey: k, ...bookInfo(k), out: 0, in: 0, commentaryOut: 0, commentaryIn: 0 }));
+    const commentary = CONNECTION_TYPES.indexOf("COMMENTARY");
     let out = 0;
     for (let i = 0; i < dir.length; i++) {
       const key = dir[i] === 0 ? "out" : "in";
       if (key === "out") out++;
       types[type[i]!]![key]++;
-      books[other[i]!]![key]++;
+      const b = books[other[i]!]!;
+      b[key]++;
+      if (type[i] === commentary) b[key === "out" ? "commentaryOut" : "commentaryIn"]++;
     }
     return {
       bookKey: this.bookKey,

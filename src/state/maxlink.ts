@@ -1,5 +1,5 @@
 import { pushTo } from "../core/collections";
-import { batch, computed, type ReadonlySignal, type Signal } from "@preact/signals";
+import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
@@ -36,7 +36,24 @@ export interface MaxLinkRunOptions {
   engineOptions?: Partial<Record<EngineId, Record<string, unknown>>>;
 }
 
+/**
+ * How many selected books the evidence pass reads (one link summary each, from the link table's book
+ * indexes: a base book with 200K links takes seconds). Beyond it the plan goes by declarations and
+ * titles alone, and says so.
+ */
+export const EVIDENCE_BOOKS = 200;
+
 export class MaxLinkState {
+  /**
+   * The existing-links evidence (linking/plan.ts, PlanBook.linkedBases): commentary key → keys of the
+   * books the database links it to as their commentary. Grows as books are checked; kept for the session.
+   */
+  readonly evidence = signal<ReadonlyMap<string, readonly string[]>>(new Map());
+  /** books whose link summary was read (or cannot be: not a database) */
+  private readonly checked = new Set<string>();
+  /** selected books the last evidence pass left unread (over EVIDENCE_BOOKS) */
+  readonly unchecked = signal(0);
+
   /** the report of the current run, live: approvals, rejections and undo update it */
   readonly report = computed<MaxLinkReport | null>(() => {
     const run = this.host.suggestions.run.value;
@@ -64,13 +81,61 @@ export class MaxLinkState {
     return "כל הספרים הפתוחים";
   }
 
+  /**
+   * Reads the existing links of the selected database books (DbLinkSummary: COMMENTARY counts per
+   * other book) so the plan can pair what declarations and titles do not ("בית יוסף" on "טור").
+   * Once per book; the first EVIDENCE_BOOKS unread ones. False when cancelled.
+   */
+  async gatherEvidence(scope: MaxLinkScope): Promise<boolean> {
+    const summary = this.service.dbLinkSummary?.bind(this.service);
+    if (!summary) return true;
+    const books = this.host.books.value;
+    const db = new Set(this.host.sources.value.filter((s) => s.info.kind === "otzaria-db").flatMap((s) => s.books.map((b) => b.key)));
+    const todo = this.selection(scope).filter((k) => db.has(k) && !this.checked.has(k));
+    const now = todo.slice(0, EVIDENCE_BOOKS);
+    this.unchecked.value = todo.length - now.length;
+    if (!now.length) return true;
+    const found = new Map<string, Set<string>>();
+    const add = (dep: string, base: string) => {
+      if (dep === base || !books.has(dep) || !books.has(base)) return;
+      const s = found.get(dep) ?? new Set();
+      found.set(dep, s.add(base));
+    };
+    const ok = await this.host.runTask(`בודק אילו ספרים כבר מקושרים במסד כפירוש ובסיס (${now.length.toLocaleString("he")} ספרים)…`, async (opts) => {
+      let done = 0;
+      for (const k of now) {
+        opts.signal?.throwIfAborted();
+        const s = await summary(k, opts.signal ? { signal: opts.signal } : {});
+        this.checked.add(k);
+        if ("byBook" in s)
+          for (const b of s.byBook) {
+            if (b.commentaryIn) add(k, b.bookKey); // this book is the stored target: a commentary on b
+            if (b.commentaryOut) add(b.bookKey, k);
+          }
+        opts.onProgress?.(++done, now.length);
+      }
+      return true;
+    });
+    if (found.size) {
+      const next = new Map(this.evidence.value);
+      for (const [dep, bases] of found) next.set(dep, [...new Set([...(next.get(dep) ?? []), ...bases])]);
+      this.evidence.value = next;
+    }
+    return ok === true;
+  }
+
   /** The plan for a scope, with only the ticked engines (all when `engines` is absent). */
   plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
-    const library: PlanBook[] = [...this.host.books.value.values()].map((b) => ({
-      ...this.host.refOf(b.key),
-      ...(b.bases && { bases: b.bases }),
-      ...(b.dependence && { dependence: b.dependence }),
-    }));
+    const evidence = this.evidence.value;
+    const library: PlanBook[] = [...this.host.books.value.values()].map((b) => {
+      const linked = [...new Set([...(b.linkedBases ?? []), ...(evidence.get(b.key) ?? [])])];
+      return {
+        ...this.host.refOf(b.key),
+        ...(b.bases && { bases: b.bases }),
+        ...(b.dependence && { dependence: b.dependence }),
+        ...(linked.length && { linkedBases: linked }),
+      };
+    });
     return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }) });
   }
 

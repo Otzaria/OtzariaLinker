@@ -1,8 +1,8 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { ENGINES, type EngineId } from "../../linking/automatic";
 import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
-import type { MaxLinkScope } from "../../state/maxlink";
+import { EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { EngineOptions } from "./engine-options";
@@ -34,7 +34,13 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
   const books = store.books.value;
 
-  const full = useMemo(() => (scope ? store.maxLink.plan(scope) : null), [kind, current, sourceId, books]);
+  // the database's own links pair commentaries the titles do not (linking/plan.ts); read before planning
+  useEffect(() => {
+    if (scope) void store.maxLink.gatherEvidence(scope);
+  }, [kind, current, sourceId, books]);
+  const evidence = store.maxLink.evidence.value;
+  const unchecked = store.maxLink.unchecked.value;
+  const full = useMemo(() => (scope ? store.maxLink.plan(scope) : null), [kind, current, sourceId, books, evidence]);
   const enabled = useMemo(() => new Set((Object.keys(full?.perEngine ?? {}) as EngineId[]).filter((e) => !off.has(e))), [full, off]);
   const plan = useMemo(() => (scope && full ? (off.size ? store.maxLink.plan(scope, enabled) : full) : null), [full, enabled]);
   const engines = ENGINES.filter((e) => full?.perEngine[e.id]);
@@ -90,6 +96,11 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
             {plan.books.length.toLocaleString("he")} ספרים נבחרו · ל־{plan.identified.toLocaleString("he")} נמצא קשר · {plan.steps.length.toLocaleString("he")} הרצות
             {skipped > 0 && ` · ${skipped.toLocaleString("he")} בלי קישור אוטומטי`}
           </p>
+          {unchecked > 0 && (
+            <p class="muted" style="margin:0;font-size:var(--fs-sm)">
+              הקישורים שכבר יש במסד נבדקו ל־{EVIDENCE_BOOKS.toLocaleString("he")} ספרים בלבד; ל־{unchecked.toLocaleString("he")} הספרים האחרים הקשר נקבע לפי המסד והשם בלבד.
+            </p>
+          )}
           {engines.length > 0 && (
             <fieldset class="ml-engines">
               <legend>השיטות שירוצו</legend>

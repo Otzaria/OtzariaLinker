@@ -28,6 +28,11 @@ export interface SourceBook {
   /** book.dependenceType as stored: "commentary", "targum", "midrash", "guides" (schema 2+) */
   dependence?: string;
   /**
+   * Keys of books the source's own data shows this one is a commentary on, without declaring it a
+   * base (Otzaria databases: default_commentator). Evidence for the max-link planner (linking/plan.ts).
+   */
+  linkedBases?: string[];
+  /**
    * book_has_links.hasSourceLinks of an Otzaria database: the book has links of its own in the
    * database, so the library may hold a links file for it (the export then asks for that file).
    */

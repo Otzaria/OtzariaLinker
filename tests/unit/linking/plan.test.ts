@@ -186,3 +186,48 @@ describe("planMaxLink — intermediate commentators", () => {
     expect(s.some((x) => x.includes(">רש\"י") || x.includes(">תוספות"))).toBe(false);
   });
 });
+
+describe("planMaxLink — the links the database already has (PlanBook.linkedBases)", () => {
+  const lib = [
+    book("db:1", "טור", { origin: "sefaria", isBaseBook: true }),
+    book("db:2", "בית יוסף", { origin: "sefaria", linkedBases: ["db:1"] }),
+    book("db:3", "בראשית", { origin: "sefaria", isBaseBook: true }),
+    book("db:4", 'רש"י על בראשית', { origin: "sefaria", bases: ["db:3"] }),
+    book("db:5", "שפתי חכמים", { origin: "sefaria", bases: ["db:4"], linkedBases: ["db:3"] }),
+    book("db:6", "בבא קמא", { origin: "sefaria", isBaseBook: true }),
+    book("db:7", "בבא מציעא", { origin: "sefaria", isBaseBook: true }),
+    book("db:8", "חידושי הלכות", { linkedBases: ["db:6", "db:7"] }),
+    book("db:9", "ספר בלי קשר"),
+  ];
+
+  it("pairs a commentary with no declaration and no 'X על Y' by its COMMENTARY links, from either side", () => {
+    for (const selected of [["db:2"], ["db:1"]]) {
+      const p = planMaxLink({ selected, library: lib, singleEngines: [] });
+      expect(steps(p)).toEqual(["headings:בית יוסף>טור", "dibur-hamatchil:בית יוסף>טור"]);
+    }
+    const p = planMaxLink({ selected: ["db:2"], library: lib, singleEngines: [] });
+    expect(p.books[0]!.decisions[0]).toContain("לפי הקישורים שבמסד");
+  });
+
+  it("a commentary on a commentary is linked to the base of its base too, unscoped", () => {
+    const p = planMaxLink({ selected: ["db:5"], library: lib, singleEngines: [] });
+    expect(steps(p)).toEqual(expect.arrayContaining(['headings:שפתי חכמים>רש"י על בראשית', "headings:שפתי חכמים>בראשית"]));
+    const rel = p.steps.find((s) => s.kind === "pair" && s.target.key === "db:3");
+    expect(rel?.kind === "pair" && rel.relation.scope).toBeUndefined();
+  });
+
+  it("several unrelated linked bases: each through its own section", () => {
+    const p = planMaxLink({ selected: ["db:8"], library: lib, singleEngines: [] });
+    const pairs = p.steps.filter((s) => s.kind === "pair");
+    expect(pairs.map((s) => s.kind === "pair" && s.relation.scope?.section).sort()).toEqual(["בבא מציעא", "בבא מציעא", "בבא קמא", "בבא קמא"]);
+  });
+
+  it("no links, no declaration, no title: still not planned", () => {
+    expect(planMaxLink({ selected: ["db:9"], library: lib, singleEngines: [] }).books[0]!.skipped).toBeTruthy();
+  });
+
+  it("the title wins over the links when it resolves", () => {
+    const l2 = [...lib, book("t:1", "פירוש על טור", { linkedBases: ["db:3"] })];
+    expect(steps(planMaxLink({ selected: ["t:1"], library: l2, singleEngines: [] }))).toEqual(["headings:פירוש על טור>טור", "dibur-hamatchil:פירוש על טור>טור"]);
+  });
+});

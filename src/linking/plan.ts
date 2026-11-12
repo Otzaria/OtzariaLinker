@@ -1,8 +1,8 @@
 import { pushTo } from "../core/collections";
 import type { BookRef } from "../core/links/model";
-import { baseTitleKey, declaredBaseKey, isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "../core/links/titles";
+import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
-import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
+import { resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
 
 /*
@@ -13,7 +13,13 @@ import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
  * Relations, strongest evidence first:
  *   1. the database's own declaration (book_base_text, SourceBook.bases);
  *   2. the title: "X על Y" (the generator's rule, batch.ts) — and, before it, the notes-book patterns
- *      "הערות … על Y" / "הערות ל<Y>", which are footnotes companions, not commentaries.
+ *      "הערות … על Y" / "הערות ל<Y>", which are footnotes companions, not commentaries;
+ *   3. the links the database already has (PlanBook.linkedBases: default_commentator, and the
+ *      COMMENTARY links into the book — always stored base → commentary). This is what pairs
+ *      "בית יוסף" with "טור" and "שער הציון" with "משנה ברורה": no declaration, no "X על Y", but
+ *      thousands of COMMENTARY links (LIBRARY_BENCHMARK.md §6.1, §7: 99.8% and 100% re-produced).
+ *      It also links a commentary on a commentary to the base of its base, when the database does
+ *      ("שפתי חכמים" → "רש"י על בראשית" → "בראשית").
  * A relation runs when either side is selected, so "this book" covers both its base and the open
  * commentaries written on it. Nothing is guessed: no relation → the book is listed with the reason.
  */
@@ -44,10 +50,12 @@ export interface PlanBook extends BookRef {
   readonly bases?: readonly string[];
   /** book.dependenceType: commentary | targum | midrash | guides */
   readonly dependence?: string;
+  /** keys of the books the source's existing links show this one is a commentary on (see the header) */
+  readonly linkedBases?: readonly string[];
 }
 
 export type RelationKind = "commentary" | "notes";
-export type RelationVia = "base-text" | "title";
+export type RelationVia = "base-text" | "title" | "links";
 
 /**
  * A commentary written on SEVERAL bases is linked to each base only through the part of it that is
@@ -130,14 +138,20 @@ const NOTES_PREFIX = "הערות";
  * "כפי אהרן הערות על …" does not start with "הערות": it is a commentary by its title.
  */
 export function notesBaseKey(title: string): string | null {
+  const named = notesBaseTitle(title);
+  return named === null ? null : baseTitleKey(named);
+}
+
+/** The base title a notes title names, prefixes kept ("הערות על משנה ברכות" → "משנה ברכות"), or null. */
+function notesBaseTitle(title: string): string | null {
   const t = normalizeTitle(title);
   if (!t.startsWith(NOTES_PREFIX)) return null;
   const rest = t.slice(NOTES_PREFIX.length);
   if (rest && !/^\s/.test(rest)) return null; // "הערותיו", "הערותי…" are other words
-  const named = declaredBaseKey(t);
+  const named = declaredBaseTitle(t);
   if (named) return named;
   const m = /^\s+ל(\S.*)$/.exec(rest);
-  return m ? baseTitleKey(m[1]!) : null;
+  return m ? m[1]! : null;
 }
 
 const isTargum = (b: PlanBook) => b.dependence?.toLowerCase() === "targum" || normalizeTitle(b.title).startsWith("תרגום");
@@ -150,9 +164,65 @@ function ref(b: BookRef): BookRef {
 
 /** The relations a book has on its own (as a dependant: one, or one per base), or why it has none. */
 export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | { problem: string } {
-  const notesKey = notesBaseKey(book.title);
-  const kind: RelationKind = notesKey !== null ? "notes" : "commentary";
-  const titleKey = notesKey ?? declaredBaseKey(book.title);
+  const own = ownRelations(book, byKey, index);
+  if ("problem" in own) {
+    const linked = linkedRelations(book, byKey);
+    return linked.length ? linked : own;
+  }
+  return [...own, ...baseOfBase(book, own, byKey)];
+}
+
+const linkedOpen = (book: PlanBook, byKey: ReadonlyMap<string, PlanBook>): PlanBook[] =>
+  [...new Set(book.linkedBases ?? [])].filter((k) => k !== book.key).map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b);
+
+/** The base keys a book is written on: declared, or shown by the links. */
+const basesOf = (b: PlanBook | undefined): readonly string[] => [...(b?.bases ?? []), ...(b?.linkedBases ?? [])];
+
+/**
+ * Relations from the existing links alone (PlanBook.linkedBases), for a book with no declaration and
+ * no usable title. One base: an ordinary relation. Several: when they form one chain (each is written
+ * on the next: "רש"י על בראשית" on "בראשית"), all of them, unscoped — a commentary on a commentary
+ * follows the same chapters and verses. Otherwise each through its own section, like book_base_text.
+ */
+function linkedRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>): Relation[] {
+  if (notesBaseKey(book.title) !== null) return [];
+  const open = linkedOpen(book, byKey);
+  if (!open.length) return [];
+  const why = "לפי הקישורים שכבר יש במסד: הוא מקושר אליו כפירוש.";
+  const keys = new Set(open.map((b) => b.key));
+  const inChain = (b: PlanBook) => basesOf(b).some((k) => keys.has(k)) || open.some((o) => basesOf(o).includes(b.key));
+  const chain = open.length === 1 || open.every(inChain);
+  if (chain) return open.map((base) => ({ kind: "commentary" as const, dependant: ref(book), base: ref(base), via: "links" as const, caveats: [why] }));
+  const note = `לפי הקישורים שכבר יש במסד הספר מפרש ${open.length} ספרים. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
+  return open.map((base) => ({ kind: "commentary" as const, dependant: ref(book), base: ref(base), via: "links" as const, caveats: [note], scope: { section: base.title } }));
+}
+
+/**
+ * A commentary on a commentary is linked to the base of its base too, when the database links it
+ * there ("שפתי חכמים" is written on "רש"י על בראשית", and the library links it to "בראשית" as well:
+ * 89K COMMENTARY links, LIBRARY_BENCHMARK.md §6.1). Unscoped: it follows the same chapters and verses.
+ */
+function baseOfBase(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>): Relation[] {
+  if (!book.linkedBases?.length) return [];
+  const direct = own.filter((r) => r.kind === "commentary" && !r.scope);
+  const have = new Set(own.map((r) => r.base.key));
+  const out: Relation[] = [];
+  for (const b of linkedOpen(book, byKey)) {
+    if (have.has(b.key)) continue;
+    const via = direct.find((r) => basesOf(byKey.get(r.base.key)).includes(b.key));
+    if (!via) continue;
+    have.add(b.key);
+    out.push({ kind: "commentary", dependant: ref(book), base: ref(b), via: "links", caveats: [`פירוש על ${quote(via.base.title)}, שכתוב על ${quote(b.title)}; המסד מקשר אותו גם ל־${quote(b.title)}.`] });
+  }
+  return out;
+}
+
+/** The relations a book's declaration or title gives it (relationsOf without the existing links). */
+function ownRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | { problem: string } {
+  const notesNamed = notesBaseTitle(book.title);
+  const kind: RelationKind = notesNamed !== null ? "notes" : "commentary";
+  const named = notesNamed ?? declaredBaseTitle(book.title);
+  const titleKey = named === null ? null : baseTitleKey(named);
   const caveats: string[] = [];
   if (kind === "notes" && isMergeableCompanionTitle(book.title))
     caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס רק כשאין עוגן על שורות ההערות. מנוע ההערות כותב עוגן בכל רשומה, ולכן הקישורים שלו מבטלים את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו. אם קובץ הקישורים של הבסיס בספרייה כבר ממזג את ההערות, זה ישנה את מה שמוצג באוצריא — הבדיקה לפני הייצוא תגיד.`);
@@ -187,11 +257,9 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
         : 'אין לו ספר בסיס: המסד לא מציין ספר שהוא כתוב עליו, והשם אינו בצורה "… על <ספר>" או "הערות ל<ספר>".',
     };
   }
-  const r = kind === "notes" ? resolveBaseKey(titleKey, index, book) : (() => {
-    const p = pairOne(book, index);
-    return p.target ? { target: p.target } : { reason: p.reason ?? "" };
-  })();
+  const r = resolveBaseKey(titleKey, index, book, named ?? undefined);
   if ("reason" in r) return { problem: r.reason };
+  if (r.note) caveats.push(r.note);
   return [{ kind, dependant: ref(book), base: ref(r.target), via: "title", caveats }];
 }
 
@@ -230,7 +298,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
   return out;
 }
 
-const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם" };
+const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם", links: "לפי הקישורים שבמסד" };
 
 /*
  * A translation (book.dependenceType "targum", or "תרגום…") linked by headings is declared "targum",

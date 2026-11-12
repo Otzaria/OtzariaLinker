@@ -48,6 +48,12 @@ describe("summary of a book's database links — same numbers as SQL", () => {
                        FROM link k WHERE k.sourceBookId = ${bookId} OR k.targetBookId = ${bookId} GROUP BY other`);
       expect(new Map(s.byBook.map((b) => [b.bookKey, [b.out, b.in]]))).toEqual(new Map(books.map(([b, o, i]) => [`${sid}:${b}`, [Number(o), Number(i)]])));
       for (const b of s.byBook) expect(b.title).toBe(q(`SELECT title FROM book WHERE id = ${b.bookKey.split(":")[1]}`)[0]![0]);
+      // COMMENTARY links per book: the max-link planner's evidence
+      const comm = q(`SELECT CASE WHEN k.sourceBookId = ${bookId} THEN k.targetBookId ELSE k.sourceBookId END AS other, sum(k.sourceBookId = ${bookId}), sum(k.sourceBookId <> ${bookId})
+                      FROM link k JOIN connection_type ct ON ct.id = k.connectionTypeId WHERE ct.name = 'COMMENTARY' AND (k.sourceBookId = ${bookId} OR k.targetBookId = ${bookId}) GROUP BY other`);
+      expect(new Map(s.byBook.filter((b) => b.commentaryOut + b.commentaryIn).map((b) => [b.bookKey, [b.commentaryOut, b.commentaryIn]]))).toEqual(
+        new Map(comm.map(([b, o, i]) => [`${sid}:${b}`, [Number(o), Number(i)]])),
+      );
       // most links first
       expect(s.byBook.map((b) => b.out + b.in)).toEqual([...s.byBook.map((b) => b.out + b.in)].sort((a, b) => b - a));
     });

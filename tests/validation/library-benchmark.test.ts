@@ -203,7 +203,16 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     `${MODE}${SHARDS > 1 ? ` shard ${SHARD}/${SHARDS}` : ""}`,
     async () => {
       const t0 = performance.now();
-      const library: PlanBook[] = books.map((b) => ({ key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }) }));
+      // the evidence the app's evidence pass reads per selected book (MaxLinkState.gatherEvidence, the link
+      // summary's COMMENTARY counts — always stored base → commentary), here from the oracle for all books at
+      // once; plus default_commentator, which the source reads at open (SourceBook.linkedBases)
+      const linked = new Map<number, Set<number>>();
+      for (const [type, s, t] of data.rows) if (type === "COMMENTARY" && s !== t) linked.set(t, (linked.get(t) ?? new Set()).add(s));
+      const keyOfId = (id: number) => byId.get(id)?.key;
+      const library: PlanBook[] = books.map((b) => {
+        const lb = [...new Set([...(b.linkedBases ?? []), ...[...(linked.get(idOf(b.key)) ?? [])].map(keyOfId).filter((k): k is string => !!k)])];
+        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...(lb.length && { linkedBases: lb }) };
+      });
       // every relation of the library at once: the planner's steps for "all books selected"
       const plan = planMaxLink({ selected: books.map((b) => b.key), library, singleEngines: ["citations"] });
       const stepsOf = new Map<number, PlanStep[]>();
