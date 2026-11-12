@@ -46,7 +46,21 @@ test("max-link: a folder of a commentary and a notes book against the database �
   await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("5 הרצות");
   await engines.getByRole("checkbox", { name: /לפי דיבור המתחיל/ }).check();
 
-  await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
+  // advanced mode: every planned engine has its settings; an invalid one blocks the run
+  await page.getByRole("radio", { name: "שני ספרים" }).click();
+  await page.getByRole("button", { name: "הגדרות השיטה (מצב מתקדם)" }).click();
+  await page.getByRole("radio", { name: "קישור מרבי" }).click();
+  const run = page.getByRole("button", { name: "הפעלת קישור מרבי" });
+  await expect(page.locator("details.engine-options")).toHaveCount(4);
+  const notesForm = page.getByRole("region", { name: "הגדרות: הערות שוליים" });
+  await notesForm.locator("summary").click();
+  await notesForm.getByLabel("סימני ההערות בספר").selectOption("regex");
+  await notesForm.getByLabel("הביטוי הרגולרי").fill("(a+)+");
+  await expect(run).toBeDisabled();
+  await notesForm.getByLabel("סימני ההערות בספר").selectOption("auto");
+  await expect(run).toBeEnabled();
+
+  await run.click();
   const report = page.locator("details.ml-report");
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator("summary").first()).toContainText("דוח הקישור המרבי");

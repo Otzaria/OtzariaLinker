@@ -1,9 +1,11 @@
 import { useMemo, useState } from "preact/hooks";
 import { ENGINES, type EngineId } from "../../linking/automatic";
+import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import type { MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { EngineOptions } from "./engine-options";
 import "./maxlink.css";
 
 /*
@@ -11,6 +13,8 @@ import "./maxlink.css";
  * folder, everything open), review the plan — which engine runs on which book and why — untick
  * engines, run. The result is an ordinary suggestions run; MaxLinkReportView sits above its table.
  * Simple by default: the per-book reasons are in a details section, the step list in advanced mode.
+ * In advanced mode every engine of the plan has its settings (the same forms as a single run); they
+ * reach the worker as MaxLinkRunOptions.engineOptions, and an invalid one blocks the run.
  */
 type ScopeKind = MaxLinkScope["kind"];
 const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "מקור או תיקייה", all: "כל הספרים הפתוחים" };
@@ -33,10 +37,20 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const engines = ENGINES.filter((e) => full?.perEngine[e.id]);
   const skipped = plan?.books.filter((b) => b.skipped).length ?? 0;
   const advanced = store.prefs.advanced.value;
+  /** per-engine settings, kept while the form is open */
+  const [formValues, setFormValues] = useState<Partial<Record<EngineId, FormValues>>>({});
+  const checks = useMemo(() => {
+    const out = new Map<EngineId, OptionsCheck>();
+    if (advanced) for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id)));
+    return out;
+  }, [advanced, engines.map((e) => e.id).join(), off, formValues]);
+  const invalid = [...checks.values()].some((c) => Object.keys(c.errors).length > 0);
 
   const start = async () => {
     if (!plan || !scope) return;
-    if (await store.runMaxLink(plan, store.maxLink.scopeLabel(scope))) onDone();
+    const engineOptions: Partial<Record<EngineId, Record<string, unknown>>> = {};
+    for (const [e, c] of checks) if (Object.keys(c.options).length) engineOptions[e] = c.options;
+    if (await store.runMaxLink(plan, store.maxLink.scopeLabel(scope), { engineOptions })) onDone();
   };
 
   return (
@@ -84,6 +98,21 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
               ))}
             </fieldset>
           )}
+          {advanced &&
+            engines
+              .filter((e) => !off.has(e.id))
+              .map((e) => (
+                <section key={e.id} aria-label={`הגדרות: ${e.title}`}>
+                  <b style="font-size:var(--fs-sm)">{e.title}</b>
+                  <EngineOptions
+                    engine={e.id}
+                    values={formValues[e.id] ?? defaultFormValues(e.id)}
+                    check={checks.get(e.id)!}
+                    onChange={(key, v) => setFormValues((all) => ({ ...all, [e.id]: { ...(all[e.id] ?? defaultFormValues(e.id)), [key]: v } }))}
+                    onReset={() => setFormValues((all) => ({ ...all, [e.id]: defaultFormValues(e.id) }))}
+                  />
+                </section>
+              ))}
           <details class="held" open={advanced && plan.books.length <= 12}>
             <summary>למה כל ספר ({plan.books.length.toLocaleString("he")})</summary>
             <ul class="ml-books">
@@ -118,7 +147,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
         הכלי רק מציע. שום קישור לא נוצר בלי אישור שלכם, ו"אישור כל הוודאיות" מאשר רק הצעות ודאיות.
       </p>
       <div class="row">
-        <button class="btn filled" disabled={!plan?.steps.length || !!store.task.value} onClick={start}>
+        <button class="btn filled" disabled={!plan?.steps.length || !!store.task.value || invalid} onClick={start} title={invalid ? "יש הגדרה לא תקינה בהגדרות השיטות" : undefined}>
           <Icon name="oz_links" size={18} />
           הפעלת קישור מרבי
         </button>
