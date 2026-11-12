@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BookOrigin } from "../../../../src/core/links/model";
 import { countVisibleChars } from "../../../../src/core/text/offsets";
 import { headingLevel } from "../../../../src/core/text/html";
-import { DEFAULT_PATTERN, runPatternEngine, type PatternOptions } from "../../../../src/linking/automatic/pattern";
-import { defaultFormValues, toEngineOptions } from "../../../../src/linking/automatic/option-specs";
+import { PATTERN_PRESETS, runPatternEngine, type PatternOptions } from "../../../../src/linking/automatic/pattern";
+import { defaultFormValues, ENGINE_OPTION_SPECS, toEngineOptions } from "../../../../src/linking/automatic/option-specs";
 import type { EngineBook, EngineResult } from "../../../../src/linking/automatic/types";
 
 const book = (title: string, key: string, texts: readonly string[], origin: BookOrigin = "personal"): EngineBook => ({
@@ -155,18 +155,38 @@ describe("guards", () => {
 });
 
 describe("options (simple mode passes the essential ones only)", () => {
-  it("the pattern and the target kind are essential; an invalid pattern blocks the run in both modes", () => {
+  it("the preset and the target are essential; the pattern is essential only with the preset \"custom\"", () => {
     const v = { ...defaultFormValues("pattern"), regex: "(a+)+", "t.certain": 80 };
-    expect(Object.keys(toEngineOptions("pattern", v, "essential").errors)).toEqual(["regex"]);
-    expect(toEngineOptions("pattern", v, "essential").options).toEqual({});
+    // a pattern typed in advanced mode does not leak into simple mode while a preset is chosen
+    expect(toEngineOptions("pattern", v, "essential")).toEqual({ options: {}, errors: {}, changed: 0 });
     expect(Object.keys(toEngineOptions("pattern", v).errors)).toContain("regex");
+    const custom = { ...v, preset: "custom" };
+    expect(Object.keys(toEngineOptions("pattern", custom, "essential").errors)).toEqual(["regex"]);
+    expect(Object.keys(toEngineOptions("pattern", { ...custom, regex: "" }, "essential").errors)).toEqual(["regex"]);
   });
 
-  it("untouched defaults give no options; a changed pattern and target are passed", () => {
+  it("untouched defaults give no options; a chosen preset, a custom template and a target are passed", () => {
     expect(toEngineOptions("pattern", defaultFormValues("pattern"), "essential").options).toEqual({});
-    const v = { ...defaultFormValues("pattern"), regex: "\\((\\d+)\\)", target: "chapter-line" };
-    expect(toEngineOptions("pattern", v, "essential").options).toEqual({ regex: "\\((\\d+)\\)", target: "chapter-line" });
-    expect(defaultFormValues("pattern")["regex"]).toBe(DEFAULT_PATTERN);
+    expect(toEngineOptions("pattern", { ...defaultFormValues("pattern"), preset: "siman-seif-sk" }, "essential").options).toEqual({ preset: "siman-seif-sk" });
+    const v = { ...defaultFormValues("pattern"), preset: "custom", regex: "\\((\\d+)\\)", target: "chapter-line" };
+    expect(toEngineOptions("pattern", v, "essential").options).toEqual({ preset: "custom", regex: "\\((\\d+)\\)", target: "chapter-line" });
+    expect(toEngineOptions("pattern", { ...v, regex: "סי'\\s?{סימן}" }, "essential").errors).toEqual({});
+    expect(toEngineOptions("pattern", { ...v, regex: "סי' {שמש}" }, "essential").errors["regex"]).toContain("{שמש}");
+  });
+
+  it("the preset's own template, shown in the field, is not passed as a custom pattern", () => {
+    const sk = PATTERN_PRESETS.find((p) => p.id === "siman-seif-sk")!;
+    const v = { ...defaultFormValues("pattern"), preset: sk.id, regex: sk.template };
+    expect(toEngineOptions("pattern", v).options).toEqual({ preset: sk.id });
+    expect(toEngineOptions("pattern", { ...v, regex: sk.template.replace("סימן", "סימנא") }).options["regex"]).toBeDefined();
+  });
+
+  it("every preset is offered by name with an example", () => {
+    const spec = ENGINE_OPTION_SPECS.pattern.find((s) => s.key === "preset")!;
+    expect(spec.kind).toBe("select");
+    const choices = spec.kind === "select" ? spec.choices.map(([id]) => id) : [];
+    expect(choices).toEqual([...PATTERN_PRESETS.map((p) => p.id), "custom"]);
+    expect(spec.hintOf?.({ preset: "perek-mishna" })).toContain('"פ"ב מ"ג" ← פרק ב › משנה ג');
   });
 });
 

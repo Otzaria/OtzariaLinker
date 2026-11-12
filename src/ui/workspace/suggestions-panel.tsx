@@ -92,7 +92,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   // outside advanced mode only the essential options (a pattern) count; the rest run at their defaults
   const check = useMemo(() => toEngineOptions(engine, values, advanced ? "all" : "essential"), [engine, values, advanced]);
   const invalid = Object.keys(check.errors).length > 0;
-  const onOption = (key: string, v: string | number | boolean) => setFormValues((all) => ({ ...all, [engine]: { ...values, [key]: v } }));
+  const onOption = (key: string, v: string | number | boolean) => setFormValues((all) => ({ ...all, [engine]: { ...(all[engine] ?? values), [key]: v } }));
 
   const start = async () => {
     const options = check.options;

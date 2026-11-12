@@ -2,8 +2,9 @@ import { expect, test } from "@playwright/test";
 import { distUrl, watchPage } from "./helpers";
 
 /*
- * v3 parity, in the built single file: the pattern method (its pattern is shown outside advanced mode
- * too) and range completion of a book from the links tab, undone with Ctrl+Z.
+ * v3 parity, in the built single file: the pattern method (its preset, and its pattern when the
+ * preset is "your own", are shown outside advanced mode too) and range completion of a book from the
+ * links tab, undone with Ctrl+Z. Then a structure preset: a nested reference into a nested target.
  */
 const NL = String.fromCharCode(10);
 const MAIN = ["<h1>ספר</h1>", "ראה סימן ב", "וכן סימן ג", "בלי הפניה", "ועיין סימן ה"].join(NL);
@@ -25,12 +26,15 @@ test("pattern method → approve → range completion → undo", async ({ page }
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption("pattern");
-  // essential options are visible without advanced mode
+  // essential options are visible without advanced mode; the pattern itself only for "your own"
+  await expect(page.getByLabel("מה מחפשים")).toBeVisible();
+  await expect(page.getByLabel("התבנית (ביטוי רגולרי)")).toHaveCount(0);
+  await page.getByLabel("מה מחפשים").selectOption("custom");
   await expect(page.getByLabel("התבנית (ביטוי רגולרי)")).toBeVisible();
   await page.getByLabel("התבנית (ביטוי רגולרי)").fill("(a+)+");
   await expect(page.getByRole("button", { name: "חיפוש התאמות" })).toBeDisabled();
   await page.getByLabel("התבנית (ביטוי רגולרי)").fill("סימן ([א-ת]{1,3})");
-  await page.getByLabel("המספר הוא").selectOption("heading");
+  await page.getByLabel("לאן ההפניה מצביעה").selectOption("tree");
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
 
   const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
@@ -52,6 +56,46 @@ test("pattern method → approve → range completion → undo", async ({ page }
 
   await page.keyboard.press("Control+z");
   await expect(page.locator(".link-list")).not.toContainText("3–5");
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});
+
+const COMMENTARY = ["<h1>פירוש</h1>", "<h2>סימן ה</h2>", 'עיין סימן ה סעיף ג ס"ק ב', 'ולעיל ס"ק א', 'וכתב הט"ז ס"ק ג'].join(NL);
+const NESTED = [
+  "<h1>שולחן</h1>", "<h2>סימן ה</h2>", "<h3>סעיף ג</h3>",
+  "<h4>סעיף קטן א</h4>", "טקסט א", "<h4>סעיף קטן ב</h4>", "טקסט ב", "<h4>סעיף קטן ג</h4>", "טקסט ג",
+].join(NL);
+
+test("a structure preset in simple mode: a nested reference lands under h2 › h3 › h4", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "פירוש.txt", mimeType: "text/plain", buffer: Buffer.from(COMMENTARY) },
+    { name: "שולחן.txt", mimeType: "text/plain", buffer: Buffer.from(NESTED) },
+  ]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ has: page.getByTitle("פירוש.txt", { exact: true }) }).getByRole("button", { name: "מקור" }).click();
+  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).getByRole("button", { name: "יעד" }).click();
+
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption("pattern");
+  const preset = page.getByLabel("מה מחפשים");
+  // presets are offered by name, each with an example of what it reads
+  await expect(preset.locator("option", { hasText: "סימן, סעיף וס\"ק" })).toHaveCount(1);
+  await preset.selectOption("siman-seif-sk");
+  await expect(page.getByText('"סימן ה סעיף ג ס"ק ב" ← סימן ה › סעיף ג › סעיף קטן ב')).toBeVisible();
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+
+  // "סימן ה סעיף ג ס"ק ב" is certain; "ס"ק א" takes its סימן from the source's heading but not its סעיף,
+  // so it is only high; the ט"ז's ס"ק is not this book's at all
+  const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
+  await expect(approveAll).toBeEnabled({ timeout: 30_000 });
+  await expect(approveAll).toContainText("(1)");
+  await approveAll.click();
+  await expect(page.getByRole("tab", { name: /קישורים/ })).toContainText("1");
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
