@@ -299,7 +299,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
  * brackets with no book, responsa by their author, the Zohar's pages…), so their strict precision says
  * little — they are hand-checked instead, and must agree with the database where it has an opinion.
  */
-const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4"];
+const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4"];
 function newForm(rules: readonly string[]): string | null {
   for (const f of NEW_FORMS) if (rules.some((r) => r.startsWith(`citations.${f}`))) return f;
   return null;

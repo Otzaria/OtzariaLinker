@@ -41,6 +41,11 @@ export interface AddrElem {
   readonly alsoNumber?: number;
   /** read with a marker added in V4 ("ס"ס", "ססי'", "כלל", "שער", "ח"א", "ה'" after a chapter): for the measurement's tally */
   readonly v4?: true;
+  /**
+   * read after "פ'", which is also the numeral 80: "תה' פ' ב" is chapter 2, or Psalm 80 verse 2 — the engine
+   * tries both readings in the cited book (engine.ts, alternativeReading)
+   */
+  readonly afterPeh?: true;
 }
 
 export interface Address {
@@ -218,13 +223,21 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     const asNumber = numeralOf(toks[parsedFrom(toks, i)]);
     if (asNumber) elems[0] = { kind: "?", n: asNumber.n, explicit: false, numeral: asNumber };
   }
+  // "פ"ה הכ"א": a marked level after it makes the compact "פ"ה" a chapter — the number 85 has no "הלכה" under it
+  if (elems[0]!.alsoNumber !== undefined && elems[1]?.explicit) {
+    const { alsoNumber: _n, ...chapter } = elems[0]!;
+    elems[0] = chapter;
+  }
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
   // "לקמן ה' ע"ב", "במ"ק כ' ע"ב": an amud written out (ע"א / ע"ב) makes even an everyday word a daf
   const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && (e.amud === undefined || !!e.amudGlued));
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
   const closed = (bracketed || !!opts.enclosed) && isPunct(toks[to], CLOSE);
-  // two numerals in a row ("ברכות נה א") are evidence too, unless one of them is an everyday word
-  const pair = elems.length >= 2 && (separators > 0 || !elems.some((e) => e.numeral.common));
+  // two numerals in a row ("ברכות נה א", "בראשית מו א") are evidence too, unless one of them is an everyday
+  // word outside brackets ("(בראשית מו א, ועיין שם עוד)", "בנדרים (לד ב, ד"ה …)" are places); a lone א/ב
+  // after a numeral (maybeAmud) is the second of them
+  const numerals = elems.length + elems.filter((e) => e.maybeAmud !== undefined).length;
+  const pair = numerals >= 2 && (separators > 0 || bracketed || !!opts.enclosed || !elems.some((e) => e.numeral.common));
   let evidence: Address["evidence"] = strongTok ? "strong" : closed || pair ? "medium" : "weak";
   if (commonOnly && !closed) evidence = "weak";
   // a single bare numeral outside brackets ("שמות ה'", "דברים רבה") is not a location
@@ -265,13 +278,17 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
   if (m && !amudAt(toks, j + m.width)) {
     const k = j + m.width;
     const num = numeralOf(toks[k]);
-    if (!num) return null;
-    if (m.kind === "daf") return readDaf(toks, k, num, true);
-    return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num, ...(m.v4 && { v4: true }) });
+    // "(דניאל ד', כ"ד)": "ד'" with no numeral after it is the numeral 4, not "דף"
+    if (!num && !(m.width === 1 && m.kind === "daf" && shape(t) === "ד'")) return null;
+    if (num) {
+      if (m.kind === "daf") return readDaf(toks, k, num, true);
+      return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num, ...(m.v4 && { v4: true }), ...(shape(t) === "פ'" && { afterPeh: true }) });
+    }
   }
-  // "מנחות דמ"ג ע"ב", "ברכות די"ז ע"א", "ד"ז ע"א": a ד for "דף" glued to the number, before an amud
+  // "מנחות דמ"ג ע"ב", "ברכות די"ז ע"א", "ד"ז ע"א", "ביומא דנ"ד א'": a ד for "דף" glued to the number, before an amud
+  // (written out, or a lone א/ב)
   const dalet = dafWithDalet(t);
-  if (dalet && amudAt(toks, j + 1)) return readDaf(toks, j, dalet, true);
+  if (dalet && (amudAt(toks, j + 1) || amudLetter(toks, j + 1))) return readDaf(toks, j, dalet, true);
   const num = numeralOf(t);
   if (!num) return null;
   // glued "." / ":" right after a bare numeral (or digits) is an amud (כג. / כג:), unless another
@@ -316,10 +333,10 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
       amud = a[0];
       next += a[1];
     } else {
-      const s = toks[next];
       // "נה א" / "ל"ד א'": a lone א/ב after the daf — an amud for a daf book, a number otherwise
-      if (s?.kind === "word" && !s.gershayim && (s.text === "א" || s.text === "ב") && !numeralOf(toks[next + 1])) {
-        maybeAmud = s.text === "א" ? 1 : 2;
+      const letter = amudLetter(toks, next);
+      if (letter) {
+        maybeAmud = letter;
         next++;
       }
     }
@@ -334,6 +351,13 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
     ...(glued && { amudGlued: true }),
   };
   return { elem, next };
+}
+
+/** a lone א/ב (maybe with a geresh) that ends the numbers: an amud after a daf ("נה א", "ל"ד א'") */
+function amudLetter(toks: readonly Tok[], i: number): 1 | 2 | null {
+  const s = toks[i];
+  if (s?.kind !== "word" || s.gershayim || (s.text !== "א" && s.text !== "ב") || numeralOf(toks[i + 1])) return null;
+  return s.text === "א" ? 1 : 2;
 }
 
 /** ", ע"א" — a comma between a daf and its amud ("ברכות ל"ג, ע"א") */
@@ -364,6 +388,9 @@ function withRange(toks: readonly Tok[], next: number, elem: AddrElem): { elem: 
   }
   return { elem, next };
 }
+
+/** "ע"ב", "עמוד א" alone at toks[i] (an amud with no daf: "ושם ע"ב") → [amud, tokens], or null. */
+export const amudOnlyAt = (toks: readonly Tok[], i: number): [1 | 2, number] | null => amudAt(toks, i);
 
 /** A closing bracket right after the address (it is not part of the anchored span). */
 export const closesAt = (toks: readonly Tok[], i: number): boolean => isPunct(toks[i], CLOSE);
