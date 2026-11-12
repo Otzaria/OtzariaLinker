@@ -24,7 +24,7 @@ import { CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type Engine
  *   - different, non-nested targets for the same position (focus line and anchor, same target book)
  *     from different engines are a CONFLICT: every side drops to "ambiguous", with the others as
  *     alternatives. Ambiguous suggestions are never approved in bulk.
- * Only "certain" is approved in bulk (store.pendingAtLeast("certain")); nothing here changes that.
+ * Only "certain" is approved in bulk (store.suggestions.pendingAtLeast("certain")); nothing here changes that.
  *
  * Single-book engines (citations) say something of another kind: a commentary line on verse 1 that
  * CITES verse 2 is two true links, not a conflict. Their position carries the citation's span, so they

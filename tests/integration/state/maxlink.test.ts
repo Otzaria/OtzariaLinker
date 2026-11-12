@@ -44,7 +44,7 @@ const PAIRS: ReadonlySet<EngineId> = new Set(["headings", "dibur-hamatchil", "fo
 describe("AppStore — max-link", () => {
   it("plans a folder: each book with the engines that fit it and why; books it cannot link, with the reason", async () => {
     const { store, folder } = await opened();
-    const plan = store.planMaxLink({ kind: "source", id: folder.info.id }, PAIRS);
+    const plan = store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS);
     expect(plan.books).toHaveLength(4);
     expect(plan.perEngine).toEqual({ headings: 1, "dibur-hamatchil": 1, footnotes: 1 });
     expect(plan.books.find((b) => b.book.title === "חידושים")!.skipped).toBeTruthy();
@@ -54,8 +54,8 @@ describe("AppStore — max-link", () => {
   it("runs into ONE suggestions run; approve all certain is one undoable action; the report follows", async () => {
     const { store, folder, saved } = await opened();
     const scope = { kind: "source", id: folder.info.id } as const;
-    expect(await store.runMaxLink(store.planMaxLink(scope, PAIRS), store.maxLink.scopeLabel(scope))).toBe(true);
-    const run = store.run.value!;
+    expect(await store.maxLink.run(store.maxLink.plan(scope, PAIRS), store.maxLink.scopeLabel(scope))).toBe(true);
+    const run = store.suggestions.run.value!;
     expect(run.maxlink!.steps).toHaveLength(3);
     const sugs = run.result.suggestions as MergedSuggestion[];
     // footnotes: 3 markers; the commentary: one per verse (headings and dibur-hamatchil agree or stand alone)
@@ -64,16 +64,16 @@ describe("AppStore — max-link", () => {
     const rep = store.maxLink.report.value!;
     expect(rep.overall).toMatchObject({ booksChecked: 4, booksIdentified: 3, steps: 3, links: 23, errors: 0 });
 
-    const certain = store.pendingAtLeast("certain");
+    const certain = store.suggestions.pendingAtLeast("certain");
     expect(certain.length).toBe(rep.overall.certain);
     expect(sugs.filter((s) => certain.includes(s.id)).every((s) => s.confidence === "certain")).toBe(true);
-    expect(store.approveSuggestions(certain)).toBe(certain.length);
+    expect(store.suggestions.approve(certain)).toBe(certain.length);
     expect(store.maxLink.report.value!.overall.approved).toBe(certain.length);
     expect(store.allLinks.value).toHaveLength(certain.length);
     store.undo();
     expect(store.allLinks.value).toHaveLength(0);
     expect(store.maxLink.report.value!.overall.approved).toBe(0);
-    expect(store.suggestionCounts.value.pending).toBe(23);
+    expect(store.suggestions.counts.value.pending).toBe(23);
 
     store.maxLink.saveReport();
     expect(saved.at(-1)!.name).toMatch(/^קישור-מרבי-.*\.csv$/);
@@ -83,31 +83,31 @@ describe("AppStore — max-link", () => {
   it("suggestions the database already has show as 'already exists' (Onkelos on Bereshit)", async () => {
     const { store, key } = await opened();
     const scope = { kind: "book", key: key("תרגום אונקלוס על בראשית") } as const;
-    const plan = store.planMaxLink(scope, PAIRS);
+    const plan = store.maxLink.plan(scope, PAIRS);
     expect(plan.steps.map((s) => s.engine)).toEqual(["headings"]); // a targum: no dibur-hamatchil
-    await store.runMaxLink(plan, "אונקלוס");
+    await store.maxLink.run(plan, "אונקלוס");
     const rep = store.maxLink.report.value!;
     expect(rep.overall.existing).toBeGreaterThan(100);
     expect(rep.overall.existing / rep.overall.links).toBeGreaterThan(0.9);
-    expect(store.run.value!.result.suggestions.filter((s) => s.rules.includes("maxlink/exists-db")).length).toBe(rep.overall.existing);
+    expect(store.suggestions.run.value!.result.suggestions.filter((s) => s.rules.includes("maxlink/exists-db")).length).toBe(rep.overall.existing);
   });
 
   it("a rejection survives a re-run, and a link approved in a single-engine run is 'already exists' here", async () => {
     const { store, folder, key } = await opened();
     const scope = { kind: "source", id: folder.info.id } as const;
-    await store.runEngine("headings", key("ביאור על בראשית"), key("בראשית"));
-    const firstHeadings = store.pendingAtLeast("certain")[0]!;
-    expect(store.approveSuggestions([firstHeadings])).toBe(1);
+    await store.suggestions.runEngine("headings", key("ביאור על בראשית"), key("בראשית"));
+    const firstHeadings = store.suggestions.pendingAtLeast("certain")[0]!;
+    expect(store.suggestions.approve([firstHeadings])).toBe(1);
 
-    await store.runMaxLink(store.planMaxLink(scope, PAIRS), "תיקייה");
-    expect(store.suggestionCounts.value.exists).toBe(1); // not approvable a second time
-    const pending = new Set(store.pendingAtLeast("certain"));
-    const sugs = store.run.value!.result.suggestions as MergedSuggestion[];
+    await store.maxLink.run(store.maxLink.plan(scope, PAIRS), "תיקייה");
+    expect(store.suggestions.counts.value.exists).toBe(1); // not approvable a second time
+    const pending = new Set(store.suggestions.pendingAtLeast("certain"));
+    const sugs = store.suggestions.run.value!.result.suggestions as MergedSuggestion[];
     // one that both engines agreed on and whose record is dibur-hamatchil's: the re-run below has only headings
     const victim = sugs.find((s) => pending.has(s.id) && s.engines.length === 2 && s.engine === "dibur-hamatchil")?.id ?? sugs.find((s) => pending.has(s.id) && s.engines.includes("headings"))!.id;
-    store.rejectSuggestions([victim]);
-    await store.runMaxLink(store.planMaxLink(scope, new Set(["headings"])), "תיקייה, רק כותרות");
-    expect(store.suggestionCounts.value.rejected).toBe(1);
-    expect(store.run.value!.result.suggestions.find((s) => s.id === victim)).toBeTruthy(); // the same id without dibur-hamatchil
+    store.suggestions.reject([victim]);
+    await store.maxLink.run(store.maxLink.plan(scope, new Set(["headings"])), "תיקייה, רק כותרות");
+    expect(store.suggestions.counts.value.rejected).toBe(1);
+    expect(store.suggestions.run.value!.result.suggestions.find((s) => s.id === victim)).toBeTruthy(); // the same id without dibur-hamatchil
   });
 });

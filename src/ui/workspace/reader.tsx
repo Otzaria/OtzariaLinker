@@ -264,9 +264,9 @@ function useLineMarks(side: Side, bookKey: string): Marks {
   });
   const suggested = useComputed(() => {
     const m = new Map<number, Confidence>();
-    const run = store.run.value;
+    const run = store.suggestions.run.value;
     if (!run) return m;
-    const st = store.suggestionState.value;
+    const st = store.suggestions.state.value;
     for (const sg of run.result.suggestions) {
       if (st.get(sg.id) !== "pending") continue;
       const end = sg.source.book.key === bookKey ? sg.source : sg.target.book.key === bookKey ? sg.target : null;

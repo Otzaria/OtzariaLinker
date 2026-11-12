@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
-import type { ExportBundle } from "../../state/store";
+import type { ExportBundle } from "../../state/exchange";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { DbCopyFiles } from "./db-copy-files";
@@ -20,7 +20,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [csv, setCsv] = useState<SefariaCsvFile[] | null>(null);
   const advanced = store.prefs.advanced.value;
 
-  const replan = () => void store.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
+  const replan = () => void store.exchange.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
   useEffect(() => {
     ref.current?.showModal();
     replan();
@@ -28,7 +28,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     if (format !== "sefaria-csv" || !plan || csv) return;
-    void store.prepareSefariaCsv(plan).then((f) => (f ? setCsv(f) : setFormat("json")));
+    void store.exchange.prepareSefariaCsv(plan).then((f) => (f ? setCsv(f) : setFormat("json")));
   }, [format, plan]);
 
   const c = plan?.counts;
@@ -182,7 +182,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
         <footer>
-          <button class="btn text" style="margin-inline-end:auto" disabled={!plan || (asCsv && !csv)} onClick={() => plan && store.saveReport(plan, asCsv ? csv ?? undefined : undefined)} title="סיכום בטקסט: כמה נכתב, לאן כל קובץ הולך, מה לא ייוצא ולמה. הוא נכלל גם בכל ZIP">
+          <button class="btn text" style="margin-inline-end:auto" disabled={!plan || (asCsv && !csv)} onClick={() => plan && store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)} title="סיכום בטקסט: כמה נכתב, לאן כל קובץ הולך, מה לא ייוצא ולמה. הוא נכלל גם בכל ZIP">
             הורדת הדוח (_report.txt)
           </button>
           <button class="btn text" onClick={() => ref.current?.close()}>סגירה</button>
@@ -190,7 +190,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             class="btn filled"
             disabled={!plan || outputs === 0 || (asCsv && !csv)}
             onClick={() => {
-              if (plan) store.saveExport(plan, asCsv ? csv ?? undefined : undefined);
+              if (plan) store.exchange.saveExport(plan, asCsv ? csv ?? undefined : undefined);
               ref.current?.close();
             }}
           >

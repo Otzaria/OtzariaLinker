@@ -37,10 +37,10 @@ describe("A4: a book title never becomes a path outside the export folder", () =
     const real = JSON.parse(store.projectText());
     const project = { ...real, links: [link("../../../.github/workflows/x", 1), link("..\\..\\Startup\\y", 2), link("א", 3), link("ג", 4)] };
     store.openProject("p.json", JSON.stringify(project));
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.heldBack.map((h) => h.link.source.book.title).sort()).toEqual(["../../../.github/workflows/x", "..\\..\\Startup\\y"].sort());
     expect(plan.heldBack.every((h) => h.problems.some((p) => p.code === "export/unsafe-title"))).toBe(true);
-    store.saveExport(plan);
+    store.exchange.saveExport(plan);
     const zip = saved.find((s) => s.name.endsWith(".zip"))!;
     expect(Object.keys(unzipSync(zip.data as Uint8Array)).sort()).toEqual(["_report.txt", "links/א_links.json", "links/ג_links.json"]);
   });

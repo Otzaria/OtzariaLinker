@@ -31,9 +31,9 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
   const books = store.books.value;
 
-  const full = useMemo(() => (scope ? store.planMaxLink(scope) : null), [kind, current, sourceId, books]);
+  const full = useMemo(() => (scope ? store.maxLink.plan(scope) : null), [kind, current, sourceId, books]);
   const enabled = useMemo(() => new Set((Object.keys(full?.perEngine ?? {}) as EngineId[]).filter((e) => !off.has(e))), [full, off]);
-  const plan = useMemo(() => (scope && full ? (off.size ? store.planMaxLink(scope, enabled) : full) : null), [full, enabled]);
+  const plan = useMemo(() => (scope && full ? (off.size ? store.maxLink.plan(scope, enabled) : full) : null), [full, enabled]);
   const engines = ENGINES.filter((e) => full?.perEngine[e.id]);
   const skipped = plan?.books.filter((b) => b.skipped).length ?? 0;
   const advanced = store.prefs.advanced.value;
@@ -50,7 +50,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
     if (!plan || !scope) return;
     const engineOptions: Partial<Record<EngineId, Record<string, unknown>>> = {};
     for (const [e, c] of checks) if (Object.keys(c.options).length) engineOptions[e] = c.options;
-    if (await store.runMaxLink(plan, store.maxLink.scopeLabel(scope), { engineOptions })) onDone();
+    if (await store.maxLink.run(plan, store.maxLink.scopeLabel(scope), { engineOptions })) onDone();
   };
 
   return (
@@ -176,7 +176,7 @@ const TILES: readonly [keyof ReportCounts | "booksChecked" | "booksIdentified", 
 export function MaxLinkReportView() {
   const store = useStore();
   const rep = store.maxLink.report.value;
-  const info = store.run.value?.maxlink;
+  const info = store.suggestions.run.value?.maxlink;
   if (!rep || !info) return null;
   const o = rep.overall;
   return (

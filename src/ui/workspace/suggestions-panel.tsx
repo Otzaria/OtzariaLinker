@@ -4,7 +4,7 @@ import { stripTags } from "../../core/text/html";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import type { SuggestionsView } from "../../state/preferences";
-import type { SuggestionState } from "../../state/store";
+import type { SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
@@ -23,10 +23,10 @@ const VIEW_LABEL: Record<SuggestionsView, string> = { table: "טבלה", inline:
 
 export function SuggestionsPanel() {
   const store = useStore();
-  const run = store.run.value;
+  const run = store.suggestions.run.value;
   const [setup, setSetup] = useState(false);
   if (!run || setup) return <RunForm onDone={() => setSetup(false)} onCancel={run ? () => setSetup(false) : undefined} />;
-  const c = store.suggestionCounts.value;
+  const c = store.suggestions.counts.value;
   const view = store.prefs.suggestionsView.value;
   const engine = ENGINES.find((e) => e.id === run.engine);
   return (
@@ -97,7 +97,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
 
   const start = async () => {
     const options = check.options;
-    const ok = single ? await store.runCitations(s!, options) : mode === "pair" ? await store.runEngine(engine, s!, t!, options) : await store.runBatch(engine, batchSource, options);
+    const ok = single ? await store.suggestions.runCitations(s!, options) : mode === "pair" ? await store.suggestions.runEngine(engine, s!, t!, options) : await store.suggestions.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
   return (
@@ -190,7 +190,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
 
 function BatchSummary() {
   const store = useStore();
-  const rows = store.run.value?.batch;
+  const rows = store.suggestions.run.value?.batch;
   if (!rows) return null;
   return (
     <details class="held" style="margin:0 6px 6px">
@@ -221,9 +221,9 @@ const PAGE = 300;
 
 function TableView() {
   const store = useStore();
-  const run = store.run.value!;
-  const st = store.suggestionState.value;
-  const c = store.suggestionCounts.value;
+  const run = store.suggestions.run.value!;
+  const st = store.suggestions.state.value;
+  const c = store.suggestions.counts.value;
   const [conf, setConf] = useState<Confidence | "all">("all");
   const [state, setState] = useState<SuggestionState | "all">("pending");
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
@@ -233,7 +233,7 @@ function TableView() {
     [run, conf, state, st],
   );
   useEffect(() => setSel(new Set()), [conf, state, run]);
-  const certain = c.pending ? store.pendingAtLeast("certain").length : 0;
+  const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
 
   return (
     <>
@@ -256,14 +256,14 @@ function TableView() {
         )}
       </div>
       <div class="row bulk">
-        <button class="btn filled" disabled={!certain} onClick={() => store.approveSuggestions(store.pendingAtLeast("certain"))} title="מאשר רק הצעות שהמנוע בטוח בהן לגמרי">
+        <button class="btn filled" disabled={!certain} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title="מאשר רק הצעות שהמנוע בטוח בהן לגמרי">
           <Icon name="oz_link_check" size={18} />
           אישור כל הוודאיות ({certain.toLocaleString("he")})
         </button>
         {sel.size > 0 && (
           <>
-            <button class="btn tonal" onClick={() => (store.approveSuggestions([...sel]), setSel(new Set()))}>אישור {sel.size}</button>
-            <button class="btn text danger" onClick={() => (store.rejectSuggestions([...sel]), setSel(new Set()))}>דחייה</button>
+            <button class="btn tonal" onClick={() => (store.suggestions.approve([...sel]), setSel(new Set()))}>אישור {sel.size}</button>
+            <button class="btn text danger" onClick={() => (store.suggestions.reject([...sel]), setSel(new Set()))}>דחייה</button>
           </>
         )}
       </div>
@@ -302,14 +302,14 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
     <tr
       class={`st-${state}`}
       tabIndex={0}
-      onClick={() => store.showSuggestion(s.id)}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.showSuggestion(s.id))}
+      onClick={() => store.suggestions.show(s.id)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.suggestions.show(s.id))}
       title={s.reasons.map((r) => r.text).join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
         <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${s.source.line + 1}: ${s.heRef2}`} />
       </td>
-      <td>{(store.run.value?.batch || store.run.value?.maxlink) && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
+      <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
       <td>{s.heRef2}</td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
@@ -327,10 +327,10 @@ function Decide({ s, state }: { s: Suggestion; state: SuggestionState }) {
   if (state === "exists") return <span class="muted">{STATE_LABEL.exists}</span>;
   return (
     <span class="decide">
-      <button class="icon-btn" aria-pressed={state === "approved"} onClick={() => (state === "approved" ? store.rejectSuggestions([s.id]) : store.approveSuggestions([s.id]))} title="אישור" aria-label="אישור">
+      <button class="icon-btn" aria-pressed={state === "approved"} onClick={() => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id]))} title="אישור" aria-label="אישור">
         <Icon name="oz_check" size={18} />
       </button>
-      <button class="icon-btn" aria-pressed={state === "rejected"} onClick={() => (state === "rejected" ? store.resetSuggestions([s.id]) : store.rejectSuggestions([s.id]))} title="דחייה" aria-label="דחייה">
+      <button class="icon-btn" aria-pressed={state === "rejected"} onClick={() => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id]))} title="דחייה" aria-label="דחייה">
         <Icon name="oz_cross" size={18} />
       </button>
     </span>
@@ -341,27 +341,27 @@ function Decide({ s, state }: { s: Suggestion; state: SuggestionState }) {
 
 function StepView({ card }: { card: boolean }) {
   const store = useStore();
-  const run = store.run.value!;
-  const st = store.suggestionState.value;
+  const run = store.suggestions.run.value!;
+  const st = store.suggestions.state.value;
   const list = run.result.suggestions;
-  const curId = store.currentSuggestion.value;
+  const curId = store.suggestions.current.value;
   const idx = Math.max(0, list.findIndex((s) => s.id === curId));
   const s = list[idx];
 
   const go = (dir: 1 | -1, pendingOnly = false) => {
     for (let i = idx + dir; i >= 0 && i < list.length; i += dir)
-      if (!pendingOnly || st.get(list[i]!.id) === "pending") return store.showSuggestion(list[i]!.id);
+      if (!pendingOnly || st.get(list[i]!.id) === "pending") return store.suggestions.show(list[i]!.id);
   };
   useEffect(() => {
-    if (s) store.showSuggestion(s.id);
+    if (s) store.suggestions.show(s.id);
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // keys act only when no control has focus: Enter on a focused button must press THAT button (UX review #1)
       if ((e.target as HTMLElement).closest?.("input, textarea, select, button, a, [role=tab], [contenteditable]") || e.ctrlKey || e.metaKey || e.altKey || !s) return;
       const k = e.key.toLowerCase();
-      if (k === "a" || k === "ש") (e.preventDefault(), store.approveSuggestions([s.id]), go(1, true));
-      else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.rejectSuggestions([s.id]), go(1, true));
+      if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
+      else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
       else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
       else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
     };
@@ -413,11 +413,11 @@ function StepView({ card }: { card: boolean }) {
         </details>
       )}
       <div class="row">
-        <button class="btn filled" onClick={() => (store.approveSuggestions([s.id]), go(1, true))} disabled={state === "approved" || state === "exists"}>
+        <button class="btn filled" onClick={() => (store.suggestions.approve([s.id]), go(1, true))} disabled={state === "approved" || state === "exists"}>
           <Icon name="oz_check" size={18} />
           אישור <kbd>A</kbd>
         </button>
-        <button class="btn outlined" onClick={() => (store.rejectSuggestions([s.id]), go(1, true))} disabled={state === "rejected"}>
+        <button class="btn outlined" onClick={() => (store.suggestions.reject([s.id]), go(1, true))} disabled={state === "rejected"}>
           <Icon name="oz_cross" size={18} />
           דחייה <kbd>R</kbd>
         </button>

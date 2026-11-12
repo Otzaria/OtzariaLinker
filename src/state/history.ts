@@ -145,7 +145,7 @@ export function fileChange(s: LinkState, title: string, after: LibraryFile | nul
 /**
  * A fingerprint of a file's text: 53-bit cyrb53 over UTF-16 code units, as hex, with the length.
  * Not a security hash — it only recognises the same file when it is loaded again; trust comes from
- * comparing the records themselves (store.importLinksFile).
+ * comparing the records themselves (store.exchange.importLinksFile).
  */
 export function fileFingerprint(text: string): string {
   let h1 = 0xdeadbeef;

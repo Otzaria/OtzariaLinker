@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BookRef, LinkSide } from "../../../src/core/links/model";
 import type { Confidence, EngineId, Suggestion } from "../../../src/linking/automatic";
 import { mergeSuggestions } from "../../../src/linking/merge";
-import { rejectionKey, rejectionKeys } from "../../../src/state/store";
+import { rejectionKey, rejectionKeys } from "../../../src/state/suggestions";
 
 const C: BookRef = { key: "s2:1", title: "ביאור על בראשית", origin: "otzaria" };
 const B: BookRef = { key: "s1:1", title: "בראשית", origin: "otzaria" };

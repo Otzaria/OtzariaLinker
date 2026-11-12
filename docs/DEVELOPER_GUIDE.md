@@ -41,7 +41,7 @@ WASM או CSP מופיעות רק בקובץ הבנוי. לכן בודקים א�
 | איך אוצריא תשמור קישור | `src/core/links/stored-form.ts`, `connection-type.ts`, `titles.ts` |
 | קריאה ממסד | `src/database/otzaria/reader.ts`, `links-reader.ts`; מסד במבנה אחר: `src/database/generic/`, `src/core/db-mapping.ts`; עמודי SQLite ב־`src/database/sqlite/lazy/` |
 | זיהוי קבצים | `src/sources/detect.ts`, `src/sources/registry.ts` |
-| פעולת משתמש | מתודה ב־`AppStore` (`src/state/store.ts`), שקוראת ל־`apply()` |
+| פעולת משתמש | מתודה ב־`AppStore` (`src/state/store.ts`), שקוראת ל־`apply()`, או במודול שה־store חושף: הצעות `src/state/suggestions.ts`, ייבוא וייצוא `exchange.ts`, בדיקת איכות `quality.ts`, וגם `maxlink.ts`, `db-links.ts`, `alt-toc.ts`, `ranges.ts`. מודול כזה מקבל ממשק `Host` צר ומשנה קישורים רק דרך `history.commit` |
 | מסך או פאנל | `src/ui/workspace/`, `src/ui/screens/`, `src/ui/dialogs/` |
 | הגדרה או פריסה | `src/state/preferences.ts`, ותפריט בסרגל העליון (`src/ui/shell/app-bar.tsx`) |
 | צבעים ומידות | `src/ui/theme/tokens.css` (טוקנים בלבד), `app.css` |
@@ -57,11 +57,11 @@ __linker.sources.value                       // המקורות הפתוחים ו
 __linker.allLinks.value                      // כל הקישורים בפרויקט
 __linker.linkState.value.undo.map(c => c.label)   // ההיסטוריה
 __linker.draftProblems.value                 // למה הבונה לא מאפשר ליצור
-__linker.run.value?.result.notes             // ההערות של ריצת המנוע האחרונה
+__linker.suggestions.run.value?.result.notes // ההערות של ריצת המנוע האחרונה
 __linker.prefs.layout.value                  // הפריסה
 ```
 
-אפשר גם לקרוא למתודות (`__linker.undo()`, `__linker.runQualityCheck()`), כמו שהממשק עושה.
+אפשר גם לקרוא למתודות (`__linker.undo()`, `__linker.quality.run()`, `__linker.exchange.prepareExport()`), כמו שהממשק עושה.
 
 **האם ה־Worker עלה?** בהפעלה, `main.tsx` שולח `ping` ל־Worker ושם את התשובה ב־`<html data-engine>`:
 `SQLite 3.x · בדיקת zstd` כשהכול תקין, או `שגיאה: …`. אם אין ערך כלל, ה־Worker לא עלה. זה גם מה
@@ -148,7 +148,7 @@ __linker.prefs.layout.value                  // הפריסה
 2. זיהוי לפי תוכן ב־`src/sources/detect.ts` (`DetectedKind`), עם בדיקה ב־`tests/unit/sources/detect.test.ts`.
 3. ניתוב ב־`SourceRegistry.route`. מסמך טקסט חוזר ב־`OpenResult.documents`; עדכנו את הטיפוס גם
    ב־`src/state/services.ts`.
-4. ייבוא ב־`AppStore.openFiles`, כפעולה אחת דרך `apply()`.
+4. ניתוב ב־`AppStore.openFiles` אל `ExchangeState` (`src/state/exchange.ts`), והייבוא שם כפעולה אחת דרך `history.commit`.
 
 ### 5.3 פורמט ייצוא
 

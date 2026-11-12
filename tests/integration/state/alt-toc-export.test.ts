@@ -48,9 +48,9 @@ describe("AppStore — alt_toc", () => {
     store.pickLine("target", book.key, 2);
     store.createFromDraft();
 
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.altToc.files.map((f) => f.name)).toEqual(["חומש שלי_alt_toc.json"]);
-    store.saveExport(plan);
+    store.exchange.saveExport(plan);
     expect(saved).toHaveLength(1);
     expect(saved[0]!.name).toMatch(/^links-\d{4}-\d\d-\d\d\.zip$/);
     const files = unzip(saved[0]!.data);
@@ -74,10 +74,10 @@ describe("AppStore — alt_toc", () => {
     const { store, saved } = makeStore();
     await store.openFiles([BOOK]);
     store.altToc.set("חומש שלי", [{ key: "Parasha", heTitle: "פרשה", entries: [{ heTitle: "א", line: 2, level: 0 }, { heTitle: "ב", line: 500, level: 0 }] }]);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.altToc.files).toEqual([]);
     expect(plan.altToc.heldBack[0]!.problems.map((p) => p.code)).toEqual(["alt-toc/line-out-of-range"]);
-    store.saveReport(plan);
+    store.exchange.saveReport(plan);
     expect(saved[0]!.name).toBe("_report.txt");
     expect(saved[0]!.data).toContain("מבני כותרות שלא ייוצאו (1)");
   });
@@ -87,8 +87,8 @@ describe("AppStore — alt_toc", () => {
     const text = JSON.stringify([{ key: "Parasha", heTitle: "פרשה", nodes: [{ heTitle: "פרשה א", line: 2 }] }], null, 2);
     await store.openFiles([BOOK, { path: "alt_toc/חומש שלי_alt_toc.json", blob: new Blob([text]) }]);
     expect(store.altToc.of("חומש שלי")).toMatchObject({ origin: "file", structures: [{ key: "Parasha" }] });
-    const plan = (await store.prepareExport())!;
-    store.saveExport(plan);
+    const plan = (await store.exchange.prepareExport())!;
+    store.exchange.saveExport(plan);
     expect(saved).toEqual([{ name: "חומש שלי_alt_toc.json", data: text, mime: "application/json" }]); // untouched → same bytes
   });
 
@@ -108,8 +108,8 @@ describe("AppStore — alt_toc", () => {
     const { store, saved } = makeStore();
     await store.openFiles([BOOK]);
     store.altToc.set("חומש שלי", [], { origin: "db" });
-    const plan = (await store.prepareExport())!;
-    store.saveExport(plan);
+    const plan = (await store.exchange.prepareExport())!;
+    store.exchange.saveExport(plan);
     expect(saved[0]).toMatchObject({ name: "חומש שלי_alt_toc.json", data: "[]" });
   });
 
@@ -147,11 +147,11 @@ describe("AppStore — Sefaria-layout CSV export", () => {
     store.pickLine("target", book.key, 2);
     store.draftHeRef.value = "חומש שלי, פרשה א, 1";
     store.createFromDraft();
-    const plan = (await store.prepareExport())!;
-    const csv = (await store.prepareSefariaCsv(plan))!;
+    const plan = (await store.exchange.prepareExport())!;
+    const csv = (await store.exchange.prepareSefariaCsv(plan))!;
     expect(csv.map((f) => f.name)).toEqual(["פירוש על חומש שלי.links.csv"]);
     expect(csv[0]!.text).toBe(["Citation 1,Citation 2,Conection Type", '"פירוש על חומש שלי, פרשה א","חומש שלי, פרשה א, 1",source'].join(NL));
-    store.saveExport(plan, csv);
+    store.exchange.saveExport(plan, csv);
     expect(saved).toEqual([{ name: "פירוש על חומש שלי.links.csv", data: csv[0]!.text, mime: "text/csv;charset=utf-8" }]);
   });
 });

@@ -85,15 +85,15 @@ describe("database links in the links tab", () => {
     expect(await store.dbLinks.adopt([dbl])).toBe(0);
 
     // the book's links file is not in the project: held back, with the reason
-    let plan = (await store.prepareExport())!;
+    let plan = (await store.exchange.prepareExport())!;
     expect(plan.files).toEqual([]);
     expect(plan.heldBack[0]!.problems.map((p) => p.code)).toContain("export/db-copy-no-file");
 
     // the user confirms the library has no file for the book: a new file is written
     store.dbLinks.confirmNewFile("ארצות החיים");
-    plan = (await store.prepareExport())!;
+    plan = (await store.exchange.prepareExport())!;
     expect(plan.files.map((f) => [f.name, f.isNewFile])).toEqual([["ארצות החיים_links.json", true]]);
-    store.saveExport(plan);
+    store.exchange.saveExport(plan);
     const rec = JSON.parse(saved[0]!.data as string)[0];
     const { heRef_2: _h, ...same } = LIBRARY_RECORD;
     expect(rec).toMatchObject(same);
@@ -113,7 +113,7 @@ describe("database links in the links tab", () => {
     const unrelated = { path: "pninimToOtzaria/links/אחר_links.json", blob: new Blob(["[]"]) };
     expect(await store.dbLinks.loadLinksFiles([unrelated, file], ["ארצות החיים"])).toEqual(["ארצות החיים"]);
     expect(store.allLinks.value.map((l) => l.provenance).sort()).toEqual(["file", "file"]);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.heldBack).toEqual([]);
     expect(plan.files.map((f) => [f.name, f.isNewFile, f.records])).toEqual([["ארצות החיים_links.json", false, 2]]);
   });
@@ -125,7 +125,7 @@ describe("database links in the links tab", () => {
     store.draftType.value = "commentary";
     store.draftTypeTouched.value = true;
     expect(store.createFromDraft()).not.toBeNull();
-    const report = (await store.runQualityCheck())!;
+    const report = (await store.quality.run())!;
     const inDb = report.issues.filter((i) => i.category === "in-db");
     expect(inDb.map((i) => i.problem.code)).toEqual(["export/in-db"]);
     // the same rule decides "already exists" in the builder's live check

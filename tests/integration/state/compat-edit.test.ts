@@ -25,7 +25,7 @@ describe("editing a record the weekly sync enriched (B2)", () => {
   it("moving the source line drops ref_1, anchor_src_hash and anchor_context, and says so", async () => {
     const store = storeWith();
     await store.openFiles([{ path: "db", blob: new Blob([]) }]);
-    store.importLinksFile("משנה ברורה_links.json", JSON.stringify([SYNCED]));
+    store.exchange.importLinksFile("משנה ברורה_links.json", JSON.stringify([SYNCED]));
     const l = store.allLinks.value[0]!;
     store.editInBuilder(l.id);
     expect(store.draft.value!.passthrough).toMatchObject({ anchor_src_hash: "sha256:abc" });

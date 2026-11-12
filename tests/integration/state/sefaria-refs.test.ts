@@ -44,13 +44,13 @@ describe("ref_2 into a Sefaria book (B1)", () => {
     const { store, saved, bereshit, verse, sheet } = await opened();
     expect(verse).toBeGreaterThanOrEqual(0);
     expect(store.isSefariaOwned({ title: "בראשית" })).toBe(true);
-    store.importLinksCsv("ביאור חדש על בראשית_links.csv", sheet(verse));
-    const plan = (await store.prepareExport())!;
+    store.exchange.importLinksCsv("ביאור חדש על בראשית_links.csv", sheet(verse));
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.heldBack).toEqual([]);
     const heRef = store.lines.peek(bereshit.key, verse)!.heRef!;
     const expected = `Genesis 1:${["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"].indexOf(heRef.split(", ")[2]!) + 1}`;
     expect(store.allLinks.value[0]!.ref2).toBe(expected);
-    store.saveExport(plan);
+    store.exchange.saveExport(plan);
     expect(JSON.parse(saved[0]!.data as string)[0].ref_2).toBe(expected);
     store.undo(); // the filled ref is its own action
     expect(store.allLinks.value[0]!.ref2).toBeUndefined();
@@ -63,11 +63,11 @@ describe("ref_2 into a Sefaria book (B1)", () => {
     expect(store.isSefariaOwned(rashi)).toBe(true);
     await store.lines.load(rashi.key, 0, 10);
     const line = [...Array(10).keys()].find((i) => store.lines.peek(rashi.key, i)?.heRef && store.lines.peek(rashi.key, i)?.heading === null)!;
-    store.importLinksCsv("ביאור חדש על בראשית_links.csv", `line_index_1,heRef_2,path_2,line_index_2,Conection Type\n2,ב,"${rashi.title.replaceAll('"', '""')}.txt",${line + 1},reference\n`);
-    let plan = (await store.prepareExport())!;
+    store.exchange.importLinksCsv("ביאור חדש על בראשית_links.csv", `line_index_1,heRef_2,path_2,line_index_2,Conection Type\n2,ב,"${rashi.title.replaceAll('"', '""')}.txt",${line + 1},reference\n`);
+    let plan = (await store.exchange.prepareExport())!;
     expect(plan.heldBack.flatMap((h) => h.problems.map((p) => p.code))).toContain("sefaria/ref2-required");
     store.exportPurpose.value = "private";
-    plan = (await store.prepareExport())!;
+    plan = (await store.exchange.prepareExport())!;
     expect(plan.heldBack).toEqual([]);
     expect(plan.warned.flatMap((w) => w.problems.map((p) => `${p.severity}:${p.code}`))).toContain("warning:sefaria/ref2-required");
   });

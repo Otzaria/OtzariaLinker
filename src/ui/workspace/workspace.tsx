@@ -134,11 +134,11 @@ function SidePanel() {
         </button>
         <button role="tab" aria-selected={current === "suggestions"} onClick={() => (store.sideTab.value = "suggestions")}>
           <Icon name="oz_link_search" size={16} />
-          הצעות {store.run.value && <span class="count">{store.suggestionCounts.value.pending.toLocaleString("he")}</span>}
+          הצעות {store.suggestions.run.value && <span class="count">{store.suggestions.counts.value.pending.toLocaleString("he")}</span>}
         </button>
         <button role="tab" aria-selected={current === "qa"} onClick={() => (store.sideTab.value = "qa")}>
           <Icon name="oz_link_check" size={16} />
-          בדיקה {store.qa.value && store.qa.value.bySeverity.error > 0 && <span class="count">{store.qa.value.bySeverity.error.toLocaleString("he")}</span>}
+          בדיקה {store.quality.report.value && store.quality.report.value.bySeverity.error > 0 && <span class="count">{store.quality.report.value.bySeverity.error.toLocaleString("he")}</span>}
         </button>
         <span class="grow" />
         <HideButton id="side" label="החלונית" />

@@ -10,6 +10,7 @@ import { sourceTitleFromLinksFileName } from "../core/links/titles";
 import { addChanges, commit, deleteChange, linksCount, type Change, type LinkState } from "./history";
 import { CHUNK, type LineStore } from "./lines";
 import type { BooksService, CallOptions, InputFile } from "./services";
+import type { ExchangeState } from "./exchange";
 import type { NoticeKind, Pick, Side } from "./store";
 
 /*
@@ -28,7 +29,8 @@ export interface DbLinksHost {
   readonly view: Record<Side, Signal<string | null>>;
   readonly pick: Record<Side, Signal<Pick | null>>;
   bookOf(ref: BookRef): SourceBook | undefined;
-  importLinksFile(path: string, text: string): void;
+  /** a library links file found in the picked files is imported like any other (state/exchange.ts) */
+  readonly exchange: { importLinksFile: ExchangeState["importLinksFile"] };
   loadSefariaTitles(path: string, text: string): boolean;
   isSefariaOwned(book: { readonly title: string }): boolean;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
@@ -272,7 +274,7 @@ export class DbLinksState {
     for (const f of files) {
       const title = sourceTitleFromLinksFileName(f.path.split(/[\\/]/).at(-1) ?? f.path);
       if (!title || !want.has(title) || found.includes(title)) continue;
-      this.host.importLinksFile(f.path, await f.blob.text());
+      this.host.exchange.importLinksFile(f.path, await f.blob.text());
       found.push(title);
     }
     if (found.length) this.dropCopiesFoundInFiles();
