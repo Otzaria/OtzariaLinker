@@ -51,6 +51,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "select", key: "anchors", label: "עוגן על מילות הד\"ה בבסיס", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
     { kind: "select", key: "targetStartsWithDh", label: "שורות ספר הבסיס פותחות בד\"ה משלהן", default: "", choices: [["", "זיהוי אוטומטי"], ["yes", "כן (פירוש על פירוש)"], ["no", "לא"]] },
     { kind: "boolean", key: "ladder", label: "הרחבת החיפוש בהדרגה לד\"ה מסומן", default: true },
+    { kind: "boolean", key: "ladderWide", label: "חיפוש גם בקטעים הסמוכים בספר הבסיס", default: false, hint: "במדידה על ספרים אמיתיים התאמות שנמצאו רק בקטע סמוך היו שגויות ברוב המקרים." },
     { kind: "boolean", key: "inherit", label: "שורות בא\"ד / שם יורשות את מקום השורה הקודמת", default: true },
     ...THRESHOLDS,
   ],

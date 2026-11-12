@@ -53,6 +53,12 @@ export interface DhOptions {
   readonly singleWordMaxOpeningRatio?: number;
   /** relax the search step by step for a line that marks its ד"ה explicitly (default true) */
   readonly ladder?: boolean;
+  /**
+   * also search the neighbouring sections (rungs C and D of the ladder). Default false: measured on
+   * 51 commentary–base pairs of the real database (REAL_DATA_REPORT.md §7), a ד"ה found only outside
+   * its own section was right 154 times in 797, and never in the held-out sample.
+   */
+  readonly ladderWide?: boolean;
   /** בא"ד / שם lines take the previous line's place (default true) */
   readonly inherit?: boolean;
 }
@@ -149,6 +155,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const thresholds = options.thresholds ?? DEFAULT_THRESHOLDS;
   const maxRatio = options.singleWordMaxOpeningRatio ?? 0.008;
   const useLadder = options.ladder !== false;
+  const ladderWide = options.ladderWide === true;
   const inherit = options.inherit !== false;
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto");
   const notes: Reason[] = [policy.reason];
@@ -492,7 +499,8 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       const B: SearchSpec = { ...A, useIdf: false };
       const D: SearchSpec = { ...B, multiplier: 0.4 };
       const wide = widen(window, base);
-      for (const [rg, spec, win] of [["A", A, window], ["B", B, window], ["C", B, wide], ["D", D, wide]] as const) {
+      const rungs = [["A", A, window], ["B", B, window], ["C", B, wide], ["D", D, wide]] as const;
+      for (const [rg, spec, win] of ladderWide ? rungs : rungs.slice(0, 2)) {
         cands = searchPass(ex, win, prevIn, spec, runs, startsCache);
         if (cands.length) {
           rung = rg;
@@ -520,6 +528,12 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const alternatives = rivals.map((c) => ({ line: c.line, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit, rung }) }));
     alternatives.sort((a, b) => b.score - a.score);
     const confidence = confidenceOf(score, alternatives[0]?.score ?? null, thresholds);
+    // A weak match BEFORE the previous line's place is mostly wrong: the commentary moves forward, and
+    // a weak backward hit is usually an earlier occurrence of common words. Measured (51 real pairs):
+    // "possible"/"ambiguous" backward matches were right 212 times in 1,080. Strong ones stay
+    // (certain 112/122), with their "dh/backward" warning.
+    if (prevIn !== null && win.line < prevIn && (confidence === "possible" || confidence === "ambiguous"))
+      return [r("dh/backward-weak", `נמצאה התאמה חלשה רק לפני המקום של השורה הקודמת (שורה ${win.line + 1} בספר הבסיס, והקודמת בשורה ${prevIn + 1}); התאמה כזו שגויה ברוב המקרים, ולכן לא הוצעה`)];
 
     const reasons: Reason[] = [BOUNDARY_REASON[ex.boundary]!];
     const rules = [`dh/extract-${ex.boundary}`, `dh/window-${window.kind}`];
