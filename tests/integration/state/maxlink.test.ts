@@ -134,6 +134,16 @@ describe("AppStore — max-link pairs by the database's existing links (plan.ts 
     expect(pairs(store.maxLink.plan({ kind: "book", key: mb }, PAIRS))).toContain("headings:שער הציון>משנה ברורה");
   });
 
+  it("counts what is left to read, and reads a book once", async () => {
+    const { store, key } = await opened();
+    const sz = { kind: "book", key: key("שער הציון") } as const;
+    expect(store.maxLink.evidencePending(sz)).toHaveLength(1);
+    await store.maxLink.gatherEvidence(sz);
+    expect(store.maxLink.evidencePending(sz)).toHaveLength(0);
+    expect(store.maxLink.checkedCount.value).toBe(1);
+    expect(store.maxLink.evidencePending({ kind: "all" }).length).toBeGreaterThan(0); // the database's other books
+  });
+
   it("text files have no database links: nothing is read, the plan is unchanged", async () => {
     const { store, folder } = await opened();
     const before = store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS).steps.length;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { ENGINES, type EngineId } from "../../linking/automatic";
 import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
-import { EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
+import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { EngineOptions } from "./engine-options";
@@ -35,8 +35,11 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const books = store.books.value;
 
   // the database's own links pair commentaries the titles do not (linking/plan.ts); read before planning
+  // (by itself for a few books; a whole database waits for a click — it reads every selected book's links)
+  const checkedCount = store.maxLink.checkedCount.value;
+  const pending = useMemo(() => (scope ? store.maxLink.evidencePending(scope).length : 0), [kind, current, sourceId, books, checkedCount]);
   useEffect(() => {
-    if (scope) void store.maxLink.gatherEvidence(scope);
+    if (scope && pending > 0 && pending <= AUTO_EVIDENCE_BOOKS) void store.maxLink.gatherEvidence(scope);
   }, [kind, current, sourceId, books]);
   const evidence = store.maxLink.evidence.value;
   const unchecked = store.maxLink.unchecked.value;
@@ -96,9 +99,12 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
             {plan.books.length.toLocaleString("he")} ספרים נבחרו · ל־{plan.identified.toLocaleString("he")} נמצא קשר · {plan.steps.length.toLocaleString("he")} הרצות
             {skipped > 0 && ` · ${skipped.toLocaleString("he")} בלי קישור אוטומטי`}
           </p>
-          {unchecked > 0 && (
+          {pending > AUTO_EVIDENCE_BOOKS && scope && (
             <p class="muted" style="margin:0;font-size:var(--fs-sm)">
-              הקישורים שכבר יש במסד נבדקו ל־{EVIDENCE_BOOKS.toLocaleString("he")} ספרים בלבד; ל־{unchecked.toLocaleString("he")} הספרים האחרים הקשר נקבע לפי המסד והשם בלבד.
+              {unchecked > 0 ? `הקישורים שכבר יש במסד נבדקו לחלק מהספרים; ל־${pending.toLocaleString("he")} ספרים` : `ל־${pending.toLocaleString("he")} ספרים מהמסד`} הקשר נקבע עכשיו לפי ההצהרה במסד והשם בלבד. בדיקת הקישורים הקיימים מוצאת עוד פירושים ובסיסים (למשל "בית יוסף" על "טור").{" "}
+              <button class="btn small" onClick={() => void store.maxLink.gatherEvidence(scope)}>
+                בדיקת הקישורים הקיימים ({Math.min(pending, EVIDENCE_BOOKS).toLocaleString("he")} ספרים)
+              </button>
             </p>
           )}
           {engines.length > 0 && (

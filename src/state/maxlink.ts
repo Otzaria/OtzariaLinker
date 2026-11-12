@@ -42,6 +42,8 @@ export interface MaxLinkRunOptions {
  * titles alone, and says so.
  */
 export const EVIDENCE_BOOKS = 200;
+/** Up to this many unread books the max-link form reads them by itself; more wait for the user's click. */
+export const AUTO_EVIDENCE_BOOKS = 20;
 
 export class MaxLinkState {
   /**
@@ -49,8 +51,9 @@ export class MaxLinkState {
    * books the database links it to as their commentary. Grows as books are checked; kept for the session.
    */
   readonly evidence = signal<ReadonlyMap<string, readonly string[]>>(new Map());
-  /** books whose link summary was read (or cannot be: not a database) */
+  /** books whose link summary was read; `checkedCount` changes with it, for the views */
   private readonly checked = new Set<string>();
+  readonly checkedCount = signal(0);
   /** selected books the last evidence pass left unread (over EVIDENCE_BOOKS) */
   readonly unchecked = signal(0);
 
@@ -86,12 +89,18 @@ export class MaxLinkState {
    * other book) so the plan can pair what declarations and titles do not ("בית יוסף" on "טור").
    * Once per book; the first EVIDENCE_BOOKS unread ones. False when cancelled.
    */
+  /** The selected database books whose links were not read yet (none when the service cannot read them). */
+  evidencePending(scope: MaxLinkScope): string[] {
+    if (!this.service.dbLinkSummary) return [];
+    const db = new Set(this.host.sources.value.filter((s) => s.info.kind === "otzaria-db").flatMap((s) => s.books.map((b) => b.key)));
+    return this.selection(scope).filter((k) => db.has(k) && !this.checked.has(k));
+  }
+
   async gatherEvidence(scope: MaxLinkScope): Promise<boolean> {
     const summary = this.service.dbLinkSummary?.bind(this.service);
     if (!summary) return true;
     const books = this.host.books.value;
-    const db = new Set(this.host.sources.value.filter((s) => s.info.kind === "otzaria-db").flatMap((s) => s.books.map((b) => b.key)));
-    const todo = this.selection(scope).filter((k) => db.has(k) && !this.checked.has(k));
+    const todo = this.evidencePending(scope);
     const now = todo.slice(0, EVIDENCE_BOOKS);
     this.unchecked.value = todo.length - now.length;
     if (!now.length) return true;
@@ -107,6 +116,7 @@ export class MaxLinkState {
         opts.signal?.throwIfAborted();
         const s = await summary(k, opts.signal ? { signal: opts.signal } : {});
         this.checked.add(k);
+        this.checkedCount.value++;
         if ("byBook" in s)
           for (const b of s.byBook) {
             if (b.commentaryIn) add(k, b.bookKey); // this book is the stored target: a commentary on b
