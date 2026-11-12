@@ -102,6 +102,7 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | `tests/integration/linking/footnotes/real-db.local.test.ts` | מנוע ההערות על מדרש ויסעו ועל 25 ספרים עם `line_note` | `OTZARIA_DB` |
 | `tests/integration/linking/citations/real-db.local.test.ts` | מנוע מראי המקומות על מדגם של ספרים מכל הקטגוריות, מול קישורי המראי מקום שבמסד (דיוק ושחזור לפי רמת ודאות), וזמן על ספר גדול | `OTZARIA_DB`; `CITATIONS_REPORT=<קובץ.json>` (כל ההצעות ששפטו), `CITATIONS_ONLY=<שם ספר>`, `CITATIONS_SHARD=k/n` (כל n־י ספר, להרצה מקבילה; אז הספים לא נבדקים) |
 | `tests/integration/linking/maxlink-real-db.local.test.ts` | קישור מרבי על ספר בסיס שלם: תכנון, הרצה, איחוד והשוואה לקישורי המסד (כמה כבר קיימים, וכמה סותרים) | `OTZARIA_DB`; `MAXLINK_BASES="ברכות,בראשית"` (ברירת מחדל: ברכות), `MAXLINK_LOG=<קובץ>` |
+| `tests/integration/live-test/bundle-real-db.local.test.ts` | לפני בדיקה בתוך אוצריא (§4ב): אף ספר של החבילה לא קיים בספרייה הרשמית, ו־`בראשית` במסד כמו שהחבילה מניחה | `OTZARIA_DB` |
 
 ```bash
 # bash
@@ -158,6 +159,26 @@ $env:VALIDATION_OUT = "$env:TEMP/otzaria-validation"
 npm run validate:real                                                   # 1–7, כ־40 דקות
 npx vitest run --config vitest.validation.config.ts tests/validation/anchors.test.ts   # בדיקה אחת
 npm run build; npm run validate:browser                                 # 8
+```
+
+## 4ב. בדיקה בתוך אפליקציית אוצריא (שלב 20)
+
+**לא בוצעה.** זו בדיקה ידנית, בכ־20 דקות, של מה שהכלי מייצא בתוך האפליקציה עצמה: ייבוא דרך תיקיית ספרים
+אישיים ודרך "ייבוא נתונים", הצגה בחלוניות, לחיצה, שורה מדויקת, עוגנים, טווחים, פירוש ומקור, ספרי ספריא,
+`user_books.db`, ועדכון תוכן. הצעדים, התוצאה הצפויה לכל בדיקה (עם הפניות לקוד של אוצריא) וטבלת התוצאות:
+[`LIVE_TESTING.md`](LIVE_TESTING.md).
+
+| קובץ | תפקיד |
+|---|---|
+| `scripts/live-test/bundle.ts` | החבילה: חמישה ספרים קטנים ו־12 קישורים, נכתבים בקוד של הכלי (`planExport`, עוגנים, `ref_*`, מעבר למהדורה) |
+| `scripts/live-test/make-bundle.mjs` | כותב את החבילה לתיקייה (ברירת מחדל `live-test-bundle/`), דרך ה־module runner של Vite |
+| `scripts/live-test/inspect-user-links.py` | מה האפליקציה שמרה ב־`user_books.db` (קריאה בלבד) |
+| `tests/integration/live-test/bundle.test.ts` | רץ ב־`npm test`: החבילה דטרמיניסטית, עוברת את `validateExport` ואת הפרסור של הכלי, העוגנים על המילים, העובדות על בראשית מול `seforim-v7-mini.db`, ושערי הייבוא של האפליקציה |
+| `tests/integration/live-test/bundle-real-db.local.test.ts` | מול המסד המלא (§4) |
+
+```
+node scripts/live-test/make-bundle.mjs
+npx vitest run tests/integration/live-test/bundle.test.ts
 ```
 
 ## 5. Fixtures
