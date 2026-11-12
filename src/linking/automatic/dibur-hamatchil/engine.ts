@@ -41,8 +41,9 @@ import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
+import { sefariaByOrigin, sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
-export interface DhOptions {
+export interface DhOptions extends SefariaOwnedOption {
   /** base line range (0-based, inclusive) to search for a commentary line; null → the engine's own default */
   readonly windows?: (commentaryLine: number) => { from: number; to: number } | null;
   /** cap on ד"ה words (12, as the source) */
@@ -225,11 +226,16 @@ export function recordTypes(commentary: BookRef, base: BookRef, declared?: strin
   };
 }
 
-/** Which record shape can carry an anchor on the base words (see DH_ANCHOR_DIRECTION.md). */
-export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | "off" = "auto", anchoredType = "commentary"): { anchors: boolean; reason: Reason } {
+/**
+ * Which record shape can carry an anchor on the base words (see DH_ANCHOR_DIRECTION.md). A book the
+ * library's sync treats as Sefaria's (`sefariaOwned`: the same predicate the export validates with,
+ * core/links/sefaria-owned.ts) never gets one: an anchor with an end on a Sefaria side, or any anchor
+ * into a Sefaria book, is refused by the export (product audit F1).
+ */
+export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | "off" = "auto", anchoredType = "commentary", sefariaOwned: SefariaOwned = sefariaByOrigin): { anchors: boolean; reason: Reason } {
   if (mode === "off") return { anchors: false, reason: r("dh/anchors-off", "עוגנים כובו בהגדרות, ולכן כל הקישורים נכתבים מצד הפירוש.") };
-  if (commentary.origin !== "otzaria" || base.origin !== "otzaria") {
-    const sefaria = commentary.origin === "sefaria" || base.origin === "sefaria";
+  const sefaria = sefariaOwned(commentary) || sefariaOwned(base) || commentary.origin === "sefaria" || base.origin === "sefaria";
+  if (sefaria || commentary.origin !== "otzaria" || base.origin !== "otzaria") {
     return {
       anchors: false,
       reason: sefaria
@@ -259,7 +265,10 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const ladderWide = options.ladderWide === true;
   const inherit = options.inherit !== false;
   const types = recordTypes(commentary.book, base.book, options.declaredType);
-  const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored);
+  const sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
+  const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored, sefariaOwned);
+  /** no range on a Sefaria base: the sync remaps only the start line from ref_2, so the end would drift (validate.ts sefaria/range-side) */
+  const baseRanges = !sefariaOwned(base.book);
   const notes: Reason[] = [policy.reason];
   const routeIntermediates = options.intermediates !== false;
   const continueItems = options.continueItems !== false;
@@ -1191,7 +1200,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
   const side = (book: BookRef, line: number, end?: number): LinkSide => (end !== undefined && end > line ? { book, line, end } : { book, line });
   const suggestions: Suggestion[] = placements.map((p) => {
-    const baseSide = side(base.book, p.base, p.baseEnd);
+    const baseSide = side(base.book, p.base, baseRanges ? p.baseEnd : undefined);
     const cSide = side(commentary.book, p.cLine);
     const baseLine = bLines[posOf.get(p.base)!];
     const warnings = [...p.warnings];

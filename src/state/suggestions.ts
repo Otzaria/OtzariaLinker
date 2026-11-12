@@ -29,6 +29,8 @@ export interface SuggestionsHost {
   reveal(side: Side, bookKey: string, line: number): void;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  /** keys of the open books (of the given keys) the library treats as Sefaria's (AppStore.sefariaOwnedKeys) */
+  sefariaOwnedKeys?(keys?: Iterable<string>): string[];
 }
 
 /** One run of an automatic engine and the user's decisions on it. */
@@ -106,7 +108,7 @@ export class SuggestionsState {
   async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
     const target = this.host.refOf(targetKey);
-    const result = await this.host.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, options, opts));
+    const result = await this.host.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, this.withSefaria(options, [source.key, target.key]), opts));
     if (!result) return false;
     await this.loadDbLinkKeys([source.key]);
     batch(() => {
@@ -125,7 +127,7 @@ export class SuggestionsState {
    */
   async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
-    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, options, opts));
+    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), opts));
     if (!result) return false;
     await this.loadDbLinkKeys([source.key]);
     batch(() => {
@@ -153,7 +155,7 @@ export class SuggestionsState {
       this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
-    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), options, opts));
+    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), opts));
     if (!items) return false;
     await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
     const suggestions: Suggestion[] = [];
@@ -179,6 +181,14 @@ export class SuggestionsState {
     const failed = rows.filter((r) => r.problem).length;
     this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
     return true;
+  }
+
+  /**
+   * The engine options with the library's answer to "is this a Sefaria book" for the books of the run
+   * (core/links/sefaria-owned.ts): the engines then never propose what the export refuses (F1).
+   */
+  private withSefaria(options: Record<string, unknown>, keys?: Iterable<string>): Record<string, unknown> {
+    return this.host.sefariaOwnedKeys ? { ...options, sefariaOwned: this.host.sefariaOwnedKeys(keys) } : options;
   }
 
   /**

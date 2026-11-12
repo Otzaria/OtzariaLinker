@@ -727,6 +727,17 @@ export class AppStore {
     return isSefariaOwned(book, this.sefariaTitles.value);
   }
 
+  /**
+   * Keys of the open books (all, or the given ones) that isSefariaOwned holds for: the same decision,
+   * handed to the engines in the worker (core/links/sefaria-owned.ts), so a suggestion never carries
+   * what the export refuses on a Sefaria side (product audit F1).
+   */
+  sefariaOwnedKeys(keys?: Iterable<string>): string[] {
+    const out: string[] = [];
+    for (const k of keys ?? this.books.value.keys()) if (this.books.value.has(k) && this.isSefariaOwned(this.refOf(k))) out.push(k);
+    return out;
+  }
+
   /** The library's own list of Sefaria titles (`.github/data/sefaria_he_titles.txt`) replaces the embedded one. */
   loadSefariaTitles(path: string, text: string): boolean {
     const list = parseSefariaTitles(text, path);

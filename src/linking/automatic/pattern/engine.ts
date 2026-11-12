@@ -1,4 +1,5 @@
 import { parseConnectionType } from "../../../core/links/connection-type";
+import { sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import { storedForm } from "../../../core/links/stored-form";
 import { anchorLabelFromHeRef, withAnchorLabel } from "../../../core/text/anchor-label";
@@ -53,7 +54,7 @@ export const DEFAULT_PATTERN = "(?:דף|עמוד|סימן)\\s{1,3}([א-ת׳״'\"
 
 export type PatternTarget = "tree" | "line" | "chapter-line" | "heading";
 
-export interface PatternOptions {
+export interface PatternOptions extends SefariaOwnedOption {
   /** a preset of pattern/presets.ts. Default "general". Ignored when `regex` or `tag` is given. */
   readonly preset?: string;
   /** the user's own pattern: a template with placeholders, or a plain regex (see checkCustomPattern) */
@@ -172,7 +173,10 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
 
   const place = placer(mode, source, target, options, notes, found);
   const heRefOf = heRefIndex(target);
-  const anchors = anchorDecision(source.book, target.book, declaredType, options.anchors ?? "auto");
+  const sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
+  const anchors = anchorDecision(source.book, target.book, declaredType, options.anchors ?? "auto", sefariaOwned);
+  // no range on a Sefaria target: the sync remaps only the start line from ref_2 (validate.ts sefaria/range-side)
+  const ranges = !sefariaOwned(target.book);
   notes.push(anchors.reason);
 
   const suggestions: Suggestion[] = [];
@@ -196,7 +200,7 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       engine: ENGINE,
       source: { book: source.book, line: m.line },
       ...(anchor ? { anchor } : {}),
-      target: p.target,
+      target: ranges || p.target.end === undefined ? p.target : { book: p.target.book, line: p.target.line },
       declaredType,
       heRef2,
       score: p.score,
@@ -640,8 +644,11 @@ function heRefIndex(book: EngineBook): (line: number) => string {
 }
 
 /** Anchors only where Otzaria keeps them: two library books, in a direction the import does not flip. */
-function anchorDecision(source: BookRef, target: BookRef, declaredType: string, mode: "auto" | "off"): { allowed: boolean; reason: Reason } {
+function anchorDecision(source: BookRef, target: BookRef, declaredType: string, mode: "auto" | "off", sefariaOwned: SefariaOwned): { allowed: boolean; reason: Reason } {
   if (mode === "off") return { allowed: false, reason: r("pattern/anchors-off", "עוגנים כובו בהגדרות: הקישורים יוצגו בפאנל הקישורים בלבד, בלי סימון המילים.") };
+  // the export refuses an anchor end on a Sefaria side and any anchor into a Sefaria book (validate.ts sefariaChecks)
+  if (sefariaOwned(source) || sefariaOwned(target))
+    return { allowed: false, reason: r("pattern/anchors-sefaria", "אחד הספרים הוא ספר של ספריא, והספרייה אינה מקבלת עוגן על מילים בקישור כזה. הקישורים נכתבים בלי עוגן.") };
   if (source.origin !== "otzaria" || target.origin !== "otzaria")
     return { allowed: false, reason: r("pattern/anchors-origin", "אחד הספרים אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על המילים שנמצאו.") };
   if (!parseConnectionType(declaredType).known) return { allowed: false, reason: r("pattern/anchors-type", "סוג הקישור אינו מוכר לאוצריא, ולכן הקישורים נכתבים בלי עוגן.") };

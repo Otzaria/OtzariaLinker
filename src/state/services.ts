@@ -65,7 +65,7 @@ export interface BooksService {
    * Runs the steps of a max-link plan in the worker (workers/maxlink-job.ts). Optional so that
    * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
    */
-  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>> }, opts?: CallOptions): Promise<MaxLinkJobResult>;
+  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>>; sefariaOwned?: readonly string[] }, opts?: CallOptions): Promise<MaxLinkJobResult>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */

@@ -29,6 +29,8 @@ export interface MaxLinkHost {
   refOf(bookKey: string): BookRef;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  /** keys of the open books the library treats as Sefaria's (AppStore.sefariaOwnedKeys): the engines' answer to it */
+  sefariaOwnedKeys?(): string[];
 }
 
 export interface MaxLinkRunOptions {
@@ -163,7 +165,7 @@ export class MaxLinkState {
     const books = new Set(steps.map((s) => s.source.key)).size;
     const t0 = Date.now();
     const res = await this.host.runTask(`קישור מרבי: ${steps.length.toLocaleString("he")} שלבים ב־${books.toLocaleString("he")} ספרים…`, (opts) =>
-      run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }) }, opts),
+      run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }), ...(this.host.sefariaOwnedKeys && { sefariaOwned: this.host.sefariaOwnedKeys() }) }, opts),
     );
     if (!res) return false;
 
