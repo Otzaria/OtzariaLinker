@@ -277,7 +277,8 @@ export class ExchangeState {
     }
     if (!changes.length) return;
     this.commit(`השלמת ציוני ספריא (ref_1/ref_2) ל־${linksCount(changes.length)}`, changes);
-    host.notify("info", `הכלי השלים ציון ספריא באנגלית (ref_1/ref_2) ל־${linksCount(changes.length)} מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+    // plain words: the notice also shows in simple mode and in the guided flow (the field names are in the history label)
+    host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
   }
 
   /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */

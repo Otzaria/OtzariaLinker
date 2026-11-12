@@ -1,5 +1,5 @@
 import { pushTo } from "../core/collections";
-import { batch, computed, effect, signal } from "@preact/signals";
+import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
 import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
@@ -29,6 +29,7 @@ import { MaxLinkState } from "./maxlink";
 import { SuggestionsState } from "./suggestions";
 import { ExchangeState } from "./exchange";
 import { QualityState } from "./quality";
+import { GuidedFlowState, type GuidedStep } from "./guided-flow";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -74,7 +75,7 @@ export interface Task {
   count?: string;
 }
 
-export type Screen = "home" | "workspace";
+export type Screen = "home" | "workspace" | "guided";
 export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
 
 export class AppStore {
@@ -96,6 +97,8 @@ export class AppStore {
   readonly exchange: ExchangeState;
   /** the quality check and its report (state/quality.ts) */
   readonly quality: QualityState;
+  /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
+  readonly guided: GuidedFlowState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -215,6 +218,22 @@ export class AppStore {
     this.suggestions = new SuggestionsState(this, service);
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
+    this.guided = new GuidedFlowState(this);
+  }
+
+  /** the guided flow's step, for the router */
+  get guidedStep(): ReadonlySignal<GuidedStep> {
+    return this.guided.step;
+  }
+
+  /** The address asked for the guided flow (at a step): the router calls it. */
+  showGuided(step?: string): void {
+    this.guided.show(step);
+  }
+
+  /** Opening sources moves to the workspace — except inside the guided flow, which stays on its step. */
+  private toWorkspace(): void {
+    if (this.screen.peek() !== "guided") this.screen.value = "workspace";
   }
 
   /* ---------------- sources ---------------- */
@@ -260,8 +279,8 @@ export class AppStore {
     if (opened.length) {
       this.notify("success", `נפתחו ${opened.length.toLocaleString("he")} ספרים מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
       this.chooseRoles(opened);
-      this.screen.value = "workspace";
-    } else if (res.documents.length) this.screen.value = "workspace";
+      this.toWorkspace();
+    } else if (res.documents.length) this.toWorkspace();
   }
 
   /**
@@ -645,7 +664,7 @@ export class AppStore {
       this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
     }
-    this.screen.value = "workspace";
+    this.toWorkspace();
     return true;
   }
 
@@ -967,7 +986,7 @@ export class AppStore {
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
-      this.screen.value = "workspace";
+      if (this.screen.peek() !== "guided") this.screen.value = "workspace";
     });
     const missing = this.missingSources.value.length;
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)

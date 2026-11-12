@@ -321,7 +321,7 @@ export function notesBaseKey(title: string): string | null {
 }
 
 /** The base title a notes title names, prefixes kept ("הערות על משנה ברכות" → "משנה ברכות"), or null. */
-function notesBaseTitle(title: string): string | null {
+export function notesBaseTitle(title: string): string | null {
   const t = normalizeTitle(title);
   if (!t.startsWith(NOTES_PREFIX)) return null;
   const rest = t.slice(NOTES_PREFIX.length);

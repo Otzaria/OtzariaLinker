@@ -70,7 +70,8 @@ test("home: task cards and the drop strip", async ({ page }) => {
 });
 
 test("start: a guided workflow asks for its sources step by step", async ({ page }) => {
-  await page.getByRole("button", { name: /תיקייה מול אוצריא/ }).click();
+  // the card now starts the guided flow (#/guided); the sheet is still the route "#/start/<id>"
+  await page.goto(`${distUrl}#/start/folder-otzaria`);
   await expect(page.getByRole("dialog", { name: "תיקייה מול אוצריא" })).toBeVisible();
   await snap(page, "start-task");
 });

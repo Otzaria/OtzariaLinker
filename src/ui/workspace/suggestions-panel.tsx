@@ -352,7 +352,8 @@ function Decide({ s, state }: { s: Suggestion; state: SuggestionState }) {
 
 /* ---------------- inline / card ---------------- */
 
-function StepView({ card }: { card: boolean }) {
+/** One suggestion at a time; `standalone` = outside the workspace (the guided flow), where no reader shows its two ends. */
+export function StepView({ card, standalone }: { card: boolean; standalone?: boolean }) {
   const store = useStore();
   const run = store.suggestions.run.value!;
   const st = store.suggestions.state.value;
@@ -437,7 +438,7 @@ function StepView({ card }: { card: boolean }) {
         <span class="grow" />
         <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה</button>
       </div>
-      <p class="muted" style="margin:0;font-size:var(--fs-sm)">שני צדי ההצעה מוצגים ומסומנים בחלוניות הספרים.</p>
+      {!standalone && <p class="muted" style="margin:0;font-size:var(--fs-sm)">שני צדי ההצעה מוצגים ומסומנים בחלוניות הספרים.</p>}
     </div>
   );
 }

@@ -4,6 +4,17 @@ import { readFileSync } from "node:fs";
 const wait = (p, ms) => p.waitForTimeout(ms);
 const task = (p, title) => p.locator(".task-card", { hasText: title });
 const sheetBtn = (p, label) => p.getByRole("button", { name: label, exact: true });
+/**
+ * A task's sheet ("#/start/<id>"). Since the guided flow, the cards "כמה ספרים יחד" and "תיקייה מול
+ * אוצריא" open the flow, and their sheet is the old path; the scenarios that measure the old path go
+ * to it by its address, counted as the one click on the card it used to take.
+ */
+async function sheet(s, p, id, what) {
+  s.clicks++;
+  s.step(what);
+  await p.evaluate((h) => (location.hash = h), `#/start/${id}`);
+  await p.getByRole("dialog").waitFor();
+}
 async function idle(p, timeout = 120_000) {
   // a running task shows its label in the app bar; wait until it is gone
   await wait(p, 300);
@@ -244,7 +255,7 @@ export async function s3(s, { IN }) {
   if (await task(p, "כמה ספרים יחד").count()) {
     // since the F15 fix: a task for several books
     await s.shot("home");
-    await s.click(task(p, "כמה ספרים יחד"), "'כמה ספרים יחד'");
+    await sheet(s, p, "several", "'כמה ספרים יחד'");
     await s.pick(sheetBtn(p, "הספרים: קבצים"), files, "שלב 1: 'קבצים' ← ארבעת הקבצים");
     await wait(p, 1000);
     await s.shot("start-sheet");
@@ -267,7 +278,7 @@ s3.title = "ארבעה ספרים, קישור אוטומטי";
 export async function s4(s, { IN }) {
   const p = await s.open();
   s.decide("'תיקייה מול אוצריא' דורשת גם מסד; התיקייה כבר מכילה את ספרי הבסיס");
-  await s.click(task(p, "תיקייה מול אוצריא"), "'תיקייה מול אוצריא'");
+  await sheet(s, p, "folder-otzaria", "'תיקייה מול אוצריא'");
   await s.pick(sheetBtn(p, "התיקייה: תיקייה"), `${IN}/s4/הספרייה שלי`, "שלב 1: 'תיקייה' ← הספרייה שלי (עם תתי־תיקיות, קובץ md ותמונה)");
   await wait(p, 1500);
   await s.pick(sheetBtn(p, "מסד אוצריא: מסד נתונים"), [OTZ(IN)], "שלב 2: 'מסד נתונים' ← seforim.db");
@@ -398,7 +409,7 @@ export function chromeMb() {
 export async function s9(s, { IN }) {
   const p = await s.open();
   s.note(`זיכרון Chrome בהתחלה: ${chromeMb()} MB`);
-  await s.click(task(p, "תיקייה מול אוצריא"), "'תיקייה מול אוצריא'");
+  await sheet(s, p, "folder-otzaria", "'תיקייה מול אוצריא'");
   let t = Date.now();
   await s.pick(sheetBtn(p, "התיקייה: תיקייה"), `${IN}/s9/מאות`, "שלב 1: 'תיקייה' ← 300 פירושים");
   await p.locator(".start-task .opened").first().waitFor({ timeout: 300_000 });
@@ -617,7 +628,7 @@ export async function s13(s, { IN }) {
   }, 5000);
   try {
     const p = await s.open();
-    await s.click(task(p, "תיקייה מול אוצריא"), "'תיקייה מול אוצריא'");
+    await sheet(s, p, "folder-otzaria", "'תיקייה מול אוצריא'");
     await s.pick(sheetBtn(p, "התיקייה: תיקייה"), `${IN}/s9/מאות`, "שלב 1: 'תיקייה' ← 300 פירושים");
     await p.locator(".start-task .opened").first().waitFor({ timeout: 300_000 });
     let t = Date.now();
@@ -674,3 +685,126 @@ export async function s14(s, { IN, MINI_DB }) {
   s.verdict = "checked";
 }
 s14.title = "בדיקות נוספות: שחזור עבודה ומסד במבנה אחר";
+
+/* ---------------- the guided flow (scenarios 3, 4 and 9 again, through "#/guided") ---------------- */
+
+/**
+ * One pass of the guided flow: the card, the books, "הבא" through the steps it shows, the database
+ * when it asks, the plan (with the purpose when it says the library will refuse something), the run,
+ * "approve all certain", every suggestion to check on its card, the check, the download. Ids 103, 104
+ * and 109 are scenarios 3, 4 and 9 through the flow (results and screenshots s103-…, s104-…, s109-…).
+ */
+async function guidedFlow(s, p, { card, books, folder, db }) {
+  const main = p.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const text = async () => (await main.innerText()).replace(/\s+/g, " ");
+  await s.click(task(p, card), `'${card}' — הזרימה המודרכת`);
+  await s.pick(main.getByRole("button", { name: folder ? "הספרים: תיקייה" : "הספרים: קבצים" }), books, `שלב 1: '${folder ? "תיקייה" : "קבצים"}'`);
+  await main.getByRole("list", { name: "נבחרו" }).waitFor({ timeout: 300_000 });
+  await s.shot("g1-files");
+  await s.click(next, "'הבא'");
+  await wait(p, 500);
+  s.note(`שלב 2 — הספרים: ${(await text()).slice(0, 700)}`);
+  await s.shot("g2-books");
+  await s.click(next, "'הבא'");
+  await wait(p, 500);
+  if (/#\/guided\/db$/.test(p.url())) {
+    s.note(`שלב 3 — מסד: ${(await text()).slice(0, 400)}`);
+    if (db) {
+      const t = Date.now();
+      await s.pick(main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }), [db], "שלב 3: מסד אוצריא");
+      await main.getByText(/כל ספרי הבסיס נמצאו|גם במה שנפתח/).first().waitFor({ timeout: 600_000 });
+      s.timings.openDb = Date.now() - t;
+    }
+    await s.shot("g3-db");
+    await s.click(next, "'הבא'");
+    await wait(p, 500);
+  } else s.note("שלב 3 (מסד אוצריא) דולג: כל ספרי הבסיס כבר נבחרו");
+  s.note(`שלב 4 — התוכנית: ${(await text()).slice(0, 900)}`);
+  await s.shot("g4-plan");
+  const toPrivate = main.locator(".guided-card.warn").getByRole("button", { name: "לשימוש שלי בלבד" });
+  if (await toPrivate.count()) {
+    s.decide("התוכנית אומרת מראש שחלק מהקישורים לא יוכלו להישלח לספרייה: לשלוח לספרייה או לשימוש שלי?");
+    await s.click(toPrivate.first(), "'לשימוש שלי בלבד' (נאמר לפני ההרצה)");
+  }
+  const t = Date.now();
+  await s.click(main.getByRole("button", { name: "הפעלה" }), "'הפעלה'");
+  await main.getByRole("button", { name: /אישור כל|כל הוודאיות אושרו/ }).waitFor({ timeout: Number(process.env.AUDIT_REAL_TIMEOUT ?? 1_500_000) });
+  s.timings.maxlink = Date.now() - t;
+  s.note(`שלב 5 — תוצאה: ${(await text()).slice(0, 500)}`);
+  await s.shot("g5-run");
+  const all = main.getByRole("button", { name: /^אישור כל [\d,]+ הוודאיות$/ });
+  if (await all.count()) await s.click(all, `'${await all.innerText()}'`);
+  const review = main.getByRole("button", { name: "מעבר עליהן" });
+  if ((await review.count()) && (await review.isEnabled())) {
+    const n = Number(((await main.locator(".guided-actions .guided-card").nth(1).locator("b").innerText()).match(/[\d,]+/)?.[0] ?? "0").replace(/,/g, ""));
+    s.decide(`${n} הצעות לבדיקה: לעבור עליהן בכרטיסים`);
+    await s.click(review, "'מעבר עליהן'");
+    const card = main.getByRole("region", { name: "ההצעות לבדיקה" });
+    for (let i = 0; i < n && (await card.count()); i++) {
+      const ok = card.getByRole("button", { name: /^אישור/ });
+      if (!(await ok.isEnabled())) break;
+      await s.click(ok, i === 0 ? "'אישור' בכל כרטיס" : undefined);
+      await wait(p, 150);
+    }
+    await s.shot("g5-reviewed");
+  }
+  await s.click(next, "'הבא: בדיקה והורדה'");
+  const t2 = Date.now();
+  const dlBtn = main.getByRole("button", { name: /^הורדת/ });
+  await dlBtn.waitFor({ timeout: 300_000 });
+  await p.waitForFunction(() => !document.querySelector("main.guided .guided-body p.lede[role=status]"), null, { timeout: 300_000 }).catch(() => {});
+  s.timings.check = Date.now() - t2;
+  s.note(`שלב 6 — בדיקה: ${(await text()).slice(0, 700)}`);
+  await s.shot("g6-check");
+  const out = {};
+  if (await dlBtn.isEnabled()) {
+    const dl = p.waitForEvent("download", { timeout: 60_000 }).catch(() => null);
+    await s.click(dlBtn, `'${await dlBtn.innerText()}'`);
+    const d = await dl;
+    if (d) {
+      out.file = d.suggestedFilename();
+      out.path = await d.path();
+      s.note(`הורד: ${out.file}`);
+    }
+    await main.getByRole("heading", { name: "מה עכשיו?" }).waitFor({ timeout: 10_000 }).catch(() => {});
+    await s.shot("g6-done");
+  } else s.note("כפתור ההורדה מושבת");
+  const hashes = await p.evaluate(() => window.__hashes ?? []);
+  s.note(`ביקור בסביבת העבודה: ${hashes.some((h) => h.startsWith("#/workspace") || h.startsWith("#/maxlink")) ? "כן" : "לא"}`);
+  return out;
+}
+
+async function openGuided(s) {
+  const p = await s.open();
+  await p.evaluate(() => {
+    window.__hashes = [location.hash];
+    addEventListener("hashchange", () => window.__hashes.push(location.hash));
+  });
+  return p;
+}
+
+export async function s103(s, { IN }) {
+  const p = await openGuided(s);
+  await guidedFlow(s, p, { card: "כמה ספרים יחד", books: FOUR.map((t) => `${IN}/s3/${t}.txt`) });
+  s.verdict = "works";
+}
+s103.title = "ארבעה ספרים — בזרימה המודרכת (3)";
+
+export async function s104(s, { IN }) {
+  const p = await openGuided(s);
+  await guidedFlow(s, p, { card: "תיקייה מול אוצריא", books: `${IN}/s4/הספרייה שלי`, folder: true, db: OTZ(IN) });
+  s.verdict = "works";
+}
+s104.title = "תיקייה עם תתי־תיקיות — בזרימה המודרכת (4)";
+
+export async function s109(s, { IN }) {
+  const p = await openGuided(s);
+  const out = await guidedFlow(s, p, { card: "תיקייה מול אוצריא", books: `${IN}/s9/מאות`, folder: true, db: OTZ(IN) });
+  if (out.path && out.file.endsWith(".zip")) {
+    const z = unzipSync(new Uint8Array(readFileSync(out.path)));
+    s.note(`ZIP: ${Object.keys(z).length} קבצים, למשל ${Object.keys(z).slice(0, 3).join(", ")}`);
+  }
+  s.verdict = "works";
+}
+s109.title = "אצווה של מאות ספרים — בזרימה המודרכת (9)";

@@ -21,8 +21,11 @@ test("routes: a guided workflow, tabs, max-link, help and export; Back/Forward/E
   writeFileSync(join(dir, "ביאור על בראשית.txt"), ["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", "<h3>פסוק א</h3>", "ביאור לפסוק 1"].join(nl), "utf8");
   await page.goto(distUrl);
 
-  // the workflow "a folder against Otzaria": its sheet asks for the folder, then the database
+  // the card "a folder against Otzaria" starts the guided flow; its first step links to the old sheet,
+  // which asks for the folder, then the database
   await page.getByRole("button", { name: /תיקייה מול אוצריא/ }).click();
+  await expect.poll(() => hash(page)).toBe("#/guided/files");
+  await page.getByRole("button", { name: 'לגיליון "תיקייה מול אוצריא"' }).click();
   const sheet = page.getByRole("dialog", { name: "תיקייה מול אוצריא" });
   await expect(sheet).toBeVisible();
   expect(hash(page)).toBe("#/start/folder-otzaria");
