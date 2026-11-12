@@ -1,6 +1,6 @@
 import type { BookRef } from "../../../core/links/model";
 import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
-import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, saSpelling, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
@@ -176,8 +176,14 @@ export class CitationScanner {
   readonly dropped = new Map<string, number>();
   private readonly ibidOn: boolean;
   private readonly window: number;
-  /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן" */
-  private readonly base: AliasTarget | null;
+  /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן"; per line in a book of partBases */
+  private base: AliasTarget | null;
+  /**
+   * A work named a Shulchan Aruch whose parts are its own first level ("שולחן ערוך הרב, אורח חיים, תלו, יח",
+   * "קול יעקב על שולחן ערוך, אורח חיים, …"): the part of the Shulchan Aruch each line is in, by name. Its
+   * simanim are the Shulchan Aruch's, so a bare "כמו שנתבאר בסימן תל"ג" is that siman of the line's part.
+   */
+  private readonly partBases: ReadonlyMap<string, AliasTarget> | null;
   /** the citing book's own levels, for its internal references (self.ts) */
   readonly structure: StructureTracker;
   private readonly selfTarget: AliasTarget | null;
@@ -193,6 +199,7 @@ export class CitationScanner {
     this.ibidOn = options.ibid ?? true;
     this.window = options.ibidWindow ?? 6;
     this.base = baseOf(aliases, sourceTitle);
+    this.partBases = this.base ? null : saPartBases(aliases, sourceTitle);
     this.structure = new StructureTracker(sourceTitle);
     this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
     this.titleCommentator = titleCommentatorOf(sourceTitle);
@@ -217,6 +224,10 @@ export class CitationScanner {
       return;
     }
     this.structure.content(heRef);
+    if (this.partBases) {
+      const first = this.structure.here().keys?.[0];
+      this.base = first?.startsWith("$") ? (this.partBases.get(saSpelling(first.slice(1))) ?? null) : null;
+    }
     const toks = citationTokens(text);
     if (!hasHebrewText(toks)) return;
     if (this.last && (line - this.last.line > FAR_WINDOW || this.headingSince)) this.last = null;
@@ -1373,7 +1384,7 @@ const keyOfName = (s: string): string => unifyFinals(s.replace(/["'׳״]/g, ""))
 
 /** The part of the Shulchan Aruch a commentary on it is on ("שולחן ערוך, אורח חיים"), or null. */
 function saBaseOf(title: string): string | null {
-  const t = normTitle(title);
+  const t = saSpelling(normTitle(title));
   if (Object.hasOwn(SA_COMMENTARY_BASE, t)) return SA_COMMENTARY_BASE[t]!;
   const part = / על שולחן ערוך,? (.+)$/.exec(t)?.[1];
   return part ? `שולחן ערוך, ${part}` : null;
@@ -1387,13 +1398,27 @@ const SA_COMMENTARY_BASE: Readonly<Record<string, string>> = {
   "שער הציון": "שולחן ערוך, אורח חיים",
 };
 
+/** The parts of the Shulchan Aruch by name, for a work whose title names it but no part of it (CitationScanner.partBases). */
+function saPartBases(aliases: AliasIndex, sourceTitle: string): Map<string, AliasTarget> | null {
+  const title = saSpelling(normTitle(sourceTitle));
+  if (!/(?:^|\s)שולחן ערוך(?:\s|,|$)/.test(title) || collectionOf(sourceTitle) === "sa" || Object.keys(SA_PARTS).some((p) => title.endsWith(p))) return null;
+  const out = new Map<string, AliasTarget>();
+  for (const part of Object.keys(SA_PARTS)) {
+    const t = aliases.lookup(`שולחן ערוך, ${part}`)?.targets.find((x) => x.tier === "title" && x.collection === "sa");
+    if (t) out.set(part, t);
+  }
+  return out.size ? out : null;
+}
+
 /**
  * The book a commentary is on — the target of "לעיל/לקמן <daf>" (a tractate) and of a bare "סימן"
  * (the Shulchan Aruch): "… על גיטין" → גיטין; "… על שולחן ערוך אורח חיים" → "שולחן ערוך, אורח חיים".
  */
 function baseOf(aliases: AliasIndex, sourceTitle: string): AliasTarget | null {
-  const title = sourceTitle.replace(/[״]/g, '"');
+  const title = saSpelling(sourceTitle.replace(/[״]/g, '"'));
   const on = / על (.+)$/.exec(title)?.[1];
+  // "קול יעקב על שולחן ערוך": no part in the title — the part is each line's (partBaseHere)
+  if (on === "שולחן ערוך") return null;
   const names = [on, on && /^שולחן ערוך (.+)$/.exec(on) ? `שולחן ערוך, ${on.slice("שולחן ערוך ".length)}` : undefined, Object.hasOwn(SA_COMMENTARY_BASE, title) ? SA_COMMENTARY_BASE[title] : undefined];
   for (const n of names) {
     if (!n) continue;
@@ -1685,8 +1710,9 @@ function unitWordAt(toks: readonly Tok[], i: number): { next: number; kinds: Uni
 
 /** A perek opening a reversed citation: "פ"ג", "בפי"א", "דבפ"ק", "פרק ג'", "בפרק ב'". */
 function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; ordinal?: true } | null {
-  const t = toks[i]!;
-  if (t.kind !== "word") return null;
+  const t = toks[i];
+  // past the line's end: "… כסף משנה" closing a line (forward() looks two words on) threw, and the whole book's step with it
+  if (t?.kind !== "word") return null;
   for (let p = 0; p <= 2; p++) {
     if (p && !PREFIX_LETTERS.test(t.text.slice(0, p))) break;
     const text = t.text.slice(p);

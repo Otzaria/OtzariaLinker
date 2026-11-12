@@ -195,6 +195,29 @@ describe("citations: a bare siman in a commentary on the Shulchan Aruch", () => 
     expect(mb('עיין לעיל סימן ג ס"ק ד')).toHaveLength(0);
     expect(scan(['עיין בסימן ש"כ ס"א'], "ספר כלשהו")).toHaveLength(0); // no base: a siman of the book itself
   });
+  it('in the library\'s other spelling of the title ("… על שלחן ערוך אורח חיים") as well', () => {
+    const c = scan(['וכמו שכתבתי בסימן ש"כ'], "אליה רבה על שלחן ערוך אורח חיים", "er");
+    expect(c).toHaveLength(1);
+    expect(books(c[0]!)).toEqual(["sa-oc"]);
+  });
+  it('in a work named a Shulchan Aruch with the parts as its first level ("שולחן ערוך הרב"): the siman of the line\'s part', () => {
+    const ix = AliasIndex.build([...CATALOG, book("sa-yd", "שולחן ערוך, יורה דעה")]);
+    const sc = new CitationScanner(ix, "harav", {}, "שולחן ערוך הרב");
+    // the library's lines (שולחן ערוך הרב, אורח חיים, שכ, יח / יורה דעה, ב, א); the DB's LINKER and OTHER links point to the SA's siman
+    sc.scanLine(0, 'מֻתָּר לְשַׁבֵּר הַקֶּרַח לִטּוֹל מַיִם מִתַּחְתָּיו, כְּמוֹ שֶׁנִּתְבָּאֵר בְּסִימָן שי"ד. אֲבָל בְּנָהָר', null, "שולחן ערוך הרב, אורח חיים,  שכ, יח");
+    sc.scanLine(1, 'ולסברא האחרונה דלקמן בסימן ס"ג עיין שם', null, "שולחן ערוך הרב, יורה דעה,  ב, א");
+    // a line with no part in its reference (the authors' preface): no base, nothing
+    sc.scanLine(2, 'וקונטרס אחרון על סימן תמ"ז בהל\' פסח', null, "שולחן ערוך הרב, הקדמת בני המחבר,  סא");
+    expect(sc.citations.map((c) => `${books(c).join()} ${loc(c)}`)).toEqual(["sa-oc siman:314", "sa-yd siman:63"]);
+  });
+});
+
+describe("citations: a line that ends in a Rambam commentator's two-word name", () => {
+  it('does not throw ("ועיין בכסף משנה" closing a line: the look past it for a reversed chapter ran off the end)', () => {
+    // threw "reading 'kind'" and lost the whole book's citations step (אליה רבה על שלחן ערוך אורח חיים)
+    expect(() => scan(["ועיין בכסף משנה"])).not.toThrow();
+    expect(() => scan(["וכן כתב בלחם משנה"])).not.toThrow();
+  });
 });
 
 describe("citations: a bare siman next to another book's name", () => {
