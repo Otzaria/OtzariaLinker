@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EngineId } from "../../linking/automatic";
 import type { SuggestMode } from "../../state/router";
+import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import type { SideTab } from "../../state/store";
 import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
@@ -44,6 +45,11 @@ interface TaskDef {
     /** the links tab opens on the database's own links */
     dbLinks?: boolean;
   };
+  /**
+   * The card starts the guided flow (state/guided-flow.ts, "#/guided") instead of the sheet. The sheet
+   * stays at "#/start/<id>" (the old path), linked from the flow's first step.
+   */
+  guided?: boolean;
 }
 
 export const TASKS: readonly TaskDef[] = [
@@ -80,6 +86,7 @@ export const TASKS: readonly TaskDef[] = [
       { label: "ספרי הבסיס, אם הם במקור אחר", hint: "למשל מסד אוצריא, כשהפירושים מתייחסים לספרים שבו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", mode: "maxlink", allBooks: true },
+    guided: true,
   },
   {
     id: "folder-otzaria",
@@ -91,6 +98,7 @@ export const TASKS: readonly TaskDef[] = [
       { label: "מסד אוצריא", hint: "seforim.db — הספרים שהתיקייה מקשרת אליהם.", options: ["db"], dbHint: true },
     ],
     then: { tab: "suggestions", mode: "maxlink", scopeStep: 0 },
+    guided: true,
   },
   {
     id: "db-db",
@@ -165,6 +173,7 @@ export function Home() {
     if (files.length) await store.openFiles(files);
   };
   const begin = (t: TaskDef) => {
+    if (t.guided) return store.guided.start();
     store.startTask.value = t.id;
     store.dialog.value = "start";
   };
@@ -179,6 +188,16 @@ export function Home() {
             <span class="grow">נמצאה עבודה שלא נשמרה מהפעם הקודמת: {store.recovery.value.links.toLocaleString("he")} קישורים.</span>
             <button class="btn filled" onClick={store.recovery.value.restore}>שחזור</button>
             <button class="btn text" onClick={store.recovery.value.dismiss}>התעלמות</button>
+          </div>
+        )}
+        {store.guided.saved.value && !store.guided.active.value && (
+          <div class="recovery" role="alert">
+            <Icon name="oz_search_in_folder" size={24} />
+            <span class="grow">
+              קישור תיקייה לאוצריא לא הסתיים: הגעתם לשלב "{GUIDED_STEP_TITLES[store.guided.saved.value.step]}" עם {store.guided.saved.value.sources.map((s) => `"${s.label}"`).join(", ")}.
+            </span>
+            <button class="btn filled" onClick={() => store.guided.continueSaved()}>המשך</button>
+            <button class="btn text" onClick={() => store.guided.dismissSaved()}>לא עכשיו</button>
           </div>
         )}
         <h1>מה תרצו לעשות?</h1>

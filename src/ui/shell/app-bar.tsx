@@ -57,6 +57,12 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </>
       )}
 
+      {inWorkspace && store.guided.active.value && (
+        <button class="btn tonal guided-back" onClick={() => store.guided.show()} title="חזרה לשלב שבו עצרתם בקישור התיקייה לאוצריא">
+          <Icon name="oz_search_in_folder" size={16} />
+          <span>חזרה להדרכה</span>
+        </button>
+      )}
       {task && (
         <div class="task" role="status">
           <span class="task-label" title={task.label}>{task.label}</span>

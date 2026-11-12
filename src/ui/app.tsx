@@ -7,6 +7,7 @@ import { HelpDialog } from "./dialogs/help-dialog";
 import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
+import { GuidedScreen } from "./screens/guided";
 import { Home, StartTaskDialog } from "./screens/home";
 import { AppBar } from "./shell/app-bar";
 import { Notices } from "./shell/notices";
@@ -58,7 +59,7 @@ export function App() {
       }}
     >
       <AppBar onExport={() => (store.dialog.value = "export")} />
-      {store.screen.value === "home" ? <Home /> : <Workspace />}
+      {store.screen.value === "home" ? <Home /> : store.screen.value === "guided" ? <GuidedScreen /> : <Workspace />}
       <Notices />
       {/* dialogs are routes (state/router.ts): closing one goes back in history; Back closes it */}
       {store.dialog.value === "export" && <ExportDialog onClose={() => store.closeDialog("export")} />}

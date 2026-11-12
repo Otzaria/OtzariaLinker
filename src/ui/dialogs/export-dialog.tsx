@@ -243,7 +243,7 @@ function withPaths(text: string) {
 }
 
 /** The ways back to Otzaria (formats/report/next-steps.ts): one expander per route, the first open when asked. */
-function NextSteps({ routes, open }: { routes: ReturnType<AppStore["exchange"]["nextSteps"]>; open?: boolean }) {
+export function NextSteps({ routes, open }: { routes: ReturnType<AppStore["exchange"]["nextSteps"]>; open?: boolean }) {
   return (
     <div class="next-steps">
       {routes.map((r, i) => (

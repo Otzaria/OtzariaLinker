@@ -369,3 +369,53 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .next-steps p { margin: 6px 0 0; font-size: var(--fs-sm); }
 .next-steps-box > summary { cursor: pointer; color: var(--primary); }
 .next-steps-box > .next-steps { margin-top: 8px; }
+
+/* ---------- the guided flow (#/guided/<step>, ui/screens/guided.tsx) ---------- */
+.guided { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 24px max(16px, 6vw) 0; max-width: 1040px; width: 100%; box-sizing: border-box; margin: 0 auto; }
+.guided-head { display: flex; gap: 12px; align-items: start; }
+.guided-head .icon { color: var(--primary); margin-top: 4px; }
+.guided-head h1 { font-size: 22px; margin: 0 0 2px; }
+.guided-head p { margin: 0; }
+.stepper { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.stepper li { display: flex; gap: 6px; align-items: center; }
+.stepper .num { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--surface-container-highest); }
+.stepper li.current { color: var(--on-surface); font-weight: 600; }
+.stepper li.current .num { background: var(--primary); color: var(--on-primary); }
+.stepper li.done .num { background: var(--tertiary); color: var(--on-tertiary); }
+.stepper li.skipped { opacity: .6; }
+.guided-body { display: grid; gap: 12px; align-content: start; padding: 16px 18px; border-radius: var(--radius); border: 1px solid var(--outline-variant); background: var(--surface); }
+.guided-body h2 { margin: 0; font-size: 18px; }
+.guided-body .lede { margin: 0; }
+.guided-body .small { font-size: var(--fs-sm); margin: 0; }
+.guided-body > .row, .guided-card .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.guided-drop { text-align: center; }
+.guided-card { display: grid; gap: 6px; margin: 0; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--outline-variant); background: var(--surface-container-low); }
+.guided-card.ok { border-color: color-mix(in srgb, var(--tertiary) 55%, transparent); }
+.guided-card.ok .row-line .icon { color: var(--tertiary); }
+.guided-card.warn { background: var(--warning-container); color: var(--on-warning-container); border-color: transparent; }
+.guided-card .row-line { display: flex; gap: 8px; align-items: center; }
+.guided-card .btn { justify-self: start; }
+.guided-card details summary { cursor: pointer; color: var(--primary); font-size: var(--fs-sm); }
+.guided-card.warn details summary { color: inherit; text-decoration: underline; }
+.guided-groups { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.guided-books { margin: 4px 0 0; padding-inline-start: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.guided-books .muted { font-size: var(--fs-sm); }
+ul.guided-books[aria-label] { list-style: none; padding: 0; }
+.guided-body .opened { display: flex; gap: 6px; align-items: center; font-size: var(--fs-sm); }
+.guided-body .opened > .icon { color: var(--tertiary); }
+.guided-purpose { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 8px 12px 10px; display: grid; gap: 6px; margin: 0; }
+.guided-purpose legend { font-weight: 600; padding: 0 4px; }
+.guided-purpose .check { display: flex; gap: 8px; align-items: start; cursor: pointer; }
+.guided-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.guided-actions .guided-card b { font-size: var(--fs-lg); }
+.guided-review { border-top: 1px solid var(--outline-variant); padding-top: 8px; }
+.guided-issues { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
+.guided-issues li { display: flex; gap: 6px; align-items: center; }
+.guided-card progress { width: 100%; }
+.guided-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0 16px; background: var(--app-bg); }
+.app-bar .guided-back { min-height: 32px; }
+@media (max-width: 720px) {
+  .guided { padding: 12px 16px 0; }
+  .app-bar .guided-back span { display: none; }
+}
+.guided-card label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
