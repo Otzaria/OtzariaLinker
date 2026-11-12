@@ -114,6 +114,13 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["עירובין", "ערובין"],
   ["קידושין", "קדושין"],
   ["גיטין", "גטין"],
+  // plene and Aramaic spellings of the Mishna's and the Yerushalmi's tractates ("בירושלמי (פ"ק דפיאה)", "(עוקצין ג:ח)")
+  ["ביכורים", "בכורים"],
+  ["בכורים", "ביכורים"],
+  ["פאה", "פיאה"],
+  ["כלאים", "כלאיים", "כלאין"],
+  ["עוקצים", "עוקצין"],
+  ["מדרש תהילים", 'שו"ט', "שוחר טוב", 'מדרש שו"ט'],
   ["בראשית רבה", 'ב"ר', 'בר"ר'],
   ["שמות רבה", 'ש"ר', 'שמו"ר'],
   ["ויקרא רבה", 'ו"ר', 'ויק"ר'],
@@ -149,6 +156,8 @@ const SA_NAMES = ["שולחן ערוך", 'שו"ע', "שלחן ערוך", 'ש"ע'
 const SA_COMMENTARY_TITLES = new Set(["משנה ברורה", "מגן אברהם", "שער הציון", "ביאור הלכה", "באר היטב", "טורי זהב", "שפתי כהן"]);
 
 const BAVLI_SET = new Set(BAVLI);
+/** the Mishna's tractates the Bavli has not: "משנה כסף", "משנה לחם" (books of the library) are no tractates */
+const MISHNA_ONLY = new Set(["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות", "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים", "שקלים", "עדיות", "אבות", "מדות", "קינים", "כלים", "אהלות", "נגעים", "פרה", "טהרות", "מקואות", "מכשירין", "זבים", "טבול יום", "ידים", "עוקצים"]);
 const TANAKH_SET = new Set(TANAKH);
 
 /** The collection a title belongs to, from the title's shape (works for every source, also text files). */
@@ -161,7 +170,7 @@ export function collectionOf(title: string): Collection {
   if (t.startsWith("משנה תורה, הלכות ") || t.startsWith("משנה תורה, ")) return "rambam";
   if (t.startsWith("שולחן ערוך, ")) return "sa";
   if (t === "טור") return "tur";
-  if (t.startsWith("משנה ") && t !== "משנה ברורה" && !t.startsWith("משנה תורה") && t.split(" ").length <= 3) return "mishna";
+  if (t.startsWith("משנה ") && (BAVLI_SET.has(t.slice(5)) || MISHNA_ONLY.has(t.slice(5)))) return "mishna";
   if (SA_COMMENTARY_TITLES.has(t) || / על שולחן ערוך/.test(t)) return "sa-commentary";
   return "other";
 }

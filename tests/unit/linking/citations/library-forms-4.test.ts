@@ -38,6 +38,15 @@ const CATALOG: CatalogBook[] = [
   book("sa-oc", "שולחן ערוך, אורח חיים"),
   book("ma", "מגן אברהם", "sefaria", ['מג"א']),
   book("bs", "בית שמואל", "sefaria", ['ב"ש']),
+  book("gen", "בראשית"),
+  book("ex", "שמות"),
+  book("lev", "ויקרא"),
+  book("deut", "דברים"),
+  book("ps", "תהילים"),
+  book("m-okt", "משנה עוקצים"),
+  book("mid-ps", "מדרש תהילים"),
+  book("mkesef", "משנה כסף"),
+  book("rashi-deut", 'רש"י על דברים'),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -88,8 +97,9 @@ describe("a commentator after the place, and its ד\"ה", () => {
     const [c] = scan(['וכמ"ש ובקדושין דף י"ו ע"ב (תוד"ה והא) יעו"ש.']);
     expect(books(c)).toEqual(["tos-kid"]);
     expect(c!.dh?.[0]).toBe("והא");
-    // a comparison in a bracket, with no ד"ה, does not move it
-    expect(books(scan(['ובקדושין דף י"ו ע"ב (תוס\' שם) יעו"ש'])[0])).toEqual(["tos-kid"]);
+    // in a bracket of its own, with no ד"ה, the commentator does not move the place: "(תוס' שם)" is his own
+    // citation (commentator-ibid), "(ותוס' חולקים)" a comparison
+    expect(scan(['ובקדושין דף י"ו ע"ב (תוס\' שם) יעו"ש']).map(books)).toEqual([["kid"], ["tos-kid"]]);
     expect(books(scan(['ובקדושין דף י"ו ע"ב (ותוס\' חולקים)'])[0])).toEqual(["kid"]);
   });
   it('"התוס\' ע"ז כ"ו א\' ד"ה … ושם ע"ב ד"ה אני": the other amud of a daf written with a letter', () => {
@@ -193,6 +203,56 @@ describe('"שם" and a ס"ק after a siman', () => {
     const other = scan([`כמ"ש ב"ש סי' מ"ה וכ' מג"א סקכ"א`]);
     expect(other.map(books)).toEqual([["bs"], ["ma"]]);
     expect(other[1]!.rule).toBeUndefined();
+  });
+});
+
+describe("a commentator and \"שם\"", () => {
+  it(`"[רש"י שם]", "[התוס' (שם)]", "[ובר"ן שם]": his words on the place just cited — "full", at most "possible"`, () => {
+    const cs = scan([`בכתוב ריש נצבים (דברים כ"ט, י"ח) "כי בשרירות לבי אלך", "במראות לבי" (רש"י שם), היינו`]);
+    expect(cs.map(books)).toEqual([["deut"], ["rashi-deut"]]);
+    expect(loc(cs[1])).toBe("?:29 ?:18");
+    expect([cs[1]!.rule, cs[1]!.ibid]).toEqual(["commentator-ibid", "full"]);
+  });
+  it(`"תוס' שם ס"ה ע"ב": the daf written after "שם", in the tractate just cited`, () => {
+    const cs = scan([`כמבואר בקידושין דף ס"ד ע"א (תוס' שם ס"ה ע"ב)`]);
+    expect(cs.map(books)).toEqual([["kid"], ["tos-kid"]]);
+    expect(loc(cs[1])).toBe("daf:65b");
+    expect(cs[1]!.ibid).toBe("partial");
+  });
+  it("not after a citation that is no daf (Gemara) or chapter and verse (Tanakh), nor far from it", () => {
+    expect(scan([`כמבואר בקידושין פ"ב (תוס' שם)`])).toHaveLength(1);
+    expect(scan([`כמבואר בקידושין דף ס"ד ע"א`, ...Array.from({ length: 8 }, () => "טקסט"), `ותוס' שם כתבו`])).toHaveLength(1);
+  });
+});
+
+describe("the Tanakh as books write it in brackets", () => {
+  it(`"(תה' נט)": a name that is also a numeral, with a chapter alone`, () => {
+    const [c] = scan([`השיבנו (תה' נט) כי הכתוב`]);
+    expect(books(c)).toEqual(["ps"]);
+    expect(loc(c)).toBe("?:59");
+    // not read as the number 405 of the place before it
+    expect(c!.rule).toBeUndefined();
+  });
+  it(`"(ברא' יה א)": 15 written "יה" — only in brackets, with another number`, () => {
+    expect(loc(scan([`וירא אליו ד' (ברא' יה א) גם`])[0])).toBe("?:15 ?:1");
+    expect(scan([`וירא אליו ד' ברא' יה א גם`])).toHaveLength(0);
+  });
+  it(`"(ויקרא כו; דברים כח)": a list in brackets — each place its own citation`, () => {
+    const cs = scan([`הכתובות בתורה (ויקרא כו; דברים כח) על`]);
+    expect(cs.map(books)).toEqual([["lev"], ["deut"]]);
+    expect(cs.map(loc)).toEqual(["?:26", "?:28"]);
+  });
+  it(`"(בראשית כא:לד; יב:י)": a ";" ends the place; "(שמות ז:ג-יב:לו)": a range into another chapter starts at its start`, () => {
+    expect(loc(scan([`ובארץ כנען (בראשית כא:לד; יב:י) כולם`])[0])).toBe("?:21 ?:34");
+    expect(loc(scan([`במצרים (שמות ז:ג-יב:לו):`])[0])).toBe("?:7 ?:3");
+  });
+  it(`"(עוקצין ג:ח)", "(שו"ט עה:א)": spellings of the Mishna's tractates and of מדרש תהילים`, () => {
+    expect(books(scan([`בקליפה (עוקצין ג:ח):`])[0])).toEqual(["m-okt"]);
+    expect(books(scan([`את ישראל (שו"ט עה:א):`])[0])).toEqual(["mid-ps"]);
+  });
+  it(`"משנה כסף" is a book, not a tractate of the Mishna named "כסף"`, () => {
+    expect(scan([`ונתן לו כסף ב' זוזים`])).toHaveLength(0);
+    expect(scan([`ונתן כסף ג, ד`])).toHaveLength(0);
   });
 });
 

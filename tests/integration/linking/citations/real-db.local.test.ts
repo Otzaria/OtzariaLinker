@@ -16,7 +16,8 @@ import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, ty
  *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db npx vitest run tests/integration/linking/citations/real-db.local.test.ts
  * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title>[;<title>…] runs only those books;
  * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then);
- * CITATIONS_SAMPLE=heldout / heldout2 runs a held-out sample (HELDOUT, HELDOUT2) instead.
+ * CITATIONS_SAMPLE=heldout / heldout2 runs a held-out sample (HELDOUT, HELDOUT2) instead; CITATIONS_SAMPLE=titles runs just the
+ * books CITATIONS_ONLY names (no thresholds checked).
  *
  * The sample: 17 category groups, from each the 3 books with the smallest sha1(book id) among those with
  * 200–6000 lines and at least 20 LINKER links (deterministic for a given library build; the script
@@ -241,8 +242,10 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
-    const heldout = process.env.CITATIONS_SAMPLE === "heldout" || process.env.CITATIONS_SAMPLE === "heldout2";
-    for (const [k, { group, title }] of (process.env.CITATIONS_SAMPLE === "heldout2" ? HELDOUT2 : heldout ? HELDOUT : SAMPLE).entries()) {
+    const heldout = process.env.CITATIONS_SAMPLE === "heldout" || process.env.CITATIONS_SAMPLE === "heldout2" || process.env.CITATIONS_SAMPLE === "titles";
+    // CITATIONS_SAMPLE=titles: the books CITATIONS_ONLY names, whatever sample they are in (a big book of the library benchmark)
+    const titles = process.env.CITATIONS_SAMPLE === "titles" ? (only ?? "").split(";").filter(Boolean).map((title) => ({ group: "-", title })) : null;
+    for (const [k, { group, title }] of (titles ?? (process.env.CITATIONS_SAMPLE === "heldout2" ? HELDOUT2 : heldout ? HELDOUT : SAMPLE)).entries()) {
       if (only && !only.split(";").includes(title)) continue;
       if (k % shards !== shard) continue;
       const b = books.find((x) => x.title === title);
@@ -361,7 +364,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
  * brackets with no book, responsa by their author, the Zohar's pages…), so their strict precision says
  * little — they are hand-checked instead, and must agree with the database where it has an opinion.
  */
-const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid"];
+const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid", "commentator-ibid"];
 function newForm(rules: readonly string[]): string | null {
   for (const f of NEW_FORMS) if (rules.some((r) => r.startsWith(`citations.${f}`))) return f;
   return null;
