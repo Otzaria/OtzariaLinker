@@ -90,13 +90,26 @@ export function prevStep(step: GuidedStep, f: FlowFacts): GuidedStep | null {
   return null;
 }
 
-/** The furthest step up to `wanted` that can be shown now (a reload, an address typed by hand, Back). */
+/** A step that still waits for the user: no books chosen, or a base missing that the database step asks for. */
+export const stepWaits = (step: GuidedStep, f: FlowFacts): boolean => (step === "files" && f.books === 0) || (step === "db" && f.missingBases > 0);
+
+/**
+ * The step to show when `wanted` is asked for out of order (a reload, a continued flow, an address
+ * typed by hand, Back): `wanted` itself when every step before it is done, else the first step on the
+ * way that still waits for the user, else the furthest that can be shown.
+ */
 export function resolveStep(wanted: GuidedStep, f: FlowFacts): GuidedStep {
-  for (let i = GUIDED_STEPS.indexOf(wanted); i > 0; i--) {
-    const s = GUIDED_STEPS[i]!;
-    if (!stepSkipped(s, f) && stepReady(s, f)) return s;
+  let last: GuidedStep = "files";
+  for (const s of GUIDED_STEPS) {
+    if (stepSkipped(s, f)) {
+      if (s === wanted) return last;
+      continue;
+    }
+    if (!stepReady(s, f)) return last;
+    if (s === wanted || stepWaits(s, f)) return s;
+    last = s;
   }
-  return "files";
+  return last;
 }
 
 /* ---------------- what was found: the books, grouped ---------------- */
@@ -687,9 +700,11 @@ export class GuidedFlowState {
         })
       : (prev?.sources ?? []);
     const prefer = this.preferSource.value ? this.host.sources.value.find((s) => s.info.id === this.preferSource.value)?.info.label : this.preferLabel;
+    // a flow waiting for its books again keeps the step it had reached
+    const waiting = open.length ? undefined : (this.resumeTo.value ?? prev?.step);
     return {
       v: 1,
-      step: !open.length && this.resumeTo.value ? this.resumeTo.value : this.step.value,
+      step: waiting ?? this.step.value,
       sources,
       purpose: this.host.exportPurpose.value,
       ...(prefer && { preferBase: prefer }),
@@ -708,13 +723,17 @@ export class GuidedFlowState {
     void kv.get(GUIDED_KEY).then(
       (text) => {
         const r = parseGuidedRecord(text);
-        if (r && !r.done && r.sources.length && !this.active.peek()) this.saved.value = r;
+        // also when the address reopened the flow itself (a reload on "#/guided/…"): nothing is chosen yet
+        if (r && !r.done && r.sources.length && !this.bookSources.peek().length) this.saved.value = r;
       },
       () => {},
     );
     const stop = effect(() => {
       if (!this.active.value) return;
-      const text = JSON.stringify(this.record());
+      const rec = this.record();
+      // nothing chosen yet: nothing to continue (and an unread record from before must not be overwritten)
+      if (!rec.sources.length) return;
+      const text = JSON.stringify(rec);
       clearTimeout(timer);
       timer = setTimeout(() => void kv.set(GUIDED_KEY, text).catch(() => {}), delayMs);
     });

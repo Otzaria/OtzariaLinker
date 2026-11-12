@@ -58,6 +58,10 @@ describe("guided flow — steps", () => {
     expect(resolveStep("finish", facts({ books: 3, links: 1 }))).toBe("finish");
     expect(resolveStep("db", facts({ books: 3 }))).toBe("books"); // skipped: the step before it
     expect(resolveStep("db", facts({ books: 3, missingBases: 2 }))).toBe("db");
+    // a continued flow stops where the user is needed: the base is missing again
+    expect(resolveStep("run", facts({ books: 3, missingBases: 1 }))).toBe("db");
+    expect(resolveStep("run", facts({ books: 3, baseChoices: 1 }))).toBe("run"); // a choice has its default
+    expect(resolveStep("plan", facts({ books: 0 }))).toBe("files");
   });
 });
 

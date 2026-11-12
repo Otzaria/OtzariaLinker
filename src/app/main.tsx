@@ -64,7 +64,10 @@ const saver: Saver = {
 
 const store = new AppStore(service, saver);
 onLost = (reason) => store.workerLost(reason);
-store.startAutosave(idbStore());
+const kv = idbStore();
+store.startAutosave(kv);
+// how far a guided flow got (state/guided-flow.ts): a reload or a closed tab can continue it
+store.guided.startPersist(kv);
 // the address follows the screens and dialogs (#/workspace/links, #/help/…), and Back/Forward move between them
 new Router(store, hashLocation()).start();
 

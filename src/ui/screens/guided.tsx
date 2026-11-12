@@ -44,7 +44,9 @@ export function GuidedScreen() {
       </header>
       <ol class="stepper" aria-label="השלבים">
         {GUIDED_STEPS.map((s, i) => {
-          const skipped = stepSkipped(s, f);
+          // the database step is "not needed" only while nothing besides the books is open: once a database
+          // is open (in this step or in the first), it is a step that was done
+          const skipped = stepSkipped(s, f) && !(s === "db" && g.otherSources.value.length > 0);
           const state = s === step ? "current" : i < at ? "done" : "todo";
           return (
             <li key={s} class={`${state}${skipped ? " skipped" : ""}`} aria-current={s === step ? "step" : undefined} title={skipped ? "לא נדרש" : undefined}>
@@ -109,10 +111,10 @@ function FilesStep() {
   };
   return (
     <>
-      {saved && g.resumeTo.value && (
+      {saved && mine.length === 0 && (
         <div class="guided-card warn" role="status">
-          <b>ממשיכים מהפעם הקודמת (הגעתם לשלב "{GUIDED_STEP_TITLES[g.resumeTo.value]}")</b>
-          <span>הדפדפן לא פותח קבצים מעצמו. פתחו שוב את אותם ספרים:</span>
+          <b>{g.resumeTo.value ? "ממשיכים מהפעם הקודמת" : "יש עבודה שלא הסתיימה"} (הגעתם לשלב "{GUIDED_STEP_TITLES[g.resumeTo.value ?? saved.step]}")</b>
+          <span>הדפדפן לא פותח קבצים מעצמו. פתחו שוב את אותם ספרים, והכלי ימשיך משם:</span>
           <ul class="guided-books">
             {saved.sources.map((s) => (
               <li key={s.label}>
@@ -121,6 +123,12 @@ function FilesStep() {
               </li>
             ))}
           </ul>
+          {!g.resumeTo.value && (
+            <div class="row">
+              <button class="btn filled" onClick={() => g.continueSaved()}>המשך מאיפה שהפסקתי</button>
+              <button class="btn text" onClick={() => g.dismissSaved()}>התחלה מחדש</button>
+            </div>
+          )}
         </div>
       )}
       <p class="lede">בחרו את התיקייה עם הספרים שלכם, או כמה ספרים. הכלי סורק גם תתי־תיקיות ומזהה לבד מה ספר ומה לא.</p>
