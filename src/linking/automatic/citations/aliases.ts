@@ -427,7 +427,8 @@ export class AliasIndex {
   private addTruncations(title: string, target: AliasTarget): void {
     if (title.includes(" ")) return;
     const key = title.replace(/[ךםןףץ]/g, (c) => FINAL_PLAIN[c]!);
-    for (let n = 3; n <= key.length - 1 && key.length - n <= 3; n++) {
+    // stems of three letters or more, short of the word by one to three ("סנהד'" for סנהדרין, "יבמו'" for יבמות)
+    for (let n = Math.max(3, key.length - 3); n <= key.length - 1; n++) {
       const k = key.slice(0, n);
       const prev = this.truncated.get(k);
       if (prev === null) continue;
@@ -487,7 +488,8 @@ const AUTHOR_NAMES = new Set(['רמב"ם', 'רמב"ן', 'רמ"א', 'רשב"א', 
 
 /** common abbreviations that are never a book's name ("חלק א", "עמוד א", "דיבור המתחיל") */
 // "מ"ע", "ל"ת": מצוות עשה / לא תעשה ("סמ"ג [מ"ע סימן כ"א]"), not מאירת עיניים, whose name is "סמ"ע"
-const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל', 'מ"ע', 'ל"ת', 'מל"ת']);
+// "ירוש'" is the word for the Yerushalmi ("בירוש' פ"ק דסנהד'"), which the database gives to one of its tractates (הוריות)
+const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל', 'מ"ע', 'ל"ת', 'מל"ת', "ירוש'", "ירושל'", "ירושלמי", "גמ'", "בבלי", "תלמוד"]);
 
 /**
  * book_acronym is machine-made and noisy (42K names; "מלכות" for a commentary on הלכות שביתת יום

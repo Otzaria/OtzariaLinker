@@ -224,7 +224,8 @@ function resolveRefs(book: BookRef, root: Node, isDaf: boolean, elems: readonly 
     // a book without parts (מגן אברהם on אורח חיים): the part named in the citation adds nothing
   }
   if (isDaf) return resolveDaf(book, node, elems, label);
-  const allowed = KINDS[collection];
+  // a commentary on the Bavli that is not by daf ("פסקי הרא"ש על סוכה, א, א"): its own chapters
+  const allowed = KINDS[collection === "bavli" ? "other" : collection];
   // expand "נה א" (a bare letter after a number) into a second number
   const nums: { n: number; to?: number; kind: Kind }[] = [];
   for (const [i, e] of elems.entries()) {
