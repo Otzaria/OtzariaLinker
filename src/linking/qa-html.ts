@@ -142,7 +142,7 @@ function severitySection(r: QaReport, sev: Severity): string {
 
 function categoryBlock(cat: QaCategory, issues: readonly QaIssue[]): string {
   const { title, hint } = QA_CATEGORIES[cat];
-  const head = "<tr><th>מקור</th><th>יעד</th><th>heRef_2</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr>";
+  const head = "<tr><th>מקור</th><th>יעד</th><th>שם המקום ביעד</th><th>סוג</th><th>הסבר</th><th>תיקון מוצע</th><th>קוד</th></tr>";
   return [
     "<details open>",
     `<summary><h3>${esc(title)} (${n(issues.length)})</h3>${hint ? ` <span class="muted">— ${esc(hint)}</span>` : ""}</summary>`,
@@ -158,7 +158,7 @@ function categoryBlock(cat: QaCategory, issues: readonly QaIssue[]): string {
 
 function issueRow(i: QaIssue): string {
   const l = i.link;
-  const cells = [place(l.source), place(l.target), bdi(l.heRef2), bdi(l.declaredType), esc(i.problem.message), `<span class="fix">${esc(suggestedFix(i.problem.code, i.category))}</span>`, `<code>${esc(i.problem.code)}</code>`];
+  const cells = [place(l.source), place(l.target), bdi(l.heRef2), bdi(l.declaredType), esc(i.problem.message), `<span class="fix">${esc(suggestedFix(i.problem.code, i.category))}</span>`, `<code>${esc(i.problem.code)}</code>${i.problem.detail ? `<br><span class="muted">${esc(i.problem.detail)}</span>` : ""}`];
   return `<tr>${cells.map((c) => `<td>${c}</td>`).join("")}</tr>`;
 }
 

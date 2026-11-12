@@ -33,11 +33,11 @@ export function parseLinksJson(text: string): ParseResult {
   let pipelineRejectsBytes = false;
 
   if (text.startsWith("﻿")) {
-    file("warning", "file/bom", "הקובץ מתחיל ב־BOM. הגנרטור מתעלם ממנו, אבל הסנכרון השבועי של הספרייה דוחה קובץ כזה.");
+    file("warning", "file/bom", "בתחילת הקובץ יש תו נסתר שעורכי טקסט מוסיפים. אוצריא מתעלמת ממנו, אבל הסנכרון השבועי של הספרייה דוחה קובץ כזה; שמירה מחדש בכלי מתקנת את זה.", "BOM");
     pipelineRejectsBytes = true;
   }
   if (text.includes("\r")) {
-    file("warning", "file/cr", "בקובץ יש סופי שורה של Windows (CR). הסנכרון השבועי של הספרייה דוחה קובץ כזה; שמירה מחדש בכלי מתקנת את זה.");
+    file("warning", "file/cr", "סופי השורות בקובץ הם בסגנון Windows. הסנכרון השבועי של הספרייה דוחה קובץ כזה; שמירה מחדש בכלי מתקנת את זה.", "CR");
     pipelineRejectsBytes = true;
   }
   if (/\n\s*\n\s*$/.test(text)) {
@@ -89,7 +89,7 @@ export function parseLinksJson(text: string): ParseResult {
         decodable = false;
         return undefined;
       }
-      if (!Number.isInteger(v)) rec("warning", "record/not-integer", `${key} = ${v} אינו מספר שלם. הגנרטור קוטע אותו, והסנכרון השבועי דוחה אותו.`);
+      if (!Number.isInteger(v)) rec("warning", "record/not-integer", `${key} = ${v} אינו מספר שלם. אוצריא קוטעת אותו, והסנכרון השבועי דוחה אותו.`);
       return v;
     };
     const str = (key: string, required: boolean): string | undefined => {
@@ -120,12 +120,12 @@ export function parseLinksJson(text: string): ParseResult {
     if (!decodable) { generatorRejectsFile = true; return; }
 
     for (const [key, v] of [["line_index_1", li1], ["line_index_2", li2]] as const)
-      if (v! < 1) rec("warning", "record/index-below-1", `${key} = ${v}: שורות בקובץ מתחילות ב־1. הגנרטור ממפה ערך כזה לשורה הראשונה, והסנכרון השבועי דוחה אותו.`);
+      if (v! < 1) rec("warning", "record/index-below-1", `${key} = ${v}: שורות בקובץ מתחילות ב־1. אוצריא ממפה ערך כזה לשורה הראשונה, והסנכרון השבועי דוחה אותו.`);
     if (DOUBLE_N_KEY in r && !(CONNECTION_TYPE_KEY in r))
-      rec("warning", "record/double-n-type", `שם השדה כתוב "${DOUBLE_N_KEY}" (שני n). הגנרטור מתעלם ממנו והקישור יישמר כ"אחר". השם הנכון הוא "${CONNECTION_TYPE_KEY}".`);
+      rec("warning", "record/double-n-type", `שם השדה כתוב "${DOUBLE_N_KEY}" (שני n). אוצריא מתעלמת ממנו והקישור יישמר כ"אחר". השם הנכון הוא "${CONNECTION_TYPE_KEY}".`);
     const connectionType = typeof typeRaw === "string" ? typeRaw : "";
     const t = parseConnectionType(connectionType);
-    if (!t.known) rec("warning", "record/unknown-type", `סוג הקשר "${connectionType}" אינו מוכר לגנרטור, והקישור יישמר כ"אחר".`);
+    if (!t.known) rec("warning", "record/unknown-type", `סוג הקשר "${connectionType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
     if (t.type === "LINKER") rec("warning", "record/linker-skipped", 'רשומות מסוג "linker" אינן מיובאות לאוצריא כלל.');
 
     // defineProperty: a key named "__proto__" is kept as data, not taken as the object's prototype
@@ -146,7 +146,7 @@ export function parseLinksJson(text: string): ParseResult {
     });
   });
   if (generatorRejectsFile)
-    file("error", "file/generator-rejects", "לפחות רשומה אחת לא ניתנת לפענוח, ולכן הגנרטור של אוצריא ידלג על הקובץ כולו. תקנו את הרשומות המסומנות לפני השימוש.");
+    file("error", "file/generator-rejects", "לפחות רשומה אחת לא ניתנת לפענוח, ולכן אוצריא תדלג על הקובץ כולו. תקנו את הרשומות המסומנות לפני השימוש.");
   return { records, issues, generatorRejectsFile, pipelineRejectsBytes };
 }
 

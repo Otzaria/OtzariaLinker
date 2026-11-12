@@ -47,13 +47,13 @@ interface Candidate {
 
 export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResult {
   const problems: Problem[] = [];
-  const add = (severity: Problem["severity"], code: string, message: string) => problems.push({ code, severity, message });
+  const add = (severity: Problem["severity"], code: string, message: string, detail?: string) => problems.push({ code, severity, message, ...(detail && { detail }) });
   const stored: ConnectionType = parseConnectionType(db.declaredType).type;
   const S = db.source;
   const T = db.target;
 
   if (stored === "LINKER") {
-    add("error", "adopt/linker", 'קישור משכבת LINKER נבנה מחדש בכל בנייה של אוצריא, ואוצריא מדלגת על רשומת "linker" בקובץ. אי אפשר להעתיק אותו לקובץ קישורים.');
+    add("error", "adopt/linker", "זה ציטוט שאוצריא מזהה לבד ובונה מחדש בכל בנייה של המסד, ואוצריא מדלגת על קישור כזה בקובץ. אי אפשר להעתיק אותו לקובץ קישורים.", 'LINKER, Conection Type "linker"');
     return { link: null, problems };
   }
   if (S.book.origin === "sefaria" && T.book.origin === "sefaria") {
@@ -70,7 +70,7 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
   ];
   const valid = all.filter((c) => storedLinkIdentity(c) === want);
   if (!valid.length) {
-    add("error", "adopt/not-reproducible", `אף רשומה בקובץ קישורים לא תישמר באוצריא כמו הקישור הזה (${TYPE_LABELS[stored].he} מ"${S.book.title}" אל "${T.book.title}"): הגנרטור היה הופך אותו או משנה את סוגו. ייתכן שמקורו בספריא או בסקריפט של הגנרטור.`);
+    add("error", "adopt/not-reproducible", `אף רשומה בקובץ קישורים לא תישמר באוצריא כמו הקישור הזה (${TYPE_LABELS[stored].he} מ"${S.book.title}" אל "${T.book.title}"): אוצריא הייתה הופכת אותו או משנה את סוגו. ייתכן שמקורו בספריא, או בקישורים שהספרייה מוסיפה בבניית המסד.`);
     return { link: null, problems };
   }
 
@@ -102,17 +102,17 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
       };
       // the generator reads an anchor's label from heRef_2 (" אות X", Generator.kt:2420-2427)
       if (a.label) heRef2 = withAnchorLabel(heRef2, a.label);
-      if (a.label && anchorLabelFromHeRef(heRef2) !== a.label) add("warning", "adopt/anchor-label", `לעוגן במסד יש תווית "${a.label}", אבל שם המקום שנבנה לא יישא אותה. תקנו את heRef_2 כך שיסתיים ב"אות ${a.label}".`);
+      if (a.label && anchorLabelFromHeRef(heRef2) !== a.label) add("warning", "adopt/anchor-label", `לעוגן במסד יש תווית "${a.label}", אבל שם המקום שנבנה לא יישא אותה. תקנו את שם המקום ביעד כך שיסתיים ב"אות ${a.label}".`, "heRef_2");
     }
     if (anchors0.length > 1) add("warning", "adopt/anchors-extra", `לקישור במסד ${anchors0.length} עוגנים בשורת המקור; הועתק רק הראשון. כל עוגן נוסף הוא רשומה נפרדת בקובץ.`);
   } else if (anchors0.length) add("warning", "adopt/anchor-lost", "לקישור במסד יש עוגן על מילה, אבל הרשומה שנבחרה מתהפכת באוצריא, ובכיוון הזה העוגן נזרק.");
   if ((db.dbAnchors ?? []).some((a) => a.side === 1)) add("warning", "adopt/anchor-target", "לקישור במסד יש עוגן בצד היעד. לקובץ קישורים אין שדה כזה, והוא לא הועתק.");
-  if (db.dbSuppressed?.length) add("warning", "adopt/suppressed", "ספריא מסתירה את הקישור הזה באחד הצדדים (link_suppressed_side). בקובץ קישורים אין דרך לומר זאת, ובקובץ הוא יוצג בשני הצדדים.");
+  if (db.dbSuppressed?.length) add("warning", "adopt/suppressed", "ספריא מסתירה את הקישור הזה באחד הצדדים. בקובץ קישורים אין דרך לומר זאת, ובקובץ הוא יוצג בשני הצדדים.");
 
-  add("info", "adopt/heref", `heRef_2 אינו נשמר במסד. נלקח שם המקום של שורת היעד במסד ("${heRef2}"). בדקו אותו לפני הייצוא.`);
+  add("info", "adopt/heref", `שם המקום ביעד, כפי שנכתב בקובץ, אינו נשמר במסד. נלקח שם המקום של שורת היעד במסד ("${heRef2}"). בדקו אותו לפני הייצוא.`, "heRef_2");
   if (valid.length > 1)
-    add("info", "adopt/direction", `אותו קישור יכול לבוא גם מקובץ הקישורים של "${(chosen.source === S ? T : S).book.title}". הכלי בחר בקובץ של "${chosen.source.book.title}"${chosen.declaredType === "source" ? ' עם הסוג "מקור" (source), כמו בקובצי המפרשים בספרייה' : ""}.`);
-  if (stored === "OTHER") add("info", "adopt/type-other", 'במסד הקישור שמור כ"אחר". בקובץ המקורי ייתכן שהיה סוג ריק, לא מוכר, או סוג שאוצריא הורידה ל"אחר". הכלי כותב "other".');
+    add("info", "adopt/direction", `אותו קישור יכול לבוא גם מקובץ הקישורים של "${(chosen.source === S ? T : S).book.title}". הכלי בחר בקובץ של "${chosen.source.book.title}"${chosen.declaredType === "source" ? ' עם הסוג "מקור", כמו בקובצי המפרשים בספרייה' : ""}.`);
+  if (stored === "OTHER") add("info", "adopt/type-other", 'במסד הקישור שמור כ"אחר". בקובץ המקורי ייתכן שהיה סוג ריק, לא מוכר, או סוג שאוצריא הורידה ל"אחר". הכלי כותב "אחר".', 'Conection Type "other"');
   if (!ctx.hasLinksFile(chosen.source.book.title))
     add("warning", "adopt/no-links-file", `קובץ הקישורים של "${chosen.source.book.title}" לא נטען לפרויקט. ייצוא שלו יחליף את הקובץ שבספרייה, ולכן הכלי לא ייצא את הקישור עד שתטענו את הקובץ (או תאשרו שאין לספר קובץ).`);
 

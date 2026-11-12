@@ -81,7 +81,7 @@ export class TextFilesSource implements BookSource {
     if (!file) throw new Error(`unknown book ${bookKey}`);
     const decoded = decodeText(await file.read());
     if (decoded.encoding !== "utf-8")
-      this.info.warnings.push({ code: "source/not-utf8", message: `הקובץ "${file.path}" שמור בקידוד ${decoded.encoding} ולא UTF-8. הכלי מציג אותו נכון, אבל הגנרטור של אוצריא קורא כל ספר כ־UTF-8 — שמרו אותו מחדש ב־UTF-8 לפני שליחה לספרייה.` });
+      this.info.warnings.push({ code: "source/not-utf8", message: `הקובץ "${file.path}" שמור בקידוד ${decoded.encoding} ולא UTF-8. הכלי מציג אותו נכון, אבל אוצריא קוראת כל ספר כ־UTF-8 — שמרו אותו מחדש ב־UTF-8 לפני שליחה לספרייה.` });
     const lines = splitBookLines(decoded.text);
     if (this.cache.size >= 32) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(bookKey, lines);

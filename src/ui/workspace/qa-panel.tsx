@@ -1,4 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
+import { problemText } from "../../core/links/validate";
 import { QA_CATEGORIES, qaAction, redundantDuplicates, suggestedFix, type QaCategory } from "../../linking/qa";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -14,6 +15,7 @@ const SEV_LABEL = { error: "שגיאות", warning: "אזהרות", info: "מי�
 
 export function QaPanel() {
   const store = useStore();
+  const advanced = store.prefs.advanced.value;
   const report = store.quality.report.value;
   const [cat, setCat] = useState<QaCategory | "all">("all");
   const [sev, setSev] = useState<"error" | "warning" | "info" | "all">("all");
@@ -107,7 +109,8 @@ export function QaPanel() {
                   {i.link.source.book.title} {i.link.source.line + 1} ← {i.link.heRef2 || i.link.target.book.title}
                 </b>
                 <br />
-                {i.problem.message}
+                {/* plain words for everyone; the file's field names only in advanced mode (audit F14) */}
+                {problemText(i.problem, advanced)}
                 {i.problem.severity !== "info" && <div class="muted">{suggestedFix(i.problem.code, i.category)}</div>}
               </span>
               <span onClick={(e) => e.stopPropagation()} style="display:flex;align-items:center">

@@ -192,10 +192,10 @@ export class AppStore {
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (base) {
       const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
-      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ref_1 הישן ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
-      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ref_2 הישן ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.` });
+      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ציון ספריא הישן של המקור ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
+      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ציון ספריא הישן של היעד ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_2" });
       const fields = dropped.filter((x) => x.startsWith("anchor_"));
-      if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: `${fields.join(" ו־")} של הסנכרון השבועי יוסרו מהרשומה, כי העוגן או השורה השתנו.` });
+      if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: "פרטים שהסנכרון השבועי של הספרייה רשם על העוגן יוסרו מהקישור, כי העוגן או השורה השתנו.", detail: fields.join(", ") });
     }
     return out;
   });
@@ -888,7 +888,7 @@ export class AppStore {
     const list = parseSefariaTitles(text, path);
     if (!list) return void this.notify("warning", `"${path}": אין בקובץ שמות ספרים, ולכן הכלי ממשיך עם הרשימה המובנית.`), false;
     this.sefariaTitles.value = list;
-    this.notify("info", `נטענה רשימת ספרי ספריא של הספרייה מ־"${path}" (${list.titles.size.toLocaleString("he")} ספרים). לפיה הכלי קובע איפה נדרש ref_1/ref_2.`);
+    this.notify("info", `נטענה רשימת ספרי ספריא של הספרייה מ־"${path}" (${list.titles.size.toLocaleString("he")} ספרים). לפיה הכלי קובע איפה נדרש ציון ספריא.`);
     return true;
   }
 

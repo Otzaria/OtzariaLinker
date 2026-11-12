@@ -137,3 +137,35 @@ describe("'הערות על X' — the real outcome (compatibility review B5, Gen
     expect(out.get("n2")!.map((p) => p.code)).not.toContain("export/companion-merge-broken");
   });
 });
+
+describe("plain words for everyone, field names apart (audit F14)", () => {
+  // every link here trips problems whose old text named the file's fields or the generator
+  const cases: Link[] = [
+    link({ declaredType: "linker" }),
+    link({ heRef2: " " }),
+    link({ target: { book: SEF, line: 2 } }),
+    link({ source: { book: SEF, line: 2 }, target: { book: B, line: 2 } }),
+    link({ ref1: "Genesis 1:1", ref2: "Genesis 1:2" }),
+    link({ target: { book: SEF, line: 2, end: 4 }, ref2: "Genesis 1:3", anchor: { rawStart: 1, rawEnd: 4 } }),
+    link({ source: { book: SEF, line: 2 }, ref1: "Genesis 1:3", anchor: { rawStart: 1 } }),
+    link({ source: { book: book("פירוש על ספר ב"), line: 1 }, target: { book: book("ספר ב", { isBaseBook: true }), line: 2 }, declaredType: "commentary" }),
+    link({ provenance: "db-copy" }),
+  ];
+  const problems = cases.flatMap((l) => validateLink(l, ctx));
+  const TECH = /ref_[12]|heRef|anchor_src_hash|Conection|path_2|הגנרטור|\((?:start|end|source|linker)\)/;
+
+  it("no message names a field of the links file", () => {
+    expect(problems.length).toBeGreaterThan(10);
+    for (const p of problems) expect(p.message, p.code).not.toMatch(TECH);
+  });
+
+  it("the field names are kept in the detail, for advanced mode", () => {
+    const detail = (code: string) => problems.find((p) => p.code === code)?.detail;
+    expect(detail("export/heref-missing")).toBe("heRef_2");
+    expect(detail("sefaria/ref2-required")).toBe("ref_2");
+    expect(detail("sefaria/ref1-side")).toBe("ref_1");
+    expect(detail("sefaria/both-refs")).toBe("ref_1, ref_2");
+    expect(detail("sefaria/pending-anchor-hash")).toContain("anchor_src_hash");
+    expect(detail("export/linker")).toContain("linker");
+  });
+});

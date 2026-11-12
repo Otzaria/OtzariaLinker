@@ -99,7 +99,7 @@ export const TYPE_LABELS: Readonly<Record<ConnectionType, { he: string; hint: st
   MISHNAH_IN_TALMUD: { he: "משנה בתלמוד", hint: "משנה שמוטבעת בגמרא" },
   RELATED: { he: "קשור", hint: "קשר כללי, לא ישיר" },
   OTHER: { he: "אחר", hint: "לא מסווג" },
-  LINKER: { he: "קישור אוטומטי", hint: "שכבה שנוצרת רק בפייפליין של אוצריא; לא ניתנת לכתיבה בקובץ" },
+  LINKER: { he: "קישור אוטומטי", hint: "קישורים שאוצריא מזהה לבד בכל בנייה של המסד; אי אפשר לכתוב אותם בקובץ קישורים" },
   SIFREI_MITZVOT: { he: "ספרי מצוות", hint: "ספר המצוות וכד'" },
   ESSAY: { he: "מאמר", hint: "מאמר / חיבור עצמאי" },
   ALLUSION: { he: "רמז", hint: "רמז / הרמזה" },

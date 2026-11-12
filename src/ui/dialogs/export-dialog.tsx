@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
+import { problemText } from "../../core/links/validate";
 import { qaAction } from "../../linking/qa";
 import type { ExportBundle } from "../../state/exchange";
 import type { AppStore } from "../../state/store";
@@ -150,7 +151,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                         <span class="grow"><FileName name={`alt_toc/${f.name}`} /></span>
                         <span class="muted">{f.clears ? "ריק: מוחק את המבנים מהספרייה" : `${f.structures} מבנים, ${f.nodes.toLocaleString("he")} צמתים`}</span>
                         {f.problems.some((p) => p.severity === "warning") && (
-                          <span class="status edited" title={f.problems.filter((p) => p.severity === "warning").map((p) => p.message).join("\n")}>
+                          <span class="status edited" title={f.problems.filter((p) => p.severity === "warning").map((p) => problemText(p, advanced)).join("\n")}>
                             אזהרה
                           </span>
                         )}
@@ -166,7 +167,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {alt.heldBack.map((b) => (
                       <li key={b.title} class="error" style="cursor:pointer" onClick={() => ((store.dialog.value = "alt-toc"), ref.current?.close())}>
                         <span>
-                          <b>{b.title}</b>: {b.problems.filter((p) => p.severity === "error").slice(0, 5).map((p) => p.message).join(" ")}
+                          <b>{b.title}</b>: {b.problems.filter((p) => p.severity === "error").slice(0, 5).map((p) => problemText(p, advanced)).join(" ")}
                         </span>
                       </li>
                     ))}
@@ -180,7 +181,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {plan.heldBack.slice(0, 200).map(({ link, problems }) => (
                       <li key={link.id} class="error" style="cursor:pointer" onClick={() => (store.revealLink(link), ref.current?.close())}>
                         <span>
-                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "error").map((p) => p.message).join(" ")}
+                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "error").map((p) => problemText(p, advanced)).join(" ")}
                         </span>
                       </li>
                     ))}
@@ -194,7 +195,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {plan.warned.slice(0, 200).map(({ link, problems }) => (
                       <li key={link.id} class="warning">
                         <span>
-                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity !== "info").map((p) => p.message).join(" ")}
+                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity !== "info").map((p) => problemText(p, advanced)).join(" ")}
                         </span>
                       </li>
                     ))}
