@@ -15,7 +15,8 @@ import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, ty
  * read-only through the same registry and worker job the app uses (a file-backed Blob, never copied):
  *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db npx vitest run tests/integration/linking/citations/real-db.local.test.ts
  * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title>[;<title>…] runs only those books;
- * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then).
+ * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then);
+ * CITATIONS_SAMPLE=heldout runs the held-out sample (HELDOUT) instead.
  *
  * The sample: 17 category groups, from each the 3 books with the smallest sha1(book id) among those with
  * 200–6000 lines and at least 20 LINKER links (deterministic for a given library build; the script
@@ -78,6 +79,72 @@ const SAMPLE: readonly { group: string; title: string }[] = [
 ];
 
 /**
+ * A HELD-OUT sample, never tuned on (CITATIONS_SAMPLE=heldout): the same criteria (200–6000 lines, at least 20
+ * LINKER links to other books), one group per top-level category of the library, the 4 books with the smallest
+ * sha1("heldout-2026-11-12:" + book id), without the books of SAMPLE and without `אוצר לעזי רש"י` (named in the
+ * benchmark's findings, so tuned on). Chosen 2026-11-12 (docs/AUTOMATION_ENGINE.md §6.8); no floors are checked on it.
+ */
+const HELDOUT: readonly { group: string; title: string }[] = [
+  { group: "הלכה", title: "מעשה רקח על הלכות שופר וסוכה ולולב" },
+  { group: "הלכה", title: "לחם משנה על משנה תורה, הלכות מכירה" },
+  { group: "הלכה", title: "אשל אברהם על שולחן ערוך אורח חיים" },
+  { group: "הלכה", title: "משה ידבר" },
+  { group: "חסידות", title: "שערי היחוד ואמונה" },
+  { group: "חסידות", title: "לקוטי תורה" },
+  { group: "חסידות", title: "דרך מצותיך" },
+  { group: "חסידות", title: "צדקת הצדיק" },
+  { group: "לימוד יומי", title: "חק לישראל - דברים" },
+  { group: "לימוד יומי", title: "חק לישראל - ויקרא" },
+  { group: "לימוד יומי", title: "חק לישראל - במדבר" },
+  { group: "לימוד יומי", title: "חק לישראל - שמות" },
+  { group: "מדרש", title: "יפה ענף על רות רבה" },
+  { group: "מדרש", title: "רות רבה (לרנר)" },
+  { group: "מדרש", title: "שיר השירים רבה" },
+  { group: "מדרש", title: "חידושי הרד״ל על שמות רבה" },
+  { group: "מחשבת ישראל", title: "דרוש חדושי הלבנה" },
+  { group: "מחשבת ישראל", title: "דרוש על התורה" },
+  { group: "מחשבת ישראל", title: "פירושים והערות מהרב יהושע הרטמן על דרשת שבת הגדול" },
+  { group: "מחשבת ישראל", title: "קובץ מאמרים ואגרות חלק ג" },
+  { group: "משנה", title: "רמב\"ם על משנה כלים" },
+  { group: "משנה", title: "ר\"ש משאנץ על משנה נגעים" },
+  { group: "משנה", title: "תוספות יום טוב על משנה מקואות" },
+  { group: "משנה", title: "יכין חולין" },
+  { group: "סדר התפילה", title: "ישמח משה על תפלות יוט וליקוטים" },
+  { group: "סדר התפילה", title: "זבח פסח על הגדה של פסח" },
+  { group: "סדר התפילה", title: "מעשה ניסים על הגדה של פסח" },
+  { group: "סדר התפילה", title: "מרבה לספר על הגדה של פסח" },
+  { group: "ספרות עזר", title: "קורא הדורות" },
+  { group: "ספרות עזר", title: "פחד יצחק חלק י" },
+  { group: "ספרות עזר", title: "אבן ספיר" },
+  { group: "ספרות עזר", title: "מגילת ספר" },
+  { group: "ספרי מוסר", title: "אור הצפון" },
+  { group: "ספרי מוסר", title: "יערות דבש חלק ב" },
+  { group: "ספרי מוסר", title: "מסילת ישרים" },
+  { group: "ספרי מוסר", title: "ספר היראה" },
+  { group: "קבלה", title: "בנפש דוד" },
+  { group: "קבלה", title: "ספרא דצניעותא עם ביאור הגרא" },
+  { group: "קבלה", title: "משכן העדות (רבי משה די ליאון)" },
+  { group: "קבלה", title: "מקדש מלך, פירוש הרמ\"ז על ספר הזהר" },
+  { group: "שו״ת", title: "חוות יאיר" },
+  { group: "שו״ת", title: "מלמד להועיל חלק א" },
+  { group: "שו״ת", title: "שו\"ת הרשב\"א חלק ה" },
+  { group: "שו״ת", title: "באר משה (דנשבסקי) א" },
+  { group: "תוספתא", title: "תוספתא שבת" },
+  { group: "תלמוד בבלי", title: "רש\"י על ברכות" },
+  { group: "תלמוד בבלי", title: "בן יהוידע על סנהדרין" },
+  { group: "תלמוד בבלי", title: "רש\"י על יומא" },
+  { group: "תלמוד בבלי", title: "הלכות קטנות לרי\"ף (מנחות)" },
+  { group: "תלמוד ירושלמי", title: "ירושלמי מבואר ומפורש על יומא" },
+  { group: "תלמוד ירושלמי", title: "שיירי קרבן על תלמוד ירושלמי סנהדרין" },
+  { group: "תלמוד ירושלמי", title: "נועם ירושלמי על ברכות" },
+  { group: "תלמוד ירושלמי", title: "פירוש שלמה סיריליו על תלמוד ירושלמי תרומות" },
+  { group: "תנ״ך", title: "הדר זקנים על התורה" },
+  { group: "תנ״ך", title: "גור אריה על דברים" },
+  { group: "תנ״ך", title: "פרדס יוסף" },
+  { group: "תנ״ך", title: "אמרי בינה דרושים" },
+];
+
+/**
  * Floors the full sample must keep (measured 2026-11-12, after the recall round: certain 85.3% strict /
  * 99.9% judged, high 72.3% / 99.8%; recall 93.1%. After the V4 round the first table — the forms the floors
  * were set on — is certain 85.3% / 99.9%, high 72.1% / 99.9%, recall 94.5%; the new forms and the internal
@@ -112,7 +179,8 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
-    for (const [k, { group, title }] of SAMPLE.entries()) {
+    const heldout = process.env.CITATIONS_SAMPLE === "heldout";
+    for (const [k, { group, title }] of (heldout ? HELDOUT : SAMPLE).entries()) {
       if (only && !only.split(";").includes(title)) continue;
       if (k % shards !== shard) continue;
       const b = books.find((x) => x.title === title);
@@ -212,7 +280,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
           all.map((j) => ({ group: j.group, book: j.book, verdict: j.verdict, exact: j.exact, confidence: j.s.confidence, score: j.s.score, line: j.s.source.line, target: j.s.target.book.title, tline: j.s.target.line, tend: j.s.target.end, heRef2: j.s.heRef2, rules: j.s.rules, reason: j.s.reasons.map((r) => r.text).join(" | "), context: j.context, at: j.at })),
         ),
       );
-    if (!only && shards === 1) {
+    if (!only && shards === 1 && !heldout) {
       for (const level of ["certain", "high"] as const) {
         const p = precision(byLevel.get(level)!);
         expect(p.strict, level).toBeGreaterThanOrEqual(MIN[level].strict);
