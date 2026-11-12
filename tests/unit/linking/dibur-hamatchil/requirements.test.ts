@@ -230,11 +230,10 @@ describe("§6 fuzzy: the letters of the ד\"ה by edit distance (rung L)", () =>
   it("a quote whose words drifted beyond a word step is found, with the rung said", () => {
     // "שריא למרפוי ארעאה": a different prefix, a dropped yod and an added he, in a ד\"ה of three words
     const res = run(["<h2>דף ב.</h2>", "<b>שריא למרפוי ארעאה.</b> פירוש"], base);
-    const s = res.suggestions[0];
-    if (s) {
-      expect(baseSide(s).line).toBe(1);
-      expect(s.confidence).not.toBe("certain");
-    }
+    const s = res.suggestions[0]!;
+    expect(baseSide(s).line).toBe(1);
+    expect(s.rules).toContain("dh/rung-L");
+    expect(s.confidence).not.toBe("certain");
   });
 
   it("negative: letters that are not there are not found", () => {

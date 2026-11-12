@@ -634,27 +634,33 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
    * Rung L: the ד"ה as one string of letters, found by edit distance (approximateOccurrence) inside
    * the stretch of a base line around a word it shares with the ד"ה — the owner's "Levenshtein ≤ 34%"
    * (build_artzot_hachaim_links.py), for quotations whose words drifted beyond what a word step
-   * bridges. Only an explicit ד"ה of 8+ letters, only base lines holding one of its words (the inverted
-   * index), and only a clear winner: the best line at least 2 edits better than any other.
+   * bridges. Only an explicit ד"ה of 8+ letters, only inside a structural window of at most 300 lines
+   * (a page, a seif, a section — never the whole book), only base lines holding one of its words (the
+   * inverted index), and only a clear winner: the best line at least 2 edits better than any other.
    */
   const letterRung = (ex: ExtractedDh, window: SearchWindow): Cand | null => {
+    if (window.kind === "book" || window.to - window.from > 300) return null;
     const src = ex.dh;
     const pattern = src.map((t) => t.key).join("");
     if (src.length < 2 || pattern.length < 8) return null;
     const max = Math.floor(pattern.length * 0.34);
     const keys = new Set(src.filter((t) => t.key.length >= 3 && !STOP_WORDS.has(t.key)).flatMap((t) => [t.key, `~${indexKey(t.key)}`]));
     if (!keys.size) return null;
-    const positions = positionsIn(window.from, window.to, hitsOf(src.filter((t) => t.key.length >= 3 && !STOP_WORDS.has(t.key)), src.length));
+    // a small window is read whole; a larger one only where a word of the ד"ה (or its stem skeleton) stands
+    const all = positionsIn(window.from, window.to);
+    const whole = all.length <= 60;
+    const positions = whole ? all : positionsIn(window.from, window.to, hitsOf(src.filter((t) => t.key.length >= 3 && !STOP_WORDS.has(t.key)), src.length));
     if (positions.length > 200) return null;
     let best: { pos: number; dist: number; from: number; to: number } | null = null;
     let second = Infinity;
     for (const pos of positions) {
       const tg = bTokens[pos]!;
       let lineBest: { dist: number; from: number; to: number } | null = null;
-      for (let i = 0; i < tg.length; i++) {
-        if (!keys.has(tg[i]!.key) && !keys.has(`~${indexKey(tg[i]!.key)}`)) continue;
-        const from = Math.max(0, i - src.length - 1);
-        const to = Math.min(tg.length, i + src.length + 2);
+      const segments: [number, number][] = [];
+      for (let i = 0; i < tg.length; i++)
+        if (keys.has(tg[i]!.key) || keys.has(`~${indexKey(tg[i]!.key)}`)) segments.push([Math.max(0, i - src.length - 1), Math.min(tg.length, i + src.length + 2)]);
+      if (!segments.length && whole && tg.reduce((n, t) => n + t.key.length, 0) <= 800) segments.push([0, tg.length]);
+      for (const [from, to] of segments) {
         const seg = tg.slice(from, to);
         const hit = approximateOccurrence(pattern, seg.map((t) => t.key).join(""), max);
         if (!hit || (lineBest && hit.dist >= lineBest.dist)) continue;
