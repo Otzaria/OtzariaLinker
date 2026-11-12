@@ -8,6 +8,8 @@ import { linePairKey } from "../linking/merge";
 import { addChanges, commit, type Change, type LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource } from "./services";
 import type { NoticeKind, Pick as LinePick, Side, SideTab } from "./store";
+import { CHUNK, type LineStore } from "./lines";
+import { stripTags } from "../core/text/html";
 
 /*
  * Automatic suggestions (stage 8): running an engine on a pair of books, the citations engine on one
@@ -26,6 +28,10 @@ export interface SuggestionsHost {
   readonly pick: Record<Side, Signal<LinePick | null>>;
   readonly sideTab: Signal<SideTab>;
   refOf(bookKey: string): BookRef;
+  /** the lines of open books (the suggestion table shows the start of each line, audit F17) */
+  readonly lines: Pick<LineStore, "peek" | "load">;
+  /** a line's place name when the database has none: "<title> <headings>" (store.autoHeRef) */
+  autoHeRef(at: { bookKey: string; line: number }): string;
   reveal(side: Side, bookKey: string, line: number): void;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
@@ -42,7 +48,21 @@ export interface SuggestionRun {
   batch?: BatchRow[];
   /** a max-link run: the plan, every step's outcome and the merge counts (state/maxlink.ts) */
   maxlink?: MaxLinkRunInfo;
+  /** a pair run: the book the user chose as the source — the table reads every row from it (audit F18) */
+  from?: string;
 }
+
+/** A suggestion as the table shows it: from the user's book to the other (audit F17, F18). */
+export interface SuggestionView {
+  from: LinkSide;
+  to: LinkSide;
+  /** the place name of `to` */
+  toLabel: string;
+  /** the suggestion is stored the other way (base → commentary); the table reads it from the user's book */
+  reversed: boolean;
+}
+
+const SNIPPET_WORDS = 7;
 
 export interface BatchRow {
   source: BookRef;
@@ -110,7 +130,7 @@ export class SuggestionsState {
     if (!result) return false;
     await this.loadDbLinkKeys([source.key]);
     batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now() };
+      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now(), from: sourceKey };
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -253,6 +273,42 @@ export class SuggestionsState {
     const st = this.state.value;
     const max = CONFIDENCE_ORDER.indexOf(level);
     return (this.run.value?.result.suggestions ?? []).filter((s) => st.get(s.id) === "pending" && CONFIDENCE_ORDER.indexOf(s.confidence) <= max).map((s) => s.id);
+  }
+
+  /**
+   * A row as the user reads it (audit F18): a pair run reads from the book the user chose as the
+   * source, also where the engine stores the link the other way (dibur hamatchil: base → commentary);
+   * then the place name is the base line's own.
+   */
+  display(s: Suggestion): SuggestionView {
+    const from = this.run.peek()?.from;
+    const reversed = !!from && s.source.book.key !== from && s.target.book.key === from;
+    if (!reversed) return { from: s.source, to: s.target, toLabel: s.heRef2, reversed };
+    return { from: s.target, to: s.source, toLabel: this.host.autoHeRef({ bookKey: s.source.book.key, line: s.source.line }), reversed };
+  }
+
+  /** The start of a line's text, which tells apart rows with the same place name (audit F17); undefined until loaded. */
+  snippet(side: LinkSide): string | undefined {
+    const l = this.host.lines.peek(side.book.key, side.line);
+    if (!l) return undefined;
+    const words = stripTags(l.text).trim().split(/\s+/).filter(Boolean);
+    return words.slice(0, SNIPPET_WORDS).join(" ") + (words.length > SNIPPET_WORDS ? "…" : "");
+  }
+
+  /** Loads the lines at both ends of the shown rows, for their snippets and place names. */
+  async loadPreviews(list: readonly Suggestion[]): Promise<void> {
+    const books = this.host.books.peek();
+    const need = new Map<string, Set<number>>();
+    for (const s of list)
+      for (const side of [s.source, s.target])
+        if (books.has(side.book.key)) need.set(side.book.key, (need.get(side.book.key) ?? new Set()).add(Math.floor(side.line / CHUNK)));
+    for (const [key, chunks] of need)
+      for (const c of chunks)
+        try {
+          await this.host.lines.load(key, c * CHUNK, c * CHUNK);
+        } catch {
+          /* a preview is best effort: a book closed meanwhile shows the place name alone */
+        }
   }
 
   /** Moves the inline/card view to a suggestion and shows both ends in the readers. */

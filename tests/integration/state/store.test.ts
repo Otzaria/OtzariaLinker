@@ -162,6 +162,46 @@ describe("AppStore — automatic suggestions", () => {
   });
 });
 
+describe("AppStore — the suggestion table reads like the user's choice", () => {
+  it("rows with the same place name differ by the start of the target line (audit F17)", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB, BIUR]);
+    const biur = [...store.books.value.values()].find((b) => b.title === "ביאור על בראשית")!;
+    const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    expect(await store.suggestions.runEngine("headings", biur.key, bereshit.key)).toBe(true);
+    const list = store.suggestions.run.value!.result.suggestions.slice(0, 5);
+    expect(store.suggestions.snippet(list[0]!.target)).toBeUndefined(); // not loaded yet
+    await store.suggestions.loadPreviews(list);
+    const snippets = list.map((s) => store.suggestions.snippet(store.suggestions.display(s).to));
+    expect(snippets.every((x) => !!x && x.length > 0)).toBe(true);
+    expect(new Set(snippets).size).toBe(list.length);
+  });
+
+  it("a dibur hamatchil run stored base → commentary still reads from the commentary the user chose (audit F18)", async () => {
+    const { store } = makeStore();
+    const verses = ["בראשית ברא אלהים את השמים ואת הארץ.", "והארץ היתה תהו ובהו וחשך על פני תהום.", "ויאמר אלהים יהי אור ויהי אור.", "וירא אלהים את האור כי טוב."];
+    const dh = ["בראשית ברא", "תהו ובהו", "יהי אור", "כי טוב"];
+    const nl = String.fromCharCode(10);
+    // a base that is not a Sefaria book, so nothing but the direction is under test
+    const base = { path: "ספר הבסיס.txt", blob: new Blob([strToU8(["<h1>ספר הבסיס</h1>", "<h2>פרק א</h2>", ...verses].join(nl))]) };
+    const comm = { path: "ביאור על ספר הבסיס.txt", blob: new Blob([strToU8(["<h1>ביאור על ספר הבסיס</h1>", "<h2>פרק א</h2>", ...dh.map((d, i) => `${d} - ביאור: הסבר קצר על שורה ${i + 1}.`)].join(nl))]) };
+    await store.openFiles([base, comm]);
+    const c = [...store.books.value.values()].find((b) => b.title === "ביאור על ספר הבסיס")!;
+    const b = [...store.books.value.values()].find((x) => x.title === "ספר הבסיס")!;
+    expect(await store.suggestions.runEngine("dibur-hamatchil", c.key, b.key)).toBe(true);
+    const list = store.suggestions.run.value!.result.suggestions;
+    const stored = list.find((s) => s.source.book.key === b.key)!;
+    expect(stored).toBeTruthy(); // the engine stores an anchored link from the base
+    await store.suggestions.loadPreviews([stored]);
+    const v = store.suggestions.display(stored);
+    expect(v.reversed).toBe(true);
+    expect(v.from.book.key).toBe(c.key);
+    expect(v.to.book.key).toBe(b.key);
+    expect(v.toLabel).toMatch(/^ספר הבסיס /);
+    expect(store.suggestions.snippet(v.to)).toBe(verses[stored.source.line - 2]!.split(" ").slice(0, 7).join(" ") + (verses[stored.source.line - 2]!.split(" ").length > 7 ? "…" : ""));
+  });
+});
+
 describe("AppStore — projects and autosave", () => {
   it("save → open in a new session binds links to the books by title", async () => {
     const a = makeStore();

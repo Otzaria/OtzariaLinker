@@ -242,6 +242,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .sug-table tr.st-approved { background: color-mix(in srgb, var(--tertiary-container) 50%, transparent); }
 .sug-table tr.st-rejected, .sug-table tr.st-exists { opacity: 0.55; }
 .sug-table .acts { white-space: nowrap; }
+.sug-table .snippet { font-size: 11.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .decide { display: inline-flex; }
 .decide .icon-btn { width: 28px; height: 28px; }
 .conf { font-size: 11px; padding: 0 7px; border-radius: var(--radius-full); white-space: nowrap; }
