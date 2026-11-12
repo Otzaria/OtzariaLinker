@@ -58,8 +58,37 @@ function headingsOf(book: EngineBook): Heading[] {
   return out;
 }
 
+export interface HeadingWindows {
+  /** per commentary line index → the base window derived from matching headings */
+  readonly windowOf: (commentaryLine: number) => SearchWindow;
+  /**
+   * Set when the matching headings were NOT used (every window is the whole book): the commentary's
+   * headings match only inside one minor base section the commentary never names (see below).
+   */
+  readonly distrusted?: { readonly section: string; readonly matched: readonly string[] };
+}
+
 /** Per commentary line index → the base window derived from matching headings. */
 export function headingWindows(commentary: EngineBook, base: EngineBook): (commentaryLine: number) => SearchWindow {
+  return headingWindowPlan(commentary, base).windowOf;
+}
+
+/**
+ * The heading windows, and whether they can be trusted.
+ *
+ * A commentary heading matches the first base heading with the same text inside the scope its parent
+ * resolved to — at any depth. Matching DEEPER than the commentary names is normal (a commentary's
+ * "סימן א" under an unnamed "הלכות …" section of the base), but when EVERY outermost match of the
+ * commentary falls inside one and the same base section that the commentary never names (no heading,
+ * not its title), and that section is a minor part of the base, the commentary's structure is not the
+ * base's: the whole commentary would be searched inside that one section. Measured on the real
+ * database (REAL_DATA_REPORT.md §7.1): "מקדש מלך" on the Zohar has "כרך א/ב/ג" › "דף ה." (Vilna
+ * volumes and pages); the Zohar is divided by parsha, and its only "כרך א/ב/ג" are the volumes of the
+ * appendix "תוספות" (966 of 18,769 lines) — so every line was searched in the appendix, and all 56
+ * certain/high suggestions were wrong. Then no heading window is used, and the engine falls back on
+ * sequential progress over the whole book.
+ */
+export function headingWindowPlan(commentary: EngineBook, base: EngineBook): HeadingWindows {
   const first = base.lines[0]?.index ?? 0;
   const last = base.lines.at(-1)?.index ?? 0;
   const whole: SearchWindow = { from: first, to: last, kind: "book" };
@@ -67,6 +96,8 @@ export function headingWindows(commentary: EngineBook, base: EngineBook): (comme
   const byLine = new Map<number, SearchWindow>();
   const stack: { level: number; key: string; mark: string }[] = [];
   let current: SearchWindow = whole;
+  /** the outermost base heading each heading path matched */
+  const outermost = new Set<Heading>();
 
   const resolve = (): SearchWindow => {
     let from = first;
@@ -76,6 +107,7 @@ export function headingWindows(commentary: EngineBook, base: EngineBook): (comme
       const inScope = (b: Heading) => b.key === h.key && b.index >= from && b.index <= to;
       const hit = baseHeadings.find((b) => inScope(b) && b.mark === h.mark) ?? baseHeadings.find(inScope);
       if (!hit) continue;
+      if (label === undefined) outermost.add(hit);
       from = hit.index;
       to = hit.end;
       label = hit.text;
@@ -93,7 +125,22 @@ export function headingWindows(commentary: EngineBook, base: EngineBook): (comme
     }
     byLine.set(l.index, current);
   }
-  return (i) => byLine.get(i) ?? whole;
+
+  // the base section that holds every outermost match, when it is one, unnamed and minor
+  const titleKey = normalize(commentary.book.title);
+  const named = new Set(commentary.lines.map((l) => (levelOf(l) !== null ? keyOf(l.text) : "")).filter(Boolean));
+  /** the nearest base heading enclosing h, other than one spanning the whole book (the title) */
+  const enclosing = (h: Heading) => {
+    let best: Heading | null = null;
+    for (const b of baseHeadings)
+      if (b.level < h.level && b.index < h.index && b.end >= h.index && !(b.index === first && b.end === last) && (!best || b.index > best.index)) best = b;
+    return best;
+  };
+  const sections = new Set([...outermost].map(enclosing));
+  const [section] = sections;
+  if (outermost.size && sections.size === 1 && section && !named.has(section.key) && !(section.key && titleKey.includes(section.key)) && (section.end - section.index + 1) * 2 < last - first + 1)
+    return { windowOf: () => whole, distrusted: { section: section.text, matched: [...outermost].map((h) => h.text) } };
+  return { windowOf: (i) => byLine.get(i) ?? whole };
 }
 
 /** Rung C of the ladder: the window widened by its own width on each side (the neighbouring sections). */
