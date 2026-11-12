@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
     "test:legacy": "playwright test tests/e2e/legacy-baseline.spec.ts",
+    "test:visual": "npm run build && playwright test --config playwright.visual.config.ts",
     "check": "npm run typecheck && npm run test && npm run test:e2e",
     "validate:real": "vitest run --config vitest.validation.config.ts",
     "validate:browser": "playwright test --config playwright.validation.config.ts"
