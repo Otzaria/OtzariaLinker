@@ -62,7 +62,7 @@ function fakeHost(work = true) {
 
 describe("routes", () => {
   it("every route reads back the same", async () => {
-    for (const h of ["#/", "#/workspace/builder", "#/workspace/links", "#/workspace/suggestions", "#/workspace/qa", "#/workspace/books", "#/maxlink", "#/export", "#/relink", "#/alt-toc", "#/help", "#/help/3-%D7%A4%D7%AA%D7%99%D7%97%D7%94", "#/start/folder-otzaria", "#/map-db", "#/import-records"])
+    for (const h of ["#/", "#/workspace/builder", "#/workspace/links", "#/workspace/suggestions", "#/workspace/qa", "#/workspace/books", "#/maxlink", "#/export", "#/relink", "#/alt-toc", "#/help", "#/help/3-%D7%A4%D7%AA%D7%99%D7%97%D7%94", "#/start/folder-otzaria", "#/map-db", "#/import-records", "#/guided/files", "#/guided/plan", "#/guided/finish"])
       expect(formatRoute(parseHash(h)!)).toBe(h);
   });
   it("short and unknown forms", async () => {
@@ -70,7 +70,8 @@ describe("routes", () => {
     expect(parseHash("#")).toEqual({ screen: "home" });
     expect(formatRoute(parseHash("#/workspace")!)).toBe("#/workspace/builder");
     expect(parseHash("#/help/3-פתיחה")?.section).toBe("3-פתיחה");
-    for (const bad of ["#/nothing", "#/workspace/nope", "#/export/x", "#/start", "#section-id", "#/workspace/links/extra"]) expect(parseHash(bad)).toBeNull();
+    for (const bad of ["#/nothing", "#/workspace/nope", "#/export/x", "#/start", "#section-id", "#/workspace/links/extra", "#/guided/nowhere", "#/guided/plan/x"]) expect(parseHash(bad)).toBeNull();
+    expect(formatRoute(parseHash("#/guided")!)).toBe("#/guided/files");
   });
 });
 
@@ -198,6 +199,25 @@ describe("Router", () => {
     expect(b.port.read()).toBe("#/map-db");
     b.userBack();
     expect(pendingDbs.value).toEqual([]);
+    expect(b.port.read()).toBe("#/");
+  });
+
+  it("the guided flow: each step is an entry; a step that cannot be shown (a reload) falls back, and the address follows", async () => {
+    const b = fakeHistory("#/guided/finish");
+    const { host, guidedStep, notes } = fakeHost(false);
+    new Router(host, b.port).start();
+    // nothing is open after a reload: the flow shows its first step, without the workspace's note
+    expect([host.screen.value, guidedStep.value, b.port.read()]).toEqual(["guided", "files", "#/guided/files"]);
+    expect(notes).toEqual([]);
+    guidedStep.value = "books";
+    await b.flush();
+    guidedStep.value = "plan";
+    await b.flush();
+    expect(b.entries()).toEqual(["#/guided/files", "#/guided/books", "#/guided/plan"]);
+    b.userBack();
+    expect(guidedStep.value).toBe("books");
+    host.screen.value = "home";
+    await b.flush();
     expect(b.port.read()).toBe("#/");
   });
 });
