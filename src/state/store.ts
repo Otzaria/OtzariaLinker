@@ -14,7 +14,7 @@ import { sourceIdOfBookKey } from "../core/books";
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle } from "../linking/batch";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -230,6 +230,7 @@ export class AppStore {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
+    if (res.sources.length) this.attachLinks();
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
     const each = (kind: string, run: (path: string, text: string) => void) => {
@@ -317,6 +318,26 @@ export class AppStore {
     if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) };
     const title = bookKey.startsWith("unresolved:") ? bookKey.slice(11) : bookKey;
     return { key: bookKey, title, origin: "unknown" };
+  }
+
+  /**
+   * Links imported (or restored) before their books were open name them by title only ("unresolved:",
+   * origin unknown). When a book of that name opens they are attached to it — the same resolution an
+   * import does when the book is already open (resolveTitle) — so the quality check, the export and the
+   * readers see the real book, not "not found in any open source" (product audit F6).
+   */
+  private attachLinks(): void {
+    const memo = new Map<string, BookRef | null>();
+    const resolve = (ref: BookRef): BookRef => {
+      if (!ref.key.startsWith("unresolved:")) return ref;
+      if (!memo.has(ref.title)) memo.set(ref.title, this.resolveTitle(ref.title));
+      return memo.get(ref.title) ?? ref;
+    };
+    this.linkState.value = rebindLinks(this.linkState.value, (l) => {
+      const s = resolve(l.source.book);
+      const t = resolve(l.target.book);
+      return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
+    });
   }
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
@@ -577,6 +598,7 @@ export class AppStore {
       this.sources.value = [...this.sources.value, src];
       for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
     });
+    this.attachLinks();
     if (src.books.length) {
       this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־"${src.info.label}".`);
       this.chooseRoles(src.books);

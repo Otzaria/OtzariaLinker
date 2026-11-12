@@ -50,6 +50,25 @@ class ChunkCache<T> {
   }
 }
 
+/**
+ * The line count of a book shorter than `below` lines, when it does not say (text files): a binary
+ * search for the last chunk-wide window that still has a line (a database may skip line numbers, so a
+ * window of CHUNK lines is probed, not a single line). About log2(below / CHUNK) small reads.
+ */
+async function lastLineAfter(service: Pick<BooksService, "lines">, bookKey: string, below: number): Promise<number> {
+  let lo = 0; // a window starting at lo has a line, or lo === 0
+  let hi = below; // no line at or after hi
+  let last = 0;
+  while (hi - lo > CHUNK) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    const got = await service.lines(bookKey, mid, mid + CHUNK - 1);
+    if (got.length) (lo = mid), (last = got.at(-1)!.index + 1);
+    else hi = mid;
+  }
+  const got = await service.lines(bookKey, lo, hi - 1);
+  return got.length ? got.at(-1)!.index + 1 : last;
+}
+
 export class LineStore {
   readonly tick = signal(0);
   /** line counts learned from a short last chunk — text books do not know their length up front */
@@ -66,7 +85,13 @@ export class LineStore {
       // A missing index stays a hole (undefined), which views show as "line not in the book".
       const placed: SourceLine[] = [];
       for (const l of got) placed[l.index - f] = l;
-      if (got.length < t - f + 1 && (!got.length || got.at(-1)!.index < t)) this.counts.set(b, got.length ? got.at(-1)!.index + 1 : f);
+      if (got.length < t - f + 1 && (!got.length || got.at(-1)!.index < t)) {
+        // a short chunk ends the book; an EMPTY one past the end only says the book is shorter than
+        // `f`, so the end is searched for (a link to line 999 of a 12-line book must not make it an
+        // 800-line book of empty lines: product audit F6)
+        const count = got.length ? got.at(-1)!.index + 1 : await lastLineAfter(service, b, f);
+        this.counts.set(b, count);
+      }
       return placed;
     }, bump);
     this.existing = new ChunkCache((b, f, t) => service.existingLinks(b, f, t), bump);
