@@ -62,12 +62,17 @@ import {
  *   BENCH_SHARD     k/n: this process runs every n-th book from k (run up to 4 in parallel)
  *   BENCH_BUDGET_MIN  stop starting books after this many minutes (resume later)
  *   BENCH_STEP_S    a step that runs longer is stopped and its partial result kept (default 600)
+ *   BENCH_DESIGN    the owners the report measures: sample | full (default: full only for BENCH_MODE=full)
+ *   BENCH_RERUN_STOPPED=1  run again the books whose steps hit BENCH_STEP_S (give it more time)
  *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
  *                   there), the oracle's population (oracle-*.json) and the reports
  */
 const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report";
+/** which owners the report measures: the sample (default) or all of them (default for BENCH_MODE=full) */
+const DESIGN = (process.env.BENCH_DESIGN ?? (MODE === "full" ? "full" : "sample")) as "sample" | "full";
+const RERUN_STOPPED = !!process.env.BENCH_RERUN_STOPPED;
 const ONLY_TYPES = process.env.BENCH_TYPES?.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
 const N = Number(process.env.BENCH_N ?? 60);
 const SEED = process.env.BENCH_SEED ?? "otzaria-bench-1";
@@ -235,7 +240,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         return stratify(units, `${SEED}|${type}|${kind}`);
       };
       /** the owners whose links are measured: all of them (full), or the stratified sample */
-      const chosen = (st: Stratum): Unit[] => (MODE === "full" ? st.units : st.units.slice(0, alloc.get(st)!));
+      const chosen = (st: Stratum): Unit[] => (DESIGN === "full" ? st.units : st.units.slice(0, alloc.get(st)!));
       const alloc = new Map<Stratum, number>();
       const design = new Map<string, { kind: "D" | "U"; strata: Stratum[] }[]>();
       for (const type of types) {
@@ -258,7 +263,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines, `next in this shard: ${next.join("; ")}`].join("\n"));
       }
       if (MODE !== "report") {
-        const mine = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id));
+        const mine = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id) || (RERUN_STOPPED && done.get(id)!.stopped.length > 0));
         const out = join(DIR, `runs-${SHARD}of${SHARDS}.jsonl`);
         console.log(`[bench] ${MODE}: ${order.length} books in the design, ${done.size} cached; this shard runs ${mine.length}`);
         for (const [i, id] of mine.entries()) {
@@ -329,7 +334,9 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       for (const line of readFileSync(join(DIR, f), "utf8").split("\n"))
         if (line.trim()) {
           const r = JSON.parse(line) as BookRecord;
-          out.set(r.id, r);
+          // a book run twice (a stopped step re-run with more time): the run with fewer stopped steps wins
+          const old = out.get(r.id);
+          if (!old || r.stopped.length <= old.stopped.length) out.set(r.id, r);
         }
     return out;
   }
@@ -572,7 +579,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       return Object.fromEntries([...by].map(([k, xs]) => [k, xs.sort((a, b) => a.rank - b.rank).slice(0, n)]));
     };
     writeFileSync(
-      join(DIR, `handcheck-${MODE}.json`),
+      join(DIR, `handcheck-${MODE}-${DESIGN}.json`),
       JSON.stringify(
         {
           fresh: take(fresh.filter((x) => x.verdict === "unconfirmed" && (x.confidence === "certain" || x.confidence === "high")), (x) => `${x.pairType}|${x.group}`, 30),
@@ -584,7 +591,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       ),
     );
     writeFileSync(
-      join(DIR, `summary-${MODE}.json`),
+      join(DIR, `summary-${MODE}-${DESIGN}.json`),
       JSON.stringify({ mode: MODE, seed: SEED, n: N, at: new Date().toISOString(), db: before, books: runBooks.size, cpuMs: ms, errors, stopped, perType, precision, byPairType, missesByType: tallyMisses(misses, isRelated) }, null, 1),
     );
   }
