@@ -37,7 +37,8 @@ import {
 import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
 import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
-import { headingWindows, widen, type SearchWindow } from "./windows";
+import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
+import { headingWindowPlan, widen, type SearchWindow } from "./windows";
 
 export interface DhOptions {
   /** base line range (0-based, inclusive) to search for a commentary line; null → the engine's own default */
@@ -290,7 +291,15 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const openingRatio = (k: string) => (contentLines ? (openings.get(k) ?? 0) / contentLines : 1);
 
   // windows
-  const defaultWindows = headingWindows(commentary, base);
+  const plan = headingWindowPlan(commentary, base);
+  const defaultWindows = plan.windowOf;
+  if (plan.distrusted && !options.windows)
+    notes.push(
+      r(
+        "dh/headings-distrusted",
+        `כותרות הפירוש (${plan.distrusted.matched.slice(0, 3).join(", ")}) נמצאו בספר הבסיס רק בתוך הקטע "${plan.distrusted.section}", שהפירוש אינו מזכיר. המבנה של שני הספרים שונה, ולכן החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש.`,
+      ),
+    );
   const first = bLines[0]?.index ?? 0;
   const last = bLines.at(-1)?.index ?? 0;
   const windowFor = (cLine: number): SearchWindow => {
@@ -298,6 +307,44 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     if (w) return { from: Math.max(first, Math.min(w.from, w.to)), to: Math.min(last, Math.max(w.from, w.to)), kind: "caller" };
     return defaultWindows(cLine);
   };
+  /*
+   * The commentary's note markers in the base (markers.ts). The commentator with about as many
+   * numbered markers as the commentary has numbered lines, whose markers fit the numbers the lines
+   * open with — inside each line's window — for at least half of them (and 5), is this commentary;
+   * its numbered lines are then placed on their markers, not by the words they quote.
+   */
+  const noteNumbers = new Map<number, number[]>();
+  for (const l of commentary.lines) {
+    if (cExtract.get(l.index)!.kind === "heading") continue;
+    const ns = openingNoteNumbers(l.text);
+    if (ns.length) noteNumbers.set(l.index, ns);
+  }
+  const markersIn = (m: CommentatorMarkers, n: number, w: SearchWindow): readonly number[] => (m.byNumber.get(n) ?? []).filter((i) => i >= w.from && i <= w.to);
+  let noteMarkers: CommentatorMarkers | null = null;
+  {
+    const sets = noteNumbers.size ? baseMarkers(bLines) : [];
+    let best = 0;
+    for (const m of sets) {
+      // every note has one marker: a commentator with far more or far fewer markers than the
+      // commentary has numbered lines is another book's notes ("Ohr Penimi": 400 markers for
+      // 1,000+ numbered lines; a book with two commentators' markers, 1,100 and 119)
+      let count = 0;
+      for (const at of m.byNumber.values()) count += at.length;
+      if (count * 2 < noteNumbers.size || count > noteNumbers.size * 2) continue;
+      let fit = 0;
+      for (const [line, ns] of noteNumbers) if (ns.some((n) => markersIn(m, n, windowFor(line)).length)) fit++;
+      if (fit > best) [best, noteMarkers] = [fit, m];
+    }
+    if (best < 5 || best * 2 < noteNumbers.size) noteMarkers = null;
+    else
+      notes.push(
+        r(
+          "dh/note-markers",
+          `בספר הבסיס יש סימני הערות של "${noteMarkers!.commentator}" שמתאימים למספרים שבראש שורות הפירוש (${best} מתוך ${noteNumbers.size}). הערה ממוספרת מקושרת למקום הסימן שלה, ולא למקום שבו נמצאו המילים שהיא מצטטת.`,
+        ),
+      );
+  }
+
   /*
    * Lines a ד"ה can land on (contentPositions, ascending) by base line index. A window is a SPAN of
    * that array, found by binary search — never a scan of the window: with the whole book as the
@@ -610,6 +657,33 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     };
   };
 
+  /**
+   * A numbered note placed on its marker. One marker of its number in the window → certain; several
+   * (numbering that restarts, with no heading to tell the sections apart) → the first one at or after
+   * the previous line's place, as high. Notes follow their markers in order: a marker before the
+   * previous line's place (in the same window) is not this note's — the number is a paragraph number,
+   * or the order is broken — and the line is left to the ד"ה search.
+   */
+  const placeOnMarker = (m: CommentatorMarkers, numbers: readonly number[], cLine: number, prev: number | null): Placement | null => {
+    const window = windowFor(cLine);
+    const prevIn = prev !== null && prev >= window.from && prev <= window.to ? prev : null;
+    for (const n of numbers) {
+      const at = markersIn(m, n, window);
+      const base = prevIn === null ? at[0] : at.find((i) => i >= prevIn);
+      if (base === undefined) continue;
+      const score = at.length === 1 ? 0.97 : 0.9;
+      const reasons = [r("dh/note-marker", `בשורת הבסיס יש סימן של הערה ${n} של "${m.commentator}", ולכן ההערה מקושרת לשם`)];
+      const rules = ["dh/note-marker", `dh/window-${window.kind}`];
+      if (at.length > 1) {
+        rules.push("dh/note-marker-order");
+        reasons.push(r("dh/note-marker-order", `בטווח יש ${at.length} סימנים של הערה ${n}; ${prevIn === null ? "נבחר הראשון שבהם" : "נבחר הראשון שאחרי המקום של השורה הקודמת"}`));
+      }
+      const alternatives = at.filter((i) => i !== base).slice(0, 3).map((line) => ({ line, score: 0.5 }));
+      return { cLine, base, score, confidence: confidenceOf(score, alternatives[0]?.score ?? null, thresholds), reasons, rules, warnings: [], alternatives, rootScore: score, depth: 0 };
+    }
+    return null;
+  };
+
   // ── the walk over the commentary ─────────────────────────────────────────────────────────
   const placements: Placement[] = [];
   const unmatched: { line: number; reasons: Reason[] }[] = [];
@@ -629,6 +703,14 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const ex = cExtract.get(line.index)!;
     if (ex.kind === "heading") {
       crossedHeading = true;
+      continue;
+    }
+    const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
+    if (marked) {
+      crossedHeading = false;
+      placements.push(marked);
+      chain = marked;
+      prev = marked.base;
       continue;
     }
     if (ex.kind === "empty") {
