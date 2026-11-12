@@ -5,6 +5,7 @@ import type { PathElement } from "../headings/numbering";
 import type { EngineLine } from "../types";
 import type { AddrElem, Kind } from "./address";
 import { normTitle, type Collection } from "./aliases";
+import { unitNameKey } from "./named";
 import { strictValue } from "./numbers";
 
 /*
@@ -46,7 +47,8 @@ export interface Resolution {
   readonly amudFromBareLetter: boolean;
   /** heRef-like label of the target, for heRef_2 */
   readonly label: string;
-  readonly via: "heref" | "headings";
+  /** heref / headings: a location; named: a unit cited by name (its alt_toc range) */
+  readonly via: "heref" | "headings" | "named";
   /** the book is addressed by daf/amud, so the location's kind was checked */
   readonly daf: boolean;
 }
@@ -57,6 +59,11 @@ export interface TargetIndex {
   /** the book is addressed by daf/amud (Bavli, its commentaries) */
   readonly daf: boolean;
   resolve(elems: readonly AddrElem[], collection: Collection, section?: string): Resolution | null;
+  /**
+   * A first level of the references named `key` (a loose unit key, named.ts: "ויקהל" in "ספר הזהר,
+   * ויקהל, א, א"), and the location under it; only books whose references name such levels.
+   */
+  resolveNamed?(key: string, elems: readonly AddrElem[]): Resolution | null;
 }
 
 const newNode = (): Node => ({ children: new Map(), first: Number.MAX_SAFE_INTEGER, last: -1 });
@@ -132,7 +139,27 @@ export function buildRefIndex(book: BookRef, lines: readonly RefLine[]): TargetI
     via: "heref",
     daf: isDaf,
     resolve: (elems, collection, section) => resolveRefs(book, root, isDaf, elems, collection, section),
+    resolveNamed: (key, elems) => resolveNamedLevel(book, root, isDaf, key, elems),
   };
+}
+
+/**
+ * "בזוהר פרשת ויקהל": the first-level node whose name has this loose key — or, when none does, the one
+ * whose name STARTS with it ("שלח" → "שלח לך"), if only one does. Then the location under it, if any.
+ */
+function resolveNamedLevel(book: BookRef, root: Node, isDaf: boolean, key: string, elems: readonly AddrElem[]): Resolution | null {
+  const named = [...root.children.entries()].filter(([k]) => k.startsWith("$")).map(([k, n]) => ({ name: k.slice(1), key: unitNameKey(k.slice(1)), n }));
+  let hit = named.filter((x) => x.key === key);
+  if (!hit.length) hit = named.filter((x) => x.key?.startsWith(`${key} `));
+  // a name that is also a numeral ("נח" = 58) became a number level among the named ones
+  const asNumber = !hit.length && named.length && !key.includes(" ") ? strictValue(key) : null;
+  const numbered = asNumber ? root.children.get(`n${asNumber}`) : undefined;
+  if (numbered) hit = [{ name: key, key, n: numbered }];
+  if (hit.length !== 1) return null;
+  const { name, n } = hit[0]!;
+  if (!elems.length) return { book, line: n.first, end: n.last, leaf: n.children.size === 0, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, ${name}`, via: "heref", daf: false };
+  const r = resolveRefs(book, n, isDaf, elems, "other");
+  return r ? { ...r, label: r.label.replace(`${book.title} `, `${book.title}, ${name}, `) } : null;
 }
 
 function touch(n: Node, line: number): void {

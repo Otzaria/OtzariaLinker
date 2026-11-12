@@ -119,6 +119,8 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["בבא מציעא", "מציעא"],
   ["נדה", "נידה"],
   ["מגילה", "מגלה"],
+  // the database's own names for it ("זוהר") fail the acronym guard (they do not start the title)
+  ["ספר הזהר", "זוהר", "זהר", "הזוהר", "הזהר", "ספר הזוהר", 'זוה"ק', 'זה"ק'],
 ];
 
 /** the parts of the Shulchan Aruch and the Tur: name → its abbreviations */
