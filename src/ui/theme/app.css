@@ -280,6 +280,7 @@ details.held summary { cursor: pointer; font-weight: 600; }
 .notice details { grid-column: 2 / -1; max-height: 180px; overflow: auto; }
 .notice details ul { margin: 4px 0 0; padding-inline-start: 18px; }
 .notice .icon-btn { width: 26px; height: 26px; color: inherit; }
+.notices-more { justify-self: start; background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); }
 
 /* full-window drop target */
 .drop-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--primary-container) 70%, transparent); border: 3px dashed var(--primary); font-size: 22px; font-weight: 600; color: var(--on-primary-container); pointer-events: none; }

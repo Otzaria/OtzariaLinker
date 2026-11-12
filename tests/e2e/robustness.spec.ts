@@ -18,3 +18,17 @@ test("a database with a b-tree cycle is refused with a message, and the next fil
   await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 15_000 });
   expect(seen.errors).toEqual([]);
 });
+
+test("many notices at once: the newest three are shown, the rest fold into 'N more' (audit F16)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".drop-strip").getByRole("button", { name: "קבצים", exact: true }).click();
+  // five broken links files: five error notices, which stay until closed
+  await (await chooser).setFiles(["א", "ב", "ג", "ד", "ה"].map((t) => ({ name: `${t}_links.json`, mimeType: "application/json", buffer: Buffer.from(`[{"line_index_1": 1, "path_2": "x.txt"`) })));
+  await expect(page.locator(".notice.error")).toHaveCount(3);
+  await page.getByRole("button", { name: "עוד 2 הודעות" }).click();
+  await expect(page.locator(".notice.error")).toHaveCount(5);
+  await page.getByRole("button", { name: "רק ההודעות האחרונות" }).click();
+  await expect(page.locator(".notice.error")).toHaveCount(3);
+});
