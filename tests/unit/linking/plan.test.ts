@@ -80,8 +80,23 @@ describe("planMaxLink — the database's declaration (book_base_text)", () => {
     expect(p.books[1]!.decisions.join(" ")).toContain("לפי המסד");
   });
 
-  it("does not link a book the database declares on several bases", () => {
+  it("a book on several bases: one relation per base, each scoped to the section headed by that base", () => {
     const lib = [book("d:1", "בראשית"), book("d:2", "שמות"), book("d:3", "מדרש לקח טוב", { bases: ["d:1", "d:2"], dependence: "midrash" })];
+    const p = planPairs({ selected: ["d:3"], library: lib });
+    expect(steps(p)).toEqual(["headings:מדרש לקח טוב>בראשית", "dibur-hamatchil:מדרש לקח טוב>בראשית", "headings:מדרש לקח טוב>שמות", "dibur-hamatchil:מדרש לקח טוב>שמות"]);
+    const scopes = p.steps.map((s) => (s.kind === "pair" ? s.relation.scope : undefined));
+    expect(scopes.map((x) => x?.section)).toEqual(["בראשית", "בראשית", "שמות", "שמות"]);
+    expect(p.books[0]!.decisions.join(" ")).toContain("2 ספרים");
+  });
+
+  it("several declared bases, only one open: still scoped (never the whole book against one base)", () => {
+    const lib = [book("d:1", "בראשית"), book("d:3", "חזקוני", { bases: ["d:1", "d:9"] })];
+    const p = planPairs({ selected: ["d:3"], library: lib });
+    expect(p.steps.every((s) => s.kind === "pair" && s.relation.scope?.section === "בראשית")).toBe(true);
+  });
+
+  it("a notes book on several bases is not planned", () => {
+    const lib = [book("d:1", "בראשית"), book("d:2", "שמות"), book("d:3", "הערות לתורה", { bases: ["d:1", "d:2"] })];
     const p = planPairs({ selected: ["d:3"], library: lib });
     expect(p.steps).toEqual([]);
     expect(p.books[0]!.skipped).toContain("2 ספרים");

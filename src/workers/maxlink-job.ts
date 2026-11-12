@@ -1,8 +1,9 @@
 import type { BookRef } from "../core/links/model";
-import { runEngine, type EngineBook, type EngineContext, type EngineResult } from "../linking/automatic";
+import { runEngine, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason } from "../linking/automatic";
 import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
+import { sectionFor } from "../linking/sections";
 import type { SourceRegistry } from "../sources/registry";
 import { citationsJob } from "./citations-job";
 
@@ -33,6 +34,36 @@ export interface MaxLinkJobOptions {
 
 /** units of progress per step: engines report their own progress inside a step */
 const UNIT = 1000;
+
+/**
+ * A pair step. When the dependant is written on several bases (Relation.scope), only the part of it
+ * headed by this base is read (linking/sections.ts); headings' "high" there is left for review (a
+ * range to a whole chapter of a section was right in 6 of 313 on the real database). Without such a
+ * part only dibur-hamatchil runs, on the whole book, and nothing it finds is above "possible": its
+ * windows come from headings that may follow another base's numbering. Measurements:
+ * docs/AUTOMATION_ENGINE.md §5.1, tests/validation/multibase.test.ts.
+ */
+function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext): EngineResult {
+  const scope = step.relation.scope;
+  if (!scope) return runEngine(step.engine, source, target, options, ctx);
+  const section = sectionFor(source, scope.section);
+  if (section) {
+    let r = runEngine(step.engine, section.book, target, options, ctx);
+    if (step.engine === "headings") r = capConfidence(r, ["high"], { code: "maxlink/section-high", text: "קישור לפרק שלם בתוך חלק של ספר על כמה ספרים: לבדיקה." });
+    const note: Reason = { code: "maxlink/section", text: `רק החלק "${section.heading}" של "${source.book.title}" (${section.lines.toLocaleString("he")} שורות) קושר אל "${target.book.title}".` };
+    return { ...r, notes: [note, ...r.notes] };
+  }
+  if (step.engine !== "dibur-hamatchil")
+    return { suggestions: [], notes: [{ code: "maxlink/no-section", text: `בספר "${source.book.title}" אין חלק בשם "${target.book.title}", ולכן שיטה זו לא רצה עליו.` }], unmatched: [] };
+  const r = capConfidence(runEngine(step.engine, source, target, options, ctx), ["certain", "high"], { code: "maxlink/dh-only", text: `בספר אין חלק בשם "${target.book.title}": המילים נמצאו בטקסט, אבל המקום לא מאומת בכותרות. לבדיקה.` });
+  const note: Reason = { code: "maxlink/dh-only", text: `בספר "${source.book.title}" אין חלק בשם "${target.book.title}", ולכן רק דיבור המתחיל קישר אליו, וכל ההצעות לבדיקה.` };
+  return { ...r, notes: [note, ...r.notes] };
+}
+
+/** Lowers the given confidences to "possible", with a warning that says why. */
+function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reason): EngineResult {
+  return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
+}
 
 export async function maxlinkJob(
   registry: SourceRegistry,
@@ -85,7 +116,7 @@ export async function maxlinkJob(
           }
         }
         ctx.signal?.throwIfAborted();
-        result = runEngine(step.engine, loaded.source, loaded.target, optionsOf(step.engine), inner);
+        result = runScoped(step, loaded.source, loaded.target, optionsOf(step.engine), inner);
       } else {
         loaded = null;
         const run = runners[step.engine];

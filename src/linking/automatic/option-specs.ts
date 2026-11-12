@@ -103,8 +103,6 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
   ],
 };
 
-export const hasEssentialOptions = (engine: EngineId): boolean => ENGINE_OPTION_SPECS[engine].some((s) => s.essential);
-
 /** the text field next to a marker select: `<key>.custom` */
 export const customKey = (key: string): string => `${key}.custom`;
 

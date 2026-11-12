@@ -47,6 +47,18 @@ export interface PlanBook extends BookRef {
 export type RelationKind = "commentary" | "notes";
 export type RelationVia = "base-text" | "title";
 
+/**
+ * A commentary written on SEVERAL bases is linked to each base only through the part of it that is
+ * headed by that base ("בראשית", "ספר שמות" — linking/sections.ts, applied by the job once the book is
+ * read). When no heading names the base, only dibur-hamatchil runs, on the whole book, and its
+ * suggestions are left for review (workers/maxlink-job.ts runScoped). Measured on the real database
+ * (docs/AUTOMATION_ENGINE.md §5.1): headings on a whole book are wrong too often even when the title
+ * names the base — "המאור הגדול על שבועות" follows the Rif's pages, not the Talmud's.
+ */
+export interface RelationScope {
+  section: string;
+}
+
 export interface Relation {
   kind: RelationKind;
   /** the commentary, or the notes book */
@@ -56,6 +68,8 @@ export interface Relation {
   via: RelationVia;
   /** the database and the title disagree, a merge-prone notes title… (Hebrew) */
   caveats: string[];
+  /** set when the dependant is written on several bases (see RelationScope) */
+  scope?: RelationScope;
 }
 
 /** One unit of work. `pair` steps run an engine on (source → target) in the engine's input direction. */
@@ -122,8 +136,8 @@ function ref(b: BookRef): BookRef {
   return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) };
 }
 
-/** The relation a book has on its own (as a dependant), or why it has none. */
-export function relationOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation | { problem: string } {
+/** The relations a book has on its own (as a dependant: one, or one per base), or why it has none. */
+export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | { problem: string } {
   const notesKey = notesBaseKey(book.title);
   const kind: RelationKind = notesKey !== null ? "notes" : "commentary";
   const titleKey = notesKey ?? declaredBaseKey(book.title);
@@ -131,15 +145,27 @@ export function relationOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>,
   if (kind === "notes" && isMergeableCompanionTitle(book.title))
     caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס, וקישורים אליו נמחקים בשקט. אם הספר צריך להישאר ספר, שנו את שמו ל"הערות ל…".`);
 
-  const declared = (book.bases ?? []).map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b && b.key !== book.key);
-  if (declared.length > 1)
-    return {
-      problem: `לפי המסד הספר כתוב על ${declared.length} ספרים (${declared.map((b) => quote(b.title)).join(", ")}). קישור אוטומטי של ספר כזה לכל בסיס בנפרד עלול לשייך פרק של ספר אחד לספר אחר, ולכן הוא לא מקושר אוטומטית. קשרו אותו ידנית או בזוג ספרים.`,
-    };
+  const declaredKeys = (book.bases ?? []).filter((k) => k !== book.key);
+  const declared = declaredKeys.map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b);
+  // several bases (even when only some are open): each base through its own section of the book
+  if (declaredKeys.length > 1) {
+    if (kind === "notes")
+      return { problem: `לפי המסד ספר ההערות כתוב על ${declaredKeys.length} ספרים, ושיטת הערות השוליים מקשרת ספר הערות לספר אחד. קשרו אותו בזוג ספרים.` };
+    if (!declared.length) return { problem: "לפי המסד הספר כתוב על כמה ספרים, ואף אחד מהם אינו פתוח עכשיו. פתחו אותם ונסו שוב." };
+    const note = `לפי המסד הספר כתוב על ${declaredKeys.length} ספרים. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
+    return declared.map((base) => ({
+      kind,
+      dependant: ref(book),
+      base: ref(base),
+      via: "base-text" as const,
+      caveats: [...caveats, note],
+      scope: { section: base.title },
+    }));
+  }
   if (declared.length === 1) {
     const base = declared[0]!;
     if (titleKey !== null && titleKey !== baseTitleKey(base.title)) caveats.push(`השם מזכיר ספר אחר מזה שהמסד מציין; הכלי הולך לפי המסד (${quote(base.title)}).`);
-    return { kind, dependant: ref(book), base: ref(base), via: "base-text", caveats };
+    return [{ kind, dependant: ref(book), base: ref(base), via: "base-text", caveats }];
   }
   if (titleKey === null) {
     const declaredButClosed = (book.bases?.length ?? 0) > 0;
@@ -154,7 +180,7 @@ export function relationOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>,
     return p.target ? { target: p.target } : { reason: p.reason ?? "" };
   })();
   if ("reason" in r) return { problem: r.reason };
-  return { kind, dependant: ref(book), base: ref(r.target), via: "title", caveats };
+  return [{ kind, dependant: ref(book), base: ref(r.target), via: "title", caveats }];
 }
 
 const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם" };
@@ -162,7 +188,10 @@ const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", 
 function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; source: BookRef; target: BookRef; why: string }[] {
   const d = quote(rel.dependant.title);
   const b = quote(rel.base.title);
-  const tail = rel.caveats.length ? ` ${rel.caveats.join(" ")}` : "";
+  const scoped = rel.scope
+    ? ` רק החלק שתחת הכותרת ${b}; אם אין כותרת כזו, רק דיבור המתחיל, וההצעות שלו לבדיקה.`
+    : "";
+  const tail = (rel.caveats.length ? ` ${rel.caveats.join(" ")}` : "") + scoped;
   if (rel.kind === "notes")
     return [
       {
@@ -198,23 +227,25 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const isSelected = new Set(selected);
 
   // every relation that touches a selected book: as the dependant, or as the base of an open dependant
-  const relations = new Map<string, Relation>(); // by dependant key
+  const relations = new Map<string, Relation[]>(); // by dependant key
   const problems = new Map<string, string>();
   for (const b of input.library) {
-    const r = relationOf(b, byKey, index);
-    if ("problem" in r) {
-      if (isSelected.has(b.key)) problems.set(b.key, r.problem);
+    const rs = relationsOf(b, byKey, index);
+    if ("problem" in rs) {
+      if (isSelected.has(b.key)) problems.set(b.key, rs.problem);
       continue;
     }
-    if (isSelected.has(r.dependant.key) || isSelected.has(r.base.key)) relations.set(b.key, r);
+    const touching = rs.filter((r) => isSelected.has(r.dependant.key) || isSelected.has(r.base.key));
+    if (touching.length) relations.set(b.key, touching);
   }
 
   const steps: PlanStep[] = [];
   const seen = new Set<string>();
   const touches = new Map<string, number>();
   const bump = (k: string) => touches.set(k, (touches.get(k) ?? 0) + 1);
-  for (const [depKey, rel] of relations) {
-    for (const s of stepsFor(rel, byKey.get(depKey)!)) {
+  for (const [depKey, rels] of relations)
+    for (const rel of rels)
+      for (const s of stepsFor(rel, byKey.get(depKey)!)) {
       if (!enabled(s.engine)) continue;
       const id = `${s.engine}|${s.source.key}>${s.target.key}`;
       if (seen.has(id)) continue;
@@ -223,7 +254,6 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       bump(s.source.key);
       bump(s.target.key);
     }
-  }
   const singles = (input.singleEngines ?? singleBookEngines()).filter(enabled);
   const info = (e: EngineId) => ENGINES.find((x) => x.id === e);
   for (const k of selected)
@@ -234,12 +264,17 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     }
 
   const onBase = new Map<string, Relation[]>();
-  for (const r of relations.values()) onBase.set(r.base.key, [...(onBase.get(r.base.key) ?? []), r]);
+  for (const rs of relations.values()) for (const r of rs) onBase.set(r.base.key, [...(onBase.get(r.base.key) ?? []), r]);
   const books: PlanBookRow[] = selected.map((k) => {
     const b = byKey.get(k)!;
     const decisions: string[] = [];
-    const own = relations.get(k);
-    if (own) decisions.push(own.kind === "notes" ? `ספר הערות על ${quote(own.base.title)} (${VIA_TEXT[own.via]}).` : `כתוב על ${quote(own.base.title)} (${VIA_TEXT[own.via]}).`, ...own.caveats);
+    const owns = relations.get(k) ?? [];
+    const own = owns[0];
+    if (own)
+      decisions.push(
+        own.kind === "notes" ? `ספר הערות על ${quote(own.base.title)} (${VIA_TEXT[own.via]}).` : `כתוב על ${owns.map((r) => quote(r.base.title)).join(", ")} (${VIA_TEXT[own.via]}).`,
+        ...own.caveats,
+      );
     const onIt = onBase.get(k) ?? [];
     const comm = onIt.filter((r) => r.kind === "commentary");
     const notes = onIt.filter((r) => r.kind === "notes");
@@ -256,9 +291,4 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   for (const s of steps) perEngine[s.engine] = (perEngine[s.engine] ?? 0) + 1;
   const identified = books.filter((r) => relations.has(r.book.key) || onBase.has(r.book.key)).length;
   return { steps, books, identified, perEngine };
-}
-
-/** Plan counts of every engine before any is unticked (for the review checkboxes). */
-export function planCounts(input: Omit<PlanInput, "engines">): Partial<Record<EngineId, number>> {
-  return planMaxLink(input).perEngine;
 }
