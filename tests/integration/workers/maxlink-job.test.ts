@@ -124,3 +124,52 @@ describe("maxlinkJob — the citations engine (single-book)", () => {
     expect(cit.result!.notes.some((n) => n.code === "citations/summary")).toBe(true);
   });
 });
+
+describe("maxlinkJob — a commentary on a commentary, carried to the base of its base (plan.ts RelationThrough)", () => {
+  // the dependant follows the intermediate's numbering (its "סעיף ב" is the intermediate's ס"ק ב); the base
+  // is numbered otherwise, and only the source's links between the intermediate and the base tell where
+  const lines = (texts: string[]) => texts.map((text, index) => ({ index, text, anchorText: text, heading: /^<h(\d)/.exec(text) ? Number(/^<h(\d)/.exec(text)![1]) : null, heRef: null }));
+  const BOOKS: Record<string, ReturnType<typeof lines>> = {
+    "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון של הבסיס", "סעיף שני של הבסיס", "סעיף שלישי של הבסיס"]),
+    "d:2": lines(["<h1>ביניים</h1>", "<h2>סימן א</h2>", "<h3>סעיף א</h3>", "ביאור ראשון", "<h3>סעיף ב</h3>", "ביאור שני"]),
+    "d:3": lines(["<h1>על הביניים</h1>", "<h2>סימן א</h2>", "<h3>סעיף א</h3>", "הערה על הביאור הראשון", "<h3>סעיף ב</h3>", "הערה על הביאור השני"]),
+  };
+  const ref = (key: string, title: string): BookRef => ({ key, title, origin: "sefaria" });
+  const base = ref("d:1", "בסיס");
+  const mid = ref("d:2", "ביניים");
+  const dep = ref("d:3", "על הביניים");
+  // the intermediate's lines 3 and 5 are linked to the base's lines 4 and 2 (crossing: not the same numbering)
+  const links = [
+    { id: "l1", source: { book: base, line: 4 }, target: { book: mid, line: 3 }, declaredType: "commentary" },
+    { id: "l2", source: { book: base, line: 2 }, target: { book: mid, line: 5 }, declaredType: "commentary" },
+  ];
+  const registry = {
+    lines: async (key: string) => BOOKS[key]!,
+    existingLinks: async (key: string) => links.filter((l) => l.source.book.key === key || l.target.book.key === key),
+  } as unknown as SourceRegistry;
+  const library = [
+    { ...base, isBaseBook: true },
+    { ...mid, bases: ["d:1"] },
+    { ...dep, bases: ["d:1", "d:2"] },
+  ];
+
+  it("links each line where its place in the intermediate is linked, and says how", async () => {
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    expect(plan.steps.map((s) => s.id)).toEqual(["headings|d:3>d:2", "headings|d:3>d:1"]);
+    const res = await maxlinkJob(registry, plan.steps, {}, {});
+    const toMid = res.items[0]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`);
+    expect(toMid).toEqual(["3>3", "5>5"]);
+    const through = res.items[1]!.result!;
+    expect(through.suggestions.map((s) => `${s.source.line}>${s.target.book.key}#${s.target.line}`)).toEqual(["3>d:1#4", "5>d:1#2"]);
+    expect(through.suggestions.every((s) => s.rules.includes("maxlink/through") && s.declaredType === "source")).toBe(true);
+    expect(through.notes[0]!.text).toContain("דרך");
+  });
+
+  it("an intermediate place with no link to the base carries nothing", async () => {
+    links.pop();
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    const res = await maxlinkJob(registry, plan.steps.filter((s) => s.id === "headings|d:3>d:1"), {}, {}); // the intermediate pair did not run: computed here
+    expect(res.items[0]!.result!.suggestions.map((s) => s.target.line)).toEqual([4]);
+    expect(res.items[0]!.result!.notes[0]!.text).toContain("אינם מקושרים");
+  });
+});

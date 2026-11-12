@@ -1,5 +1,5 @@
 import type { BookRef } from "../core/links/model";
-import { runEngine, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason } from "../linking/automatic";
+import { runEngine, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -78,7 +78,12 @@ export async function maxlinkJob(
   const pairKey = (s: PlanStep) => (s.kind === "pair" ? `${s.source.key}>${s.target.key}` : `single:${s.id}`);
   const shared = (s: PlanStep) => (s.kind === "pair" ? `book:${s.target.key}` : `single:${s.id}`);
   for (const s of steps) for (const k of [shared(s), pairKey(s)]) if (!order.has(k)) order.set(k, order.size);
-  const sorted = [...steps].sort((a, b) => order.get(shared(a))! - order.get(shared(b))! || order.get(pairKey(a))! - order.get(pairKey(b))!);
+  // a step that reaches its base through an intermediate commentary runs after every other step: it
+  // reuses the intermediate pair's result of this job (runThrough)
+  const late = (s: PlanStep) => (s.kind === "pair" && s.relation.through ? 1 : 0);
+  const sorted = [...steps].sort((a, b) => late(a) - late(b) || order.get(shared(a))! - order.get(shared(b))! || order.get(pairKey(a))! - order.get(pairKey(b))!);
+  /** each pair step's result, by engine and pair, for runThrough */
+  const results = new Map<string, EngineResult>();
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
   const optionsOf = (engine: string) => options.engineOptions?.[engine] ?? {};
@@ -96,7 +101,11 @@ export async function maxlinkJob(
     const t0 = Date.now();
     try {
       let result: EngineResult;
-      if (step.kind === "pair") {
+      if (step.kind === "pair" && step.relation.through) {
+        loaded = null;
+        const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
+        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner);
+      } else if (step.kind === "pair") {
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
         if (loaded?.key !== key) {
@@ -118,7 +127,9 @@ export async function maxlinkJob(
         ctx.signal?.throwIfAborted();
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner);     } else {
+        result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner);
+        results.set(`${step.engine}|${key}`, result);
+      } else {
         loaded = null;
         const run = runners[step.engine];
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);
@@ -148,6 +159,94 @@ export async function maxlinkJob(
   const pos = new Map(steps.map((s, i) => [s.id, i]));
   items.sort((a, b) => pos.get(a.stepId)! - pos.get(b.stepId)!);
   return { items, dbLinkKeys: [...keys] };
+}
+
+/**
+ * A commentary on a commentary, linked to the base of its base (plan.ts RelationThrough): the engine's
+ * suggestions against each intermediate (this job's own result for that pair when it ran, else run
+ * here), each carried to the base by the links the source already has between the intermediate and the
+ * base. A place in the intermediate with no such link gives nothing; one whose links spread over more
+ * than THROUGH_SPAN lines of the base is too vague to carry, and is counted in the notes.
+ */
+async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+  const out = new Map<string, Suggestion>();
+  const notes: Reason[] = [];
+  for (const via of step.relation.through ?? []) {
+    let r = results.get(`${step.engine}|${step.source.key}>${via.book.key}`);
+    if (!r) {
+      const inner: Extract<PlanStep, { kind: "pair" }> = { ...step, target: via.book, relation: { ...step.relation, base: via.book, through: undefined, ...(via.scope ? { scope: via.scope } : { scope: undefined }) } };
+      r = runScoped(inner, await load(registry, step.source), await load(registry, via.book), options, ctx);
+    }
+    const toBase = await linkedLines(registry, via.book.key, step.target.key);
+    let carried = 0;
+    let unlinked = 0;
+    let spread = 0;
+    for (const sg of r.suggestions) {
+      const [mine, mid] = sg.source.book.key === step.source.key ? [sg.source, sg.target] : [sg.target, sg.source];
+      if (mid.book.key !== via.book.key) continue;
+      const lines: number[] = [];
+      for (let m = mid.line; m <= (mid.end ?? mid.line); m++) for (const [a, b] of toBase.get(m) ?? []) for (let x = a; x <= b; x++) lines.push(x);
+      if (!lines.length) {
+        unlinked++;
+        continue;
+      }
+      const from = Math.min(...lines);
+      const to = Math.max(...lines);
+      if (to - from > THROUGH_SPAN) {
+        spread++;
+        continue;
+      }
+      const id = `${sg.engine}:through:${step.source.key}#${mine.line}>${step.target.key}#${from}`;
+      if (out.has(id)) continue;
+      carried++;
+      out.set(id, {
+        id,
+        engine: sg.engine,
+        source: { book: step.source, line: mine.line, ...(mine.end !== undefined && mine.end !== mine.line && { end: mine.end }) },
+        target: { book: step.target, line: from, ...(to > from && { end: to }) },
+        declaredType: "source",
+        heRef2: "",
+        score: sg.score,
+        confidence: sg.confidence,
+        reasons: [
+          { code: "maxlink/through", text: `השורה מפרשת את שורה ${mid.line + 1} ב־"${via.book.title}", והמסד מקשר את השורה ההיא ל־"${step.target.title}" כאן.` },
+          ...sg.reasons,
+        ],
+        rules: [...sg.rules, "maxlink/through"],
+        alternatives: [],
+        warnings: sg.warnings,
+      });
+    }
+    notes.push({
+      code: "maxlink/through",
+      text: `"${step.source.title}" קושר אל "${step.target.title}" דרך "${via.book.title}": ${carried.toLocaleString("he")} שורות.${unlinked ? ` ${unlinked.toLocaleString("he")} מקומות ב־"${via.book.title}" אינם מקושרים במסד אל "${step.target.title}", ולכן לא הועברו.` : ""}${spread ? ` ${spread.toLocaleString("he")} מקומות מקושרים לטווח רחב מדי, ולא הועברו.` : ""}`,
+    });
+  }
+  return { suggestions: [...out.values()], notes, unmatched: [] };
+}
+
+/** at most this many base lines between the first and the last a place in the intermediate is linked to */
+const THROUGH_SPAN = 3;
+
+/** Line of book `a` → the [from, to] line ranges of book `b` the source's existing links join it to. */
+async function linkedLines(registry: SourceRegistry, a: string, b: string): Promise<Map<number, [number, number][]>> {
+  const out = new Map<number, [number, number][]>();
+  const add = (aSide: { line: number; end?: number }, bSide: { line: number; end?: number }) => {
+    for (let x = aSide.line; x <= (aSide.end ?? aSide.line); x++) {
+      const list = out.get(x) ?? [];
+      list.push([bSide.line, bSide.end ?? bSide.line]);
+      out.set(x, list);
+    }
+  };
+  try {
+    for (const l of await registry.existingLinks(a, 0, Number.MAX_SAFE_INTEGER)) {
+      if (l.source.book.key === a && l.target.book.key === b) add(l.source, l.target);
+      else if (l.target.book.key === a && l.source.book.key === b) add(l.target, l.source);
+    }
+  } catch {
+    /* a source without links: nothing to carry */
+  }
+  return out;
 }
 
 async function load(registry: SourceRegistry, book: BookRef): Promise<EngineBook> {

@@ -304,3 +304,40 @@ describe("planMaxLink — TARGUM and MIDRASH links as evidence (PlanBook.linkedK
     expect(linkedFields([{ dependant: "b", base: "db:1" }, { dependant: "b", base: "db:1", kind: "targum" }]).get("b")!.linkedKinds).toEqual({});
   });
 });
+
+describe("planMaxLink — a commentary on a commentary, declared on both (book_base_text chain)", () => {
+  const lib = [
+    book("db:1", "שולחן ערוך, אורח חיים", { origin: "sefaria", isBaseBook: true }),
+    book("db:2", "מגן אברהם", { origin: "sefaria", bases: ["db:1"], dependence: "commentary" }),
+    book("db:3", "טורי זהב על שולחן ערוך אורח חיים", { origin: "sefaria", bases: ["db:1"], dependence: "commentary" }),
+    book("db:4", "מחצית השקל על אורח חיים", { origin: "sefaria", bases: ["db:1", "db:2"], dependence: "commentary" }),
+    book("db:5", "פרי מגדים על אורח חיים", { origin: "sefaria", bases: ["db:1", "db:2", "db:3"], dependence: "commentary" }),
+    book("db:6", "בראשית", { origin: "sefaria", isBaseBook: true }),
+    book("db:7", "שמות", { origin: "sefaria", isBaseBook: true }),
+    book("db:8", "חזקוני", { origin: "sefaria", bases: ["db:6", "db:7"], dependence: "commentary" }),
+  ];
+  const pairs = (p: ReturnType<typeof planMaxLink>) => p.steps.filter((s) => s.kind === "pair") as Extract<ReturnType<typeof planMaxLink>["steps"][number], { kind: "pair" }>[];
+
+  it("one intermediate: linked to it unscoped, and to the root through it", () => {
+    const p = planMaxLink({ selected: ["db:4"], library: lib, singleEngines: [] });
+    const toMid = pairs(p).filter((s) => s.target.key === "db:2");
+    const toRoot = pairs(p).filter((s) => s.target.key === "db:1");
+    expect(toMid.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil"]);
+    expect(toMid.every((s) => !s.relation.scope && !s.relation.through)).toBe(true);
+    expect(toRoot.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil"]);
+    expect(toRoot.every((s) => s.relation.through?.map((t) => t.book.key).join() === "db:2" && !s.relation.scope)).toBe(true);
+    expect(toRoot[0]!.why).toContain("לפי הקישורים שכבר יש במסד");
+  });
+
+  it("two intermediates: each through its own section, the root through both", () => {
+    const p = planMaxLink({ selected: ["db:5"], library: lib, singleEngines: [] });
+    expect(pairs(p).filter((s) => s.target.key === "db:2" || s.target.key === "db:3").every((s) => s.relation.scope?.section === s.target.title)).toBe(true);
+    const root = pairs(p).find((s) => s.target.key === "db:1")!;
+    expect(root.relation.through!.map((t) => [t.book.key, t.scope?.section])).toEqual([["db:2", "מגן אברהם"], ["db:3", "טורי זהב על שולחן ערוך אורח חיים"]]);
+  });
+
+  it("bases that are not one chain stay one section per base", () => {
+    const p = planMaxLink({ selected: ["db:8"], library: lib, singleEngines: [] });
+    expect(pairs(p).every((s) => s.relation.scope && !s.relation.through)).toBe(true);
+  });
+});

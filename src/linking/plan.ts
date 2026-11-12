@@ -142,6 +142,22 @@ export interface RelationScope {
   section: string;
 }
 
+/**
+ * A commentary on a commentary, linked to the base of its base THROUGH the commentary it explains
+ * ("מחצית השקל" explains the "מגן אברהם", which is written on the "שולחן ערוך"). Its headings follow
+ * the intermediate's numbering (its "סעיף ב" is the מגן אברהם's ס"ק ב), so the engines link it to the
+ * intermediate, and each place found there is carried to the base by the links the database already
+ * has between the intermediate and the base (workers/maxlink-job.ts runThrough). Measured on the real
+ * database: 12,171 of the 12,180 lines of מחצית השקל that the library links to the שולחן ערוך are
+ * linked exactly where that composition leads; פרי מגדים 9,421 of 9,501; בועז on the Mishnah 28/32.
+ */
+export interface RelationThrough {
+  /** the intermediate commentary */
+  book: BookRef;
+  /** when the dependant explains several intermediates: the part written on this one */
+  scope?: RelationScope;
+}
+
 export interface Relation {
   kind: RelationKind;
   /** the commentary, or the notes book */
@@ -155,6 +171,8 @@ export interface Relation {
   scope?: RelationScope;
   /** the existing links show the dependant is a translation / a midrash of the base (PlanBook.linkedKinds) */
   dependence?: LinkedKind;
+  /** set when the dependant is linked to this base through the commentary it explains (RelationThrough) */
+  through?: readonly RelationThrough[];
 }
 
 /** One unit of work. `pair` steps run an engine on (source → target) in the engine's input direction. */
@@ -336,6 +354,47 @@ function baseOfBase(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap
   return out;
 }
 
+/*
+ * The declared bases of a commentary on a commentary form a chain: "מחצית השקל" is declared on the
+ * "מגן אברהם" and on the "שולחן ערוך", and the "מגן אברהם" is itself written on the "שולחן ערוך" (213
+ * of the 258 multi-base books of the database: בועז on יכין and the Mishnah, the פרי מגדים on the מגן
+ * אברהם, the ט"ז and the שולחן ערוך…). Such a book is not divided into a part per base — it follows
+ * the intermediate commentary, numbering included — so a section per base finds nothing (today: only
+ * dibur-hamatchil, everything left for review). Instead: the intermediate is the base (unscoped when
+ * there is one, each in its own section when several), and each root is reached through them.
+ * Null when the bases are not one chain, or the dependant itself is part of it.
+ */
+function chainRelations(book: PlanBook, declared: readonly PlanBook[], caveats: readonly string[]): Relation[] | null {
+  const keys = new Set(declared.map((b) => b.key));
+  const writtenOn = (b: PlanBook) => basesOf(b).filter((k) => keys.has(k) && k !== b.key);
+  const mids = declared.filter((b) => writtenOn(b).length > 0);
+  const midKeys = new Set(mids.map((b) => b.key));
+  const roots = declared.filter((b) => !midKeys.has(b.key));
+  if (!mids.length || !roots.length || roots.some((r) => !mids.some((m) => writtenOn(m).includes(r.key)))) return null;
+  if (mids.some((m) => writtenOn(m).some((k) => midKeys.has(k)))) return null; // a longer chain: not this rule
+  const scoped = mids.length > 1;
+  const out: Relation[] = mids.map((m) => ({
+    kind: "commentary" as const,
+    dependant: ref(book),
+    base: ref(m),
+    via: "base-text" as const,
+    caveats: [...caveats, scoped ? `לפי המסד הספר מפרש ${mids.length} פירושים; כל אחד מקושר רק דרך החלק בספר שהכותרת שלו היא שמו.` : `לפי המסד הספר הוא פירוש על ${quote(m.title)}, ולכן הכותרות שלו הולכות לפי ${quote(m.title)}.`],
+    ...(scoped && { scope: { section: m.title } }),
+  }));
+  for (const r of roots) {
+    const via = mids.filter((m) => writtenOn(m).includes(r.key));
+    out.push({
+      kind: "commentary",
+      dependant: ref(book),
+      base: ref(r),
+      via: "base-text",
+      caveats: [...caveats, `${quote(book.title)} מפרש את ${via.map((m) => quote(m.title)).join(" ואת ")}, שכתוב על ${quote(r.title)}: כל שורה מקושרת קודם למקום שהיא מפרשת שם, ומשם ל־${quote(r.title)} לפי הקישורים שכבר יש במסד ביניהם.`],
+      through: via.map((m) => ({ book: ref(m), ...(scoped && { scope: { section: m.title } }) })),
+    });
+  }
+  return out;
+}
+
 /** The relations a book's declaration or title gives it (relationsOf without the existing links). */
 function ownRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | { problem: string } {
   const notesNamed = notesBaseTitle(book.title);
@@ -353,6 +412,8 @@ function ownRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, inde
     if (kind === "notes")
       return { problem: `לפי המסד ספר ההערות כתוב על ${declaredKeys.length} ספרים, ושיטת הערות השוליים מקשרת ספר הערות לספר אחד. קשרו אותו בזוג ספרים.` };
     if (!declared.length) return { problem: "לפי המסד הספר כתוב על כמה ספרים, ואף אחד מהם אינו פתוח עכשיו. פתחו אותם ונסו שוב." };
+    const chained = kind === "commentary" && declared.length === declaredKeys.length ? chainRelations(book, declared, caveats) : null;
+    if (chained) return chained;
     const note = `לפי המסד הספר כתוב על ${declaredKeys.length} ספרים. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
     return declared.map((base) => ({
       kind,
@@ -397,7 +458,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
     if (!book || isTargum(book)) continue;
     for (const own of relations.get(k) ?? []) {
       // a midrash or a translation (by its links) does not quote רש"י or תוספות
-      if (own.kind !== "commentary" || own.scope || own.dependence || own.dependant.key !== k) continue;
+      if (own.kind !== "commentary" || own.scope || own.through || own.dependence || own.dependant.key !== k) continue;
       const self = commentatorOfTitle(own.dependant.title)?.key;
       for (const sib of commentariesOn.get(own.base.key) ?? []) {
         const who = commentatorOfTitle(sib.dependant.title);
@@ -495,7 +556,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       if (isSelected.has(b.key)) problems.set(b.key, rs.problem);
       continue;
     }
-    for (const r of rs) if (r.kind === "commentary" && !r.scope) pushTo(commentariesOn, r.base.key, r);
+    for (const r of rs) if (r.kind === "commentary" && !r.scope && !r.through) pushTo(commentariesOn, r.base.key, r);
     const touching = rs.filter((r) => isSelected.has(r.dependant.key) || isSelected.has(r.base.key));
     if (touching.length) relations.set(b.key, touching);
   }
