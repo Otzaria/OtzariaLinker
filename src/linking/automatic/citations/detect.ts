@@ -1021,7 +1021,8 @@ export class CitationScanner {
     if (at < 0 || last?.kind !== "word" || !last.gershayim || numeralOf(last)) return null;
     for (let start = Math.max(0, at - 2); start <= at; start++) {
       for (const m of [...this.aliases.matchAt(toks, start), ...this.aliases.authorNamesAt(toks, start)]) {
-        if (m.to !== at + 1) continue;
+        // "וכמ"ש בשבת (פט.)" is "as written", not כ + "מ"ש" (מלאכת שלמה)
+        if (m.to !== at + 1 || m.prefix.includes("כ") || RUNNING_TEXT_NAMES.has(m.entry.text) || COMMON_ABBREVIATIONS.has(wordShape(toks[start]!))) continue;
         const targets: AliasTarget[] = [];
         for (const c of candidates) {
           const on = this.aliases.commentariesOn.get(c.book.title.replace(/[״]/g, '"')) ?? [];
@@ -1092,10 +1093,10 @@ export class CitationScanner {
       // a commentator named right before ("תוס' פסחים ל"א") or right after ("לעיל כ"ג ע"א תוס' ד"ה"):
       // the citation points into that commentary
       const before = commentatorBefore(toks, c.from);
-      // after the place, only with its ד"ה ("לעיל כ"ג ע"א תוס' ד"ה"): "(ב"מ פד:), כרש"י ובעלי התוספות" is a
-      // comparison, not the commentary's words on the daf
+      // after the place, only with its ד"ה or "שם" ("לעיל כ"ג ע"א תוס' ד"ה", "(דף ל) בתוס' שם"): "(ב"מ פד:),
+      // כרש"י ובעלי התוספות" is a comparison, not the commentary's words on the daf
       const afterAny = before ? undefined : commentatorAfter(toks, c.to);
-      const after = afterAny && isDibur(toks, afterAny.next) ? afterAny : undefined;
+      const after = afterAny && (isDibur(toks, afterAny.next) || isWord(toks[afterAny.next], "שם")) ? afterAny : undefined;
       const who = before ?? after?.who;
       let lib: { name: string; targets: AliasTarget[] } | null = null;
       const dh = isDibur(toks, after ? after.next : c.to);

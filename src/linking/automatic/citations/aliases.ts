@@ -451,8 +451,9 @@ export class AliasIndex {
     for (const prefix of prefixesOf(t)) {
       const first = t.key.slice(prefix.length);
       for (const e of this.byFirst.get(first) ?? []) {
-        // "כפסחים ח' ע"ב" is a title with כ; "כתלים" is "walls", not כ + a spelling of תהילים: with כ only a title
-        if (prefix.endsWith("כ") && !e.targets.some((x) => x.tier === "title")) continue;
+        // "כפסחים ח' ע"ב" is a title with כ, "כאה"ע" a quoted name; "כתלים" is "walls", not כ + a spelling of
+        // תהילים: with כ only a title or a quoted name
+        if (prefix.endsWith("כ") && !e.targets.some((x) => x.tier === "title") && !e.words.some((w) => w.gershayimFromEnd || w.geresh)) continue;
         const end = matchWords(e.words, toks, i, prefix.length);
         if (end !== null) out.push({ entry: e, from: i, to: end, prefix });
       }
