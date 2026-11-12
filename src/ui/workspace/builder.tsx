@@ -178,8 +178,36 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
           <button class="adv-link" onClick={() => store.pickLine(side, pick.bookKey, pick.line)}>הסרת העוגן</button>
         </span>
       )}
+      {!pick.anchor && <RangeButtons side={side} pick={pick} />}
       {line && <span class="snip">{plainText(line.anchorText)}</span>}
     </div>
+  );
+}
+
+/**
+ * v3's "until the next" (F-054/F-055): the end that stops one line before the next link or heading of
+ * this side (linking/ranges.ts), or the range removed. A line count still unknown gives a notice.
+ */
+function RangeButtons({ side, pick }: { side: Side; pick: Pick }) {
+  const store = useStore();
+  const untilNext = async () => {
+    const end = await store.ranges.suggestEnd(pick.bookKey, side, pick.line, store.editing.value ?? undefined);
+    const cur = store.pick[side].value;
+    // the pick may have moved while the headings were read
+    if (!cur || cur.bookKey !== pick.bookKey || cur.line !== pick.line) return;
+    if (end === null) return store.notify("warning", "אורך הספר עדיין לא ידוע, ולכן אי אפשר להציע סוף לטווח.");
+    if (end <= pick.line) return store.notify("info", "השורה הבאה כבר מתחילה קישור או כותרת, ולכן אין טווח להציע.");
+    store.pick[side].value = { bookKey: pick.bookKey, line: pick.line, end };
+  };
+  return (
+    <span style="grid-column:1/-1" class="row">
+      <button class="adv-link" onClick={untilNext} title="הטווח נמשך עד שורה אחת לפני הקישור או הכותרת הבאים בצד הזה">
+        טווח עד הקישור הבא
+      </button>
+      {pick.end !== undefined && (
+        <button class="adv-link" onClick={() => (store.pick[side].value = { bookKey: pick.bookKey, line: pick.line })}>בלי טווח</button>
+      )}
+    </span>
   );
 }
 

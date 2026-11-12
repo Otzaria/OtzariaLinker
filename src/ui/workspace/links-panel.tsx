@@ -85,6 +85,7 @@ function ProjectLinksPanel() {
         </button>
         {altTocButton}
       </div>
+      <FillRanges />
       <div class="filters">
         {(["all", "new", "edited", "existing", "deleted"] as const).map((s) =>
           s === "all" || counts[s] ? (
@@ -114,6 +115,50 @@ function ProjectLinksPanel() {
       )}
       {!filtered.length && <p class="empty">אין קישורים שמתאימים לסינון.</p>}
     </>
+  );
+}
+
+/**
+ * Range completion (v3 F-084/F-105): every link of a book on one side runs until one line before the
+ * next link (the last one to the end of the book). One undoable step; the rule is linking/ranges.ts.
+ */
+function FillRanges() {
+  const store = useStore();
+  const books = [store.view.source.value, store.view.target.value].filter((k, i, a): k is string => !!k && a.indexOf(k) === i);
+  const [bookKey, setBookKey] = useState<string>("");
+  const [side, setSide] = useState<"source" | "target">("source");
+  const [onlyRanged, setOnlyRanged] = useState(true);
+  const key = books.includes(bookKey) ? bookKey : books[0];
+  if (!key) return null;
+  return (
+    <details class="held" style="margin:6px 6px 0">
+      <summary>השלמת טווחים</summary>
+      <div class="builder" style="padding:6px 0 0">
+        <span class="muted">כל טווח נמשך עד שורה אחת לפני תחילת הקישור הבא, והאחרון עד סוף הספר. שורת כותרת אינה סוף טווח. אפשר לבטל ב־Ctrl+Z.</span>
+        <label class="field">
+          הספר
+          <select value={key} onChange={(e) => setBookKey(e.currentTarget.value)}>
+            {books.map((k) => (
+              <option key={k} value={k}>{store.refOf(k).title}</option>
+            ))}
+          </select>
+        </label>
+        <label class="field">
+          הספר הוא, בקישורים
+          <select value={side} onChange={(e) => setSide(e.currentTarget.value as "source" | "target")}>
+            <option value="source">צד המקור</option>
+            <option value="target">צד היעד</option>
+          </select>
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={onlyRanged} onChange={(e) => setOnlyRanged(e.currentTarget.checked)} />
+          <span>רק קישורים שכבר מוגדרים כטווח (בטלו כדי להפוך גם קישורי שורה לטווחים)</span>
+        </label>
+        <div class="row">
+          <button class="btn tonal" disabled={!!store.task.value} onClick={() => void store.ranges.fill(key, side, onlyRanged)}>השלמה</button>
+        </div>
+      </div>
+    </details>
   );
 }
 

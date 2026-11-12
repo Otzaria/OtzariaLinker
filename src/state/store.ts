@@ -29,6 +29,7 @@ import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMap
 import { detectLayout, type JsonLayout } from "../formats/links-json/layout";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
+import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState, type MaxLinkRunOptions, type MaxLinkScope } from "./maxlink";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
@@ -114,6 +115,8 @@ export class AppStore {
   readonly dbLinks: DbLinksState;
   /** max-link: plan, run and report (state/maxlink.ts) */
   readonly maxLink: MaxLinkState;
+  /** range suggestions, cutting and completion (state/ranges.ts) */
+  readonly ranges: RangesState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -217,6 +220,7 @@ export class AppStore {
     this.altToc = new AltTocState(this, service);
     this.dbLinks = new DbLinksState(this, service);
     this.maxLink = new MaxLinkState(this, service, saver);
+    this.ranges = new RangesState(this, service);
   }
 
   /* ---------------- sources ---------------- */
@@ -430,12 +434,12 @@ export class AppStore {
       const before = this.linkState.value.links.get(this.editing.value);
       if (!before) return null;
       const after: Link = { ...d, status: before.status === "existing" ? "edited" : before.status };
-      this.apply("עריכת קישור", [{ id: before.id, before, after }]);
+      this.apply("עריכת קישור", [{ id: before.id, before, after }, ...this.trimAround(after, before.id)]);
       this.clearPicks();
       return after;
     }
     const link: Link = { ...d, id: this.newLinkId(), status: "new", provenance: "user" };
-    this.apply("יצירת קישור", addChanges([link]));
+    this.apply("יצירת קישור", [...addChanges([link]), ...this.trimAround(link)]);
     batch(() => {
       this.pick.target.value = null;
       this.draftHeRef.value = null;
@@ -445,6 +449,21 @@ export class AppStore {
       if (s && !s.anchor && s.end === undefined) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
     });
     return link;
+  }
+
+  /**
+   * v3's "trim the previous range" (F-064): a range of another link that the new link's start falls
+   * inside is cut to end one line before it, in the same undoable step, and the user is told.
+   */
+  private trimAround(link: Link, exclude?: string): Change[] {
+    const keyOf = (ref: BookRef) => this.bookOf(ref)?.key;
+    const changes: Change[] = [];
+    for (const side of ["source", "target"] as const) {
+      const key = keyOf(link[side].book);
+      if (key) changes.push(...this.ranges.trimFor(key, side, link[side].line, exclude ?? link.id).filter((c) => !changes.some((x) => x.id === c.id)));
+    }
+    if (changes.length) this.notify("info", changes.length === 1 ? "טווח של קישור קודם קוצר כדי שלא יבלע את הקישור החדש." : `קוצרו הטווחים של ${linksCount(changes.length)} קודמים כדי שלא יבלעו את הקישור החדש.`);
+    return changes;
   }
 
   /** The next line after `line` that is not a heading (links to headings are dropped), as far as loaded. */
