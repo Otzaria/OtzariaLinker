@@ -39,6 +39,7 @@ export class DbBookSource implements BookSource {
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links);
     for (const b of await reader.books()) s.booksById.set(b.id, b);
+    s.info.library = isLibraryDb(reader.caps.kind, label, s.booksById.values());
     s.bases = await reader.baseTexts();
     s.commentatorOf = await reader.defaultCommentators();
     s.withLinks = await reader.booksWithSourceLinks();
@@ -186,7 +187,7 @@ export class DbBookSource implements BookSource {
   }
 
   private originOf(b: DbBook): BookOrigin {
-    if (this.reader.caps.kind !== "official") return "personal";
+    if (!this.info.library) return "personal";
     return b.source && /sefaria/i.test(b.source) ? "sefaria" : "otzaria";
   }
 
@@ -199,3 +200,17 @@ export class DbBookSource implements BookSource {
   }
 }
 
+/**
+ * Whether a database is the official Otzaria library (product audit F12). The layout cannot tell: a
+ * personal database built in the Otzaria schema has the same tables, and without a personal marker
+ * (user_link, book.isPersonal, library_id — capabilities.ts) it looks "official". The library's own
+ * database is built from Sefaria first (Generator.kt: Sefaria is the priority source), so it always
+ * holds books whose source is Sefaria; one without any is the user's. A file named seforim.db — the
+ * library's name — counts too, for old schemas without a source table.
+ */
+export function isLibraryDb(kind: string, label: string, books: Iterable<Pick<DbBook, "source">>): boolean {
+  if (kind !== "official") return false;
+  if (/^seforim\.db$/i.test(label)) return true;
+  for (const b of books) if (b.source && /sefaria/i.test(b.source)) return true;
+  return false;
+}

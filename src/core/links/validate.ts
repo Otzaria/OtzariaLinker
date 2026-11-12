@@ -52,6 +52,11 @@ export interface ValidationContext {
    * the library's list, core/links/sefaria-titles.ts). Absent: the database origin.
    */
   sefariaOwned?(book: BookRef): boolean;
+  /**
+   * The library gives this book's name to a Sefaria book, whatever book of that name is open
+   * (sefaria-titles.ts hasSefariaTitle). Absent: not checked.
+   */
+  sefariaTitle?(book: BookRef): boolean;
   /** "submission" (default): rules of the library's sync are errors; "private": warnings (B1). */
   purpose?: "submission" | "private";
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
@@ -235,6 +240,14 @@ function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
     add("error", "sefaria/anchor-range", "עוגן עם סוף (end) אינו נתמך בקישור שנוגע בספר ספריא.");
   if (tgtSef && !srcSef && link.anchor)
     add("error", "sefaria/anchor-into-sefaria", "עוגן (start) אינו מותר בקישור מספר אוצריא אל ספר ספריא.");
+  // The user's own book that only shares its name with a library Sefaria book (a text file, a personal
+  // database: product audit F2). The Sefaria rules are not its rules — but sent to the library, the
+  // record names the LIBRARY's Sefaria book, with the line numbers of the user's: the library would
+  // link the wrong book, and without ref_1/ref_2 its sync fails. Private use is unaffected.
+  if (submit)
+    for (const [side, label] of [[link.source, "ספר המקור"], [link.target, "ספר היעד"]] as const)
+      if (!owned(side.book) && ctx.sefariaTitle?.(side.book))
+        add("error", "sefaria/not-library-edition", `${label} "${side.book.title}" שפתחתם הוא ספר שלכם (מקובץ או ממסד אישי), אבל בספריית אוצריא השם הזה שייך לספר של ספריא. קישור שיישלח לספרייה יחובר לספר של ספריא, במספרי השורות של הספר שלכם. לשימוש שלכם בחרו בחלון הייצוא "לשימוש פרטי". אם זה עותק של הספר מהספרייה, סמנו ברשימת המקורות "ספרי ספריית אוצריא".`);
   if (link.ref1 !== undefined && link.anchor && link.passthrough?.["anchor_src_hash"] === undefined)
     add("error", "sefaria/pending-anchor-hash", "עוגן חדש עם ref_1 דורש anchor_src_hash, שרק הסנכרון של הספרייה מחשב. הסירו את העוגן או השאירו אותו לתהליך הספרייה.");
 }

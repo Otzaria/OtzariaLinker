@@ -10,7 +10,8 @@ import { AppStore } from "../../../src/state/store";
 function storeWith() {
   const book = (key: string, title: string, origin: string) => ({ key, title, origin, lineCount: 20 });
   const service = {
-    open: async () => ({ sources: [{ info: { id: "s1", kind: "otzaria-db", label: "db", warnings: [] }, books: [book("s1:1", "משנה ברורה", "sefaria"), book("s1:2", "שער הציון", "otzaria")] }], documents: [], skipped: [] }),
+    // the official database: its books are the library's own (SourceInfo.library, as DbBookSource reports it)
+    open: async () => ({ sources: [{ info: { id: "s1", kind: "otzaria-db", label: "db", warnings: [], library: true }, books: [book("s1:1", "משנה ברורה", "sefaria"), book("s1:2", "שער הציון", "otzaria")] }], documents: [], skipped: [] }),
     lines: async (_k: string, a: number, b: number) => Array.from({ length: Math.min(b, 19) - a + 1 }, (_, i) => ({ index: a + i, text: "שורה של טקסט", anchorText: "שורה של טקסט", heRef: "  ", heading: null, existsInDb: true })),
     existingLinks: async () => [],
     close: async () => {},

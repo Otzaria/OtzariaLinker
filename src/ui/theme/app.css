@@ -100,6 +100,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .source-row .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
 .source-row .meta > span:not(.src-badge) { white-space: nowrap; }
 .source-row .source-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-row .library-switch { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); cursor: pointer; }
 .empty-sources { margin: 4px 2px; font-size: var(--fs-sm); }
 /* where a book comes from (several sources open) */
 .src-badge { display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface-container-highest); color: var(--on-surface-variant); white-space: nowrap; font-weight: 600; vertical-align: 1px; }

@@ -6,6 +6,7 @@ import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
+import { SEFARIA_TITLES_PATH } from "../core/links/sefaria-owned";
 import { parseRecords } from "../formats/records/records";
 import { stripTags } from "../core/text/html";
 import { sharedDictionaries } from "../database/compression/zstd";
@@ -73,6 +74,8 @@ export class SourceRegistry {
     }
     if (texts.length) {
       const src = new TextFilesSource(this.nextId(), labelForTexts(texts), texts);
+      // a checkout of the library carries its list of Sefaria titles: its books are the library's (sefaria-titles.ts)
+      if (files.some((f) => f.path.replace(/\\/g, "/").endsWith(SEFARIA_TITLES_PATH))) src.info.library = true;
       // decided at open time: a warning added on first read (inside the source) never reached the UI
       if (notUtf8.length)
         src.info.warnings.push({

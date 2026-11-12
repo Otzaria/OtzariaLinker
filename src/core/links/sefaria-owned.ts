@@ -23,6 +23,9 @@ export interface SefariaOwnedOption {
   readonly sefariaOwned?: readonly string[];
 }
 
+/** The library's list of Sefaria titles inside a library checkout: a folder holding it is the library (sefaria-titles.ts). */
+export const SEFARIA_TITLES_PATH = ".github/data/sefaria_he_titles.txt";
+
 /** The predicate an engine uses: the keys it was given, else the database origin. */
 export function sefariaOwnedOf(keys: readonly string[] | undefined): SefariaOwned {
   if (!keys) return sefariaByOrigin;

@@ -111,6 +111,7 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "sefaria/range-side": "קשרו שורה אחת במקום טווח בצד של ספר ספריא.",
   "sefaria/anchor-range": "השאירו עוגן על מילה אחת, בלי סוף.",
   "sefaria/anchor-into-sefaria": "הסירו את העוגן.",
+  "sefaria/not-library-edition": "בחרו בחלון הייצוא \"לשימוש פרטי\", או סמנו את המקור כ\"ספרי ספריית אוצריא\" אם הספר הוא עותק של ספר הספרייה.",
   "sefaria/pending-anchor-hash": "הסירו את העוגן, או השאירו אותו לתהליך של הספרייה.",
 };
 
