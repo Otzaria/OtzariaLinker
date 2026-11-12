@@ -156,9 +156,11 @@ const PENALTY = {
 export interface Pending {
   readonly citation: Citation;
   /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was; dibur: the ד"ה's line was found */
-  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean; twoReadings?: boolean }[];
+  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
+  /** the numbers' other reading ("פ"ב" as 82) names a place in one of the candidate books */
+  altElsewhere?: boolean;
 }
 
 export class CitationRun {
@@ -315,12 +317,13 @@ export class CitationRun {
         // book_acronym is too noisy to trust without the target's own references: a database name
         // located only by headings ("בתרא" → a commentary's headings) is not a reading
         if (res && res.via === "headings" && t.tier === "acronym") continue;
-        // "תהלים פ"ו", "תה' פ' ב": the numbers have a second reading; it costs only when the book has that place too
-        // (in a midrash rabbah "פי"א" is its parsha 11, the way it is cited)
-        const alt = res && !res.daf && p.citation.rule !== "midrash-rabbah" ? alternativeReading(p.citation.elems) : null;
+        // "תהלים פ"ו", "תה' פ' ב": the numbers have a second reading; it costs only when some book the name may
+        // mean has that place too — this one, or another candidate ("בכתובות פ"ב": chapter 2 of the Mishna, or
+        // daf 82 of the Bavli). In a midrash rabbah "פי"א" is its parsha 11, the way it is cited.
+        const alt = !res?.daf && p.citation.rule !== "midrash-rabbah" ? alternativeReading(p.citation.elems) : null;
         const other = alt ? index.resolve(alt, t.collection, t.section) : null;
-        const twoReadings = !!other && (other.line !== res!.line || other.end !== res!.end);
-        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null, ...(twoReadings && { twoReadings: true }) });
+        if (other && (!res || other.line !== res.line || other.end !== res.end)) p.altElsewhere = true;
+        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
       }
     }
   }
@@ -358,7 +361,7 @@ export class CitationRun {
         unmatched.set(c.line, list);
         continue;
       }
-      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, o.twoReadings) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
+      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
       const best = scored[0]!;
       // the same book reached through two names (a title and an acronym) is not a rival
       const rival = scored.find((o) => o.target.book.key !== best.target.book.key);
