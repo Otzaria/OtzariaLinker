@@ -304,10 +304,21 @@ export class CitationScanner {
           rule = "sk-here";
         }
       }
+      // "ב"ש סי' מ"ה סק"א … וב"ש סקכ"א": a ס"ק of the book just cited with a siman is in that siman, like "שם"
+      let ibidOf: number | undefined;
+      if (elems[0]!.kind === "sk" && rule !== "sk-here" && this.last && !this.lastFar && this.last.elems[0]?.kind === "siman") {
+        const same = cands.filter((c) => this.last!.c.candidates.some((p) => p.book.key === c.book.key));
+        if (same.length) {
+          cands = same;
+          elems = [this.last.elems[0]!, ...elems];
+          rule = "sk-ibid";
+          ibidOf = this.last.c.seq;
+        }
+      }
       if (!cands.length) return this.drop("self");
       // "ב"ק (דף ט:)": the closing bracket belongs to the span; in "(בראשית א, ב)" neither bracket does
       const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
-      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: m.entry.numeric, m, ...(rule && { rule }) });
+      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: ibidOf !== undefined ? "partial" : "none", ...(ibidOf !== undefined && { ibidOf }), form: "forward", numericName: m.entry.numeric, m, ...(rule && { rule }) });
     }
     return null;
   }
@@ -983,6 +994,9 @@ export class CitationScanner {
     if (!this.last || (t.text !== "שם" && t.text !== "ושם") || t.gershayim || t.geresh) return null;
     // "הפ"ת שם סק"ט": "שם" after a name we do not know refers to THAT book, not to our last citation
     const prev = toks[i - 1];
+    // "רמ"א שם סעי' ב'" after "מג"א סי' ש"ו": the Rema's gloss in the Shulchan Aruch, at the last citation's siman
+    // ("רמ"א" is also the numeral 241, so the guard below would let it through as a number)
+    if (prev?.kind === "word" && /^[ובהלד]{0,2}רמ"א$/.test(wordShape(prev))) return this.remaIbid(toks, i, line) ?? this.drop("ibid-other-book");
     if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !this.aliases.matchAt(toks, i - 1).length) return this.drop("ibid-other-book");
     // …and so does "המ"ל (שם)", "הרשב"א [שם]", "הרמב"ם ז"ל (שם)": an author's name before the bracket
     // (past ז"ל) — a quoted name with the article, or a commentator's ("רש"י (שם)")
@@ -1008,6 +1022,26 @@ export class CitationScanner {
     const elems = mergeIbid(this.last.elems, addr.elems);
     if (!elems) return this.drop("ibid-shape");
     return this.emit(toks, line, { from: i, to: addr.to, candidates: this.last.c.candidates, name: "שם", elems, evidence: addr.evidence, bracketed: inBracket || addr.bracketed, ibid: "partial", ibidOf: this.last.c.seq, form: "forward", numericName: false, ...(this.last.c.internal && { internal: this.last.c.internal }), ...((this.lastFar || t.text === "ושם" || twice === 2) && { rule: this.lastFar ? "ibid-far" : "ibid-v4" }) });
+  }
+
+  /**
+   * "רמ"א שם סעי' ב'": the Shulchan Aruch (where the Rema's glosses are) at the siman of the last citation — of the
+   * Shulchan Aruch itself or of a commentary on one part of it ("מג"א סי' ש"ו") — and the seif written after "שם".
+   */
+  private remaIbid(toks: readonly Tok[], i: number, line: number): number | null {
+    const last = this.last;
+    if (!last || this.lastFar || last.elems[0]?.kind !== "siman") return null;
+    const addr = parseAddress(toks, i + 1);
+    if (!addr || addr.evidence !== "strong" || addr.elems[0]!.kind !== "seif") return null;
+    const parts = new Map<string, AliasTarget>();
+    for (const c of last.c.candidates) {
+      const title = c.collection === "sa" ? c.book.title : c.collection === "sa-commentary" ? saBaseOf(c.book.title) : null;
+      const t = title ? this.aliases.lookup(title)?.targets.find((x) => x.tier === "title" && x.collection === "sa") : undefined;
+      if (t) parts.set(t.book.key, t);
+    }
+    const cands = this.own([...parts.values()]);
+    if (cands.length !== 1) return null;
+    return this.emit(toks, line, { from: i - 1, to: addr.to, candidates: cands, name: 'רמ"א', elems: [last.elems[0]!, ...addr.elems], evidence: "strong", bracketed: false, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, commentators: false, rule: "rema-ibid" });
   }
 
   /** The siman the citing line is on: the first level of its own reference, when it is a number ("משנה ברורה, תמה, א" → 445). */

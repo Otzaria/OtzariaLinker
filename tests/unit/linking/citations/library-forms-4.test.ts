@@ -37,6 +37,7 @@ const CATALOG: CatalogBook[] = [
   book("km-ned", "כסף משנה על משנה תורה, הלכות נדרים"),
   book("sa-oc", "שולחן ערוך, אורח חיים"),
   book("ma", "מגן אברהם", "sefaria", ['מג"א']),
+  book("bs", "בית שמואל", "sefaria", ['ב"ש']),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -172,6 +173,26 @@ describe('a ס"ק with no siman', () => {
     expect(c!.rule).toBe("sk-here");
     // in a book on something else, the siman is unknown
     expect(scan([['עיין במג"א סק"א שהביא', "ספר כלשהו, תמה, א"]])[0]!.rule).toBeUndefined();
+  });
+});
+
+describe('"שם" and a ס"ק after a siman', () => {
+  it(`"רמ"א שם סעי' ב'" after "מג"א סי' ש"ו": the Shulchan Aruch at that siman, not the מג"א`, () => {
+    const cs = scan([`כמ"ש מג"א סי' ש"ו סקט"ו וע"פי מ"ש רמ"א שם סעי' ב' באתרא`]);
+    expect(cs.map(books)).toEqual([["ma"], ["sa-oc"]]);
+    expect(loc(cs[1])).toBe("siman:306 seif:2");
+    expect(cs[1]!.rule).toBe("rema-ibid");
+    // without a seif after it, "רמ"א שם" is the Rema's words somewhere else: nothing (not the מג"א)
+    expect(scan([`כמ"ש מג"א סי' ש"ו סקט"ו וכ"כ רמ"א שם בהגה`])).toHaveLength(1);
+  });
+  it(`"וב"ש סקכ"א" after "ב"ש סי' מ"ה": the same siman`, () => {
+    const cs = scan([`כמ"ש מג"א סי' ש"ו סקט"ו וכ' מג"א סקכ"א`]);
+    expect(loc(cs[1])).toBe("siman:306 sk:21");
+    expect(cs[1]!.rule).toBe("sk-ibid");
+    // another book's ס"ק is not in that siman
+    const other = scan([`כמ"ש ב"ש סי' מ"ה וכ' מג"א סקכ"א`]);
+    expect(other.map(books)).toEqual([["bs"], ["ma"]]);
+    expect(other[1]!.rule).toBeUndefined();
   });
 });
 
