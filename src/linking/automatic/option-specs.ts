@@ -78,6 +78,9 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "ladder", label: "הרחבת החיפוש בהדרגה לד\"ה מסומן", default: true },
     { kind: "boolean", key: "ladderWide", label: "חיפוש גם בקטעים הסמוכים בספר הבסיס", default: false, hint: "במדידה על ספרים אמיתיים התאמות שנמצאו רק בקטע סמוך היו שגויות ברוב המקרים." },
     { kind: "boolean", key: "inherit", label: "שורות בא\"ד / שם יורשות את מקום השורה הקודמת", default: true },
+    { kind: "boolean", key: "intermediates", label: "שורה על רש\"י/תוספות מקושרת רק לספר של אותו מפרש", default: true, hint: "שורה שפותחת \"רש\"י ד\"ה\" או \"תוס' ד\"ה\" מפרשת את דברי המפרש, ולא את הגמרא." },
+    { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
+    { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
     ...THRESHOLDS,
   ],
   footnotes: [
