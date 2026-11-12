@@ -12,7 +12,8 @@ import { dafElement, kindOfWord, kindWord, parseHeading, type PathElement } from
 import { analyzeBook } from "../headings/structure";
 import { confidenceOf, DEFAULT_THRESHOLDS, type Candidate, type ConfidenceThresholds, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../types";
 import { parseAmud, parseRefNumeral } from "./numerals";
-import { BAVLI_TRACTATES, DEFAULT_PRESET, presetById, type PatternPreset } from "./presets";
+import { bookMatches, otherBook } from "./books";
+import { DEFAULT_PRESET, presetById, type PatternPreset } from "./presets";
 import { compilePattern, type GroupSpec } from "./template";
 import { TargetTree, type RefPath } from "./tree";
 
@@ -69,8 +70,18 @@ export interface PatternOptions {
   readonly target?: PatternTarget;
   /** tree: link to the whole section under the place as a range. Default false. */
   readonly sectionRanges?: boolean;
+  /** tree: a reference right after the name of another book ("הט"ז ס"ק ג", "שבת דף כג") is skipped. Default true. */
+  readonly otherBooks?: boolean;
   /** tree: a reference without its upper levels takes them from the source line's headings. Default true. */
   readonly context?: boolean;
+  /**
+   * "start": only a reference at the START of a line counts (after a bracket, a tag or a book's name:
+   * "<b>ס"ק ג</b> …", "(ס"ק ו) …", "מ"א ס"ק ב …") — a commentary whose every comment opens with its
+   * place. Default "anywhere".
+   */
+  readonly position?: "anywhere" | "start";
+  /** lines with no reference of their own take the last reference above them, until the next heading. Default false. */
+  readonly carry?: boolean;
   /** "Conection Type" of the suggestions. Default "reference" (v3's default for this method). */
   readonly declaredType?: string;
   /** "auto" (default): an anchor on the matched words when Otzaria keeps it; "off": none */
@@ -81,9 +92,14 @@ export interface PatternOptions {
 const ENGINE = "pattern";
 const PROGRESS_EVERY = 500;
 const SCORE = { exact: 1, reset: 0.9, ambiguous: 0.9 } as const;
+/** a line that only continues the reference above it */
+const CARRY_CAP = 0.9;
 const MAX_RANGE = 40;
 /** visible characters from a named reference on that are matched against the target's heading names */
 const NAME_WINDOW = 60;
+/** visible characters before a reference searched for the name of another book */
+const BEFORE_WINDOW = 50;
+const AFTER_WINDOW = 30;
 
 const r = (code: string, text: string): Reason => ({ code, text });
 
@@ -110,8 +126,10 @@ interface Match {
   readonly book?: string;
   /** a numeral that is also an everyday word ("פרק לא") */
   readonly ambiguous: boolean;
-  /** the book named right before the match, when it is another tractate */
-  readonly otherBook?: string;
+  /** the visible text right before the match, for the "another book" guard (books.ts) */
+  readonly before?: string;
+  /** the visible text right after the match */
+  readonly after?: string;
 }
 
 type Placed = { readonly target: LinkSide; readonly score: number; readonly reasons: Reason[]; readonly warnings: Reason[]; readonly alternatives: Candidate[]; readonly rules: string[] };
@@ -137,10 +155,11 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
   const stats = { notNumbers: 0, samples: [] as string[] };
   const finder: Finder = compiled?.ok
     ? structured
-      ? templateFinder(compiled.regex, groups, all, preset?.chain === true, preset?.otherTractateGuard === true ? target.book.title : null, stats)
+      ? templateFinder(compiled.regex, groups, all, preset?.chain === true, stats)
       : regexFinder(compiled.regex, options, all)
     : tagFinder(tag, options, all);
-  const found = findMatches(source, finder, ctx, unmatched);
+  const atStart = options.position === "start";
+  const found = findMatches(source, atStart ? startOnly(finder) : finder, ctx, unmatched);
   if (found === null) return { suggestions: [], notes: [r("pattern/aborted", "הריצה בוטלה לפני שהסתיימה. לא נוצרו הצעות.")], unmatched: [] };
   if (preset) notes.push(r("pattern/preset", `התבנית "${preset.name}": ${preset.description}.`));
   if (!found.length) notes.push(r("pattern/no-matches", tag ? `בספר המקור אין אף תגית <${tag}> עם מספר.` : "התבנית לא נמצאה באף שורה של ספר המקור."));
@@ -184,6 +203,12 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       warnings: p.warnings,
     });
   }
+  if (options.carry) {
+    const carried = carryForward(source, suggestions, thresholds);
+    if (carried.length) notes.push(r("pattern/carried", `${carried.length} שורות בלי הפניה משלהן קיבלו את המקום של ההפניה האחרונה שמעליהן (עד הכותרת הבאה).`));
+    suggestions.push(...carried);
+    suggestions.sort((a, b) => a.source.line - b.source.line);
+  }
   const shared = [...perTarget.values()].filter((n) => n > 1).length;
   if (shared) notes.push(r("pattern/shared-targets", `${shared} שורות ביעד מקבלות יותר מהפניה אחת. זה תקין בהפניות, אבל בהערות שוליים זה סימן לטעות בתבנית או בחלוקה לפרקים.`));
   return { suggestions, notes, unmatched };
@@ -200,9 +225,10 @@ export function readReferences(text: string, presetOrTemplate: string, targetTit
   const preset = presetById(presetOrTemplate);
   const compiled = compilePattern(preset?.template ?? presetOrTemplate);
   if (!compiled.ok) return [];
-  const guard = preset?.otherTractateGuard && targetTitle ? targetTitle : null;
-  const finder = templateFinder(compiled.regex, compiled.groups, true, preset?.chain === true, guard, { notNumbers: 0, samples: [] });
-  return finder(text, 0, 0).flatMap((m) => ("reason" in m || m.otherBook || (m.book !== undefined && targetTitle && !bookMatches(m.book, targetTitle)) ? [] : [refLabel(m)]));
+  const finder = templateFinder(compiled.regex, compiled.groups, true, preset?.chain === true, { notNumbers: 0, samples: [] });
+  return finder(text, 0, 0).flatMap((m) =>
+    "reason" in m || (targetTitle && (otherBook(m.before ?? "", m.after ?? "", targetTitle) || (m.book !== undefined && !bookMatches(m.book, targetTitle)))) ? [] : [refLabel(m)],
+  );
 }
 
 /** "סימן ה › סעיף ג-ה" */
@@ -245,7 +271,7 @@ function regexFinder(regex: RegExp, options: PatternOptions, all: boolean): Find
 }
 
 /** A template (a preset, or the user's own with placeholders): every group says what its part is. */
-function templateFinder(regex: RegExp, groups: readonly GroupSpec[], all: boolean, chain: boolean, guardTitle: string | null, stats: { notNumbers: number; samples: string[] }): Finder {
+function templateFinder(regex: RegExp, groups: readonly GroupSpec[], all: boolean, chain: boolean, stats: { notNumbers: number; samples: string[] }): Finder {
   return (text, line, pos) => {
     const map = visibleMap(text);
     const vis = map.text;
@@ -263,7 +289,6 @@ function templateFinder(regex: RegExp, groups: readonly GroupSpec[], all: boolea
       const end = Math.max(read.end, start + 1);
       const deepest = read.elements[read.elements.length - 1];
       const num = read.flat ?? deepest?.n ?? 0;
-      const otherBook = guardTitle ? tractateBefore(vis, start, guardTitle) : undefined;
       out.push({
         pos,
         line,
@@ -277,7 +302,8 @@ function templateFinder(regex: RegExp, groups: readonly GroupSpec[], all: boolea
         ref: { elements: read.elements, ...(read.to !== undefined ? { to: read.to } : {}) },
         ...(read.name !== undefined ? { name: { text: read.name, label: read.nameLabel, at: read.nameAt } } : {}),
         ...(read.book !== undefined ? { book: read.book } : {}),
-        ...(otherBook ? { otherBook } : {}),
+        before: vis.slice(Math.max(0, start - BEFORE_WINDOW), start),
+        after: vis.slice(end, end + AFTER_WINDOW),
         ambiguous: read.ambiguous,
       });
     }
@@ -403,54 +429,6 @@ function chainMatches(ms: readonly Match[], vis: string, map: ReturnType<typeof 
   return out;
 }
 
-/** comparison form of a book name: no nikud, no quotes, no "מסכת" */
-const bookKey = (s: string): string => stripNikud(s).replace(/["'״׳]/g, "").replace(/^מסכת\s+/, "").replace(/\s+/g, " ").trim();
-const TRACTATE_KEYS = new Map(BAVLI_TRACTATES.map((t) => [bookKey(t), t] as const));
-
-/** A Bavli tractate named in the two words before `start` that is not the target ("שבת דף כג"). */
-function tractateBefore(vis: string, start: number, targetTitle: string): string | undefined {
-  const words = vis.slice(Math.max(0, start - 40), start).replace(/[(),.:;[\]]/g, " ").trim().split(/\s+/).filter(Boolean);
-  const cands: string[] = [];
-  if (words.length >= 2) cands.push(`${words[words.length - 2]} ${words[words.length - 1]}`);
-  if (words.length) cands.push(words[words.length - 1]!);
-  for (const c of cands) {
-    for (const k of [bookKey(c), bookKey(c).replace(/^[ובדמל]/, "")]) {
-      const t = TRACTATE_KEYS.get(k);
-      if (t && !bookMatches(t, targetTitle)) return t;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Does a book named in a reference ("ברכות", "בברכות", "ב"ק", "מו"ק") name the target? Equal names,
- * the target's last title part ("תלמוד בבלי, ברכות"), or an abbreviation whose letters split into
- * prefixes of the target's words in order (ב"ק = בבא קמא, מו"ק = מועד קטן).
- */
-export function bookMatches(named: string, title: string): boolean {
-  const t = bookKey(title.split(",").pop() ?? title).replace(/^(?:תלמוד בבלי|בבלי|משנה)\s+/, "");
-  const full = bookKey(title);
-  const quoted = /["'״׳]/.test(named);
-  for (const n of [bookKey(named), bookKey(named).replace(/^[ובלמ]/, "")]) {
-    if (!n) continue;
-    if (n === t || n === full) return true;
-    if (quoted && !n.includes(" ") && prefixesOf(n, t.split(" "))) return true;
-  }
-  return false;
-}
-
-function prefixesOf(letters: string, words: readonly string[]): boolean {
-  if (words.length < 2) return false;
-  const go = (i: number, w: number): boolean => {
-    if (w === words.length) return i === letters.length;
-    for (let len = 1; len <= words[w]!.length && i + len <= letters.length; len++) {
-      if (words[w]!.startsWith(letters.slice(i, i + len)) && go(i + len, w + 1)) return true;
-    }
-    return false;
-  };
-  return go(0, 0);
-}
-
 function tagFinder(tag: string, options: PatternOptions, all: boolean): Finder {
   const numbering = options.gematria === false ? ("digits" as const) : undefined;
   return (text, line, pos) => {
@@ -460,6 +438,46 @@ function tagFinder(tag: string, options: PatternOptions, all: boolean): Finder {
       ref: { elements: [{ kind: "?", n: m.num, label: toGematria(m.num) }] }, ambiguous: false,
     }));
   };
+}
+
+/** at most two short words before a reference that opens a line ("(", "<b>", "מ"א") */
+const START_RE = /^[\s([*•]*(?:[^\s()]{1,6}\s){0,2}[\s([]*$/;
+
+function startOnly(finder: Finder): Finder {
+  return (text, line, pos) => {
+    const all = finder(text, line, pos);
+    const first = all.find((m) => "reason" in m || START_RE.test(m.before ?? (m.vStart === 0 ? "" : "x".repeat(99))));
+    return first && !("reason" in first) ? [first] : [];
+  };
+}
+
+/** Lines without a reference inherit the last suggestion above them, up to the next heading; never certain. */
+function carryForward(source: EngineBook, suggestions: readonly Suggestion[], thresholds: ConfidenceThresholds): Suggestion[] {
+  const byLine = new Map<number, Suggestion>();
+  for (const s of suggestions) if (!byLine.has(s.source.line)) byLine.set(s.source.line, s);
+  const out: Suggestion[] = [];
+  let last: Suggestion | null = null;
+  for (const l of source.lines) {
+    if (l.heading !== null) { last = null; continue; }
+    const own = byLine.get(l.index);
+    if (own) { last = own; continue; }
+    if (!last || (stripTags(l.text).match(/[א-ת]/g) ?? []).length < 2) continue;
+    const score = Math.min(last.score, CARRY_CAP);
+    out.push({
+      ...last,
+      id: `${last.id.split(">")[0]!.replace(/#\d+@\d+$/, "")}#${l.index}~>${last.id.split(">")[1]}`,
+      source: { book: source.book, line: l.index },
+      score,
+      confidence: confidenceOf(score, null, thresholds),
+      reasons: [r("pattern/carried", `בשורה אין הפניה; היא ממשיכה את שורה ${last.source.line + 1}.`), ...last.reasons.slice(1)],
+      rules: [...last.rules, "pattern.carried"],
+      alternatives: [],
+      warnings: last.warnings,
+    });
+    const { anchor: _drop, ...rest } = out[out.length - 1]!;
+    out[out.length - 1] = rest;
+  }
+  return out;
 }
 
 /** The matches in every non-heading source line, in order; null when aborted. */
@@ -502,10 +520,12 @@ function treePlacer(source: EngineBook, target: EngineBook, options: PatternOpti
   if (!tree.hasNumberedHeadings && !tree.structure.markerLines) notes.push(r("pattern/no-numbered-headings", "ביעד אין כותרות ממוספרות ולא שורות ממוספרות, ולכן אין לאן לקשר לפי מקום מבני."));
   if (tree.structure.untagged) notes.push(r("pattern/untagged-headings", `ביעד זוהו ${tree.structure.untagged} שורות כותרת בלי תגית (כמו "סימן ה" בשורה לבדה), והן משמשות כמו כותרות.`));
   const useContext = options.context !== false;
+  const guardBooks = options.otherBooks !== false;
   const sourceStructure = useContext ? analyzeBook(source, { numbering: "lenient", untaggedHeadings: true }) : null;
   const opts = { sectionRanges: options.sectionRanges === true, context: useContext };
   return (m) => {
-    if (m.otherBook) return { unplaced: r("pattern/other-book", `ההפניה היא למסכת ${m.otherBook}, לא לספר היעד.`) };
+    const other = guardBooks && m.before !== undefined ? otherBook(m.before, m.after ?? "", target.book.title, tree.structure.kinds) : undefined;
+    if (other) return { unplaced: r("pattern/other-book", `לפני ההפניה כתוב "${other}": זו הפניה לספר אחר, לא לספר היעד.`) };
     if (m.book !== undefined && !bookMatches(m.book, target.book.title)) return { unplaced: r("pattern/other-book", `ההפניה היא ל"${m.book}", לא לספר היעד "${target.book.title}".`) };
     let elements = m.ref.elements;
     if (m.name) {

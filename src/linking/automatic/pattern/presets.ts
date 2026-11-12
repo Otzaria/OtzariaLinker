@@ -31,8 +31,6 @@ export interface PatternPreset {
   readonly matches: "first" | "all";
   /** merge matches that follow each other ("סימן ה, סעיף ג" found as two) into one reference */
   readonly chain?: boolean;
-  /** skip a reference right after the name of another Bavli tractate ("שבת דף כג" in a ברכות run) */
-  readonly otherTractateGuard?: boolean;
   /** examples: text → the path it reads, levels joined with " › " (a range: "סעיף ג-ה") */
   readonly examples: readonly (readonly [text: string, path: string])[];
   /** texts that must give no reference */
@@ -70,7 +68,6 @@ export const PATTERN_PRESETS: readonly PatternPreset[] = [
     template: `(?:(?<![א-ת])[ובלמ]?(?:דף|ד['׳])\\s?|(?<=[(\\[])(?=[א-ת"'׳״]{1,5}\\s?(?:[.:]|ע["״]))|(?<![א-ת])(?=[א-ת"'׳״]{1,5}\\sע["״][אב](?![א-ת]))){דף}(?:,?\\s?{עמוד})?`,
     target: "tree",
     matches: "all",
-    otherTractateGuard: true,
     examples: [
       ["דף ב.", "דף ב."],
       ["בדף ב:", "דף ב:"],
@@ -361,11 +358,3 @@ export const CUSTOM_PRESET = "custom";
 export function presetById(id: string | undefined): PatternPreset | undefined {
   return PATTERN_PRESETS.find((p) => p.id === (id || DEFAULT_PRESET));
 }
-
-/** Bavli tractates (names and common abbreviations), for the "another tractate" guard. Facts. */
-export const BAVLI_TRACTATES: readonly string[] = [
-  "ברכות", "שבת", "עירובין", "ערובין", "פסחים", "שקלים", "יומא", "סוכה", "ביצה", "ראש השנה", "ר\"ה", "תענית", "מגילה",
-  "מועד קטן", "מו\"ק", "חגיגה", "יבמות", "כתובות", "נדרים", "נזיר", "סוטה", "גיטין", "קידושין", "קדושין",
-  "בבא קמא", "ב\"ק", "בבא מציעא", "ב\"מ", "בבא בתרא", "ב\"ב", "סנהדרין", "מכות", "שבועות", "עבודה זרה", "ע\"ז",
-  "הוריות", "זבחים", "מנחות", "חולין", "בכורות", "ערכין", "תמורה", "כריתות", "מעילה", "תמיד", "נדה", "נידה",
-];

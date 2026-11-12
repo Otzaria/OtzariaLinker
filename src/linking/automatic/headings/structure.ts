@@ -131,6 +131,7 @@ export function analyzeBook(book: EngineBook, opts: AnalyzeOptions): BookStructu
   let marker: number | null = null;
   let markerLines = 0;
   let untagged = 0;
+  const untaggedLevel = new Map<string, number>();
   let path: PathElement[] = [];
   for (let i = 0; i < src.length; i++) {
     const l = src[i]!;
@@ -145,7 +146,16 @@ export function analyzeBook(book: EngineBook, opts: AnalyzeOptions): BookStructu
       const u = untaggedHeading(l.text, opts.numbering);
       if (u) {
         elements = u;
-        level = kindLevel.get(u[0]!.kind) ?? deepestTagged + 1;
+        // a kind with no tagged heading nests by first appearance (Otzariya_Link_Maker's idea): the
+        // first new kind under an open heading of another kind is its child ("פרק א" › "משנה א")
+        const k = u[0]!.kind;
+        let lv = kindLevel.get(k) ?? untaggedLevel.get(k);
+        if (lv === undefined) {
+          const top = stack[stack.length - 1];
+          lv = top && !top.elements.some((e) => e.kind === k) ? Math.min(6, top.level + 1) : deepestTagged + 1;
+          untaggedLevel.set(k, lv);
+        }
+        level = lv;
         untagged++;
       }
     }

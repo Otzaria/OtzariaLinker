@@ -271,6 +271,8 @@ export function dafElement(n: number, amud: 1 | 2 | undefined): PathElement {
  * line made ENTIRELY of listed kind words and their numerals ("פרק ג", "דף ב ע"א", "סימן יב סעיף ג").
  */
 export function untaggedHeading(html: unknown, mode: NumberingMode): PathElement[] | null {
+  // a heading of at most 24 visible characters is never this long, even with tags (a cheap reject for prose lines)
+  if (String(html ?? "").length > 400) return null;
   // a whole line in brackets ("(סימן ה)", "[סעיף ג]") is the same heading
   const text = plainText(html).replace(/^[([]\s*(.*?)\s*[)\]]$/, "$1");
   if (!text || text.length > 24) return null;
@@ -286,7 +288,8 @@ const NOT_MARKERS = new Set(["שם", "שם'", "כו'", "וכו'", "עי'"]);
  * is no kind word, so the numeral must LOOK like one (descending letters, gershayim or digits).
  */
 export function inlineMarker(html: unknown, mode: NumberingMode): number | null {
-  const m = /^\(([^()\s]{1,6})\)/.exec(plainText(html));
+  // only the start of the line matters; plainText of a whole long line is the cost of analyzeBook
+  const m = /^\(([^()\s]{1,6})\)/.exec(plainText(String(html ?? "").slice(0, 300)));
   if (!m || NOT_MARKERS.has(m[1]!)) return null;
   const num = parseNumeral(m[1]!, mode, true);
   return num ? num.n : null;

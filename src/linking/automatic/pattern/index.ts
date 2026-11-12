@@ -4,7 +4,8 @@
  * line, a line of a chapter, or a place in the target's heading tree. Pure; runs in the worker.
  * See engine.ts, presets.ts, template.ts, tree.ts.
  */
-export { bookMatches, DEFAULT_PATTERN, readReferences, runPatternEngine, type PatternOptions, type PatternTarget } from "./engine";
+export { DEFAULT_PATTERN, readReferences, runPatternEngine, type PatternOptions, type PatternTarget } from "./engine";
+export { bookMatches, otherBook } from "./books";
 export { parseAmud, parseRefNumeral, type RefNumber } from "./numerals";
 export { CUSTOM_PRESET, DEFAULT_PRESET, PATTERN_PRESETS, presetById, type PatternPreset } from "./presets";
 export { compilePattern, describeLevels } from "./template";

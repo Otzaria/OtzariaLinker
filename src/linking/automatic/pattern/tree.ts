@@ -5,7 +5,7 @@ import { phraseSimilarity } from "../../../matching/similarity";
 import type { Candidate, EngineBook, Reason } from "../types";
 import { align, COST, type AlignContext, type Alignment } from "../headings/align";
 import { kindWord, parseHeading, plainText, type PathElement } from "../headings/numbering";
-import { analyzeBook, buildUnits, type BookStructure, type Unit } from "../headings/structure";
+import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "../headings/structure";
 
 /*
  * A structure reference ("סימן ה סעיף ג ס"ק ב", "פ"ב מ"ג", "דף ב:") → the place in the TARGET'S
@@ -30,6 +30,7 @@ const ORDINAL_SCORE = 0.88;
 const MAX_RANGE = 40;
 /** a candidate whose skipped levels contradict the source's headings */
 const CONTRADICTED = 0.2;
+const MAX_ALTERNATIVES = 3;
 
 export interface RefPath {
   readonly elements: readonly PathElement[];
@@ -61,6 +62,8 @@ export class TargetTree {
   /** every heading by its text, for named references: "פרשת נח", "שער הבטחון" */
   private readonly names: { key: string; words: number; elements: readonly PathElement[] }[] = [];
   private readonly numbers = new Set<string>();
+  /** units by every element of their path ("siman#5" → every unit under סימן ה) */
+  private readonly byElement = new Map<string, Set<Unit>>();
 
   constructor(private readonly book: EngineBook) {
     this.structure = analyzeBook(book, { numbering: "lenient", untaggedHeadings: true });
@@ -72,6 +75,12 @@ export class TargetTree {
       if (list) list.push(u);
       else this.byKey.set(k, [u]);
       if (last.kind !== "name" && last.kind !== "daf") this.numbers.add(`${last.kind}#${last.n}`);
+      for (const e of u.path) {
+        const ek = elementKeyOf(e);
+        const set = this.byElement.get(ek);
+        if (set) set.add(u);
+        else this.byElement.set(ek, new Set([u]));
+      }
     }
     const seen = new Set<string>();
     for (const h of this.structure.headings) {
@@ -106,8 +115,22 @@ export class TargetTree {
     return null;
   }
 
+  private readonly placed = new Map<string, TreePlaced | TreeUnplaced>();
+
   /** The place of a reference in the target; `context` = the heading path of the source line. */
   place(ref: RefPath, context: readonly PathElement[], opts: TreeOptions): TreePlaced | TreeUnplaced {
+    // only the source's levels the target has can decide anything ("סעיף ב" of a commentary on a ס"ק book cannot)
+    const ctx = opts.context ? context.filter((e) => e.kind === "name" || this.structure.kinds.has(e.kind === "amud" ? "daf" : e.kind)) : [];
+    // the same reference under the same headings is placed the same way (ס"ק א, ב, ג… in every סימן)
+    const key = `${pathKey(ref.elements)}|${ref.to ?? ""}|${pathKey(ctx)}|${opts.sectionRanges}`;
+    const hit = this.placed.get(key);
+    if (hit) return hit;
+    const out = this.placeUncached(ref, ctx, opts);
+    this.placed.set(key, out);
+    return out;
+  }
+
+  private placeUncached(ref: RefPath, context: readonly PathElement[], opts: TreeOptions): TreePlaced | TreeUnplaced {
     const P = ref.elements;
     const ranked = this.match(P);
     const kindless = P.some((e) => e.kind === "?");
@@ -119,7 +142,11 @@ export class TargetTree {
     const best = ranked[0]!.score;
     const tied = ranked.filter((s) => best - s.score < 0.02);
     if (tied.length > 1 && opts.context && context.length) {
-      const judged = tied.map((s) => ({ s, ...agreement(s.alignment, context) }));
+      // only candidates under one of the source's own levels can agree with it (a fast subset: "ס"ק ב"
+      // ties with one unit per סימן, and only the one under the source's סימן matters)
+      const near = new Set<Unit>();
+      for (const e of context) for (const u of this.byElement.get(elementKeyOf(e)) ?? []) near.add(u);
+      const judged = tied.filter((s) => near.has(s.unit)).map((s) => ({ s, ...agreement(s.alignment, context) }));
       const fit = judged.filter((j) => j.conflicts === 0);
       const top = Math.max(0, ...fit.map((j) => j.agrees));
       const winners = fit.filter((j) => j.agrees === top);
@@ -127,8 +154,14 @@ export class TargetTree {
         const w = winners[0]!;
         // the skipped levels the context confirmed cost nothing; candidates it contradicts are far behind
         const s = { ...w.s, score: Math.min(1, w.s.score + COST.skip * w.agrees) };
-        const against = new Set(judged.filter((j) => j.conflicts > 0).map((j) => j.s));
-        pool = [s, ...ranked.filter((x) => x !== w.s).map((x) => (against.has(x) ? { ...x, score: Math.max(0, x.score - CONTRADICTED) } : x))].sort((a, b) => b.score - a.score);
+        // only the few best others matter (alternatives); a reference like "ס"ק ב" ties with one unit per סימן
+        const others = [
+          ...fit.filter((j) => j !== w).slice(0, MAX_ALTERNATIVES).map((j) => j.s),
+          ...ranked.slice(tied.length, tied.length + MAX_ALTERNATIVES),
+          ...tied.filter((x) => !near.has(x.unit)).slice(0, MAX_ALTERNATIVES).map((x) => ({ ...x, score: Math.max(0, x.score - CONTRADICTED) })),
+          ...judged.filter((j) => j.conflicts > 0).slice(0, MAX_ALTERNATIVES).map((j) => ({ ...j.s, score: Math.max(0, j.s.score - CONTRADICTED) })),
+        ].sort((a, b) => b.score - a.score);
+        pool = [s, ...others];
         ctxNote = r("pattern/context", `ההפניה לא אומרת את כל הרמות; לפי הכותרות של שורת המקור (${pathLabel(context)}) זה ${pathLabel(w.s.unit.path)}.`);
         ctxRule = "pattern.context";
       }
@@ -160,8 +193,20 @@ export class TargetTree {
     };
   }
 
+  private readonly cache = new Map<string, Scored[]>();
+
+  /** every unit the path aligns with, best first (cached: the same references repeat all over a book) */
   private match(P: readonly PathElement[]): Scored[] {
     if (!P.length) return [];
+    const key = pathKey(P);
+    const hit = this.cache.get(key);
+    if (hit) return hit;
+    const out = this.matchUncached(P);
+    this.cache.set(key, out);
+    return out;
+  }
+
+  private matchUncached(P: readonly PathElement[]): Scored[] {
     const kinds = new Set(P.filter((e) => e.kind !== "name" && e.kind !== "?").map((e) => (e.kind === "amud" ? "daf" : e.kind)));
     const actx: AlignContext = {
       baseKinds: this.structure.kinds,
@@ -244,6 +289,12 @@ export class TargetTree {
   private lineOf(pos: number): number {
     return this.book.lines[pos]!.index;
   }
+}
+
+/** an element as the context compares it: kind and number (a daf without its side), or a name */
+function elementKeyOf(e: PathElement): string {
+  if (e.kind === "name") return `$${e.name}`;
+  return `${e.kind === "amud" ? "daf" : e.kind}#${e.n}`;
 }
 
 function keyOf(e: PathElement): string {

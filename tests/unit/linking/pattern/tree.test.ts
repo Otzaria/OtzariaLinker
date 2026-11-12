@@ -66,14 +66,14 @@ describe("context: a reference without its upper levels takes them from the sour
   const src = ["<h1>מחצית השקל</h1>", "<h2>סימן ב</h2>", "<h3>סעיף ג</h3>", '<b>ס"ק ג ידקדק</b> וכו\'', "<h2>סימן א</h2>", '<b>מ"א ס"ק ב\' מפני</b> ועכ"פ'];
 
   it("the source's סימן decides; the link is certain and says why", () => {
-    const res = run(src, ma, { preset: "siman-seif-sk" });
+    const res = run(src, ma, { preset: "siman-seif-sk" }, "מגן אברהם");
     expect(pairs(res)).toEqual(["3>8", "5>3"]);
     expect(conf(res)).toEqual(["certain", "certain"]);
     expect(codes(res.suggestions[0]!.reasons)).toContain("pattern/context");
   });
 
   it("without the context the same reference fits every סימן: ambiguous, with the others as alternatives", () => {
-    const res = run(src, ma, { preset: "siman-seif-sk", context: false });
+    const res = run(src, ma, { preset: "siman-seif-sk", context: false }, "מגן אברהם");
     expect(conf(res)).toEqual(["ambiguous", "ambiguous"]);
     expect(res.suggestions[0]!.alternatives.length).toBeGreaterThan(0);
   });
@@ -176,5 +176,49 @@ describe("the general preset and the user's own template", () => {
 
   it("an unknown preset name is reported, not guessed", () => {
     expect(codes(run(["סימן ב"], tgt, { preset: "nope" }).notes)).toEqual(["pattern/unknown-preset"]);
+  });
+});
+
+describe("a reference that belongs to another book named before it", () => {
+  const ma = ["<h1>מגן אברהם</h1>", "<h2>סימן א</h2>", "(א) שיהא", "(ב) מפני", "(ג) ומיד"];
+
+  it('"הט"ז ס"ק ג" and "בש"ך שם ס"ק ב" are skipped; "מ"א ס"ק ג" and "לעיל ס"ק ג" are the target\'s', () => {
+    const src = ["<h2>סימן א</h2>", 'וכ\' הט"ז ס"ק ג', 'ועיין בש"ך שם ס"ק ב', 'דהא כתב מ"א לקמן ס"ק ג', "וכדלעיל ס\"ק ב"];
+    const res = run(src, ma, { preset: "siman-seif-sk" }, "מגן אברהם");
+    expect(pairs(res)).toEqual(["3>4", "4>3"]);
+    expect(unmatchedCodes(res)).toEqual(["pattern/other-book", "pattern/other-book"]);
+    expect(pairs(run(src, ma, { preset: "siman-seif-sk", otherBooks: false }, "מגן אברהם"))).toEqual(["1>4", "2>3", "3>4", "4>3"]);
+  });
+
+  it("a level of a structure the target does not have, right before: \"בכלל ז' ס\"ו\" is not סעיף ו of the target", () => {
+    const sa = ["<h2>סימן א</h2>", "(א) א", "(ב) ב", "(ג) ג", "(ד) ד", "(ה) ה", "(ו) ו"];
+    const res = run(["<h2>סימן א</h2>", "וז\"ל החיי אדם בכלל ז' ס\"ו", 'ועיין ס"ו'], sa, { preset: "siman-seif" }, "שולחן ערוך, אורח חיים");
+    expect(pairs(res)).toEqual(["2>6"]);
+  });
+
+  it("a tractate named before the reference: \"בנגעים (פרק יד משנה ג)\" is not משנה ברכות", () => {
+    const mishna = ["<h1>משנה ברכות</h1>", "<h2>פרק א</h2>", "(א) א", "(ב) ב", "(ג) ג"];
+    const res = run(['תנינא בנגעים (פרק א משנה ג)', "לקמן (פרק א משנה ב)"], mishna, { preset: "perek-mishna" }, "משנה ברכות");
+    expect(pairs(res)).toEqual(["1>3"]);
+  });
+});
+
+describe("a commentary whose comments open with their place (position: start, carry)", () => {
+  const ma = ["<h1>מגן אברהם</h1>", "<h2>סימן א</h2>", "(א) שיהא", "(ב) מפני", "(ג) ומיד"];
+  const src = ["<h2>סימן א</h2>", '<b>ס"ק ב מפני</b> וכדלעיל ס"ק א', "ועוד בזה", '(ס"ק ג) ומיד', "<h2>סימן ב</h2>", "בלי הפניה"];
+
+  it("only the reference that opens a line counts; the one inside the text does not", () => {
+    const res = run(src, ma, { preset: "siman-seif-sk", position: "start" }, "מגן אברהם");
+    expect(pairs(res)).toEqual(["1>3", "3>4"]);
+  });
+
+  it("carry: a line without a reference continues the one above it, never across a heading, never certain", () => {
+    const res = run(src, ma, { preset: "siman-seif-sk", position: "start", carry: true }, "מגן אברהם");
+    expect(pairs(res)).toEqual(["1>3", "2>3", "3>4"]);
+    const carried = res.suggestions[1]!;
+    expect(carried.confidence).toBe("high");
+    expect(carried.anchor).toBeUndefined();
+    expect(codes(carried.reasons)[0]).toBe("pattern/carried");
+    expect(new Set(res.suggestions.map((s) => s.id)).size).toBe(3);
   });
 });
