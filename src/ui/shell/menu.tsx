@@ -43,9 +43,9 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
   );
 }
 
-export function MenuItem({ icon, children, checked, onSelect }: { icon?: IconName; children: ComponentChildren; checked?: boolean; onSelect: () => void }) {
+export function MenuItem({ icon, children, checked, onSelect, class: cls }: { icon?: IconName; children: ComponentChildren; checked?: boolean; onSelect: () => void; class?: string }) {
   return (
-    <button class="item" role={checked === undefined ? "menuitem" : "menuitemradio"} {...(checked !== undefined && { "aria-checked": checked })} onClick={onSelect}>
+    <button class={`item${cls ? ` ${cls}` : ""}`} role={checked === undefined ? "menuitem" : "menuitemradio"} {...(checked !== undefined && { "aria-checked": checked })} onClick={onSelect}>
       {icon && <Icon name={icon} size={18} />}
       <span class="grow">{children}</span>
       {checked && <Icon name="oz_check" size={16} />}

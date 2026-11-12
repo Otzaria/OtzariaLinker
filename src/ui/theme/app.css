@@ -97,6 +97,42 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .sources-list { padding: 6px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .source-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius); background: var(--surface-container-low); }
 .source-row .meta { font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.source-row .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.source-row .meta > span:not(.src-badge) { white-space: nowrap; }
+.source-row .source-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-sources { margin: 4px 2px; font-size: var(--fs-sm); }
+/* where a book comes from (several sources open) */
+.src-badge { display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface-container-highest); color: var(--on-surface-variant); white-space: nowrap; font-weight: 600; vertical-align: 1px; }
+.src-badge.otzaria { border-color: color-mix(in srgb, var(--primary) 60%, transparent); color: var(--primary); background: color-mix(in srgb, var(--primary-container) 40%, var(--surface)); }
+.src-badge.personal, .src-badge.mapped { border-color: color-mix(in srgb, var(--tertiary) 60%, transparent); color: var(--on-tertiary-container); background: color-mix(in srgb, var(--tertiary-container) 50%, var(--surface)); }
+.src-badge.folder, .src-badge.files, .src-badge.zip { border-color: color-mix(in srgb, var(--secondary) 50%, transparent); color: var(--on-secondary-container); background: color-mix(in srgb, var(--secondary-container) 50%, var(--surface)); }
+/* adding sources: the options, the database hint and a drop zone */
+.add-sources { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.add-toggle { width: 100%; }
+.flip { transform: rotate(180deg); }
+.add-options { display: grid; gap: 2px; padding: 4px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.add-option { display: flex; gap: 8px; align-items: start; text-align: start; padding: 6px 8px; border: 0; border-radius: var(--radius); background: none; cursor: pointer; }
+.add-option:hover { background: var(--secondary-container); color: var(--on-secondary-container); }
+.add-option .icon { color: var(--primary); margin-top: 1px; }
+.add-option b { display: block; font-weight: 600; }
+.add-option .muted { display: block; font-size: var(--fs-sm); }
+.drop-zone { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1.5px dashed var(--outline); border-radius: var(--radius); font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.drop-zone .icon { color: var(--primary); }
+.drop-zone.over { border-color: var(--primary); background: color-mix(in srgb, var(--primary-container) 45%, var(--surface)); color: var(--on-primary-container); }
+.db-hint { display: flex; gap: 8px; align-items: start; font-size: var(--fs-sm); color: var(--on-surface-variant); text-align: start; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-container); }
+.db-hint .icon { margin-top: 2px; color: var(--primary); }
+.db-hint .path { display: block; margin: 2px 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--on-surface); text-align: left; }
+.db-hint .muted { margin-top: 4px; }
+.btn.small { min-height: 0; padding: 0 6px; font-size: var(--fs-sm); gap: 4px; vertical-align: middle; color: var(--primary); }
+/* books grouped by source */
+.book-group + .book-group { border-top: 1px solid var(--outline-variant); }
+.group-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: 0; background: var(--surface-container-low); cursor: pointer; text-align: start; font-size: var(--fs-sm); position: sticky; top: 0; z-index: 1; }
+.group-head:hover { background: var(--surface-container); }
+.group-head .chev { width: 10px; color: var(--on-surface-variant); }
+.group-head .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.book-list li.twin .meta { color: var(--warning); }
+.panel-head .src-badge { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.builder .end .src-badge { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .book-search { padding: 6px; border-bottom: 1px solid var(--outline-variant); display: grid; gap: 6px; }
 .book-list { list-style: none; margin: 0; padding: 4px; }
 .book-list li { display: flex; align-items: center; gap: 4px; border-radius: var(--radius); padding: 0 2px 0 6px; }
@@ -265,6 +301,8 @@ dialog.help-dialog .dlg { height: 100%; }
 .help-content h2 { font-size: 20px; margin-top: 28px; padding-top: 8px; border-top: 1px solid var(--outline-variant); }
 .help-content h3 { font-size: 17px; margin-top: 20px; }
 .help-content code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--surface-container-highest); padding: 1px 4px; border-radius: 4px; direction: ltr; unicode-bidi: isolate; }
+/* a snippet never breaks in the middle (an LTR run split over two RTL lines reads backwards); a long one scrolls inside its own box */
+.help-content :not(pre) > code { white-space: nowrap; display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: bottom; line-height: 1.45; }
 .help-content pre { background: var(--surface-container-highest); padding: 10px; border-radius: var(--radius); overflow: auto; }
 .help-content pre code { background: none; padding: 0; }
 .help-content .table-wrap { overflow-x: auto; }
@@ -273,7 +311,31 @@ dialog.help-dialog .dlg { height: 100%; }
 .help-content th { background: var(--surface-container-highest); }
 .help-content kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--outline); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
 .help-content a { color: var(--primary); }
-@media (max-width: 760px) { .help-layout { grid-template-columns: 1fr; } .help-nav { display: none; } }
+@media (max-width: 760px) { .help-layout { grid-template-columns: 1fr; } .help-nav { display: none; } .help-content { padding: 4px 14px 20px; } }
+/* a guided workflow: the sources it needs, step by step */
+dialog.start-task { width: min(620px, calc(100vw - 32px)); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.steps > li { display: flex; gap: 12px; align-items: start; padding: 12px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface); }
+.steps > li.done { border-color: var(--tertiary); }
+.steps .num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--secondary-container); color: var(--on-secondary-container); }
+.steps li.done .num { background: var(--tertiary); color: var(--on-tertiary); }
+.steps .muted { font-size: var(--fs-sm); }
+.steps .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.steps .opened { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.steps .opened .icon { color: var(--tertiary); }
+.steps .db-hint { margin-top: 8px; }
+/* the app bar on a phone: one row. The advanced switch moves into the settings menu, the brand keeps its icon in
+   the workspace, and a running task gets a row of its own */
+.narrow-only { display: none !important; }
+@media (max-width: 600px) {
+  .app-bar { padding: 4px 8px; gap: 2px; }
+  .app-bar .sep, .app-bar > .switch { display: none; }
+  .app-bar.ws .brand-name, .app-bar .export .lbl { display: none; }
+  .app-bar .brand { margin-inline-end: 2px; }
+  .app-bar .export { padding-inline: 10px; }
+  .app-bar .task { order: 99; flex-basis: 100%; margin: 0; }
+  .narrow-only { display: flex !important; }
+}
 
 /* alt_toc editor */
 .alt-toc label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }

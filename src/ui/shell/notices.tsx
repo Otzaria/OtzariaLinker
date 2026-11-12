@@ -2,6 +2,7 @@ import { useEffect } from "preact/hooks";
 import type { Notice } from "../../state/store";
 import { useStore } from "../context";
 import { Icon, type IconName } from "../icons/icon";
+import { withFileNames } from "./file-name";
 
 const ICON: Record<Notice["kind"], IconName> = { info: "fl_info", success: "fl_checkmark_circle", warning: "fl_warning", error: "fl_error_circle" };
 
@@ -28,7 +29,7 @@ function NoticeView({ n, onClose }: { n: Notice; onClose: () => void }) {
     <div class={`notice ${n.kind}`} role={n.kind === "error" ? "alert" : "status"}>
       <Icon name={ICON[n.kind]} size={18} />
       <div>
-        {n.text}
+        {withFileNames(n.text)}
         {n.action && (
           <button class="btn text" onClick={() => (n.action!.run(), onClose())}>
             {n.action.label}
@@ -43,7 +44,7 @@ function NoticeView({ n, onClose }: { n: Notice; onClose: () => void }) {
           <summary>פרטים ({n.details.length})</summary>
           <ul>
             {n.details.map((d, i) => (
-              <li key={i}>{d}</li>
+              <li key={i}>{withFileNames(d)}</li>
             ))}
           </ul>
         </details>

@@ -3,6 +3,7 @@ import type { RelinkPlan, RelinkVerdict } from "../../linking/relink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { EditionDiffView } from "./edition-diff";
+import { ltr } from "../shell/file-name";
 
 /*
  * Moving links to a new edition of a book (stage 11). The user opens the old and the new edition,
@@ -47,7 +48,7 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
             <select value={oldKey} onChange={(e) => setOld(e.currentTarget.value)}>
               <option value="">בחרו ספר…</option>
               {withLinks.map((b) => (
-                <option key={b.key} value={b.key}>{b.title} — {b.path ?? b.key}</option>
+                <option key={b.key} value={b.key}>{b.title} — {ltr(b.path ?? store.sources.value.find((s) => b.key.startsWith(`${s.info.id}:`))?.info.label ?? b.key)}</option>
               ))}
             </select>
           </label>
@@ -56,7 +57,7 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
             <select value={newKey} onChange={(e) => setNew(e.currentTarget.value)}>
               <option value="">בחרו ספר…</option>
               {books.filter((b) => b.key !== oldKey).map((b) => (
-                <option key={b.key} value={b.key}>{b.title} — {b.path ?? b.key}</option>
+                <option key={b.key} value={b.key}>{b.title} — {ltr(b.path ?? store.sources.value.find((s) => b.key.startsWith(`${s.info.id}:`))?.info.label ?? b.key)}</option>
               ))}
             </select>
           </label>
