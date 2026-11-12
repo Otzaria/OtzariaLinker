@@ -1,0 +1,32 @@
+name: Visual baselines
+
+# Manual only. Makes the Linux screenshots for the visual comparison (docs/TESTING.md §2a) and
+# uploads them as an artifact; nothing is compared and nothing is committed. Someone looks at them,
+# commits them under tests/visual/__screenshots__/linux/, and only then can ci.yml compare.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-baselines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install Chrome and a Hebrew UI font
+        run: |
+          npx playwright install --with-deps chrome
+          sudo apt-get install -y fonts-noto-core
+      - name: Screenshots (writes the missing Linux baselines)
+        run: npx playwright test --config playwright.visual.config.ts --update-snapshots=missing
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-linux
+          path: tests/visual/__screenshots__/linux/

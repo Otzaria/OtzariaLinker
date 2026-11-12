@@ -19,5 +19,5 @@
     "noEmit": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "tests", "build", "scripts/live-test", "vite.config.ts", "playwright.config.ts", "vitest.validation.config.ts", "playwright.validation.config.ts"]
+  "include": ["src", "tests", "build", "scripts/live-test", "vite.config.ts", "playwright.config.ts", "vitest.validation.config.ts", "playwright.validation.config.ts", "playwright.visual.config.ts"]
 }

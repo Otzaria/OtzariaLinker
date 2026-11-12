@@ -15,6 +15,7 @@
 | ארכיטקטורה | `tests/unit/architecture.test.ts` | Vitest, סריקת `import` | כן |
 | E2E | `tests/e2e/` | Playwright: Chrome ו־Edge המותקנים, ו־Firefox של Playwright | לא: `npx playwright test` |
 | בסיס רגרסיה של v3 | `tests/e2e/legacy-baseline.spec.ts` | Playwright | לא: `npm run test:legacy` |
+| השוואה חזותית | `tests/visual/` (§2א) | Playwright, `toHaveScreenshot`, Chrome בלבד | לא: `npm run test:visual`, ולא ב־CI |
 | מול מסד אמיתי | `tests/integration/**/*.local.test.ts` (§4) | Vitest | רק עם `OTZARIA_DB` |
 
 ## 2. הרצה
@@ -28,6 +29,7 @@ npm run build && npx playwright test                # E2E על הקובץ הבנ
 npx playwright test tests/e2e/qa.spec.ts --project=chrome
 npm run test:e2e                                    # build + E2E
 npm run test:legacy                                 # 93 הבדיקות העצמיות של v3
+npm run test:visual                                 # build + השוואת צילומי המסכים (§2א)
 npm run check                                       # typecheck + npm test + E2E
 ```
 
@@ -60,6 +62,46 @@ npm run check                                       # typecheck + npm test + E2E
 | `help.spec.ts` | <kbd>F1</kbd> ולחצן העזרה פותחים את המדריך, פרקים מנווטים בתוכו בלי לעזוב את הדף, <kbd>Esc</kbd> סוגר |
 | `robustness.spec.ts` | מסד עם מעגל בעץ העמודים נדחה עם הודעה, והקובץ הבא עדיין נפתח |
 | `legacy-baseline.spec.ts` | 93/93 הבדיקות העצמיות של `legacy/OtzariaLinker-v3.html` (לא רץ ב־Firefox) |
+
+## 2א. השוואה חזותית (`npm run test:visual`)
+
+`tests/visual/screens.spec.ts` מגיע לשבעה מסכים כמו בדיקות ה־E2E (המסד החלקי וספרי טקסט קטנים, בלי מסד
+אמיתי), ומשווה צילום של החלון לצילום הבסיס: מסך הפתיחה, סביבת העבודה עם שני ספרים, קישור קיים ושתי שורות
+בבונה, טבלת ההצעות אחרי מנוע הכותרות, לשונית הבדיקה, חלון הייצוא, העזרה (<kbd>F1</kbd>) ודוח הקישור המרבי.
+התצורה, `playwright.visual.config.ts`, מריצה כל מסך בשישה פרויקטים: `light`/`dark` כפול `desktop` (1280×800),
+`tablet` (768×1024) ו־`phone` (390×844). מתחת ל־1200 פיקסלים הפריסה ההתחלתית היא "שני טקסטים וחלונית צד",
+ולכן הבדיקה פותחת את רשימת הספרים מהלשונית "ספרים".
+
+**מה עושה את הצילום יציב:** Chrome המותקן בלבד, `deviceScaleFactor: 1`, `locale: "he-IL"` ו־`timezoneId` קבועים,
+`reducedMotion`, אנימציות וסמן הקלדה כבויים (`animations: "disabled"`, `caret: "hide"`), העכבר מחוץ לכל פקד
+ושום פקד במיקוד. ההודעות הקופצות (`.notices`) מתנקות לפני כל צילום, כי הודעת הצלחה נעלמת אחרי 5 שניות
+ונוכחותה תלויה במהירות הריצה. בשום מסך אין שעה או תאריך; משך הריצה מופיע רק בדוח הקישור המרבי במצב
+מתקדם, והוא ממוסך (`timeMasks`). גם מיקום הגלילה של החלונית הצדדית (ומתחת ל־900 פיקסלים, של כל סביבת העבודה)
+מתאפס לראש, כי הוא תלוי בתזמון שבין גדילת התוכן לגלילה של הלחיצה האחרונה. אין תקציב של פיקסלים שונים
+(`maxDiffPixels: 0`): סף של 0.2% העביר בשקט שינוי בתווית של לחצן. רעש של החלקת קצוות נבלע בסף הצבע של כל פיקסל
+(`threshold`, ברירת המחדל 0.2). שלוש הרצות רצופות על אותו בסיס עברו 42/42.
+
+**למה צילומי הבסיס לכל מערכת בנפרד, ולמה זה לא ב־CI.** גופני הספרים מוטמעים, אבל גופן הממשק הוא של
+המערכת (`--font-ui`: ‏Segoe UI ב־Windows, ובלינוקס מה שמותקן), וגם הריכוך של הטקסט שונה. צילום מ־Windows לא
+יתאים לעולם לצילום מלינוקס. לכן הנתיב כולל את המערכת, `tests/visual/__screenshots__/<platform>/<project>/<מסך>.png`,
+ובמאגר יש כרגע רק צילומי `win32` (42 קבצים, כ־3.5MB). CI רץ על Ubuntu, ולכן ההשוואה **אינה** חלק מ־`npx playwright test`
+(ה־`testDir` שלו הוא `tests/e2e`) ולא מ־`ci.yml`: היא הייתה נכשלת תמיד, או "עוברת" בכתיבת בסיס חדש בלי שאיש הסתכל
+בו. אחרי שינוי בממשק מריצים אותה ב־Windows, לפני PR.
+
+לבסיס של לינוקס יש workflow ידני, `.github/workflows/visual-baselines.yml` (Actions → Visual baselines → Run workflow):
+הוא מתקין את Chrome ואת גופני Noto, מצלם עם `--update-snapshots=missing` ומעלה את `tests/visual/__screenshots__/linux/`
+כ־artifact. אחרי שמישהו **הסתכל** בצילומים ושמר אותם במאגר, אפשר להוסיף ל־`ci.yml` צעד השוואה (אותה פקודה בלי
+`--update-snapshots`). כל עוד הם לא במאגר, ההרצה בלינוקס כותבת צילומים חסרים ונכשלת.
+
+```
+npm run test:visual                                          # build + השוואה (Windows)
+npx playwright test -c playwright.visual.config.ts --project=dark-phone   # פרויקט אחד, אחרי build
+npm run test:visual -- --update-snapshots=all                 # שינוי מכוון בממשק: כתיבה מחדש של הבסיס
+```
+
+כשבדיקה נכשלת, Playwright שומר ב־`test-results/` את הצילום, את הבסיס ואת ההפרש (`*-actual.png`, `*-expected.png`,
+`*-diff.png`). `--update-snapshots` בלי ערך כותב רק צילומים שנכשלו; `=all` כותב את כולם. אחרי כתיבה **מסתכלים** בצילומים שהשתנו (`git diff --stat tests/visual`) לפני commit:
+בסיס שנכתב בלי שמישהו ראה אותו לא בודק כלום. בסוף מוחקים את `test-results/` ואת `playwright-report/`.
 
 ## 3. Property tests
 
@@ -213,6 +255,6 @@ py -3 -I scripts/fixtures/make_generic_dbs.py
 - בזמן עבודה מריצים את הבדיקות הקשורות לשינוי; לפני PR את הכול (`npm run check`).
 - CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test` עם `FC_SEED` שנגזר מה־commit, build, E2E ב־Chrome,
   ב־Edge וב־Firefox (`npx playwright install --with-deps chrome msedge firefox`), ובודק שבנייה חוזרת נותנת
-  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)).
+  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)). ההשוואה החזותית לא רצה ב־CI (§2א).
 
 </div>

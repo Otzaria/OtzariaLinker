@@ -183,7 +183,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </div>
         <footer>
           <button class="btn text" style="margin-inline-end:auto" disabled={!plan || (asCsv && !csv)} onClick={() => plan && store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)} title="סיכום בטקסט: כמה נכתב, לאן כל קובץ הולך, מה לא ייוצא ולמה. הוא נכלל גם בכל ZIP">
-            הורדת הדוח (_report.txt)
+            {/* one span: a .btn is a flex row, and loose text and <bdi> would become items with gaps between them */}
+            <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
           </button>
           <button class="btn text" onClick={() => ref.current?.close()}>סגירה</button>
           <button
