@@ -130,6 +130,37 @@ export function redo(s: LinkState): LinkState {
   return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
 }
 
+/**
+ * Re-points links at books without making an action: `fix` returns the link with its books resolved
+ * (or the same object). Applied to the current links AND to every version the history holds, so undo
+ * and redo bring back resolved links too. Not a user change: no history entry, no new revision
+ * (product audit F6: links loaded before their books are attached when the books open).
+ */
+export function rebindLinks(s: LinkState, fix: (l: Link) => Link): LinkState {
+  let changed = false;
+  const f = (l: Link): Link => {
+    const n = fix(l);
+    if (n !== l) changed = true;
+    return n;
+  };
+  const cmd = (c: Command): Command => {
+    let touched = false;
+    const changes = c.changes.map((x) => {
+      const before = x.before && f(x.before);
+      const after = x.after && f(x.after);
+      if (before === x.before && after === x.after) return x;
+      touched = true;
+      return { id: x.id, ...(before && { before }), ...(after && { after }) };
+    });
+    return touched ? { ...c, changes } : c;
+  };
+  const links = new Map<string, Link>();
+  for (const [id, l] of s.links) links.set(id, f(l));
+  const undo = s.undo.map(cmd);
+  const redo = s.redo.map(cmd);
+  return changed ? { ...s, links, undo, redo } : s;
+}
+
 /** Setting (or, with null, dropping) one book's structures, as a change. */
 export function altTocChange(s: LinkState, title: string, after: AltTocBook | null): AltTocChange {
   const before = s.altToc.get(title);

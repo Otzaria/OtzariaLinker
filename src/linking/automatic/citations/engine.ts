@@ -21,6 +21,7 @@ import { resolveInternal } from "./self";
 import { resolveAltDaf, type DafStructure } from "./altdaf";
 import { hebrewTokens } from "../../../matching/hebrew-tokens";
 import { keySimilarity } from "../../../matching/token-match";
+import { sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
 /*
  * The CITATIONS engine ("מראי מקומות"): finds references to other books in ONE book's text and links
@@ -41,7 +42,7 @@ import { keySimilarity } from "../../../matching/token-match";
  * library pipeline requires (§1.8: no `start` towards a Sefaria book, no `end` on a Sefaria record).
  */
 
-export interface CitationsOptions {
+export interface CitationsOptions extends SefariaOwnedOption {
   /** suggestions below this confidence are not returned. Default "possible". */
   readonly minConfidence?: "certain" | "high" | "possible";
   /** resolve "שם" (ibid). Default true. */
@@ -166,7 +167,9 @@ export interface Pending {
 export class CitationRun {
   private readonly scanner: CitationScanner;
   private readonly pending = new Map<number, Pending>();
-  private readonly opts: Required<Omit<CitationsOptions, "thresholds">> & { thresholds: ConfidenceThresholds };
+  private readonly opts: Required<Omit<CitationsOptions, "thresholds" | "sefariaOwned">> & { thresholds: ConfidenceThresholds };
+  /** the library's answer to "is this a Sefaria book" (core/links/sefaria-owned.ts): no anchor and no range on such a side */
+  private readonly sefariaOwned: SefariaOwned;
   private lines = 0;
   /** source lines with merged notes: an anchor there would cancel the notes merge (validate.ts) */
   private readonly notesLines = new Set<number>();
@@ -187,6 +190,7 @@ export class CitationRun {
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
     };
+    this.sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
     this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid, self: source }, source.title, units);
   }
 
@@ -384,7 +388,7 @@ export class CitationRun {
       }
       const res = best.res;
       // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1)
-      const ranged = this.opts.ranges && res.end > res.line && !sefariaSide(res.book);
+      const ranged = this.opts.ranges && res.end > res.line && !this.sefariaOwned(res.book);
       const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: res.line };
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
@@ -420,7 +424,7 @@ export class CitationRun {
           .filter((o) => o !== best)
           .slice(0, this.opts.maxAlternatives)
           .map((o): Candidate => ({
-            target: this.opts.ranges && o.res.end > o.res.line && !sefariaSide(o.res.book) ? { book: o.res.book, line: o.res.line, end: o.res.end } : { book: o.res.book, line: o.res.line },
+            target: this.opts.ranges && o.res.end > o.res.line && !this.sefariaOwned(o.res.book) ? { book: o.res.book, line: o.res.line, end: o.res.end } : { book: o.res.book, line: o.res.line },
             score: round(o.score),
             reasons: [{ code: "citations/alternative", text: `${o.res.label} (${o.target.book.title})` }],
           })),
@@ -446,7 +450,7 @@ export class CitationRun {
   private anchorPolicy(target: BookRef, cache: Map<string, boolean>): boolean {
     const hit = cache.get(target.key);
     if (hit !== undefined) return hit;
-    const ok = this.opts.anchors === "auto" && this.source.origin === "otzaria" && target.origin === "otzaria";
+    const ok = this.opts.anchors === "auto" && this.source.origin === "otzaria" && target.origin === "otzaria" && !this.sefariaOwned(this.source) && !this.sefariaOwned(target);
     cache.set(target.key, ok);
     return ok;
   }
@@ -456,7 +460,7 @@ export class CitationRun {
     if (!cache.size) return null;
     const without = [...cache.values()].filter((v) => !v).length;
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
-    if (this.source.origin !== "otzaria")
+    if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };
     return { code: "citations/anchors-sefaria", text: "קישורים לספרי ספריא נכתבים בלי עוגן על מילות ההפניה: הספרייה אינה מקבלת עוגן בקישור מספר אוצריא אל ספר ספריא. הם יוצגו בפאנל הקישורים." };
   }
@@ -791,8 +795,3 @@ export function runCitationsEngine(source: EngineBook, library: CitationLibrary,
   return run.finish(ctx);
 }
 
-/**
- * a book the library manages through Sefaria refs, by the database origin: the library list
- * (core/links/sefaria-titles.ts) stays out of the worker bundle; the export checks ranges by the list
- */
-const sefariaSide = (book: BookRef): boolean => book.origin === "sefaria";

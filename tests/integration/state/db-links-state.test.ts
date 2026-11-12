@@ -147,3 +147,25 @@ describe("database links in the links tab", () => {
     expect(store.notices.value.at(-1)!.text).toMatch(/לא הועתקו/);
   });
 });
+
+describe("what 'copy to the project' can copy (product audit F11)", () => {
+  it("one rule for the row button and 'select the shown': Sefaria↔Sefaria links are not selectable", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB]);
+    const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    store.showBook("source", bereshit.key);
+    store.dbLinks.side.value = "source";
+    await store.dbLinks.loadSummary(bereshit.key);
+    await store.dbLinks.loadPage();
+    const shown = store.dbLinks.list.value!.links;
+    expect(shown.length).toBeGreaterThan(0);
+    const sefariaBoth = shown.filter((l) => l.source.book.origin === "sefaria" && l.target.book.origin === "sefaria");
+    expect(sefariaBoth.length).toBeGreaterThan(0);
+    for (const l of sefariaBoth) expect(store.dbLinks.whyNotCopyable(l)).toContain("אי אפשר");
+    // whatever passes the rule is really copied: nothing selected is refused
+    const copyable = shown.filter((l) => !store.dbLinks.whyNotCopyable(l));
+    const made = await store.dbLinks.adopt(copyable);
+    expect(made).toBe(copyable.length);
+    expect(store.notices.value.some((n) => n.text.includes("לא הועתקו"))).toBe(false);
+  });
+});

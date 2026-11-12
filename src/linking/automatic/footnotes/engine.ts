@@ -1,6 +1,7 @@
 import { APP_DEPENDENT_TYPES, parseConnectionType } from "../../../core/links/connection-type";
 import type { RawAnchor } from "../../../core/links/model";
 import { isMergeableCompanionTitle } from "../../../core/links/titles";
+import { sefariaOwnedOf, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { anchorLabelFromHeRef, withAnchorLabel } from "../../../core/text/anchor-label";
 import { toGematria } from "../../../core/text/gematria";
 import { stripTags } from "../../../core/text/html";
@@ -32,7 +33,7 @@ import {
  * Options of runFootnotesEngine. Every field is optional; the defaults suit the common case of a
  * book with `<sup>` (or parenthesised) markers and a notes book whose lines open with the marker.
  */
-export interface FootnotesOptions {
+export interface FootnotesOptions extends SefariaOwnedOption {
   /**
    * How markers are written in the MAIN book: "sup" | "sub" | "parentheses" | { tag } | { regex }.
    * "auto" (default) tries sup, sub and parentheses and keeps the one whose numbers best match the
@@ -261,13 +262,17 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   const merged = isMergeableCompanionTitle(notes.book.title);
   const typeShowsPopup = popupTypeOk(declaredType, notes.book.title);
   const heRefOf = notesHeRefs(notes);
+  // the export refuses an anchor end on a Sefaria side (validate.ts sefaria/anchor-range): such a pair is linked line to line
+  const owned = sefariaOwnedOf(options.sefariaOwned);
+  const sefaria = owned(main.book) || owned(notes.book);
+  if (sefaria) runNotes.push(r("footnotes/anchors-sefaria", "אחד הספרים הוא ספר של ספריא, והספרייה אינה מקבלת עוגן על הסימן בקישור כזה. הקישורים נכתבים משורה לשורה, בלי עוגן."));
   const noteLead = new Map<number, Marker>();
   for (const o of noteOccs) if (!noteLead.has(o.line)) noteLead.set(o.line, o.marker);
   const suggestions: Suggestion[] = [];
   let noPopup = 0;
   const linkedNoteLines = new Set<number>();
   for (const h of hits) {
-    const s = buildSuggestion(h, main, notes, declaredType, heRefOf, noteLead, plan.chapters, { merged, typeShowsPopup, singleChapter: plan.chapters.length === 1 });
+    const s = buildSuggestion(h, main, notes, declaredType, heRefOf, noteLead, plan.chapters, { merged, typeShowsPopup, singleChapter: plan.chapters.length === 1, anchors: !sefaria });
     if (s.warnings.some((w) => w.code === "footnotes/no-popup")) noPopup++;
     h.lines.forEach((x) => linkedNoteLines.add(x));
     suggestions.push(s);
@@ -563,7 +568,7 @@ function groupOccs(occs: readonly Occ[], sectionOf: Int32Array): Map<number, Occ
 
 function buildSuggestion(
   h: Hit, main: EngineBook, notes: EngineBook, declaredType: string, heRefOf: (line: number) => string, noteLead: ReadonlyMap<number, Marker>,
-  chapters: readonly Chapter[], flags: { merged: boolean; typeShowsPopup: boolean; singleChapter: boolean },
+  chapters: readonly Chapter[], flags: { merged: boolean; typeShowsPopup: boolean; singleChapter: boolean; anchors: boolean },
 ): Suggestion {
   const m = h.occ.marker;
   const target = h.lines[0]!;
@@ -658,7 +663,7 @@ function buildSuggestion(
   const label = labelOf(m);
   const heRef2 = withAnchorLabel(heRefOf(target), label);
   // a data-label element shows nothing: there are no characters to anchor on, the link is the line's
-  const anchor: RawAnchor | undefined = m.style === "label" ? undefined : { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(label && anchorLabelFromHeRef(heRef2) === label ? { label } : {}) };
+  const anchor: RawAnchor | undefined = m.style === "label" || !flags.anchors ? undefined : { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(label && anchorLabelFromHeRef(heRef2) === label ? { label } : {}) };
   return {
     id: `footnotes:${main.book.key}#${h.occ.line}@${m.rawStart}>${notes.book.key}#${target}`,
     engine: "footnotes",

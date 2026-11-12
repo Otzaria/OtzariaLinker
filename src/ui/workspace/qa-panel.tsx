@@ -1,5 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
-import { QA_CATEGORIES, redundantDuplicates, type QaCategory } from "../../linking/qa";
+import { QA_CATEGORIES, qaAction, redundantDuplicates, suggestedFix, type QaCategory } from "../../linking/qa";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 
@@ -24,6 +24,9 @@ export function QaPanel() {
   const rows = useMemo(() => (report?.issues ?? []).filter((i) => (cat === "all" || i.category === cat) && (sev === "all" || i.problem.severity === sev)), [report, cat, sev]);
 
   const run = () => void store.quality.run().then(() => (setCat("all"), setShown(PAGE)));
+  const purpose = store.exportPurpose.value;
+  /** a remedy changes the links or the rules: the report is made again at once, so a fixed problem leaves it */
+  const remedy = (act: () => void) => (act(), void store.quality.run());
 
   if (!report)
     return (
@@ -45,6 +48,12 @@ export function QaPanel() {
           <b>{report.checked.toLocaleString("he")} קישורים נבדקו</b>
           <div class="muted" style="font-size:var(--fs-sm)">
             {report.clean.toLocaleString("he")} תקינים · {report.bySeverity.error.toLocaleString("he")} שגיאות · {report.bySeverity.warning.toLocaleString("he")} אזהרות
+          </div>
+          <div class="muted" style="font-size:var(--fs-sm)">
+            {purpose === "private" ? "נבדק לשימוש פרטי (כמו בחלון הייצוא)." : "נבדק לשליחה לספריית אוצריא (כמו בחלון הייצוא)."}{" "}
+            <button class="adv-link" onClick={() => remedy(() => (store.exportPurpose.value = purpose === "private" ? "submission" : "private"))}>
+              {purpose === "private" ? "בדיקה לשליחה לספרייה" : "בדיקה לשימוש פרטי"}
+            </button>
           </div>
         </div>
         <button class="btn text" onClick={run} title={stale ? "הקישורים השתנו מאז הבדיקה" : "הרצה מחדש"}>
@@ -99,9 +108,20 @@ export function QaPanel() {
                 </b>
                 <br />
                 {i.problem.message}
+                {i.problem.severity !== "info" && <div class="muted">{suggestedFix(i.problem.code, i.category)}</div>}
               </span>
-              <span onClick={(e) => e.stopPropagation()} style="display:flex">
-                <button class="icon-btn" title="תיקון בבונה" aria-label="תיקון" onClick={() => (store.editInBuilder(i.link.id), (store.sideTab.value = "builder"))}>
+              <span onClick={(e) => e.stopPropagation()} style="display:flex;align-items:center">
+                {qaAction(i.problem, purpose) === "private" && (
+                  <button class="btn text small" title="הייצוא והבדיקה יהיו לשימוש פרטי: כללי הסנכרון של הספרייה לא יחסמו" onClick={() => remedy(() => (store.exportPurpose.value = "private"))}>
+                    לשימוש פרטי
+                  </button>
+                )}
+                {qaAction(i.problem, purpose) === "drop-anchor" && (
+                  <button class="btn text small" title="הסרת העוגן על המילים; הקישור עצמו נשאר" onClick={() => remedy(() => store.dropAnchors([i.link.id]))}>
+                    הסרת העוגן
+                  </button>
+                )}
+                <button class="icon-btn" title="עריכה בבונה" aria-label="עריכה בבונה" onClick={() => (store.editInBuilder(i.link.id), (store.sideTab.value = "builder"))}>
                   <Icon name="oz_link_edit" size={16} />
                 </button>
                 <button class="icon-btn" title="מחיקת הקישור" aria-label="מחיקה" onClick={() => store.deleteLinks([i.link.id])}>

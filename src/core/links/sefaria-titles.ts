@@ -49,8 +49,33 @@ export function parseSefariaTitles(text: string, label: string): SefariaTitles |
   return titles.size ? { titles, source: "library", label } : null;
 }
 
-/** The library file's path inside a library checkout. */
-export const SEFARIA_TITLES_PATH = ".github/data/sefaria_he_titles.txt";
+/** The library file's path inside a library checkout (the constant lives where the worker can read it). */
+export { SEFARIA_TITLES_PATH } from "./sefaria-owned";
 
-/** Whether the sync and the PR gate treat this book as Sefaria-owned. */
-export const isSefariaOwned = (book: Pick<BookRef, "title">, list: SefariaTitles = embeddedSefariaTitles()): boolean => list.titles.has(book.title);
+/*
+ * THE rule for "is this a Sefaria book" (compatibility review B6, product audit F2) — the one place it
+ * lives; AppStore.isSefariaOwned applies it to what is open, and the engines get its answer
+ * (core/links/sefaria-owned.ts). The Sefaria constraints (ref_1/ref_2, no anchor end, no anchor into
+ * Sefaria, no range on a Sefaria side) are rules of the LIBRARY'S weekly sync, so they bind the
+ * library's own books:
+ *
+ *   - the title is in the library's list of Sefaria titles (above), AND
+ *   - the book in hand is the library's edition of it (`edition`):
+ *       true      — the official Otzaria database, a library checkout (a folder holding
+ *                   .github/data/sefaria_he_titles.txt), or any source the user marked "ספרי ספריית
+ *                   אוצריא" in the sources list (AppStore.setLibrarySource);
+ *       false     — the user's own book that only shares the name: a text file, a personal database
+ *                   (one in the Otzaria schema without the library's Sefaria books, F12), a mapped one;
+ *       undefined — no book of that name is open (a links file names it): the name means the library's
+ *                   book, as it does for the sync.
+ *
+ * Whether a text file named "בראשית" is a copy of the library's book or the user's own is genuinely
+ * ambiguous, so it is never guessed from the name: it defaults to "the user's", and one switch per
+ * source says otherwise. A link sent to the library that touches such a book is still refused — by
+ * validate.ts sefaria/not-library-edition, in plain words — because the library would read the name as
+ * its Sefaria book.
+ */
+export const isSefariaOwned = (book: Pick<BookRef, "title">, list: SefariaTitles = embeddedSefariaTitles(), edition?: boolean): boolean => edition !== false && list.titles.has(book.title);
+
+/** The library gives this name to a Sefaria book, whatever book of that name is open. */
+export const hasSefariaTitle = (book: Pick<BookRef, "title">, list: SefariaTitles = embeddedSefariaTitles()): boolean => list.titles.has(book.title);

@@ -7,6 +7,28 @@ import { badgeOf, SourceBadge } from "./source-badge";
 import { ReopenSources } from "./reopen-sources";
 import { SourceName } from "../shell/file-name";
 
+/**
+ * "Are these the library's own books?" — one switch per source, shown only where it matters: a source
+ * with a book the library names like a Sefaria book ("בראשית"). On: the library's Sefaria rules apply
+ * to those books; off: they are the user's own (core/links/sefaria-titles.ts, product audit F2).
+ */
+function LibrarySwitch({ sourceId }: { sourceId: string }) {
+  const store = useStore();
+  const named = store.sefariaNamedBooks(sourceId);
+  if (!named.length) return null;
+  const on = store.isLibrarySource(sourceId);
+  const which = `${named.slice(0, 2).map((t) => `"${t}"`).join(", ")}${named.length > 2 ? ` ועוד ${(named.length - 2).toLocaleString("he")}` : ""}`;
+  return (
+    <label
+      class="library-switch"
+      title={`בספריית אוצריא ${which} ${named.length === 1 ? "הוא ספר" : "הם ספרים"} של ספריא. סמנו אם המקור הזה הוא ספריית אוצריא עצמה (או עותק שלה): אז הקישורים אליהם נבדקים לפי הכללים של ספרי ספריא. בלי הסימון אלה ספרים שלכם, והכללים האלה לא חלים עליהם.`}
+    >
+      <input type="checkbox" checked={on} onChange={(e) => store.setLibrarySource(sourceId, e.currentTarget.checked)} />
+      ספרי ספריית אוצריא
+    </label>
+  );
+}
+
 /** Open sources (databases, folders, files), adding more, and a search over all their books. */
 export function SourcesBody() {
   const store = useStore();
@@ -32,6 +54,7 @@ export function SourcesBody() {
                 <span>{s.books.length.toLocaleString("he")} ספרים</span>
                 {s.info.warnings.length > 0 && <span>{s.info.warnings.length} אזהרות</span>}
               </div>
+              <LibrarySwitch sourceId={s.info.id} />
             </div>
             {store.canRemap(s.info.id) && (
               <button class="icon-btn" title="שינוי המיפוי של המסד" aria-label={`מיפוי ${s.info.label}`} onClick={() => void store.remapSource(s.info.id)}>

@@ -30,6 +30,8 @@ export interface MaxLinkHost {
   refOf(bookKey: string): BookRef;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null>;
+  /** keys of the open books the library treats as Sefaria's (AppStore.sefariaOwnedKeys): the engines' answer to it */
+  sefariaOwnedKeys?(): string[];
 }
 
 export interface MaxLinkRunOptions {
@@ -135,8 +137,11 @@ export class MaxLinkState {
     return ok === true;
   }
 
-  /** The plan for a scope, with only the ticked engines (all when `engines` is absent). */
-  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
+  /**
+   * The plan for a scope, with only the ticked engines (all when `engines` is absent). `preferSource`:
+   * the source whose books are the bases when a base is open in several (MaxLinkPlan.baseSources).
+   */
+  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>, preferSource?: string): MaxLinkPlan {
     const evidence = this.evidence.value;
     const library: PlanBook[] = [...this.host.books.value.values()].map((b) => {
       // default_commentator (read at open) is commentary evidence like a COMMENTARY link
@@ -149,7 +154,7 @@ export class MaxLinkState {
         ...linkedProps(fields),
       };
     });
-    return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }) });
+    return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }), ...(preferSource && { preferSource }) });
   }
 
   /** Runs a plan and makes its merged suggestions the current run. */
@@ -167,7 +172,7 @@ export class MaxLinkState {
     const units = steps.length + books;
     const res = await this.host.runTask(
       `קישור מרבי: ${steps.length.toLocaleString("he")} שלבים ב־${books.toLocaleString("he")} ספרים…`,
-      (opts) => run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }) }, opts),
+      (opts) => run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }), ...(this.host.sefariaOwnedKeys && { sefariaOwned: this.host.sefariaOwnedKeys() }) }, opts),
       (d) => countOf("שלב", Math.floor(d / MAXLINK_PROGRESS_UNIT) + 1, units),
     );
     if (!res) return false;

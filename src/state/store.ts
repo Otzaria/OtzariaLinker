@@ -9,11 +9,11 @@ import { path2ForTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../cor
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
-import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
+import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -233,6 +233,7 @@ export class AppStore {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
+    if (res.sources.length) this.attachLinks();
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
     const each = (kind: string, run: (path: string, text: string) => void) => {
@@ -344,6 +345,27 @@ export class AppStore {
     if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) };
     const title = bookKey.startsWith("unresolved:") ? bookKey.slice(11) : bookKey;
     return { key: bookKey, title, origin: "unknown" };
+  }
+
+  /**
+   * Links imported (or restored) before their books were open name them by title only ("unresolved:",
+   * origin unknown). When a book of that name opens they are attached to it — the same resolution an
+   * import does when the book is already open (resolveTitle) — so the quality check, the export and the
+   * readers see the real book, not "not found in any open source" (product audit F6).
+   */
+  private attachLinks(): void {
+    const memo = new Map<string, BookRef | null>();
+    const resolve = (ref: BookRef): BookRef => {
+      if (!ref.key.startsWith("unresolved:")) return ref;
+      if (!memo.has(ref.title)) memo.set(ref.title, this.resolveTitle(ref.title));
+      return memo.get(ref.title) ?? ref;
+    };
+    this.linkState.value = rebindLinks(this.linkState.value, (l) => {
+      const s = resolve(l.source.book);
+      const t = resolve(l.target.book);
+      return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
+    });
+    this.exchange.booksOpened();
   }
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
@@ -555,6 +577,20 @@ export class AppStore {
     this.apply(changes.length === 1 ? "שינוי סוג קשר" : `שינוי סוג הקשר של ${linksCount(changes.length)}`, changes);
   }
 
+  /** Removes the word anchor of links (the remedy the quality check offers for an anchor the library refuses). */
+  dropAnchors(ids: readonly string[]): void {
+    const s = this.linkState.value;
+    const changes = ids
+      .map((id): Change | null => {
+        const before = s.links.get(id);
+        if (!before?.anchor || before.provenance === "db") return null;
+        const { anchor: _a, ...rest } = before;
+        return { id, before, after: { ...rest, status: before.status === "existing" ? "edited" : before.status } };
+      })
+      .filter((c): c is Change => !!c);
+    this.apply(changes.length === 1 ? "הסרת עוגן" : `הסרת העוגן של ${linksCount(changes.length)}`, changes);
+  }
+
   undo(): void {
     this.linkState.value = undo(this.linkState.value);
   }
@@ -604,6 +640,7 @@ export class AppStore {
       this.sources.value = [...this.sources.value, src];
       for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
     });
+    this.attachLinks();
     if (src.books.length) {
       this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
@@ -750,9 +787,61 @@ export class AppStore {
     return ok === true;
   }
 
-  /** Whether the library's sync and PR gate count a book as Sefaria-owned (B6). */
-  isSefariaOwned(book: { readonly title: string }): boolean {
-    return isSefariaOwned(book, this.sefariaTitles.value);
+  /**
+   * Whether the library's sync and PR gate count a book as Sefaria-owned: its title is in the library's
+   * list AND the open book is the library's edition (the rule and why: core/links/sefaria-titles.ts).
+   * A ref with a key is that book; a bare title is any open book of that name; none open = the title.
+   */
+  isSefariaOwned(book: { readonly title: string; readonly key?: string }): boolean {
+    return isSefariaOwned(book, this.sefariaTitles.value, this.libraryEdition(book));
+  }
+
+  /** Whether the open book a ref names is the library's own edition; undefined when no such book is open. */
+  private libraryEdition(book: { readonly title: string; readonly key?: string }): boolean | undefined {
+    const exact = book.key !== undefined ? this.books.value.get(book.key) : undefined;
+    const editions = exact ? [exact] : (this.booksByTitle.value.get(book.title) ?? []);
+    if (!editions.length) return undefined;
+    return editions.some((b) => this.isLibrarySource(sourceIdOfBookKey(b.key)));
+  }
+
+  /** what the user said about a source, against what was detected at open (SourceInfo.library) */
+  readonly libraryOverrides = signal<ReadonlyMap<string, boolean>>(new Map());
+
+  /** Whether an open source holds the library's own books (the official database, a library checkout, or the user says so). */
+  isLibrarySource(sourceId: string): boolean {
+    return this.libraryOverrides.value.get(sourceId) ?? this.sources.value.find((s) => s.info.id === sourceId)?.info.library ?? false;
+  }
+
+  /** The user's switch "ספרי ספריית אוצריא" for one source (product audit F2): decides the Sefaria rules for its books. */
+  setLibrarySource(sourceId: string, library: boolean): void {
+    const s = this.sources.value.find((x) => x.info.id === sourceId);
+    if (!s) return;
+    this.libraryOverrides.value = new Map(this.libraryOverrides.value).set(sourceId, library);
+    const named = s.books.filter((b) => hasSefariaTitle(b, this.sefariaTitles.value)).map((b) => `"${b.title}"`);
+    const which = named.length ? ` ${named.slice(0, 3).join(", ")}${named.length > 3 ? ` ועוד ${named.length - 3}` : ""}` : "";
+    this.notify(
+      "info",
+      library
+        ? `"${s.info.label}" מסומן כספרי ספריית אוצריא.${which ? `${which} נחשבים עכשיו ספרי ספריא, ושליחה לספרייה של קישורים אליהם דורשת ציון ספריא.` : ""}`
+        : `"${s.info.label}" מסומן כספרים שלכם.${which ? `${which} אינם נחשבים ספרי ספריא.` : ""}`,
+    );
+  }
+
+  /** Books of a source whose names the library gives to Sefaria books — where the switch above matters. */
+  sefariaNamedBooks(sourceId: string): string[] {
+    const s = this.sources.value.find((x) => x.info.id === sourceId);
+    return s ? s.books.filter((b) => hasSefariaTitle(b, this.sefariaTitles.value)).map((b) => b.title) : [];
+  }
+
+  /**
+   * Keys of the open books (all, or the given ones) that isSefariaOwned holds for: the same decision,
+   * handed to the engines in the worker (core/links/sefaria-owned.ts), so a suggestion never carries
+   * what the export refuses on a Sefaria side (product audit F1).
+   */
+  sefariaOwnedKeys(keys?: Iterable<string>): string[] {
+    const out: string[] = [];
+    for (const k of keys ?? this.books.value.keys()) if (this.books.value.has(k) && this.isSefariaOwned(this.refOf(k))) out.push(k);
+    return out;
   }
 
   /** The library's own list of Sefaria titles (`.github/data/sefaria_he_titles.txt`) replaces the embedded one. */
@@ -777,6 +866,7 @@ export class AppStore {
       },
       linksFile: (title) => this.dbLinks.linksFile(title),
       sefariaOwned: (book) => this.isSefariaOwned(book),
+      sefariaTitle: (book) => hasSefariaTitle(book, this.sefariaTitles.value),
       purpose: this.exportPurpose.value,
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),

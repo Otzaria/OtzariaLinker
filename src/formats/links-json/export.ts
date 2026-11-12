@@ -2,7 +2,7 @@ import { zipSync, strToU8 } from "fflate";
 import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
 import { unsafeFileTitle } from "../../core/links/titles";
-import { FILE_LEVEL_CODES, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
+import { asExported, FILE_LEVEL_CODES, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
@@ -51,13 +51,12 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   const heldBack: ExportPlan["heldBack"] = [];
   const warned: ExportPlan["warned"] = [];
   for (const l of live) {
-    const p = problems.get(l.id) ?? [];
-    // An imported record the user did not touch is already in the library: dropping it from the
-    // rewritten file would DELETE it there. It is kept as it was, with its problems as warnings.
-    const untouchedImport = l.provenance === "file" && l.status === "existing";
+    // An imported record the user did not touch is kept as it was, its errors as warnings (asExported:
+    // the same rule the quality check reports by)
+    const p = asExported(l, problems.get(l.id) ?? []);
     // a problem of the book's whole file holds it back always — also untouched and in expert mode (A1–A4)
     const fileHeld = p.some((x) => FILE_LEVEL_CODES.has(x.code));
-    if (fileHeld || (!opts.includeErrors && !untouchedImport && p.some((x) => x.severity === "error"))) heldBack.push({ link: l, problems: p });
+    if (fileHeld || (!opts.includeErrors && p.some((x) => x.severity === "error"))) heldBack.push({ link: l, problems: p });
     else {
       written.push(l);
       if (p.some((x) => x.severity === "warning" || x.severity === "error")) warned.push({ link: l, problems: p });

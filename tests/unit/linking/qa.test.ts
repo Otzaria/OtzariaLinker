@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
 import type { ValidationContext } from "../../../src/core/links/validate";
 import { qaCsv, redundantDuplicates, runQa } from "../../../src/linking/qa";
+import { planExport } from "../../../src/formats/links-json/export";
 
 const A: BookRef = { key: "a", title: "פירוש", origin: "otzaria", isBaseBook: false };
 const B: BookRef = { key: "b", title: "בסיס", origin: "otzaria", isBaseBook: false };
@@ -40,5 +41,30 @@ describe("QA report", () => {
     const csv = qaCsv(report);
     expect(csv.startsWith("﻿")).toBe(true);
     expect(csv.split("\r\n").length).toBe(report.issues.length + 2);
+  });
+});
+
+describe("the check and the export agree (product audit F7)", () => {
+  // scenario 11: a library file's record points past the end of its target, and one the user made does too
+  const untouched = mk("lib", { provenance: "file", status: "existing", fileIndex: 0, target: { book: B, line: 40 } });
+  const made = mk("new", { target: { book: B, line: 40 } });
+  const report = runQa([untouched, made], ctx);
+  const plan = planExport([untouched, made], ctx);
+  const sev = (id: string) => report.issues.filter((i) => i.link.id === id && i.problem.code === "export/line-out-of-range").map((i) => i.problem.severity);
+
+  it("an untouched library record the export keeps is a warning in the check too, and says it is kept as is", () => {
+    expect(plan.warned.map((w) => w.link.id)).toEqual(["lib"]);
+    expect(sev("lib")).toEqual(["warning"]);
+    expect(report.issues.find((i) => i.link.id === "lib")!.problem.message).toContain("כמו שהיא");
+  });
+
+  it("a record the export holds back is an error in the check", () => {
+    expect(plan.heldBack.map((h) => h.link.id)).toEqual(["new"]);
+    expect(sev("new")).toEqual(["error"]);
+  });
+
+  it("every link the check calls an error is held back by the export, and only those", () => {
+    const errors = new Set(report.issues.filter((i) => i.problem.severity === "error").map((i) => i.link.id));
+    expect(new Set(plan.heldBack.map((h) => h.link.id))).toEqual(errors);
   });
 });

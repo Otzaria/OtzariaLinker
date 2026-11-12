@@ -31,6 +31,8 @@ export const SINGLE_BOOK_RUNNERS: Record<SingleEngineId, SingleRunner> = {
 export interface MaxLinkJobOptions {
   /** per-engine options (advanced mode); absent = the engine's defaults */
   engineOptions?: Partial<Record<string, Record<string, unknown>>>;
+  /** keys of the books the library treats as Sefaria's (core/links/sefaria-owned.ts), given to every engine */
+  sefariaOwned?: readonly string[];
 }
 
 /** units of progress per step: engines report their own progress inside a step */
@@ -146,7 +148,7 @@ export async function maxlinkJob(
   const partLinks = new Map<string, Map<string, number[]>>();
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
-  const optionsOf = (engine: string) => options.engineOptions?.[engine] ?? {};
+  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }) });
   const items: StepResult[] = [];
 
   let loaded = null as { key: string; source: EngineBook; target: EngineBook } | null;

@@ -519,7 +519,7 @@ export async function s11(s, { IN }) {
   await s.lap("qaDone");
   await s.shot("qa-report");
   s.note(`דוח הבדיקה: ${(await sideText(p)).slice(0, 1500)}`);
-  const fix = p.getByRole("button", { name: "תיקון" }).first();
+  const fix = p.getByRole("button", { name: /^(תיקון|עריכה בבונה)$/ }).first(); // renamed after the audit (F8)
   if (await fix.count()) {
     await s.click(fix, "'תיקון' ליד הבעיה הראשונה");
     await wait(p, 800);

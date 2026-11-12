@@ -58,6 +58,12 @@ export interface SourceInfo {
   kind: SourceKind;
   label: string;
   warnings: { code: string; message: string }[];
+  /**
+   * The source is the official Otzaria library (its books are the library's own editions): the
+   * official database, or a checkout of the library. Decided at open; the user can say otherwise per
+   * source (AppStore.setLibrarySource). The Sefaria rules bind only such books (core/links/sefaria-titles.ts).
+   */
+  library?: boolean;
 }
 
 /** The key of the source a book belongs to ("s3" for "s3:1234"). */

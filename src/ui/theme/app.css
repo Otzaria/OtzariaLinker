@@ -103,6 +103,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .source-row .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
 .source-row .meta > span:not(.src-badge) { white-space: nowrap; }
 .source-row .source-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-row .library-switch { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); cursor: pointer; }
 .empty-sources { margin: 4px 2px; font-size: var(--fs-sm); }
 .reopen-sources { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--tertiary-container); color: var(--on-tertiary-container); text-align: start; font-size: var(--fs-sm); }
 .reopen-sources header { display: flex; align-items: center; gap: 6px; }
