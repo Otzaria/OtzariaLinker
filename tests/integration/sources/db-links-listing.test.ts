@@ -54,6 +54,12 @@ describe("summary of a book's database links — same numbers as SQL", () => {
       expect(new Map(s.byBook.filter((b) => b.commentaryOut + b.commentaryIn).map((b) => [b.bookKey, [b.commentaryOut, b.commentaryIn]]))).toEqual(
         new Map(comm.map(([b, o, i]) => [`${sid}:${b}`, [Number(o), Number(i)]])),
       );
+      // TARGUM and MIDRASH links per book: evidence too (plan.ts evidenceFromCounts)
+      for (const [type, out, inn] of [["TARGUM", "targumOut", "targumIn"], ["MIDRASH", "midrashOut", "midrashIn"]] as const) {
+        const rows = q(`SELECT CASE WHEN k.sourceBookId = ${bookId} THEN k.targetBookId ELSE k.sourceBookId END AS other, sum(k.sourceBookId = ${bookId}), sum(k.sourceBookId <> ${bookId})
+                        FROM link k JOIN connection_type ct ON ct.id = k.connectionTypeId WHERE ct.name = '${type}' AND (k.sourceBookId = ${bookId} OR k.targetBookId = ${bookId}) GROUP BY other`);
+        expect(new Map(s.byBook.filter((b) => b[out] + b[inn]).map((b) => [b.bookKey, [b[out], b[inn]]]))).toEqual(new Map(rows.map(([b, o, i]) => [`${sid}:${b}`, [Number(o), Number(i)]])));
+      }
       // most links first
       expect(s.byBook.map((b) => b.out + b.in)).toEqual([...s.byBook.map((b) => b.out + b.in)].sort((a, b) => b - a));
     });

@@ -43,6 +43,14 @@ export interface DbLinkBookCount {
    */
   commentaryOut: number;
   commentaryIn: number;
+  /**
+   * Of those, TARGUM and MIDRASH links. Stored base → dependant like COMMENTARY (the full database,
+   * checked 2026-11-12: all 40,741 TARGUM and 10,689 MIDRASH links, e.g. "בראשית" → "תרגום ותפסיר רסג").
+   */
+  targumOut: number;
+  targumIn: number;
+  midrashOut: number;
+  midrashIn: number;
 }
 
 /** Counts of a book's database links, from the link table's book indexes (no full-table scan). */

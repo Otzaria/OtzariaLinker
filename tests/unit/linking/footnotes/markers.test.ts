@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { countVisibleChars, visibleUnits } from "../../../../src/core/text/offsets";
 import {
-  appRecognisesMarker, checkCustomPattern, detectMarkers, leadingMarker, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT, type Marker,
+  appRecognisesMarker, checkCustomPattern, detectMarkers, labelCommentators, leadingMarker, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT, type Marker,
 } from "../../../../src/linking/automatic/footnotes";
 
 /** What the reader sees between the anchor offsets, counted the generator's way. */
@@ -201,5 +201,15 @@ describe("custom patterns are bounded (security review #7)", () => {
     const t0 = Date.now();
     if (r.ok) "a".repeat(20_000).match(r.regex);
     expect(Date.now() - t0).toBeLessThan(2000);
+  });
+});
+
+describe("data-label markers (Sefaria)", () => {
+  it("the empty element with its closing tag; the label is the number; one commentator or all", () => {
+    const line = `אב<i data-commentator="A" data-label="12"></i>ג<i data-commentator="B" data-label="ג"></i><i data-label="5"></i><i data-commentator="A" data-label="⚬"></i>`;
+    const all = detectMarkers(line, "label");
+    expect(all.map((m) => [m.num, line.slice(m.rawStart, m.rawEnd)])).toEqual([[12, '<i data-commentator="A" data-label="12"></i>'], [3, '<i data-commentator="B" data-label="ג"></i>']]);
+    expect(detectMarkers(line, { label: "B" }).map((m) => m.num)).toEqual([3]);
+    expect(labelCommentators(line)).toEqual(["A", "B"]);
   });
 });
