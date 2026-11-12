@@ -254,7 +254,8 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       if (process.env.BENCH_DRY) {
         const lines = [...design].map(([type, kinds]) => `${type}: ${kinds.map((k) => `${k.kind} ${k.strata.reduce((a, st) => a + chosen(st).length, 0)}/${k.strata.reduce((a, st) => a + st.units.length, 0)} units in ${k.strata.length} strata`).join(", ")}`);
         const lineSum = order.reduce((a, id) => a + (byId.get(id)?.lineCount ?? 0), 0);
-        return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines].join("\n"));
+        const next = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id)).slice(0, 5).map((id) => `${byId.get(id)!.title} (${byId.get(id)!.lineCount} lines, ${(stepsOf.get(id) ?? []).map((s) => s.engine).join("+")})`);
+        return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines, `next in this shard: ${next.join("; ")}`].join("\n"));
       }
       if (MODE !== "report") {
         const mine = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id));
