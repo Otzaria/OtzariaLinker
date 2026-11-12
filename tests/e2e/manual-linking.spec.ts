@@ -91,6 +91,7 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await expect(dialog.getByRole("heading", { name: "מה עכשיו?" })).toBeVisible();
   await expect(dialog.locator('details[data-route="library"]')).toHaveAttribute("open", "");
   await expect(dialog.locator('details[data-route="library"]')).toContainText("otzaria-library");
+  await expect(dialog.locator('details[data-route="library"] bdi[dir=ltr]').first()).toHaveText("links/"); // never "/links"
   await expect(dialog.locator('details[data-route="personal"] summary')).toHaveText("לאוצריא שלכם בלבד (הספרייה האישית)");
   await expect(dialog.locator('details[data-route="database"]')).toContainText("הכלי לא כותב קישורים לתוך מסד");
   await shot(page, "5b-export-next");

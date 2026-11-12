@@ -236,6 +236,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Folder and file names in a Hebrew step ("links/", "_links.json") as LTR units: "links/" never reads "/links". */
+function withPaths(text: string) {
+  return text.split(/([A-Za-z_][\w.-]*\/|‎?_links\.json)/).map((part, i) => (i % 2 ? <bdi key={i} dir="ltr">{part}</bdi> : part));
+}
+
 /** The ways back to Otzaria (formats/report/next-steps.ts): one expander per route, the first open when asked. */
 function NextSteps({ routes, open }: { routes: ReturnType<AppStore["exchange"]["nextSteps"]>; open?: boolean }) {
   return (
@@ -245,7 +250,7 @@ function NextSteps({ routes, open }: { routes: ReturnType<AppStore["exchange"]["
           <summary>{r.title}</summary>
           <ol>
             {r.steps.map((s, n) => (
-              <li key={n}>{s}</li>
+              <li key={n}>{withPaths(s)}</li>
             ))}
           </ol>
           {r.note && <p class="muted">{r.note}</p>}
