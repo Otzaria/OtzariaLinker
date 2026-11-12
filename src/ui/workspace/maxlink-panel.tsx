@@ -5,6 +5,7 @@ import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { sourceNameText } from "../shell/file-name";
 import { EngineOptions } from "./engine-options";
 import "./maxlink.css";
 
@@ -88,7 +89,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           המקור
           <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
             {sources.map((x) => (
-              <option key={x.info.id} value={x.info.id}>{x.info.label} ({x.books.length.toLocaleString("he")} ספרים)</option>
+              <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length.toLocaleString("he")} ספרים)</option>
             ))}
           </select>
         </label>

@@ -15,6 +15,26 @@ export function FileName({ name }: { name: string }) {
   );
 }
 
+/** Whether a source's name is a file name ("אישי-פירושים.db"), not a folder or "4 קובצי טקסט". */
+export const isFileName = (name: string): boolean => /\.[A-Za-z0-9]{1,8}$/.test(name);
+
+/**
+ * A source's name (audit F19): a file name as one LTR unit — "אישי-פירושים.db", never
+ * "db.אישי-פירושים" — and any other name (a folder) isolated in its own direction.
+ */
+export function SourceName({ name, class: cls }: { name: string; class?: string }) {
+  return isFileName(name) ? (
+    <bdi dir="ltr" class={cls ? `fname ${cls}` : "fname"}>
+      {name}
+    </bdi>
+  ) : (
+    <bdi class={cls}>{name}</bdi>
+  );
+}
+
+/** A source's name inside a plain string (an <option>): LTR-isolated when it is a file name. */
+export const sourceNameText = (name: string): string => (isFileName(name) ? ltr(name) : name);
+
 /** A file name inside a plain string (an <option>, a title, a hint): Unicode's LTR isolate. */
 export const ltr = (name: string): string => `⁦${name}⁩`;
 

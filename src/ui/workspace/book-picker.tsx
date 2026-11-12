@@ -6,6 +6,7 @@ import type { OpenedSource } from "../../state/services";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { badgeOf, SourceBadge } from "./source-badge";
+import { SourceName } from "../shell/file-name";
 
 /*
  * Searchable list of every open book, grouped by source when more than one is open (the Otzaria
@@ -110,7 +111,7 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
             >
               <span class="chev" aria-hidden="true">{shut ? "◂" : "▾"}</span>
               <SourceBadge source={g.source} />
-              <bdi class="grow label">{g.source.info.label}</bdi>
+              <SourceName name={g.source.info.label} class="grow label" />
               <span class="count">{g.total.toLocaleString("he")}</span>
             </button>
             {!shut && (

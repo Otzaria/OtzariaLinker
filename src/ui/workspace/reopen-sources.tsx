@@ -2,7 +2,7 @@ import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { pickFiles } from "../files";
 import { Icon } from "../icons/icon";
-import { FileName } from "../shell/file-name";
+import { FileName, SourceName } from "../shell/file-name";
 import { OtzariaDbHint, SOURCE_OPTIONS, type SourceOption } from "./add-sources";
 
 /*
@@ -19,8 +19,6 @@ function pickerOf(s: MissingSource): SourceOption {
   const id: SourceOption["id"] = s.kind !== "text-files" ? "db" : /\.zip$/i.test(s.label) ? "zip" : s.files?.some((f) => f.includes("/")) ? "folder" : "files";
   return SOURCE_OPTIONS.find((o) => o.id === id)!;
 }
-
-const looksLikeFile = (name: string): boolean => /\.[A-Za-z0-9]{1,8}$/.test(name);
 
 function names(list: readonly string[], file: boolean) {
   const shown = list.slice(0, MAX_NAMES);
@@ -62,7 +60,7 @@ export function ReopenSources() {
             <li key={i}>
               <Icon name={o.icon} size={16} />
               <div class="grow">
-                <div class="name">{looksLikeFile(s.label) ? <FileName name={s.label} /> : <bdi>{s.label}</bdi>}</div>
+                <div class="name"><SourceName name={s.label} /></div>
                 {s.files && s.files.length > 0 && o.id === "files" ? <div class="muted">הקבצים: {names(s.files, true)}</div> : null}
                 {s.missingTitles.length > 0 && <div class="muted">ספרים שהקישורים מחכים להם: {names(s.missingTitles, false)}</div>}
               </div>

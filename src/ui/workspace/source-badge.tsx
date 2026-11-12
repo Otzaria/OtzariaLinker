@@ -2,6 +2,7 @@ import { useMemo } from "preact/hooks";
 import { sourceIdOfBookKey } from "../../core/books";
 import type { OpenedSource } from "../../state/services";
 import { useStore } from "../context";
+import { SourceName } from "../shell/file-name";
 
 /*
  * Where a book comes from, when several sources are open: a badge per source kind (the Otzaria
@@ -42,7 +43,7 @@ export function SourceBadge({ source, name }: { source: OpenedSource; name?: boo
       {name && (
         <>
           {": "}
-          <bdi>{source.info.label}</bdi>
+          <SourceName name={source.info.label} />
         </>
       )}
     </span>

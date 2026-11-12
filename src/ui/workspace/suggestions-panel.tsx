@@ -6,6 +6,7 @@ import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
@@ -145,7 +146,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
             המקור שבו נמצאים הפירושים
             <select value={batchSource} onChange={(e) => setBatchSource(e.currentTarget.value)}>
               {sources.map((x) => (
-                <option key={x.info.id} value={x.info.id}>{x.info.label} ({x.books.length} ספרים)</option>
+                <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length} ספרים)</option>
               ))}
             </select>
             <span class="muted">כל ספר מקושר לספר שבשמו ("… על בראשית" ← בראשית), מבין כל הספרים הפתוחים.</span>
