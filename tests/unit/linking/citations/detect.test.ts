@@ -257,6 +257,23 @@ describe("citations: a Rambam topic after a chapter (\"רמב\"ם פ\"ט מתר�
     expect(scanR('כמ"ש רמב"ם סוף פ\' י"ב מהל\' מעשר והכא')).toHaveLength(0);
   });
 
+  it("a commentary on the Rambam named before it: its words on that chapter, when the library has it", () => {
+    const withMlm = [...RAMBAM, book("mlm-trum", "משנה למלך על משנה תורה, הלכות תרומות"), book("km-trum", "כסף משנה על משנה תורה, הלכות תרומות")];
+    const scanC = (line: string) => {
+      const sc = new CitationScanner(AliasIndex.build(withMlm), "src", {}, "ספר כלשהו");
+      sc.scanLine(0, line, null);
+      return sc.citations;
+    };
+    const a = scanC(`וכמש"כ המל"מ [בפ"ט מהל' תרומות] א"כ`)[0]!;
+    expect(books(a)).toEqual(["mlm-trum"]);
+    expect(a.commentator).toBe("משנה למלך");
+    expect(books(scanC(`וכתב הכ"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["km-trum"]);
+    // "וכ"מ" is "וכן משמע": the Rambam
+    expect(books(scanC(`וכ"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["r-trum"]);
+    // not in the library: the Rambam's chapter stays
+    expect(books(scanC(`וכתב הלח"מ פ"ט מהל' תרומות`)[0]!)).toEqual(["r-trum"]);
+  });
+
   it("the author's name is not a book: it does not swallow the place", () => {
     expect(scanR('וזהו דעת הרמב"ם פ"ד מהל\' תרומות ע"ש').map(books)).toEqual([["r-trum"]]);
   });
@@ -360,5 +377,15 @@ describe("citations: \"דף X\" with no tractate, in a commentary on a tractate"
     expect(scan(['ד"ה ההוא: [דף כג]'], "ספר כלשהו")).toHaveLength(0);
     // a tractate named a few words before (past a full stop) is the daf's book
     expect(onYev('וכן בסוף גיטין מייתי לה הש"ס. [דף פ"ט] גם')).toHaveLength(0);
+  });
+});
+
+describe("citations: a chapter by its ordinal word", () => {
+  it("\"בפרק קמא דיבמות\", \"פ' שני דשבת\"; not without the book after it", () => {
+    const a = one("כדאיתא בפרק קמא דיבמות ושם");
+    expect(books(a)).toEqual(["yev"]);
+    expect(loc(a)).toBe("perek:1");
+    expect(loc(one("ועיין פ' שני דשבת"))).toBe("perek:2");
+    expect(scan(["כדאיתא בפרק קמא ושם"])).toHaveLength(0);
   });
 });

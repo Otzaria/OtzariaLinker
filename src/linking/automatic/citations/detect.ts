@@ -59,6 +59,8 @@ export interface Citation {
    * "rambam-topic-full" / "-first" / "-initials" — "רמב"ם פ"ט מתרומות"; "base-daf" — "דף לה" in a commentary on a tractate
    */
   readonly rule?: string;
+  /** the chapter was written as an ordinal word ("בפרק קמא דסנהדרין") */
+  readonly ordinal?: true;
 }
 
 /** A chapter or parsha cited by its name. */
@@ -75,6 +77,13 @@ export interface CitedUnit {
   readonly context: "named" | "base" | "unique";
   /** the words written are only the start of the structure's name ("פרק האשה" for "האשה שהיא עושה") */
   readonly partial: boolean;
+  /**
+   * a name several tractates share, told apart only by the daf after it ("בפ' כיצד (י"ט ע"א)"): the unit
+   * in each candidate book; the daf must fall inside one of them (engine.ts)
+   */
+  readonly bases?: readonly NamedUnit[];
+  /** the name was written as its initials ("פ' אע"פ") */
+  readonly initials?: boolean;
 }
 
 export interface DetectOptions {
@@ -240,7 +249,7 @@ export class CitationScanner {
     const cands = this.own(topic ? [topic.target] : m!.entry.targets);
     if (!cands.length) return this.drop("self");
     const name = topic ? topic.target.book.title : m!.entry.text;
-    return this.emit(toks, line, { from: i, to, candidates: cands, name, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, ...(m && !topic && { m }), ...(topic && { rule: `rambam-topic-${topic.how}` }) });
+    return this.emit(toks, line, { from: i, to, candidates: cands, name, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, ...(m && !topic && { m }), ...(topic && { rule: `rambam-topic-${topic.how}` }), ...(head.ordinal && { ordinal: true }) });
   }
 
   /**
@@ -319,6 +328,17 @@ export class CitationScanner {
     const tractates = this.tractateKeys(near);
     const torah = new Set(near.filter((t) => t.collection === "tanakh").map((t) => t.book.key));
     const namedFor = (x: { unit: NamedUnit }) => (x.unit.kind === "chapter" ? tractates : torah);
+    // "בפ' כיצד (י"ט ע"א)": a name several tractates share, with a daf after it — the daf tells which
+    const dafAfter = !!addr && (addr.elems[0]!.kind === "daf" || addr.elems[0]!.amud !== undefined);
+    const byDaf = (list: typeof matches) => {
+      const units = list.map((x) => x.unit).filter((u) => u.kind === "chapter" && u.collection === "bavli");
+      if (units.length < 2 || new Set(units.map((u) => u.book.key)).size !== units.length) return null;
+      const cands = this.own(units.map((u) => ({ book: u.book, tier: "derived" as const, collection: u.collection })));
+      if (cands.length !== units.length) return null;
+      const end = addr!.bracketed && addr!.closed ? addr!.to + 1 : addr!.to;
+      const unit: CitedUnit = { kind: "chapter", name: units[0]!.name, key: toks.slice(head.next, found.to).map((t) => looseWord(t.key)).join(" "), context: "unique", partial: list.some((x) => !x.full), bases: units, ...(found.initials && { initials: true }) };
+      return this.emitUnit(toks, line, from, end, cands, unit, addr, true);
+    };
     if (matches.some((x) => namedFor(x).size)) {
       matches = matches.filter((x) => namedFor(x).has(x.unit.book.key));
       context = "named";
@@ -328,10 +348,14 @@ export class CitationScanner {
     } else if (matches.some((x) => x.full)) {
       // the name alone: the unit whose whole name it is — unless the words also start the names of two
       // or more other units ("ר"פ האשה" may be פסחים' "האשה", or יבמות' "האשה רבה", כתובות' "האשה שנפלו"…)
-      if (matches.filter((x) => !x.full).length >= 2) return this.drop("unit-ambiguous");
+      if (matches.filter((x) => !x.full).length >= 2) return (dafAfter ? byDaf(matches) : null) ?? this.drop("unit-ambiguous");
       matches = matches.filter((x) => x.full);
     }
     if (matches.length > 1 && matches.some((x) => x.full)) matches = matches.filter((x) => x.full);
+    if (matches.length > 1 && dafAfter && context === "unique") {
+      const r = byDaf(matches);
+      if (r !== null) return r;
+    }
     if (matches.length !== 1) return this.drop(matches.length ? "unit-ambiguous" : "unit-not-in-book");
     const u = matches[0]!.unit;
     // the tier of the name that told the book ("יבמות" written as the title), else a derived reading
@@ -346,6 +370,7 @@ export class CitationScanner {
       base: u,
       context,
       partial: !matches[0]!.full,
+      ...(found.initials && { initials: true }),
     };
     return this.emitUnit(toks, line, from, end, candidates, unit, addr, u.kind === "chapter");
   }
@@ -514,6 +539,7 @@ export class CitationScanner {
       commentators?: boolean;
       /** the rule that read it, beyond its form (Citation.rule) */
       rule?: string;
+      ordinal?: boolean;
     },
   ): number | null {
     let candidates = c.candidates;
@@ -540,6 +566,15 @@ export class CitationScanner {
       } else if (dh && !named) {
         this.drop("dibur-without-commentator");
         return c.to;
+      } else if (!who && candidates.length && candidates.every((x) => x.collection === "rambam")) {
+        // "המל"מ [בפ"א מהל' תמידין]", "הראב"ד פי"ו מאישות": a commentary on the Rambam named right before —
+        // its words on that chapter; when the library does not have it, the Rambam's chapter stays
+        const rc = rambamCommentatorBefore(toks, c.from);
+        const moved = rc ? this.toCommentary(candidates, rc) : [];
+        if (moved.length) {
+          candidates = moved;
+          commentator = rc;
+        }
       }
     }
     candidates = [...candidates].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
@@ -563,6 +598,7 @@ export class CitationScanner {
       ...(commentator && { commentator }),
       ...(c.unit && { unit: c.unit }),
       ...(c.rule && { rule: c.rule }),
+      ...(c.ordinal && { ordinal: true }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -743,6 +779,40 @@ function commentatorBefore(toks: readonly Tok[], i: number): string | undefined 
   return wordIn(t, COMMENTATORS) ?? undefined;
 }
 
+/**
+ * The commentaries on the Rambam by the names books cite them ("המל"מ", "הלח"מ", "הכ"מ", "הראב"ד", "המ"מ"), as
+ * the library's "<author> על משנה תורה, …" write the author. "כ"מ" and "מ"מ" are also "וכן משמע", "מכל מקום":
+ * only with the article.
+ */
+const RAMBAM_COMMENTATORS: readonly (readonly [string, string, boolean])[] = [
+  ['מל"מ', "משנה למלך", false], ["משנה למלך", "משנה למלך", false],
+  ['לח"מ', "לחם משנה", false], ["לחם משנה", "לחם משנה", false],
+  ['כ"מ', "כסף משנה", true], ["כסף משנה", "כסף משנה", false],
+  ['מ"מ', "מגיד משנה", true], ["מגיד משנה", "מגיד משנה", false], ['ה"ה', "מגיד משנה", false],
+  ['ראב"ד', 'השגות הראב"ד', false], ["השגות", 'השגות הראב"ד', false],
+  ["אור שמח", "אור שמח", false],
+];
+
+/** a Rambam commentator's name ending right before toks[i] (past ז"ל), with ו/ב/ל/ד and the article */
+function rambamCommentatorBefore(toks: readonly Tok[], i: number): string | undefined {
+  let at = beforeIndex(toks, i, 1);
+  if (at >= 0 && HONORIFICS.has(wordShape(toks[at]!))) at = beforeIndex(toks, i, 2);
+  if (at < 0) return undefined;
+  for (const [name, author, article] of RAMBAM_COMMENTATORS) {
+    const words = name.split(" ");
+    const first = toks[at - words.length + 1];
+    if (!first || first.kind !== "word") continue;
+    if (words.length === 2 && (toks[at]?.kind !== "word" || wordShape(toks[at]!) !== words[1])) continue;
+    const shape = wordShape(first);
+    for (let p = 0; p <= 2; p++) {
+      if (p && !/^[ובלד]$/.test(shape[p - 1]!)) break;
+      const rest = shape.slice(p);
+      if ((!article && rest === words[0]) || rest === `ה${words[0]}`) return author;
+    }
+  }
+  return undefined;
+}
+
 /** "לעיל כ"ג ע"א תוס' ד"ה…": a commentator right after the location, and the token after it */
 function commentatorAfter(toks: readonly Tok[], i: number): { who: string; next: number } | undefined {
   let j = i;
@@ -783,7 +853,7 @@ function unitWordAt(toks: readonly Tok[], i: number): { next: number; kinds: Uni
 }
 
 /** A perek opening a reversed citation: "פ"ג", "בפי"א", "דבפ"ק", "פרק ג'", "בפרק ב'". */
-function perekAt(toks: readonly Tok[], i: number): { n: number; next: number } | null {
+function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; ordinal?: true } | null {
   const t = toks[i]!;
   if (t.kind !== "word") return null;
   for (let p = 0; p <= 2; p++) {
@@ -805,6 +875,9 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number } |
     const abbrev = t.geresh && !t.gershayim && (text === "פ" || text === "פר");
     if (word || abbrev) {
       const num = toks[i + 1];
+      // "בפרק קמא דסנהדרין", "פ' שני דכתובות": an ordinal word (the reversed form needs the book after it)
+      const ordinal = num?.kind === "word" && !num.gershayim && !num.geresh ? ORDINALS[num.key] : undefined;
+      if (ordinal) return { n: ordinal, next: i + 2, ordinal: true };
       if (num?.kind === "word" && (num.gershayim || num.geresh)) {
         const n = num.gershayim ? (num.gershayimAt === num.text.length - 1 ? strictValue(num.text) : null) : strictValue(num.text);
         if (n && (word || n <= 30)) return { n, next: i + 2 };
@@ -813,6 +886,9 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number } |
   }
   return null;
 }
+
+/** ordinal words for a chapter ("פרק קמא", "פ' שלישי") */
+const ORDINALS: Readonly<Record<string, number>> = { קמא: 1, ראשונ: 1, תנינא: 2, שני: 2, שלישי: 3, רביעי: 4, חמישי: 5, ששי: 6, שישי: 6, שביעי: 7, שמיני: 8, תשיעי: 9, עשירי: 10 };
 
 /** words for "הלכות" between the ד/מ and a Rambam topic ("מה' מכירה", "מהלכו' אישות") */
 const HILCHOT = new Set(["ה'", "הל'", "הלכות", "הלכו'", "הלכ'"]);

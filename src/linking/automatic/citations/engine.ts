@@ -103,6 +103,16 @@ const PENALTY = {
   rambamInitials: 0.04,
   /** "דף לה" with no tractate in a commentary on one: the tractate is inferred from the book, not written */
   baseDaf: 0.07,
+  /**
+   * "בפרק קמא דכתובות" with nothing after: the Mishna's chapter is the nearest target, but books mostly
+   * mean the Gemara's discussion in it — at most "possible"
+   */
+  ordinalChapter: 0.05,
+  /**
+   * "המל"מ פ"ג מהל' תרומות": the commentary's whole chapter on it — coarse (the database rarely links
+   * these), at most "possible"; a halacha after it is a precise place
+   */
+  rambamCommentaryChapter: 0.1,
 } as const;
 
 export interface Pending {
@@ -351,11 +361,11 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
  */
 function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, units: readonly NamedUnit[] | null): { r: Resolution; fallback: boolean; addressed?: boolean } | null {
   const u = c.unit!;
-  const own = u.base && u.base.book.key === t.book.key ? u.base : ownUnit(u.kind, u.name, u.key, units ?? []);
+  const own = u.base && u.base.book.key === t.book.key ? u.base : (u.bases?.find((b) => b.book.key === t.book.key) ?? ownUnit(u.kind, u.name, u.key, units ?? []));
   const indexed = index && index.via !== "none" ? index : null;
   if (c.elems.length && indexed) {
     // a level of the book's references: the location is under it; else the location in the whole book
-    const r = u.base ? indexed.resolve(c.elems, t.collection, t.section) : (indexed.resolveNamed?.(u.key, c.elems) ?? null);
+    const r = u.base || u.bases ? indexed.resolve(c.elems, t.collection, t.section) : (indexed.resolveNamed?.(u.key, c.elems) ?? null);
     if (r) {
       // "בפרק הזהב (דף ס.)": a daf outside the chapter contradicts the name — no guess
       if (own && (r.end < own.line || r.line > own.end)) return null;
@@ -363,6 +373,8 @@ function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, uni
     }
   }
   const fallback = c.elems.length > 0;
+  // a name several tractates share is told apart only by its daf: no daf inside, no link
+  if (u.bases) return null;
   if (own) {
     const word = u.kind === "chapter" ? "פרק" : "פרשת";
     return { r: { book: t.book, line: own.line, end: own.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${t.book.title}, ${word} ${own.name}`, via: "named", daf: false }, fallback };
@@ -404,6 +416,8 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.form === "relative") s -= PENALTY.relative;
   if (c.rule === "rambam-topic-initials") s -= PENALTY.rambamInitials;
   if (c.rule === "base-daf") s -= PENALTY.baseDaf;
+  if (c.ordinal && c.elems.length === 1 && TALMUDIC.has(t.collection)) s -= PENALTY.ordinalChapter;
+  if (c.commentator && t.collection === "rambam" && !r.leaf) s -= PENALTY.rambamCommentaryChapter;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   // a unit whose location was found inside it: the location is the citation and the name confirms
   // it — with the book named next to it, as sure as "<tractate> <daf>"
@@ -468,6 +482,7 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
     reasons.push({ code: "citations/commentator", text: `לפני ההפניה כתוב "${c.commentator}", ולכן הקישור הוא אל ${t.book.title} ולא אל ספר הבסיס` });
   }
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
+  if (c.ordinal) rules.push("citations.perek-ordinal");
   if (c.rule) {
     rules.push(`citations.${c.rule}`);
     const why = RULE_REASON[c.rule];
