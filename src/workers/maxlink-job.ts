@@ -3,7 +3,7 @@ import { runEngine, type Confidence, type EngineBook, type EngineContext, type E
 import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
-import { sectionFor } from "../linking/sections";
+import { partSection, partsOf, sectionFor, type Section } from "../linking/sections";
 import type { SourceRegistry } from "../sources/registry";
 import { citationsJob } from "./citations-job";
 
@@ -43,14 +43,16 @@ const UNIT = 1000;
  * windows come from headings that may follow another base's numbering. Measurements:
  * docs/AUTOMATION_ENGINE.md §5.1, tests/validation/multibase.test.ts.
  */
-function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext): EngineResult {
+function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext, byLinks?: Section | null): EngineResult {
   const scope = step.relation.scope;
   if (!scope) return runEngine(step.engine, source, target, options, ctx);
-  const section = sectionFor(source, scope.section);
+  const section = sectionFor(source, scope.section) ?? byLinks ?? null;
   if (section) {
     let r = runEngine(step.engine, section.book, target, options, ctx);
     if (step.engine === "headings") r = capConfidence(r, ["high"], { code: "maxlink/section-high", text: "קישור לפרק שלם בתוך חלק של ספר על כמה ספרים: לבדיקה." });
-    const note: Reason = { code: "maxlink/section", text: `רק החלק "${section.heading}" של "${source.book.title}" (${section.lines.toLocaleString("he")} שורות) קושר אל "${target.book.title}".` };
+    const note: Reason = byLinks === section
+      ? { code: "maxlink/section-by-links", text: `בספר "${source.book.title}" אין חלק בשם "${target.book.title}". החלק "${section.heading}" (${section.lines.toLocaleString("he")} שורות) הוא זה שהמסד מקשר אל "${target.book.title}", ורק הוא קושר.` }
+      : { code: "maxlink/section", text: `רק החלק "${section.heading}" של "${source.book.title}" (${section.lines.toLocaleString("he")} שורות) קושר אל "${target.book.title}".` };
     return { ...r, notes: [note, ...r.notes] };
   }
   if (step.engine !== "dibur-hamatchil")
@@ -71,6 +73,48 @@ function notesAsCommentary(r: EngineResult, main: EngineBook, notes: EngineBook,
   const h = runEngine("headings", notes, main, {}, ctx);
   const note: Reason = { code: "maxlink/notes-by-headings", text: `שיטת הערות השוליים לא מצאה סימני הערה שמתאימים לשורות "${notes.book.title}", ולכן ההערות קושרו לפי הכותרות של שני הספרים, כמו פירוש.` };
   return { suggestions: h.suggestions, notes: [note, ...r.notes, ...h.notes], unmatched: h.unmatched };
+}
+
+/*
+ * A book on several bases whose parts are not named after them: "פרי מגדים" is declared on the מגן אברהם,
+ * the ט"ז and the שולחן ערוך, and its parts are "אשל אברהם" (on the מגן אברהם) and "משבצות זהב" (on the
+ * ט"ז); in יורה דעה "שפתי דעת" is on the ש"ך. With no part named after the base only dibur-hamatchil ran,
+ * on the whole book, all of it for review. The library's own links tell which part is on which base:
+ * the part holding at least PART_MIN of the links to the base and PART_SHARE of them is its section.
+ */
+const PART_MIN = 100;
+const PART_SHARE = 0.8;
+
+export async function partByLinks(registry: SourceRegistry, source: EngineBook, targetKey: string, cache: Map<string, Map<string, number[]>>): Promise<Section | null> {
+  const parts = partsOf(source);
+  if (parts.length < 2) return null;
+  let byOther = cache.get(source.book.key);
+  if (!byOther) {
+    byOther = new Map<string, number[]>();
+    try {
+      for (const l of await registry.existingLinks(source.book.key, 0, Number.MAX_SAFE_INTEGER)) {
+        const [mine, other] = l.source.book.key === source.book.key ? [l.source, l.target] : [l.target, l.source];
+        const list = byOther.get(other.book.key) ?? [];
+        list.push(mine.line);
+        byOther.set(other.book.key, list);
+      }
+    } catch {
+      /* a source without links: no part by links */
+    }
+    cache.set(source.book.key, byOther);
+  }
+  const lines = byOther.get(targetKey);
+  if (!lines || lines.length < PART_MIN) return null;
+  const posOf = new Map(source.lines.map((l, i) => [l.index, i] as const));
+  const counts = parts.map(() => 0);
+  for (const line of lines) {
+    const pos = posOf.get(line);
+    if (pos === undefined) continue;
+    const k = parts.findIndex((p) => pos >= p.from && pos <= p.to);
+    if (k >= 0) counts[k]!++;
+  }
+  const best = counts.indexOf(Math.max(...counts));
+  return counts[best]! >= PART_MIN && counts[best]! >= PART_SHARE * lines.length ? partSection(source, parts[best]!) : null;
 }
 
 /** Lowers the given confidences to "possible", with a warning that says why. */
@@ -97,6 +141,8 @@ export async function maxlinkJob(
   const sorted = [...steps].sort((a, b) => late(a) - late(b) || order.get(shared(a))! - order.get(shared(b))! || order.get(pairKey(a))! - order.get(pairKey(b))!);
   /** each pair step's result, by engine and pair, for runThrough */
   const results = new Map<string, EngineResult>();
+  /** per dependant, its existing links by other book (partByLinks reads them once) */
+  const partLinks = new Map<string, Map<string, number[]>>();
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
   const optionsOf = (engine: string) => options.engineOptions?.[engine] ?? {};
@@ -140,7 +186,8 @@ export async function maxlinkJob(
         ctx.signal?.throwIfAborted();
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner);
+        const byLinks = step.relation.scope && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
+        result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks);
         if (step.engine === "footnotes" && !result.suggestions.length) result = notesAsCommentary(result, loaded.source, loaded.target, inner);
         results.set(`${step.engine}|${key}`, result);
       } else {
