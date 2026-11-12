@@ -5,4 +5,5 @@ export { CitationScanner, mergeIbid, type Citation, type CitedUnit } from "./det
 export { NamedUnitIndex, unitKindOf, unitsFromAltToc, type NamedUnit, type NamedUnitSource, type UnitKind } from "./named";
 export { parseAddress, type AddrElem, type Address } from "./address";
 export { citationTokens } from "./text";
+export { dafStructureFromAltToc, resolveAltDaf, type DafStructure } from "./altdaf";
 export { numeralOf, strictValue } from "./numbers";

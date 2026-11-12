@@ -1,7 +1,10 @@
+import type { BookRef } from "../../../core/links/model";
 import { closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
-import { normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { collectionOf, normTitle, SA_PARTS, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
+import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
+import { StructureTracker, type InternalRef } from "./self";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
 /*
@@ -44,9 +47,17 @@ export interface Citation {
   readonly ibidOf?: number;
   /**
    * forward: name then location; reversed: "פ"ג מהל' שבת"; relative: "לעיל/לקמן" + daf of the base book;
-   * named: a unit cited by its name ("בפרק הזהב", "בפרשת וירא"), maybe with a location after it
+   * named: a unit cited by its name ("בפרק הזהב", "בפרשת וירא"), maybe with a location after it;
+   * internal: a place in the citing book itself ("לעיל סי' ה", "לקמן כלל ז") — self.ts
    */
-  readonly form: "forward" | "reversed" | "relative" | "named";
+  readonly form: "forward" | "reversed" | "relative" | "named" | "internal";
+  /** form "internal" (and an ibid of one): which way it points and where it was written */
+  readonly internal?: InternalRef;
+  /**
+   * the words after "ד"ה" when the citation was moved to a commentator ("תוס' … ד"ה רבי מאיר"): the
+   * commentator's line on the daf is the one whose heading starts with them (engine.ts, refineDibur)
+   */
+  readonly dh?: readonly string[];
   /** form "named": the unit the name stands for */
   readonly unit?: CitedUnit;
   /** a collection word right before ("ירושלמי", "רמב"ם", "גמ'") */
@@ -91,6 +102,8 @@ export interface DetectOptions {
   readonly ibid?: boolean;
   /** how many lines back "שם" may reach (no heading between). Default 6. */
   readonly ibidWindow?: number;
+  /** the citing book itself: "לעיל סי' ה" / "לקמן כלל ז" link inside it (self.ts). Without it, no internal references. */
+  readonly self?: BookRef;
 }
 
 const MONTHS = new Set(["תשרי", "חשון", "חשוון", "מרחשון", "כסלו", "כסליו", "טבת", "שבט", "אדר", "ניסן", "אייר", "איר", "סיון", "סיוון", "תמוז", "אב", "אלול", "לחודש", "לחדש", "בחודש", "בחדש", "לירח"].map(unifyFinals));
@@ -113,6 +126,8 @@ const COMMENTATORS: readonly (readonly [string, string])[] = [
   ['רמב"ן', 'רמב"ן'], ['רשב"א', 'רשב"א'], ['ריטב"א', 'ריטב"א'], ['ר"ן', 'ר"ן'], ['רא"ש', 'רא"ש'], ['רי"ף', 'רי"ף'],
   ['מהרש"א', 'מהרש"א'], ['רשב"ם', 'רשב"ם'], ['מאירי', "מאירי"], ['מהרש"ל', 'מהרש"ל'], ['רע"ב', 'ברטנורא'], ["ברטנורא", "ברטנורא"],
   ['תוי"ט', "תוספות יום טוב"], ['אבן עזרא', "אבן עזרא"], ['ראב"ע', "אבן עזרא"], ['רד"ק', 'רד"ק'],
+  // "תוד"ה" — תוספות דיבור המתחיל, one word
+  ['תוד"ה', "תוספות"],
 ];
 
 const PREFIX_LETTERS = /^[ובהלכדמש]{1,2}/;
@@ -125,18 +140,28 @@ function shapeOf(t: Tok, stripPrefix: number): string {
 /** The word as one of `list`, allowing up to two glued prefix letters. */
 function wordIn<T>(t: Tok | undefined, list: readonly (readonly [string, T])[]): T | null {
   if (!t || t.kind !== "word") return null;
+  // a map per list, and its words' letters: most words of a line are none of them (the scan calls this per word)
+  let m = WORD_LISTS.get(list) as { byShape: Map<string, T>; keys: Set<string> } | undefined;
+  if (!m) {
+    m = { byShape: new Map(list.map(([w, v]) => [w, v] as const)), keys: new Set(list.map(([w]) => unifyFinals(w.replace(/["']/g, "")))) };
+    WORD_LISTS.set(list, m);
+  }
   for (let p = 0; p <= 2; p++) {
     if (p && !PREFIX_LETTERS.test(t.text.slice(0, p))) break;
-    const s = shapeOf(t, p);
-    for (const [w, v] of list) if (s === w) return v;
+    if (!m.keys.has(p ? t.key.slice(p) : t.key)) continue;
+    const v = m.byShape.get(shapeOf(t, p));
+    if (v !== undefined) return v;
   }
   return null;
 }
+const WORD_LISTS = new WeakMap<object, unknown>();
 
 export class CitationScanner {
   readonly citations: Citation[] = [];
   private seq = 0;
   private last: { c: Citation; line: number; elems: readonly AddrElem[] } | null = null;
+  /** the last citation is beyond the ibid window (FAR_WINDOW at most) */
+  private lastFar = false;
   private lastLineSeen = -1;
   private headingSince = false;
   /** spans that looked like citations but were dropped, by reason (for the notes) */
@@ -145,6 +170,9 @@ export class CitationScanner {
   private readonly window: number;
   /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן" */
   private readonly base: AliasTarget | null;
+  /** the citing book's own levels, for its internal references (self.ts) */
+  readonly structure: StructureTracker;
+  private readonly selfTarget: AliasTarget | null;
 
   constructor(
     private readonly aliases: AliasIndex,
@@ -157,23 +185,30 @@ export class CitationScanner {
     this.ibidOn = options.ibid ?? true;
     this.window = options.ibidWindow ?? 6;
     this.base = baseOf(aliases, sourceTitle);
+    this.structure = new StructureTracker(sourceTitle);
+    this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
   }
 
-  /** Feeds one line (in book order). Heading lines are not linked but break the ibid chain. */
-  scanLine(line: number, text: string, heading: number | null): void {
+  /** Feeds one line (in book order). Heading lines are not linked but break the ibid chain. `heRef`: the line's own reference, for internal references. */
+  scanLine(line: number, text: string, heading: number | null, heRef?: string | null): void {
     if (heading !== null) {
       this.headingSince = true;
+      this.structure.heading(heading, text);
+      this.contextCache = undefined;
       return;
     }
+    this.structure.content(heRef);
     const toks = citationTokens(text);
     if (!hasHebrewText(toks)) return;
-    if (this.last && (line - this.last.line > this.window || this.headingSince)) this.last = null;
+    if (this.last && (line - this.last.line > FAR_WINDOW || this.headingSince)) this.last = null;
+    // past the window, "שם" with a place of its own may still reach the last citation ("ibid-far"); "(שם)" alone may not
+    this.lastFar = !!this.last && line - this.last.line > this.window;
     this.headingSince = false;
     this.lastLineSeen = line;
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
-      const next = this.forward(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? (this.ibidOn ? this.ibid(toks, i, line) : null);
+      const next = this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line)) : null);
       if (next !== null) i = next - 1;
     }
   }
@@ -191,15 +226,19 @@ export class CitationScanner {
       if (RUNNING_TEXT_NAMES.has(m.entry.text)) continue;
       // "בחולין שם", "בנזיר (שם)": the book with the last citation's location
       const shem = isWord(toks[m.to], "שם") ? m.to + 1 : opensAt(toks, m.to) && isWord(toks[m.to + 1], "שם") && closesAt(toks, m.to + 2) ? m.to + 3 : -1;
-      if (this.ibidOn && shem > 0 && this.last) {
+      if (this.ibidOn && shem > 0 && this.last && (!this.lastFar || !this.last.c.ibid || this.last.c.ibid === "none")) {
         const cands = this.own(m.entry.targets).filter((c) => this.last!.c.candidates.some((p) => p.book.key === c.book.key));
         if (cands.length) {
           const end = shem;
-          return this.emit(toks, line, { from: i, to: end, candidates: cands, name: m.entry.text, elems: this.last.elems, evidence: "strong", bracketed: false, ibid: "book", ibidOf: this.last.c.seq, form: "forward", numericName: false, m });
+          return this.emit(toks, line, { from: i, to: end, candidates: cands, name: m.entry.text, elems: this.last.elems, evidence: "strong", bracketed: false, ibid: "book", ibidOf: this.last.c.seq, form: "forward", numericName: false, m, ...(this.lastFar && { rule: "ibid-far" }) });
         }
       }
       // "ב"ח ח"מ סי' ר"ב", "טור או"ח סי' א": a part of the Tur / Shulchan Aruch after the name
       const sec = m.entry.targets.some((t) => t.section) ? null : sectionAt(toks, m.to);
+      // "תנחומא, משפטים ב", "בזוה"ק בשלח (נב:)", "זוה"ק (כי תשא קפח.)": a named level of the book's own
+      // references (its parshiyot), then the place under it
+      const level = sec ? null : this.namedLevel(toks, i, line, m);
+      if (level !== null) return level;
       const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i) });
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
@@ -212,13 +251,185 @@ export class CitationScanner {
       }
       if (isDate(toks, addr.to)) return this.drop("date");
       let cands = this.own(m.entry.targets);
+      let elems = addr.elems;
+      // "שו"ת הרשב"א ח"ו סי' ה": a work in parts, each its own book ("… חלק ו"): the part picks the book
+      const part = elems[0]!.kind === "chelek" && elems.length > 1 ? this.partBook(m, elems[0]!.n) : null;
+      if (part) {
+        cands = this.own(part);
+        elems = elems.slice(1);
+      }
       if (sec && addr.from === sec.next) cands = withSection(cands, sec.part);
       if (!cands.length) return this.drop("self");
       // "ב"ק (דף ט:)": the closing bracket belongs to the span; in "(בראשית א, ב)" neither bracket does
       const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
-      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: m.entry.numeric, m });
+      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: m.entry.numeric, m, ...(part && { rule: "part-book" }) });
     }
     return null;
+  }
+
+  /**
+   * Responsa by their author and siman: "הריב"ש סי' ת"ו", "במהרי"ק בסי' פ"ו", "בתשו' רמ"א סי' ס"ו", "רמ"א
+   * בתשו' סי' ס"ו", "בתשובת הרא"ש כלל ל"ה סי' ד'", "בתשו' רדב"ז ח"א סי' רס"ז". The author is read from
+   * the library's own titles of responsa (aliases.ts). Without a word for responsa next to the name, only an
+   * author with no other book in the library ("הרא"ש סי' ה" may be his work on the Talmud), and never an
+   * author's name alone that names many works (רמב"ם, רמ"א, רא"ש — AUTHOR_NAMES). A work in parts needs its part.
+   */
+  private responsa(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (t.kind !== "word" || !this.aliases.responsa.size) return null;
+    // most words are neither a word for responsa nor the start of an author's name
+    const first = this.aliases.responsaFirst;
+    if (!first.has(t.key) && !first.has(t.key.slice(1)) && !first.has(t.key.slice(2)) && !/^[ובלד]{0,2}(?:תשו|תשובת|תשובות|תשובה|שות|בתשו)$/.test(t.key)) return null;
+    let j = i;
+    const lead = RESPONSA_WORD.test(wordShape(t));
+    if (lead) j++;
+    const a = toks[j];
+    if (!a || a.kind !== "word") return null;
+    let found: { key: string; to: number } | null = null;
+    for (const p of lead ? [0] : [0, 1, 2]) {
+      if (p && !/^[ובלדכש]{1,2}$/.test(a.text.slice(0, p))) break;
+      for (let n = 3; n >= 1; n--) {
+        const words = toks.slice(j, j + n);
+        if (words.length < n || words.some((w) => w.kind !== "word")) continue;
+        const first = words[0]!;
+        const k0 = first.key.slice(p);
+        if (!k0) continue;
+        const keys = [k0, ...words.slice(1).map((w) => w.key)];
+        // the article of an acronym ("הריב"ש") is not part of the name
+        const variants = first.gershayim && keys[0]!.startsWith("ה") && keys[0]!.length > 2 ? [keys.join(" "), [keys[0]!.slice(1), ...keys.slice(1)].join(" ")] : [keys.join(" ")];
+        const hit = variants.find((k) => this.aliases.responsa.has(k));
+        if (hit && (n > 1 || first.gershayim || k0.length >= 4)) {
+          found = { key: hit, to: j + n };
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) return null;
+    let k = found.to;
+    // "רמ"א בתשו' סי' ס"ו", "הרא"ש בתשובות כלל פ"ה"
+    const trail = !lead && toks[k]?.kind === "word" && RESPONSA_WORD.test(wordShape(toks[k]!));
+    if (trail) k++;
+    const named = lead || trail;
+    if (!named && AUTHOR_NAMES_KEYS.has(found.key)) return null;
+    const addr = parseAddress(toks, k, { enclosed: opensBefore(toks, k) || opensBefore(toks, i) });
+    if (!addr) return null;
+    let elems = addr.elems;
+    let books = this.aliases.responsa.get(found.key)!;
+    if (elems[0]!.kind === "chelek" && elems.length > 1) {
+      const n = elems[0]!.n;
+      books = books.filter((b) => b.part === n);
+      elems = elems.slice(1);
+    } else if (books.some((b) => b.part !== null)) books = books.filter((b) => b.part === null);
+    const e = elems[0]!;
+    if (!e.explicit || (e.kind !== "siman" && e.kind !== "klal" && e.kind !== "teshuva")) return null;
+    const own = this.own(books.map((b) => b.target));
+    if (own.length !== 1) return books.length ? this.drop("responsa-ambiguous") : null;
+    // the author's other books ("צוואת הריב"ש") are candidates too when no word says "responsa": the place decides
+    const others = named ? [] : this.own(this.aliases.authorsElsewhere.get(found.key) ?? []);
+    // an author of many works ("חתם סופר": dozens of "חידושי חתם סופר על …") names none of them by his name alone
+    if (others.length > MAX_OTHER_WORKS) return this.drop("responsa-ambiguous");
+    const cands = [...own, ...others];
+    if (isDate(toks, addr.to)) return this.drop("date");
+    const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
+    return this.emit(toks, line, { from: i, to, candidates: cands, name: toks.slice(i, found.to).map((x) => wordShape(x)).join(" "), elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: false, commentators: false, rule: named ? "responsa-named" : "responsa-author" });
+  }
+
+  /**
+   * "רמב"ם מלכים פי"א ה"א", "הרמב"ם [שכירות פ"ב ה"ג]", "רמב"ם ת"ת פ"ג, הי"ב", "וברמב"ם (הל' ת"ת פ"ג ה"ט)":
+   * the author, then a topic of the Mishneh Torah (whole, its first word, or its initials — topicAt), then a
+   * chapter. The chapter is required: "הרמב"ם שבת" is no place.
+   */
+  private rambamNamed(toks: readonly Tok[], i: number, line: number): number | null {
+    if (wordIn(toks[i], QUALIFIERS) !== "rambam" || !this.aliases.rambamTopics.length) return null;
+    let k = i + 1;
+    const open = opensAt(toks, k);
+    if (open) k++;
+    const w = toks[k];
+    const hl = w?.kind === "word" && HILCHOT.has(wordShape(w).replace(/^ו?ב/, ""));
+    if (hl) k++;
+    // "הרמב"ם ס"ל פ"א": an abbreviation of running text is no topic
+    if (toks[k]?.kind === "word" && COMMON_ABBREVIATIONS.has(wordShape(toks[k]!))) return null;
+    const topic = topicAt(this.aliases, toks, k, 0);
+    if (!topic) return null;
+    const parsed = parseAddress(toks, topic.to, { enclosed: open || opensBefore(toks, i) });
+    if (!parsed || parsed.elems[0]!.kind !== "perek" || !parsed.elems[0]!.explicit) return null;
+    // after a topic of the Rambam "פ"ג" is chapter 3 (not also the number 83)
+    const { alsoNumber: _n, ...first } = parsed.elems[0]!;
+    const addr = { ...parsed, elems: [first, ...parsed.elems.slice(1)] };
+    if (isDate(toks, addr.to)) return this.drop("date");
+    const cands = this.own([topic.target]);
+    if (!cands.length) return this.drop("self");
+    const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
+    return this.emit(toks, line, { from: i, to, candidates: cands, name: topic.target.book.title, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: false, rule: `rambam-named-${topic.how}` });
+  }
+
+  /**
+   * "ש"ך חו"מ סי' צ"א", "הש"ך ביו"ד סי' רל"ב": a name the database gives to an author's several works, then
+   * a part of the Shulchan Aruch that picks one of them ("שפתי כהן על שולחן ערוך חושן משפט").
+   */
+  private authorPart(toks: readonly Tok[], i: number, line: number): number | null {
+    for (const m of this.aliases.authorNamesAt(toks, i)) {
+      const sec = sectionAt(toks, m.to);
+      if (!sec) continue;
+      const cands = this.own(withSection(m.entry.targets, sec.part).filter((t) => !t.section));
+      if (cands.length !== 1) continue;
+      const addr = parseAddress(toks, sec.next);
+      if (!addr || !addr.elems[0]!.explicit) continue;
+      if (isDate(toks, addr.to)) return this.drop("date");
+      return this.emit(toks, line, { from: i, to: addr.to, candidates: cands, name: m.entry.text, elems: addr.elems, evidence: addr.evidence, bracketed: false, ibid: "none", form: "forward", numericName: m.entry.numeric, m, rule: "author-part" });
+    }
+    return null;
+  }
+
+  /** the book "<name> חלק <n>" (a title of the library), for a name and a part written after it */
+  private partBook(m: AliasMatch, n: number): AliasTarget[] | null {
+    const name = normTitle(m.entry.text);
+    for (const t of [name, ...m.entry.targets.map((x) => normTitle(x.book.title))]) {
+      const hit = this.aliases.lookup(`${t} חלק ${toGematria(n)}`)?.targets.filter((x) => x.tier === "title");
+      if (hit?.length) return hit;
+    }
+    return null;
+  }
+
+  /**
+   * "<book> [פרשת] <parsha> <place>" for a book that is not the Torah itself: "(תנחומא, משפטים ב)",
+   * "מדרש תנחומא תזריע י"א", "בזוה"ק בשלח (נב:)", "בזוה"ק (וארא כד:)". The parsha's name is one of the
+   * library's own (the Torah's alt_toc, named.ts), written whole; the place after it is required (a name
+   * alone is "בזוהר פרשת ויקהל", named()). Resolved in the book: a level of its references by that name
+   * (Tanchuma: "מדרש תנחומא, משפטים, ב"), or its daf structure (the Zohar, engine.ts).
+   */
+  private namedLevel(toks: readonly Tok[], i: number, line: number, m: AliasMatch): number | null {
+    if (!this.units?.size || m.entry.targets.some((t) => t.collection !== "other")) return null;
+    let k = m.to;
+    if (toks[k]?.kind === "punct" && toks[k]!.text === ",") k++;
+    const open = opensAt(toks, k);
+    if (open) k++;
+    const w = toks[k];
+    if (w?.kind === "word" && !w.gershayim && (/^ו?ב?(?:פרשת|פרשה)$/.test(w.text) || (w.geresh && /^ו?ב?פ$/.test(w.text)))) k++;
+    const found = this.units.matchAt(toks, k, ["parsha"]);
+    const full = found ? found.matches.filter((x) => x.full) : [];
+    if (!found || !full.length || new Set(full.map((x) => x.unit.name)).size !== 1) return null;
+    let at = found.to;
+    // "בזוה"ק בשלח (נב:)": the place may open its own bracket after the name
+    const inner = !open && opensAt(toks, at);
+    const addr = parseAddress(toks, at, { enclosed: open || inner || opensBefore(toks, i) });
+    if (!addr) return null;
+    // "דתניא (ויקרא כב, כג)", "דספרא (בראשית מח, יט)": a book of the Torah (also a parsha's name) with a chapter
+    // and a verse is the Torah's verse, quoted after a word that happens to be a book's name
+    // ("ותניא (דברים ו)", "עין יעקב (דברים לג:כח)", "בתורת כהנים (ויקרא כו, יד-מג)"): only a daf after it is the
+    // book's own page ("בזוה"ק בראשית (נב.)")
+    if (!addr.elems.some((e) => e.kind === "daf" || e.amud !== undefined) && this.aliases.matchAt(toks, k).some((x) => x.entry.targets.some((t) => t.collection === "tanakh"))) return null;
+    // a parsha of the Torah and a chapter and verse after it is the Torah ("ויקרא (ה, א)") — not this book's level
+    if (isDate(toks, addr.to)) return this.drop("date");
+    const cands = this.own(m.entry.targets);
+    if (!cands.length) return this.drop("self");
+    const name = full[0]!.unit.name;
+    const key = toks.slice(k, found.to).map((t) => looseWord(t.key)).join(" ");
+    const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
+    const unit: CitedUnit = { kind: "parsha", name, key, context: "named", partial: false };
+    at = to;
+    return this.emitUnit(toks, line, i, at, cands, unit, addr, false, "named-level");
   }
 
   /**
@@ -250,18 +461,32 @@ export class CitationScanner {
     // author's name right before or by a word for "הלכות"; the same words without them are the tractate
     const rambamBefore = [1, 2].some((b) => wordIn(before(toks, i, b), QUALIFIERS) === "rambam");
     let topic: RambamTopic | null = null;
+    // "פ"ט ה"י מהל' עדות", "פ"ו הל' כ"ו מהל' ערכין": the halacha written before the topic
+    let pre: Address | null = null;
+    if (!m) {
+      const h = parseAddress(toks, j, { after: "perek" });
+      if (h && h.elems.length === 1 && h.elems[0]!.kind === "halacha" && h.elems[0]!.explicit) {
+        const tp = rambamTopicAt(this.aliases, toks, h.to);
+        if (tp && (tp.hilchot || rambamBefore)) {
+          pre = h;
+          j = h.to;
+        }
+      }
+    }
     if (!m?.entry.targets.some((t) => t.collection === "rambam")) {
       topic = rambamTopicAt(this.aliases, toks, j);
       if (topic && !topic.hilchot && !rambamBefore) topic = null;
+      // "הרמב"ם בפ"ו מאבות" (שמונה פרקים, on the tractate): a topic read loosely loses to a tractate's name
+      if (topic && m && !topic.hilchot && (topic.how === "word" || topic.how === "abbrev")) topic = null;
       // "הרמב"ם פ"ב דכתובות" is not the tractate; a topic we cannot read is not guessed
       if (!topic && rambamBefore) return m ? this.drop("rambam-topic-unknown") : null;
     }
     if (!m && !topic) return null;
     j = topic ? topic.to : m!.to;
-    const elems: AddrElem[] = [{ kind: "perek", n: head.n, explicit: true, numeral: { n: head.n, form: "gershayim", common: false } }];
+    const elems: AddrElem[] = [{ kind: "perek", n: head.n, explicit: true, numeral: { n: head.n, form: "gershayim", common: false } }, ...(pre && topic ? pre.elems : [])];
     let to = j;
     const rest = parseAddress(toks, j, { after: "perek" });
-    if (rest && !rest.elems.some((e) => e.kind === "perek")) {
+    if (rest && !rest.elems.some((e) => e.kind === "perek") && !(pre && topic)) {
       elems.push(...rest.elems);
       to = rest.to;
     }
@@ -395,7 +620,7 @@ export class CitationScanner {
     return this.emitUnit(toks, line, from, end, candidates, unit, addr, u.kind === "chapter");
   }
 
-  private emitUnit(toks: readonly Tok[], line: number, from: number, to: number, candidates: readonly AliasTarget[], unit: CitedUnit, addr: Address | null, commentators: boolean): number | null {
+  private emitUnit(toks: readonly Tok[], line: number, from: number, to: number, candidates: readonly AliasTarget[], unit: CitedUnit, addr: Address | null, commentators: boolean, rule?: string): number | null {
     if (isDate(toks, to)) return this.drop("date");
     const next = this.emit(toks, line, {
       from,
@@ -410,6 +635,7 @@ export class CitationScanner {
       numericName: false,
       unit,
       commentators,
+      ...(rule && { rule }),
     });
     // "שם" after a unit cited by name alone has no location to complete
     if (!addr) this.last = null;
@@ -485,6 +711,79 @@ export class CitationScanner {
   }
 
   /**
+   * "לעיל סי' ה", "לקמן סעיף ג ס"ק ב", "כמ"ש לעיל כלל ז' סי' ח'", "עיין לקמן באות ז": a place in the citing
+   * book itself (self.ts). Only with a level named by its word (a bare number, or a daf, says nothing of
+   * which level), and not when another book is named next to it ("הט"ז לקמן סי' ח'", "לעיל סי' ה בט"ז")
+   * — that is the other book's own "לקמן". Resolved once the whole book was read (engine.ts).
+   */
+  private internal(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (!this.selfTarget || t.gershayim || t.geresh || !RELATIVE.test(t.text)) return null;
+    const addr = parseAddress(toks, i + 1, { enclosed: opensBefore(toks, i) });
+    const e = addr?.elems[0];
+    if (!addr || !e || !e.explicit || e.kind === "daf" || e.kind === "?" || addr.elems.some((x) => x.kind === "daf" || x.amud !== undefined)) return null;
+    const named = (x: Tok | undefined) => !!x && x.kind === "word" && !RELATIVE.test(x.text) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && (((x.gershayim || x.geresh) && !numeralOf(x) && !LOCATION_WORD.test(wordShape(x))) || OTHER_WORK.test(x.text));
+    const titled = (at: number) => at >= 0 && toks[at]?.kind === "word" && this.aliases.matchAt(toks, at).length > 0;
+    if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(beforeIndex(toks, i, 1)) || titled(beforeIndex(toks, i, 2))) return this.drop("internal-of-another-book");
+    const after = addr.closed ? addr.to + 1 : addr.to;
+    if (named(toks[after]) || titled(after)) return this.drop("internal-of-another-book");
+    const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
+    // "(לעיל פסוק טו)" in a midrash is a verse of the Torah, of a chapter the text does not say: the citation
+    // before it was another verse's in two of three cases checked by hand (§6.8) — no link
+    if (e.kind === "pasuk") return null;
+    const dir = /לעיל$/.test(t.text) ? -1 : 1;
+    return this.emit(toks, line, { from: i, to, candidates: [this.selfTarget], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "internal", numericName: false, commentators: false, internal: { dir, here: this.structure.here() } });
+  }
+
+  /**
+   * A commentator's words on a daf told by the context: "וכתבו בתוס' [ד"ה רבי" after "[יבמות פ"ז ע"ב]",
+   * "רש"י שם ד"ה שלא", "ובתוס' שם [ד"ה אבל]", "התוס' בדף ט"ו ע"ב ד"ה במאי", "תוד"ה הן". The commentator's
+   * name, maybe "שם", maybe a daf with no tractate, and then "ד"ה" (required: "תוס' שם" alone is often
+   * another place). The tractate is the last citation's (a daf of the Bavli, near: as "שם"), or the one this
+   * book comments on; the link is to that commentary on the daf (the line of the ד"ה is not looked up).
+   */
+  private dibur(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    const who = wordIn(t, COMMENTATORS);
+    if (!who) return null;
+    const compact = /^ו?ב?תוד"ה$/.test(wordShape(t).replace(/^ה/, ""));
+    let k = i + 1;
+    const skip = () => {
+      while (toks[k]?.kind === "punct" && "([".includes(toks[k]!.text)) k++;
+    };
+    if (!compact) {
+      skip();
+      if (isWord(toks[k], "שם")) k++;
+      skip();
+    }
+    let elems: readonly AddrElem[] | null = null;
+    let to = k;
+    if (!compact) {
+      const addr = parseAddress(toks, k);
+      if (addr && addr.elems.length === 1 && (addr.elems[0]!.kind === "daf" || addr.elems[0]!.amud !== undefined)) {
+        elems = addr.elems;
+        k = addr.to;
+        skip();
+      }
+      const d = toks[k];
+      // "ד"ה", or "תוד"ה" after the place ("התוס' [שם פ"ז ע"א [תוד"ה היום]]")
+      if (!d || d.kind !== "word" || !d.gershayim || !/^ו?ב?(?:תו)?דה$/.test(d.key)) return null;
+    }
+    // the ד"ה and the first word of its heading belong to the span
+    to = toks[k + (compact ? 0 : 1)]?.kind === "word" ? k + (compact ? 1 : 2) : k + (compact ? 0 : 1);
+    const last = this.last && !this.lastFar && line - this.last.line <= this.window ? this.last : null;
+    const lastDaf = last && last.elems.length && (last.elems[0]!.kind === "daf" || last.elems[0]!.amud !== undefined) && last.c.candidates.some((x) => x.collection === "bavli") ? last : null;
+    const books = lastDaf ? lastDaf.c.candidates.filter((x) => x.collection === "bavli") : this.base?.collection === "bavli" ? [this.base] : null;
+    if (!books?.length) return null;
+    const place = elems ?? lastDaf?.elems ?? null;
+    if (!place) return null;
+    const moved = this.toCommentary(books, who);
+    if (!moved.length) return this.drop("commentator-not-in-library");
+    const dh = diburWordsAt(toks, compact ? i : k);
+    return this.emit(toks, line, { ...(dh && { dh }), from: i, to: Math.max(to, i + 1), candidates: moved, name: wordShape(t), elems: place, evidence: "strong", bracketed: false, ibid: elems || !lastDaf ? "none" : "partial", ...(lastDaf && !elems && { ibidOf: lastDaf.c.seq }), form: "forward", numericName: false, commentators: false, rule: "dibur-context", commentator: who });
+  }
+
+  /**
    * "ד"ה חוץ: דף לה", "וכן בדף מ"ו ע"ב": the word "דף" and a number with no tractate, in a commentary on
    * a tractate ("פסקי תוספות על יבמות") — a daf of that tractate. Only the full word "דף" ("ד'" is also
    * "ארבע"), only a daf, and not when a book we do not know is named right before ("במהרש"א דף ט'").
@@ -504,10 +803,100 @@ export class CitationScanner {
     return this.emit(toks, line, { from: i, to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false, rule: "base-daf" });
   }
 
+  /**
+   * A location in brackets with no book before it — "(א, כ"ז)", "(ל"ב, ה')", "(פסוק כז)", "[מ"ד ע"א]",
+   * "(ס"ט:)" — is the book the context gives: the citation right before it, when it is near (the same
+   * line, or the last few lines with no heading between) and of the same shape (a daf after a daf; chapter
+   * and verse after a chapter-and-verse book); else, for chapter and verse, the book of the Torah the
+   * headings above name ("ספר בראשית", "פרשת וירא"), or the book of the Tanakh this one comments on; for
+   * a daf, the tractate this one comments on. Read as "שם" without the word, so at most "high".
+   */
+  private implicit(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (!opensBefore(toks, i) || t.kind === "punct" || isWord(t, "שם")) return null;
+    // "(מ"א ה)": a book of the Tanakh by its numeral name (numericTanakh), not a place
+    if (t.kind === "word" && Object.hasOwn(NUMERIC_TANAKH, wordShape(t))) return null;
+    const addr = parseAddress(toks, i, { enclosed: true });
+    if (!addr || !addr.closed) return null;
+    const es = addr.elems;
+    const isDafElem = (e: AddrElem) => e.kind === "daf" || e.amud !== undefined;
+    const daf = es.length === 1 && isDafElem(es[0]!) && (es[0]!.amud !== undefined || es[0]!.explicit);
+    const pair = es.length === 2 && es.every((e) => e.kind === "?" && e.amud === undefined && e.maybeAmud === undefined && e.to === undefined);
+    const verse = (es.length === 1 && es[0]!.kind === "pasuk") || (es.length === 2 && es[0]!.kind === "perek" && es[1]!.kind === "pasuk");
+    if (!daf && !pair && !verse) return null;
+    if (isDate(toks, addr.to + 1)) return null;
+    // "[ג.] מכות דף ו'": a bracket opening the line, or followed by a book's name, marks the book's own
+    // sections (כסף נבחר), not a place of the citation before it
+    const after = toks[addr.closed ? addr.to + 1 : addr.to];
+    if (toks.slice(0, i).every((x) => x.kind === "punct") || (after?.kind === "word" && this.aliases.matchAt(toks, addr.closed ? addr.to + 1 : addr.to).length)) return null;
+    // "פ' ד' אחין ([ד' ל"ב])": a chapter or a book named just before is the place's own, read with it or not at all
+    for (let j = Math.max(0, i - 6); j < i - 1; j++) if (unitWordAt(toks, j) || perekAt(toks, j) || this.aliases.matchAt(toks, j).length) return null;
+    const last = this.last && line - this.last.line <= IMPLICIT_WINDOW ? this.last : null;
+    // a verse alone ("([פסוק ה])"): in a midrash the citation before it is often a verse quoted from another
+    // book or chapter (§6.8) — no link
+    if (verse && es.length === 1) return null;
+    // "בע"ג ([מ"ו.])", "וההיא דבתרא ([דף ל"ב])": a name right before the bracket is the place's own book
+    const prevWord = before(toks, i, 1);
+    if (prevWord?.kind === "word" && (((prevWord.gershayim || prevWord.geresh) && !numeralOf(prevWord) && !COMMON_ABBREVIATIONS.has(wordShape(prevWord))) || TRACTATE_NICKNAMES.test(prevWord.text))) return null;
+    // "כביבמות ([צ.])": a tractate with prefix letters matchAt does not take ("כב", "וכב")
+    if (prevWord?.kind === "word" && !prevWord.gershayim && [2, 3].some((p) => /^[וכבדלמה]+$/.test(prevWord.text.slice(0, p)) && this.aliases.lookup(prevWord.text.slice(p))?.targets.some((x) => x.collection === "bavli" || x.collection === "tanakh"))) return null;
+    if (last && last.elems.length && !last.c.internal) {
+      const lastDaf = isDafElem(last.elems[0]!);
+      const sameShape = daf ? lastDaf && last.c.candidates.some((x) => x.collection === "bavli") : !lastDaf && (last.line === line || last.c.candidates.every((x) => x.collection === "tanakh"));
+      const elems = sameShape ? mergeIbid(last.elems, es) : null;
+      // chapter and verse in the same line as a citation of the Tanakh: "high"; anything farther — a daf ("בסוף
+      // השולח (דף מ"ח)" names its own tractate by a chapter's name), or a verse a line or more after another
+      // book's ("(ל"ב, ח')" after Psalms, in a book on the Torah) — "possible" (hand check, §6.8)
+      const near = !daf && last.line === line && last.c.candidates.every((x) => x.collection === "tanakh");
+      // in a book on the Torah, a verse farther from the last citation is the Torah's (the headings say which book)
+      const ctxFirst = !daf && !near ? this.contextBook() : null;
+      if (elems && !ctxFirst) return this.emit(toks, line, { from: i, to: addr.to, candidates: last.c.candidates, name: "", elems, evidence: addr.evidence, bracketed: true, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: near ? "implicit-previous" : "implicit-previous-far" });
+    }
+    const ctx = daf ? (this.base?.collection === "bavli" ? this.base : null) : verse && es.length === 1 ? null : this.contextBook();
+    if (!ctx) return null;
+    // a book named a few words before is the location's book, not the context's ("בסוף גיטין … [דף פ"ט]")
+    for (let j = Math.max(0, i - 8); j < i; j++) if (this.aliases.matchAt(toks, j).length) return null;
+    const prev = before(toks, i, 1);
+    if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !COMMON_ABBREVIATIONS.has(wordShape(prev))) return null;
+    const cands = this.own([ctx]);
+    if (!cands.length) return null;
+    return this.emit(toks, line, { from: i, to: addr.to, candidates: cands, name: "", elems: es, evidence: addr.evidence, bracketed: true, ibid: "none", form: "forward", numericName: false, commentators: false, rule: "implicit-context" });
+  }
+
+  /** the book of the Tanakh the context names: a heading above ("ספר שמות", "פרשת וירא"), else the book this one comments on */
+  private contextCache: AliasTarget | null | undefined;
+  private contextBook(): AliasTarget | null {
+    if (this.contextCache !== undefined) return this.contextCache;
+    let found: AliasTarget | null = null;
+    for (const name of this.structure.names().reverse()) {
+      const n = normTitle(name).replace(/^ספר /, "");
+      const book = this.aliases.lookup(n)?.targets.find((x) => x.tier === "title" && x.collection === "tanakh");
+      if (book) {
+        found = book;
+        break;
+      }
+      const parsha = /^פרשת (.+)$/.exec(n)?.[1];
+      if (parsha && this.units?.size) {
+        const toks = citationTokens(parsha);
+        const m = this.units.matchAt(toks, 0, ["parsha"]);
+        const full = m && m.to === toks.length ? m.matches.filter((x) => x.full) : [];
+        if (full.length === 1) {
+          found = { book: full[0]!.unit.book, tier: "derived", collection: "tanakh" };
+          break;
+        }
+      }
+    }
+    if (!found) {
+      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1];
+      found = (on && this.aliases.lookup(on)?.targets.find((x) => x.tier === "title" && x.collection === "tanakh")) || null;
+    }
+    return (this.contextCache = found);
+  }
+
   /** "(שם)", "(שם ד)", "שם פסוק ד", "שם דף ה ע"ב" at toks[i]. */
   private ibid(toks: readonly Tok[], i: number, line: number): number | null {
     const t = toks[i]!;
-    if (!this.last || t.text !== "שם" || t.gershayim || t.geresh) return null;
+    if (!this.last || (t.text !== "שם" && t.text !== "ושם") || t.gershayim || t.geresh) return null;
     // "הפ"ת שם סק"ט": "שם" after a name we do not know refers to THAT book, not to our last citation
     const prev = toks[i - 1];
     if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !this.aliases.matchAt(toks, i - 1).length) return this.drop("ibid-other-book");
@@ -520,17 +909,19 @@ export class CitationScanner {
     if (author?.kind === "word" && !numeralOf(author) && !this.aliases.matchAt(toks, at).length && (quotedAuthor || wordIn(author, COMMENTATORS) || wordIn(author, QUALIFIERS) === "rambam")) return this.drop("ibid-other-book");
     const inBracket = toks[i - 1]?.kind === "punct" && "([".includes(toks[i - 1]!.text);
     // "(שם שם לב)": the same book and the same chapter — the numbers replace the deepest level
-    const twice = isWord(toks[i + 1], "שם") ? 1 : 0;
+    // "(שם שם לב)", "(שם, שם, י"ח)"
+    const twice = isWord(toks[i + 1], "שם") ? 1 : toks[i + 1]?.kind === "punct" && toks[i + 1]!.text === "," && isWord(toks[i + 2], "שם") ? 2 : 0;
     const addr = parseAddress(toks, i + 1 + twice, { enclosed: inBracket });
+    if (this.lastFar && !addr) return null;
     if (!addr) {
       // only "(שם)" — a bare "שם" in running text is the word "there"/"name"
-      if (inBracket && closesAt(toks, i + 1)) return this.emit(toks, line, { from: i, to: i + 1, candidates: this.last.c.candidates, name: "שם", elems: this.last.elems, evidence: "strong", bracketed: true, ibid: "full", ibidOf: this.last.c.seq, form: "forward", numericName: false });
+      if (inBracket && closesAt(toks, i + 1)) return this.emit(toks, line, { from: i, to: i + 1, candidates: this.last.c.candidates, name: "שם", elems: this.last.elems, evidence: "strong", bracketed: true, ibid: "full", ibidOf: this.last.c.seq, form: "forward", numericName: false, ...(this.last.c.internal && { internal: this.last.c.internal }) });
       return null;
     }
     if (!inBracket && addr.evidence !== "strong") return null;
     const elems = mergeIbid(this.last.elems, addr.elems);
     if (!elems) return this.drop("ibid-shape");
-    return this.emit(toks, line, { from: i, to: addr.to, candidates: this.last.c.candidates, name: "שם", elems, evidence: addr.evidence, bracketed: inBracket || addr.bracketed, ibid: "partial", ibidOf: this.last.c.seq, form: "forward", numericName: false });
+    return this.emit(toks, line, { from: i, to: addr.to, candidates: this.last.c.candidates, name: "שם", elems, evidence: addr.evidence, bracketed: inBracket || addr.bracketed, ibid: "partial", ibidOf: this.last.c.seq, form: "forward", numericName: false, ...(this.last.c.internal && { internal: this.last.c.internal }), ...((this.lastFar || t.text === "ושם" || twice === 2) && { rule: this.lastFar ? "ibid-far" : "ibid-v4" }) });
   }
 
   /** the targets without the source book itself */
@@ -560,11 +951,17 @@ export class CitationScanner {
       /** the rule that read it, beyond its form (Citation.rule) */
       rule?: string;
       ordinal?: boolean;
+      internal?: InternalRef;
+      /** the citation was already moved to this commentator's book */
+      commentator?: string;
+      /** the words of the ד"ה after it */
+      dh?: readonly string[];
     },
   ): number | null {
     let candidates = c.candidates;
     const qualifier = qualifierBefore(toks, c.from);
-    let commentator: string | undefined;
+    let commentator: string | undefined = c.commentator;
+    let diburWords: readonly string[] | null = c.dh ?? null;
     if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
       if (qualifier && !candidates.some((x) => x.collection === qualifier)) candidates = [...candidates, ...this.siblings(candidates, qualifier)];
@@ -575,6 +972,8 @@ export class CitationScanner {
       const who = before ?? after?.who;
       const dh = isDibur(toks, after ? after.next : c.to);
       const named = candidates.some((x) => / על /.test(x.book.title));
+      // "תוס' (מנחות צג.) ד"ה X", "יבמות מ"ז ע"ב תוד"ה במקום": the words of the ד"ה
+      if (who && !named) diburWords = diburWordsAt(toks, after ? after.next : c.to) ?? (after ? diburWordsAt(toks, after.next - 1) : null);
       if (who && !named) {
         const moved = this.toCommentary(candidates, who);
         if (!moved.length) {
@@ -619,6 +1018,8 @@ export class CitationScanner {
       ...(c.unit && { unit: c.unit }),
       ...(c.rule && { rule: c.rule }),
       ...(c.ordinal && { ordinal: true }),
+      ...(c.internal && { internal: c.internal }),
+      ...(commentator && diburWords?.length && { dh: diburWords }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -695,6 +1096,26 @@ const HONORIFICS = new Set(['ז"ל', 'זצ"ל', 'ז"ל:', 'נ"י', 'שליט"א'
 /** words that name another work before a siman ("בתשובה סימן צ"ז") */
 const OTHER_WORK = /^[וב]{0,2}(?:תשובה|תשובות|תשו|ספר|ס|שו"ת|שות)$/;
 
+/** a location word with quote marks ("ס"ק", "סי'", "הל'"): not another book's name before an internal reference */
+const LOCATION_WORD = /^[ובד]{0,2}(?:ס"ק|סק'|סי'|סע'|סעי'|הל'|פ'|פר'|ס"ס|ססי'|או')$/;
+
+/** words for "responsa" before or after an author's name ("בתשו'", "בתשובת", "שו"ת", "בתשובות") */
+const RESPONSA_WORD = /^[ובלד]{0,2}(?:תשו'|תשובת|תשובות|תשובה|שו"ת|שות|בתשו')$/;
+/** authors whose name alone names many works ("רמ"א סי' נ"ג" is the Shulchan Aruch's gloss): only with a word for responsa */
+const AUTHOR_NAMES_KEYS = new Set(["רמבמ", "רמבנ", "רמא", "רשבא", "ראש", "ריטבא", "רנ", "ריפ", "רשי", "מהרשא", "מהרשל", "רשבמ", "ראבד", "רמ"]);
+
+/** an author with more other works than this: his name alone and a siman are no reference to his responsa */
+const MAX_OTHER_WORKS = 3;
+
+/** past the ibid window, how far "שם" with a place of its own (or "<book> שם") may still reach, scored lower */
+const FAR_WINDOW = 15;
+
+/** "בבתרא", "דקמא", "במציעא": a tractate by its nickname (the Bavot), right before a place */
+const TRACTATE_NICKNAMES = /^[ובד]{0,2}(?:בתרא|קמא|מציעא)$/;
+
+/** how many lines back a bare location in brackets may take its book from the citation before it */
+const IMPLICIT_WINDOW = 3;
+
 /** the word "דף" with a ב/ו ("בדף", "ובדף") — not "ד'" */
 const DAF_WORD = /^(?:ו?ב)?דף$/;
 
@@ -752,6 +1173,23 @@ function isDate(toks: readonly Tok[], i: number): boolean {
     if (MONTHS.has(t.key) || (t.key.length > 2 && MONTHS.has(t.key.slice(1)))) return true;
   }
   return false;
+}
+
+/**
+ * The words of a ד"ה at toks[j] ("ד"ה רבי מאיר", "תוד"ה במקום", past a closing bracket or a comma): up to
+ * four words, to the first punctuation. Null when there is no ד"ה there.
+ */
+function diburWordsAt(toks: readonly Tok[], j: number): string[] | null {
+  while (toks[j]?.kind === "punct" && ")],[(".includes(toks[j]!.text)) j++;
+  const t = toks[j];
+  if (!t || t.kind !== "word" || !t.gershayim || !/^ו?ב?(?:ה?תו)?דה$/.test(t.key)) return null;
+  const out: string[] = [];
+  for (let k = j + 1; k < toks.length && out.length < 4; k++) {
+    const w = toks[k]!;
+    if (w.kind !== "word") break;
+    out.push(w.key);
+  }
+  return out.length ? out : null;
 }
 
 /** "ד"ה" (dibur hamatchil) right after the location */
@@ -923,7 +1361,8 @@ interface RambamTopic {
   /** a word for "הלכות" was written */
   readonly hilchot: boolean;
   /** all the topic's words, its first word alone, or its initials ("מא"ב" — איסורי ביאה) */
-  readonly how: "full" | "first" | "initials";
+  /** "abbrev": the starts of words anywhere in it ("יו"ט"); "word": a later word of it ("לולב") */
+  readonly how: "full" | "first" | "initials" | "abbrev" | "word";
 }
 
 /**
@@ -958,7 +1397,12 @@ function topicAt(aliases: AliasIndex, toks: readonly Tok[], k: number, strip: nu
   if (t.gershayim) {
     const letters = t.key.slice(strip);
     const hit = topics.filter((x) => x.words.length >= letters.length && [...letters].every((ch, n) => x.words[n]![0] === ch));
-    return hit.length === 1 ? { target: hit[0]!.target, to: k + 1, how: "initials" } : null;
+    if (hit.length === 1) return { target: hit[0]!.target, to: k + 1, how: "initials" };
+    if (hit.length > 1) return null;
+    // "יו"ט" (שביתת יום טוב), "מע"ק" (מעשה הקרבנות), "אה"ט" (שאר אבות הטומאות), "ס"ת" (…וספר תורה): the
+    // start of each of two or more words in a row, anywhere in the topic, past a ו or an article
+    const loose = topics.filter((x) => abbreviates(letters, x.words));
+    return loose.length === 1 ? { target: loose[0]!.target, to: k + 1, how: "abbrev" } : null;
   }
   if (t.geresh) return null;
   const key = (n: number): string | null => {
@@ -981,8 +1425,30 @@ function topicAt(aliases: AliasIndex, toks: readonly Tok[], k: number, strip: nu
   if (!first || first.length < 3) return null;
   const raw = t.key.slice(strip);
   const same = topics.filter((x) => looseWord(x.words[0]!) === first);
-  if (same.length !== 1 || topics.some((x) => x !== same[0] && x.words[0]!.startsWith(raw) && x.words[0] !== raw)) return null;
-  return { target: same[0]!.target, to: k + 1, how: "first" };
+  if (same.length === 1 && !topics.some((x) => x !== same[0] && x.words[0]!.startsWith(raw) && x.words[0] !== raw)) return { target: same[0]!.target, to: k + 1, how: "first" };
+  if (same.length) return null;
+  // "מהל' לולב" (שופר וסוכה ולולב), "מה' סוכה": a later word of one topic only, past its ו
+  if (raw.length < 4) return null;
+  const later = topics.filter((x) => x.words.slice(1).some((w) => looseWord(w.replace(/^ו(?=.{3})/, "")) === first));
+  if (later.length !== 1 || topics.some((x) => looseWord(x.words[0]!) === first)) return null;
+  return { target: later[0]!.target, to: k + 1, how: "word" };
+}
+
+/** the letters are the starts of two or more words in a row of `words` (each start past a ו or an article ה) */
+function abbreviates(letters: string, words: readonly string[]): boolean {
+  const go = (w: number, at: number, used: number): boolean => {
+    if (at === letters.length) return used >= 2;
+    if (w >= words.length) return false;
+    const word = words[w]!;
+    for (const skip of [0, 1]) {
+      if (skip && !/^[וה]/.test(word)) continue;
+      const body = word.slice(skip);
+      for (let n = Math.min(body.length, letters.length - at); n >= 1; n--) if (body.slice(0, n) === letters.slice(at, at + n) && go(w + 1, at + n, used + 1)) return true;
+    }
+    return false;
+  };
+  for (let start = 0; start < words.length; start++) if (go(start, 0, 0)) return true;
+  return false;
 }
 
 /**

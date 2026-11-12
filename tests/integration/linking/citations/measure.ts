@@ -15,6 +15,10 @@ import type { Confidence, Suggestion } from "../../../../src/linking/automatic";
  *   • unconfirmed — the database has no link from that line to that book (a LINKER miss, or our
  *                 error: sampled by hand, see docs/AUTOMATION_ENGINE.md §6).
  * Recall counts LINKER links only (REFERENCE/QUOTATION are not all explicit citations).
+ *
+ * A LINKER link from the book to ITSELF ("לעיל סי' ה" — LinkerToOtzaria made a few thousand) is gold of its
+ * own type, "linker-self": it judges the internal references (self.ts) and is counted apart, so the recall
+ * against the other books stays comparable with earlier measurements.
  */
 
 export interface GoldLink {
@@ -34,6 +38,10 @@ export function goldOf(links: readonly Link[], sourceKey: string): GoldLink[] {
   for (const l of links) {
     if (!GOLD_TYPES.has(l.declaredType)) continue;
     // LINKER is one-way (source = the citing line): a LINKER link INTO this book is another book's citation
+    if (l.declaredType === "linker" && l.source.book.key === sourceKey && l.target.book.key === sourceKey) {
+      out.push({ line: l.source.line, bookKey: sourceKey, bookTitle: l.target.book.title, from: l.target.line, to: l.target.end ?? l.target.line, type: "linker-self", link: l });
+      continue;
+    }
     const [mine, other] = l.source.book.key === sourceKey ? [l.source, l.target] : l.target.book.key === sourceKey && l.declaredType !== "linker" ? [l.target, l.source] : [null, null];
     if (!mine || !other || other.book.key === sourceKey) continue;
     out.push({ line: mine.line, bookKey: other.book.key, bookTitle: other.book.title, from: other.line, to: other.end ?? other.line, type: l.declaredType, link: l });
@@ -56,7 +64,7 @@ export interface Judged {
  * (no span), the suggestion is a mention it did not link — unconfirmed. Without `lineText` any
  * disagreement on the line counts as wrong.
  */
-export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLink[], lineText?: (line: number) => string | undefined): { judged: Judged[]; found: Set<GoldLink>; linkerTotal: number } {
+export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLink[], lineText?: (line: number) => string | undefined): { judged: Judged[]; found: Set<GoldLink>; linkerTotal: number; selfTotal: number } {
   const byLine = new Map<string, GoldLink[]>();
   for (const g of gold) {
     const k = `${g.line}|${g.bookKey}`;
@@ -81,7 +89,7 @@ export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLin
       // span: Sefaria's quotations, or another book citing this line) or a LINKER citation of other
       // words in the line says nothing about this mention
       const sameWords = list.some((g) => {
-        if (g.type !== "linker") return false;
+        if (g.type !== "linker" && g.type !== "linker-self") return false;
         const x = g.link.dbAnchors?.find((y) => y.side === 0);
         return !x || (x.charStart < b && a < (x.charEnd ?? x.charStart + 1));
       });
@@ -89,7 +97,7 @@ export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLin
     }
     judged.push({ s, verdict, exact: hits.some((h) => h.from === from) });
   }
-  return { judged, found, linkerTotal: gold.filter((g) => g.type === "linker").length };
+  return { judged, found, linkerTotal: gold.filter((g) => g.type === "linker").length, selfTotal: gold.filter((g) => g.type === "linker-self").length };
 }
 
 export interface Tally {
