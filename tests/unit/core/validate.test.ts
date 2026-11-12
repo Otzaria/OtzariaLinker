@@ -92,3 +92,22 @@ describe("heRef_2 is never blank (compatibility review B3)", () => {
     expect(codes(link({ heRef2: "   " }))).toContain("error:export/heref-missing");
   });
 });
+
+describe("'הערות על X' — the real outcome (compatibility review B5, Generator.kt:1004-1008)", () => {
+  const C = book("הערות על ספר א");
+  it("an unanchored record is merged; an anchored one cancels the merge and keeps the link", () => {
+    expect(codes(link({ target: { book: C, line: 2 } }))).toContain("warning:export/companion-merged");
+    const anchored = codes(link({ target: { book: C, line: 2 }, anchor: { rawStart: 3 } }));
+    expect(anchored).toContain("info:export/companion-merge-cancelled");
+    expect(anchored).not.toContain("warning:export/companion-merged");
+  });
+
+  it("a new anchored record on a note line the library's file merges today is warned about", () => {
+    const merged = link({ id: "f1", provenance: "file", status: "existing", target: { book: C, line: 2 } });
+    const anchoredSameLine = link({ id: "n1", target: { book: C, line: 3 }, anchor: { rawStart: 3 } });
+    const anchoredOtherLine = link({ id: "n2", source: { book: A, line: 4 }, target: { book: C, line: 4 }, anchor: { rawStart: 3 } });
+    const out = validateExport([merged, anchoredSameLine, anchoredOtherLine], ctx, storedKey);
+    expect(out.get("n1")!.map((p) => p.code)).toContain("export/companion-merge-broken");
+    expect(out.get("n2")!.map((p) => p.code)).not.toContain("export/companion-merge-broken");
+  });
+});

@@ -112,8 +112,15 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // "…שובבי״ם" in the database — real-data validation, check 3).
   if (s.book.origin === "unknown") add("warning", "export/source-unknown", `ספר המקור "${s.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, אוצריא תדלג על כל קובץ הקישורים שלו.`);
   if (t.book.origin === "unknown") add("warning", "export/target-unknown", `הספר "${t.book.title}" לא נמצא באף מקור פתוח. אם אין ספר בשם הזה בדיוק במסד, הקישור יידחה.`);
-  if (isMergeableCompanionTitle(t.book.title))
-    add("warning", "export/companion-merged", `"${t.book.title}" מתחיל ב"הערות על". ספר כזה ממוזג לתוך ספר הבסיס, וכל הקישורים אליו נמחקים בשקט. שם בטוח: "הערות ל…".`);
+  // "הערות על X" (LINK_FORMATS §1.11, Generator.kt:929-937,1004-1008): merged into the base only when no
+  // record of the base's file has a word anchor on a line that receives a note. An anchored record
+  // CANCELS the merge — the companion stays a book and the links are kept (compatibility review B5).
+  if (isMergeableCompanionTitle(t.book.title)) {
+    if (link.anchor)
+      add("info", "export/companion-merge-cancelled", `"${t.book.title}" מתחיל ב"הערות על", ואוצריא ממזגת ספר כזה לתוך ספר הבסיס. אבל לרשומה הזו יש עוגן על שורה שמקבלת הערה, וזה מבטל את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו.`);
+    else
+      add("warning", "export/companion-merged", `"${t.book.title}" מתחיל ב"הערות על". אם כל תנאי המיזוג מתקיימים, אוצריא תשלב את ההערות בשורות של "${s.book.title}", והרשומות אליו לא יישמרו כקישורים. כדי שההערות יישארו ספר עם קישורים, תנו לו שם כמו "הערות ל…", או קשרו עם עוגן.`);
+  }
   if (t.book.origin === "otzaria" && t.book.title !== normalizeTitle(t.book.title))
     add("error", "export/title-not-normalized", `שם הספר "${t.book.title}" כתוב עם מירכאות או רווחים שאוצריא מנרמלת (למשל "→״). במסד הוא נקרא "${normalizeTitle(t.book.title)}", והקישור לא יימצא.`);
 
@@ -125,6 +132,35 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
 }
 
 type Add = (severity: Severity, code: string, message: string) => void;
+
+/**
+ * The base's links file in the library merges "הערות על X" today (its records to X have no anchor),
+ * and the export adds or edits a record with a word anchor on one of those note lines: that cancels
+ * the merge (Generator.kt:1004-1008) — X becomes a separate book and the notes leave the base's
+ * lines. Said on every such anchored record (compatibility review B5).
+ */
+function companionMergeChecks(links: readonly Link[], out: Map<string, Problem[]>): void {
+  const noteLines = new Map<string, Set<number>>(); // "<base>|<companion>" → base lines the library merges today
+  for (const l of links)
+    if (l.provenance === "file" && l.status === "existing" && !l.anchor && isMergeableCompanionTitle(l.target.book.title)) {
+      const k = `${l.source.book.title}|${l.target.book.title}`;
+      noteLines.set(k, (noteLines.get(k) ?? new Set()).add(l.source.line));
+    }
+  if (!noteLines.size) return;
+  for (const l of links) {
+    if (!l.anchor || (l.provenance === "file" && l.status === "existing")) continue;
+    for (const [k, lines] of noteLines) {
+      const [base, companion] = k.split("|") as [string, string];
+      if (l.source.book.title !== base || !lines.has(l.source.line)) continue;
+      out.get(l.id)?.push({
+        code: "export/companion-merge-broken",
+        severity: "warning",
+        message: `קובץ הקישורים של "${base}" בספרייה ממזג היום את "${companion}" לתוך הספר (רשומות בלי עוגן). לרשומה הזו יש עוגן על שורה ${l.source.line + 1}, שמקבלת הערה, וזה יבטל את המיזוג: "${companion}" ייכנס לאוצריא כספר נפרד, וההערות לא יופיעו עוד בתוך שורות "${base}". אם זה לא מה שרציתם, הסירו את העוגן.`,
+      });
+      break;
+    }
+  }
+}
 
 function sideChecks(label: string, side: Link["source"], ctx: ValidationContext, add: Add) {
   const count = ctx.lineCount(side.book);
@@ -194,6 +230,7 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext, k
     const fileLevel = problems.find((p) => FILE_LEVEL_CODES.has(p.code));
     if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);
   }
+  companionMergeChecks(links, out);
   if (heldFiles.size)
     for (const l of links) {
       const why = heldFiles.get(l.source.book.title);

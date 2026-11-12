@@ -126,7 +126,7 @@ export function relationOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>,
   const titleKey = notesKey ?? declaredBaseKey(book.title);
   const caveats: string[] = [];
   if (kind === "notes" && isMergeableCompanionTitle(book.title))
-    caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס, וקישורים אליו נמחקים בשקט. אם הספר צריך להישאר ספר, שנו את שמו ל"הערות ל…".`);
+    caveats.push(`ספר בשם "הערות על…" ממוזג באוצריא לתוך ספר הבסיס רק כשאין עוגן על שורות ההערות. מנוע ההערות כותב עוגן בכל רשומה, ולכן הקישורים שלו מבטלים את המיזוג: ההערות יישארו ספר נפרד והקישורים יישמרו. אם קובץ הקישורים של הבסיס בספרייה כבר ממזג את ההערות, זה ישנה את מה שמוצג באוצריא — הבדיקה לפני הייצוא תגיד.`);
 
   const declared = (book.bases ?? []).map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b && b.key !== book.key);
   if (declared.length > 1)

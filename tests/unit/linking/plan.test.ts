@@ -92,11 +92,12 @@ describe("planMaxLink — the database's declaration (book_base_text)", () => {
     expect(steps(planPairs({ selected: ["d:2"], library: lib }))).toEqual(["headings:אונקלוס>בראשית"]);
   });
 
-  it("a 'הערות על X' notes book is planned with a warning: Otzaria merges it and drops its links", () => {
+  it("a 'הערות על X' notes book is planned with the real outcome: the footnotes engine anchors every record, which cancels the merge (B5)", () => {
     const lib = [book("d:1", "מדרש ויסעו"), book("d:2", "הערות על מדרש ויסעו", { bases: ["d:1"] })];
     const p = planPairs({ selected: ["d:2"], library: lib });
     expect(steps(p)).toEqual(["footnotes:מדרש ויסעו>הערות על מדרש ויסעו"]);
-    expect(p.steps[0]!.why).toContain("הערות ל…");
+    expect(p.steps[0]!.why).toContain("מבטלים את המיזוג");
+    expect(p.steps[0]!.why).not.toContain("נמחקים בשקט");
   });
 });
 

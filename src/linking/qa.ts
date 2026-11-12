@@ -59,6 +59,8 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/sefaria-both": "sefaria",
   "export/title-not-normalized": "title",
   "export/companion-merged": "title",
+  "export/companion-merge-cancelled": "title",
+  "export/companion-merge-broken": "title",
   "export/heref-missing": "reference",
   "export/line-not-verified": "unverified",
   "export/in-db": "in-db",
