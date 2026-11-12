@@ -1,13 +1,14 @@
 import { effect } from "@preact/signals";
 import { render } from "preact";
 import { AppStore } from "../state/store";
-import type { BooksService, Saver } from "../state/services";
+import type { Saver } from "../state/services";
 import { App } from "../ui/app";
 import { StoreContext } from "../ui/context";
 import { applyTheme } from "../ui/theme/theme";
 import "../ui/theme/tokens.css";
 import "../ui/theme/app.css";
 import { RpcClient, type Port } from "../workers/rpc";
+import { booksService } from "./books-service";
 import { idbStore } from "./idb-store";
 import type { SourcesApi } from "../workers/sources-api";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
@@ -46,23 +47,7 @@ const call = <K extends keyof SourcesApi & string>(op: K, args: Parameters<Sourc
   return rpc.call(op, args, opts);
 };
 
-const service: BooksService = {
-  open: (files, opts) => call("open", [files], opts),
-  openMapped: (token, mapping, opts) => call("openMapped", [token, mapping], opts),
-  lines: (key, from, to, opts) => call("lines", [key, from, to], opts),
-  existingLinks: (key, from, to, opts) => call("existingLinks", [key, from, to], opts),
-  close: async (id) => void (await call("close", [id])),
-  runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
-  runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
-  diffBooks: (oldKey, newKey, opts) => call("diffBooks", [oldKey, newKey], opts),
-  searchBook: (key, query, options, opts) => call("searchBook", [key, query, options], opts),
-  altToc: (key, opts) => call("altToc", [key], opts),
-  headings: (key, opts) => call("headings", [key], opts),
-  runCitations: (source, options, opts) => call("runCitations", [source, options], opts),
-  dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
-  dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
-  runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
-};
+const service = booksService(call);
 
 const saver: Saver = {
   save(name, data, mime) {

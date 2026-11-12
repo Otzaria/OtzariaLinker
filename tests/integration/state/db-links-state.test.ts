@@ -4,12 +4,9 @@ import { storedLinkIdentity } from "../../../src/core/links/equality";
 import type { Link } from "../../../src/core/links/model";
 import { countVisibleChars } from "../../../src/core/text/offsets";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
-import { citationsJob } from "../../../src/workers/citations-job";
-import { searchJob } from "../../../src/workers/search-job";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
+import { registryService } from "../../support/books-service";
 
 /*
  * Database links in the application state (stage 10), end to end without UI, on the real
@@ -23,22 +20,7 @@ const LIBRARY_RECORD = { line_index_1: 323, heRef_2: 'המאיר לארץ על �
 
 function makeStore() {
   const reg = new SourceRegistry();
-  const service: BooksService = {
-    open: (f) => reg.open(f),
-    openMapped: (t, m) => reg.openMapped(t, m),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-    runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
-    runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
-    runCitations: (s, o) => citationsJob(reg, s, o, {}),
-    diffBooks: (a, b) => diffJob(reg, a, b),
-    searchBook: (k, q, o) => searchJob(reg, k, q, o, {}),
-    altToc: (k) => reg.altToc(k),
-    headings: (k) => reg.headings(k),
-    dbLinkSummary: (k, opts) => reg.dbLinkSummary(k, { ...(opts?.signal && { signal: opts.signal }) }),
-    dbLinksPage: (k, query) => reg.dbLinksPage(k, query),
-  };
+  const service = registryService(reg);
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
   return { store, saved };

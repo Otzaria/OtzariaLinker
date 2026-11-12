@@ -2,8 +2,8 @@ import { strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
+import { registryService } from "../../support/books-service";
 
 /*
  * The range actions through the store (state/ranges.ts): the builder's "until the next link", the
@@ -11,13 +11,7 @@ import { AppStore } from "../../../src/state/store";
  */
 function makeStore() {
   const reg = new SourceRegistry();
-  const service = {
-    open: (f) => reg.open(f),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-    headings: (k) => reg.headings(k),
-  } as Partial<BooksService> as BooksService;
+  const service = registryService(reg);
   return new AppStore(service, { save: () => {} }, loadPreferences(null));
 }
 const NL = String.fromCharCode(10);

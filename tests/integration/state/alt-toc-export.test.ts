@@ -4,28 +4,13 @@ import { describe, expect, it } from "vitest";
 import { entriesFromHeadings, numberInGematria } from "../../../src/core/alt-toc/edit";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService, KeyValueStore } from "../../../src/state/services";
+import type { KeyValueStore } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
-import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
-import { searchJob } from "../../../src/workers/search-job";
-import { citationsJob } from "../../../src/workers/citations-job";
+import { registryService } from "../../support/books-service";
 
 function makeStore() {
   const reg = new SourceRegistry();
-  const service: BooksService = {
-    open: (f) => reg.open(f),
-    openMapped: (t, m) => reg.openMapped(t, m),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-    runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
-    runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
-    diffBooks: (a, b) => diffJob(reg, a, b),
-    altToc: (k) => reg.altToc(k),
-    headings: (k) => reg.headings(k),
-    searchBook: (k, q, o) => searchJob(reg, k, q, o),
-    runCitations: (s, o) => citationsJob(reg, s, o, {}),
-  };
+  const service = registryService(reg);
   const saved: { name: string; data: Uint8Array | string; mime: string }[] = [];
   const store = new AppStore(service, { save: (name, data, mime) => saved.push({ name, data, mime }) }, loadPreferences(null));
   return { store, saved };

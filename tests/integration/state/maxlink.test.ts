@@ -3,14 +3,10 @@ import { strToU8 } from "fflate";
 import type { EngineId } from "../../../src/linking/automatic";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
-import { citationsJob } from "../../../src/workers/citations-job";
-import { maxlinkJob } from "../../../src/workers/maxlink-job";
-import { searchJob } from "../../../src/workers/search-job";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
 import type { MergedSuggestion } from "../../../src/linking/merge";
+import { registryService } from "../../support/books-service";
 
 /*
  * Max-link through the store, on the real database slice plus a "folder" of text files: plan,
@@ -18,21 +14,7 @@ import type { MergedSuggestion } from "../../../src/linking/merge";
  */
 function makeStore() {
   const reg = new SourceRegistry();
-  const service: BooksService = {
-    open: (f) => reg.open(f),
-    openMapped: (t, m) => reg.openMapped(t, m),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-    runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
-    runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
-    runCitations: (s, o) => citationsJob(reg, s, o, {}),
-    diffBooks: (a, b) => diffJob(reg, a, b),
-    searchBook: (k, q, o) => searchJob(reg, k, q, o, {}),
-    altToc: (k) => reg.altToc(k),
-    headings: (k) => reg.headings(k),
-    runMaxLink: (steps, o, opts) => maxlinkJob(reg, steps, o, { ...(opts?.signal && { signal: opts.signal }), ...(opts?.onProgress && { progress: opts.onProgress }) }),
-  };
+  const service = registryService(reg);
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
   return { store, saved };

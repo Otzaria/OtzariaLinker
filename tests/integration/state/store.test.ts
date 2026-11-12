@@ -2,29 +2,13 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { batchJob, diffJob, engineJob } from "../../../src/workers/engine-job";
-import { searchJob } from "../../../src/workers/search-job";
-import { citationsJob } from "../../../src/workers/citations-job";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
+import { registryService } from "../../support/books-service";
 
 function makeStore() {
   const reg = new SourceRegistry();
-  const service: BooksService = {
-    open: (f) => reg.open(f),
-    openMapped: (t, m) => reg.openMapped(t, m),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-    runEngine: (e, s, t, o) => engineJob(reg, e, s, t, o, {}),
-    runBatch: (e, pairs, o) => batchJob(reg, e, pairs, o, {}),
-    diffBooks: (a, b) => diffJob(reg, a, b),
-    searchBook: (k, q, o, opts) => searchJob(reg, k, q, o, { ...(opts?.signal && { signal: opts.signal }), ...(opts?.onProgress && { progress: opts.onProgress }) }),
-    altToc: (k) => reg.altToc(k),
-    headings: (k) => reg.headings(k),
-    runCitations: (s, o) => citationsJob(reg, s, o, {}),
-  };
+  const service = registryService(reg);
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
   return { store, saved };

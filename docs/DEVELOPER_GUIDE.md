@@ -164,11 +164,12 @@ __linker.prefs.layout.value                  // הפריסה
 ### 5.5 פעולת Worker
 
 1. חתימה ב־`SourcesApi` (`src/workers/sources-api.ts`).
-2. מטפל ב־`sources.worker.ts` (מקבל `ctx` עם `signal` ו־`progress`). פעולה ארוכה חייבת לבדוק את
-   `ctx.signal`; אחרת ה־watchdog יחליף את ה־Worker אחרי ביטול.
-3. מתודה ב־`BooksService` (`src/state/services.ts`) ומתאם ב־`src/app/main.tsx` (דרך `call()`, שמחבר את
-   ה־watchdog לביטול).
-4. גם בזיוף שב־`tests/integration/state/store.test.ts`.
+2. מטפל ב־`sourcesHandlers` (`src/workers/sources-handlers.ts`, המימוש היחיד; מקבל `ctx` עם `signal` ו־`progress`).
+   פעולה ארוכה חייבת לבדוק את `ctx.signal`; אחרת ה־watchdog יחליף את ה־Worker אחרי ביטול.
+3. מתודה ב־`BooksService` (`src/state/services.ts`) ושורה אחת ב־`booksService` (`src/app/books-service.ts`),
+   המיפוי היחיד בין השניים. האפליקציה מעבירה לו את `call()` של ה־RPC (שמחבר את ה־watchdog לביטול).
+4. אין זיופים לכתוב: הבדיקות משתמשות ב־`registryService` (`tests/support/books-service.ts`), שמריץ את אותם
+   מטפלים ואותו מיפוי בלי postMessage (`inProcessCall`).
 
 ### 5.6 סוג קשר
 

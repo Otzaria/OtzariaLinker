@@ -1,19 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { loadPreferences } from "../../../src/state/preferences";
-import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { registryService } from "../../support/books-service";
 
 /* The mapping wizard's state flow, without UI: drop → pending → open through a mapping → saved in the project → reused. */
 function makeStore(reg = new SourceRegistry()) {
-  const service = {
-    open: (f) => reg.open(f),
-    openMapped: (t, m) => reg.openMapped(t, m),
-    lines: (k, a, b) => reg.lines(k, a, b),
-    existingLinks: (k, a, b) => reg.existingLinks(k, a, b),
-    close: async (id) => reg.close(id),
-  } as BooksService;
+  const service = registryService(reg);
   return new AppStore(service, { save: () => {} }, loadPreferences(null));
 }
 const DB = () => ({ path: "corpus.db", blob: new Blob([readFileSync("tests/fixtures/db/generic/books-lines.db")]) });
