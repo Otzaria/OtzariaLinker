@@ -260,6 +260,24 @@ describe("a daf as Chassidic and later books write it", () => {
   });
 });
 
+describe("a daf in brackets across the headings of small sections", () => {
+  it(`"(דף כ"ח)" in the ב"ח, a few lines after "בפ' המפלת (נדה דף כ"ט)" with "סעיף קטן" headings between`, () => {
+    const sc = new CitationScanner(AliasIndex.build([...CATALOG, book("nida", "נדה")]), "src", {}, 'ב"ח', NamedUnitIndex.build([]));
+    sc.scanLine(0, `ומאימתי מונין וכו' (נדה דף כ"ט) תנן יצא מחותך`, null);
+    sc.scanLine(1, "סעיף קטן כז", 3);
+    sc.scanLine(2, "ואפי' לא יצא לגמרי לחוץ וכו'", null);
+    sc.scanLine(3, "סעיף קטן כח", 3);
+    sc.scanLine(4, `זה נלמד ממימרא דרב הונא (דף כ"ח) שיתבאר בסמוך`, null);
+    expect(sc.citations.map(books)).toEqual([["nida"], ["nida"]]);
+    expect(sc.citations[1]!.rule).toBe("implicit-previous-far");
+    // too far: nothing
+    const far = new CitationScanner(AliasIndex.build([...CATALOG, book("nida", "נדה")]), "src", {}, 'ב"ח', NamedUnitIndex.build([]));
+    far.scanLine(0, `ומאימתי מונין וכו' (נדה דף כ"ט) תנן`, null);
+    far.scanLine(9, `זה נלמד ממימרא דרב הונא (דף כ"ח) שיתבאר`, null);
+    expect(far.citations).toHaveLength(1);
+  });
+});
+
 describe("commentators on the Tanakh", () => {
   it(`"רש"י (שם פסוק יט)": his words on another verse of the chapter just cited`, () => {
     const cs = scan([`כתיב (דברים כ"ט, י"ח) כי בשרירות, ועיין רש"י (שם פסוק יט) שכתב`]);

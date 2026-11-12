@@ -166,6 +166,8 @@ export class CitationScanner {
   readonly citations: Citation[] = [];
   private seq = 0;
   private last: { c: Citation; line: number; elems: readonly AddrElem[] } | null = null;
+  /** the last citation of a daf of the Gemara — kept across headings (implicit(): "(דף כ"ח)" in the ב"ח) */
+  private lastTalmud: { c: Citation; line: number } | null = null;
   /** the last citation is beyond the ibid window (FAR_WINDOW at most) */
   private lastFar = false;
   private lastLineSeen = -1;
@@ -999,6 +1001,13 @@ export class CitationScanner {
       const ctxFirst = !daf && !near ? this.contextBook() : null;
       if (elems && !ctxFirst) return this.emit(toks, line, { from: i, to: addr.to, candidates: last.c.candidates, name: "", elems, evidence: addr.evidence, bracketed: true, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: near ? "implicit-previous" : "implicit-previous-far" });
     }
+    // "(דף כ"ח)" with the word "דף", a few lines after a daf of the Gemara was cited, across the headings of a book in
+    // small sections (the ב"ח on the Tur: "סעיף קטן כג" between them): that tractate — "possible", like a far "שם"
+    const lt = this.lastTalmud;
+    if (daf && es[0]!.explicit && !last && lt && line > lt.line && line - lt.line <= IMPLICIT_ACROSS && this.base?.collection !== "bavli") {
+      const cands = this.own((lt.c.movedFrom ?? lt.c.candidates).filter((x) => x.collection === "bavli" && !x.book.title.includes(" על ")));
+      if (cands.length) return this.emit(toks, line, { from: i, to: addr.to, candidates: cands, name: "", elems: es, evidence: addr.evidence, bracketed: true, ibid: "partial", ibidOf: lt.c.seq, form: "forward", numericName: false, commentators: false, rule: "implicit-previous-far" });
+    }
     const ctx = daf ? (this.base?.collection === "bavli" ? this.base : null) : verse && es.length === 1 ? null : this.contextBook();
     if (!ctx) return null;
     // a book named a few words before is the location's book, not the context's ("בסוף גיטין … [דף פ"ט]")
@@ -1298,6 +1307,7 @@ export class CitationScanner {
     };
     this.citations.push(cit);
     this.last = { c: cit, line, elems: c.elems };
+    if (c.elems[0] && (c.elems[0].kind === "daf" || c.elems[0].amud !== undefined) && (cit.movedFrom ?? cit.candidates).some((x) => x.collection === "bavli" && !x.book.title.includes(" על "))) this.lastTalmud = { c: cit, line };
     return c.to;
   }
 
@@ -1400,6 +1410,8 @@ const TRACTATE_NICKNAMES = /^[ובד]{0,2}(?:בתרא|קמא|מציעא)$/;
 
 /** how many lines back a bare location in brackets may take its book from the citation before it */
 const IMPLICIT_WINDOW = 3;
+/** …and how far "(דף X)" may reach back to a daf of the Gemara across headings */
+const IMPLICIT_ACROSS = 6;
 
 /** the word "דף" with a ב/ו ("בדף", "ובדף") — not "ד'" */
 const DAF_WORD = /^(?:ו?ב)?דף$/;
