@@ -1,4 +1,5 @@
 import type { LinkSide } from "../../../core/links/model";
+import { sefariaOwnedOf, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { toGematria } from "../../../core/text/gematria";
 import {
   confidenceOf,
@@ -28,7 +29,7 @@ import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from 
 
 export type { NumberingMode } from "./numbering";
 
-export interface HeadingsOptions {
+export interface HeadingsOptions extends SefariaOwnedOption {
   /** "Conection Type" of every suggestion. Default "source" (see below). */
   readonly declaredType?: string;
   /**
@@ -95,6 +96,13 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   const unmatched: { line: number; reasons: Reason[] }[] = [];
   const aborted = () => ctx.signal?.aborted === true;
   const done = (): EngineResult => ({ suggestions, notes, unmatched });
+  /**
+   * No range on a base the library treats as Sefaria's — the one predicate of the export and the other
+   * engines (core/links/sefaria-owned.ts): the sync remaps only the start line from ref_2, so an end
+   * would drift, and a submission refuses it (validate.ts sefaria/range-side; product audit F1).
+   */
+  const baseRanges = !sefariaOwnedOf(options.sefariaOwned)(base.book);
+  const sideAt = (start: number, end: number) => sideOf(base, start, baseRanges ? end : start);
 
   const cs = analyzeBook(commentary, opts);
   const bs = analyzeBook(base, opts);
@@ -235,7 +243,7 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       }
     }
     const confidence: Confidence = confidenceOf(score, runnerUp, opts.thresholds);
-    const { reasons, warnings, rules } = explain(chosen, base);
+    const { reasons, warnings, rules } = explain(chosen, base, baseRanges);
     if (section && inside.length && inside.length < all.length) rules.push("headings.inside-section");
     if (outsideSection) {
       warnings.push({ code: "heading/outside-section", text: `המקום שנמצא אינו בתוך המקום של הקטע שהשורה שייכת אליו (${describe(section.path)}), ולכן הביטחון הוגבל ל"אפשרית"` });
@@ -265,7 +273,7 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     }
     if (chosen.alignment.missing) partial++;
     if (confidence === "certain" || confidence === "high") prevStart = chosen.start;
-    const target = sideOf(base, chosen.start, chosen.end);
+    const target = sideAt(chosen.start, chosen.end);
     const source: LinkSide = { book: commentary.book, line: srcIndex };
     suggestions.push({
       id: suggestionId(commentary, srcIndex, target),
@@ -281,7 +289,7 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       alternatives: cands
         .filter((c) => c !== chosen)
         .slice(0, opts.maxAlternatives)
-        .map((c): Candidate => ({ target: sideOf(base, c.start, c.end), score: round(c.score), reasons: explain(c, base).reasons })),
+        .map((c): Candidate => ({ target: sideAt(c.start, c.end), score: round(c.score), reasons: explain(c, base, baseRanges).reasons })),
       warnings,
     });
   }
@@ -459,7 +467,7 @@ function display(e: PathElement): string {
 
 const describe = (P: readonly PathElement[]) => P.map(display).join(", ");
 
-function explain(s: Scored, base: EngineBook): { reasons: Reason[]; warnings: Reason[]; rules: string[] } {
+function explain(s: Scored, base: EngineBook, ranges = true): { reasons: Reason[]; warnings: Reason[]; rules: string[] } {
   const reasons: Reason[] = [];
   const warnings: Reason[] = [];
   const rules = new Set<string>();
@@ -480,7 +488,10 @@ function explain(s: Scored, base: EngineBook): { reasons: Reason[]; warnings: Re
       text: `${display(firstMissing)} לא נמצא בספר הבסיס תחת ${describe(s.path)}; הקישור הוא ל${describe(s.path)} כולו`,
     });
   }
-  if (s.end > s.start && !s.unit.marker) {
+  if (s.end > s.start && !s.unit.marker && !ranges) {
+    // a Sefaria base: the link goes to the section's first line, with no range end
+    reasons.push({ code: "heading/range-sefaria", text: `הקישור לתחילת ${describe(s.path)} בלבד: זה ספר של ספריא, והספרייה לא מקבלת טווח בצד שלו` });
+  } else if (s.end > s.start && !s.unit.marker) {
     rules.add("headings.range");
     const from = base.lines[s.start]!.index + 1;
     const to = base.lines[s.end]!.index + 1;

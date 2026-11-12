@@ -23,6 +23,10 @@ export interface RangesHost {
   notify(kind: NoticeKind, text: string, details?: string[], action?: { label: string; run: () => void }): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
   undo(): void;
+  /** the one answer to "is this a Sefaria book" (AppStore.isSefariaOwned, core/links/sefaria-owned.ts) */
+  isSefariaOwned?(book: { readonly title: string; readonly key?: string }): boolean;
+  /** what the export is for: a submission to the library refuses a range on a Sefaria side */
+  readonly exportPurpose?: ReadonlySignal<"submission" | "private">;
 }
 
 export class RangesState {
@@ -69,6 +73,12 @@ export class RangesState {
     const book = await this.book(bookKey);
     if (!book) return null;
     const title = this.host.books.value.get(bookKey)?.title ?? "";
+    // a range on a Sefaria side drifts (the sync remaps only its start) and a submission refuses it
+    // (validate.ts sefaria/range-side): the completion would only make errors (product audit F1)
+    if (this.host.exportPurpose?.value !== "private" && this.host.isSefariaOwned?.({ title, key: bookKey })) {
+      this.host.notify("warning", `הטווחים לא הושלמו: "${title}" הוא ספר של ספריא, והספרייה לא מקבלת טווח בצד שלו (סוף הטווח לא מתעדכן איתה). אם הקישורים לשימושכם בלבד, בחרו בחלון הייצוא "שימוש פרטי" ונסו שוב.`);
+      return null;
+    }
     const r = fillRanges(this.links(), book, side, { onlyRanged });
     if (r.skippedNoText) {
       this.host.notify("warning", `אורך הספר "${title}" עדיין לא ידוע, ולכן הטווחים לא הושלמו. פתחו את הספר בקורא ונסו שוב.`);
