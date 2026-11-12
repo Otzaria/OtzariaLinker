@@ -85,7 +85,9 @@ describe("QA report as HTML", () => {
 
   it("has a fix for every category, and a specific one where the code has one", () => {
     for (const c of Object.keys(QA_CATEGORIES) as QaCategory[]) expect(suggestedFix("unknown/code", c)).toMatch(/\S/);
-    expect(suggestedFix("sefaria/ref2-side")).toContain("ref_2");
+    // plain words for everyone (audit F14): the field is named as the builder names it, not "ref_2"
+    expect(suggestedFix("sefaria/ref2-side")).toContain("ציון ספריא של היעד");
+    expect(suggestedFix("sefaria/ref2-side")).not.toContain("ref_2");
     expect(categoryOf("export/reversed-dependency")).toBe("type");
     expect(categoryOf("export/anchor-on-notes-line")).toBe("anchor");
   });

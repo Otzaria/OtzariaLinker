@@ -83,6 +83,7 @@ export function DbLinksPanel() {
 
 function Loaded({ summary }: { summary: DbLinkSummary }) {
   const store = useStore();
+  const advanced = store.prefs.advanced.value;
   const s = store.dbLinks;
   const f = s.filter.value;
   const list = s.list.value;
@@ -119,7 +120,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       <LineView side={side} />
       <div class="filters" role="group" aria-label="כיוון">
         {(["all", "out", "in"] as const).map((d) => (
-          <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? "הספר הוא צד המקור השמור (side 0)" : d === "in" ? "הספר הוא צד היעד השמור (side 1)" : undefined}>
+          <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? `הספר הוא צד המקור של הקישור במסד${advanced ? " (side 0)" : ""}` : d === "in" ? `הספר הוא צד היעד של הקישור במסד${advanced ? " (side 1)" : ""}` : undefined}>
             {d === "all" ? "שני הכיוונים" : d === "out" ? "יוצאים" : "נכנסים"} <span class="count">{(d === "all" ? summary.total : summary[d]).toLocaleString("he")}</span>
           </button>
         ))}

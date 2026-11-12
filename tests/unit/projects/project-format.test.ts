@@ -87,3 +87,25 @@ describe("project file — alt_toc (optional field of version 1)", () => {
     expect(p.skipped).toBe(4);
   });
 });
+
+describe("project file — the source's library switch (audit F2)", () => {
+  const bind = (b: { title: string; origin: BookRef["origin"] }): BookRef => ({ key: `s1:${b.title}`, title: b.title, origin: b.origin });
+  const sources = [
+    { label: "s1", kind: "text-files", books: 2, files: ["s1/בראשית.txt"], library: true },
+    { label: "אישי.db", kind: "otzaria-db", books: 3, library: false },
+    { label: "seforim.db", kind: "otzaria-db", books: 9 },
+  ];
+
+  it("round-trips as an optional field of version 1", () => {
+    const text = serializeProject({ sources, links: [], rejectedSuggestions: [], view: { source: null, target: null } }, "x");
+    expect(JSON.parse(text).version).toBe(1);
+    expect(parseProject(text, bind).sources).toEqual(sources);
+  });
+
+  it("an older project without it opens with no choice; a value that is not true/false is dropped", () => {
+    const old = JSON.stringify({ format: "otzaria-linker-project", version: 1, savedAt: "", app: "3.0.0", sources: [{ label: "s1", kind: "text-files", books: 2 }], links: [], rejectedSuggestions: [], view: { source: null, target: null } });
+    expect(parseProject(old, bind).sources).toEqual([{ label: "s1", kind: "text-files", books: 2 }]);
+    const odd = old.replace('"books":2', '"books":2,"library":"yes"');
+    expect(parseProject(odd, bind).sources[0]).not.toHaveProperty("library");
+  });
+});

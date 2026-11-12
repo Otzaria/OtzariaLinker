@@ -28,11 +28,11 @@ export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: s
   heading: { title: "קישור לכותרת", hint: "אוצריא מדלגת על קישור שאחד מקצותיו שורת כותרת" },
   anchor: { title: "עוגן לא תקין", hint: "העוגן ייזרק או יתקצר" },
   type: { title: "סוג קשר", hint: "סוג לא מוכר, או קישור שיישמר כ\"אחר\"" },
-  sefaria: { title: "כללי ספריא", hint: "שדות ref_1/ref_2 ועוגנים מול ספרי ספריא" },
+  sefaria: { title: "כללי ספריא", hint: "ציוני ספריא, טווחים ועוגנים בקישורים לספרי ספריא" },
   title: { title: "שם ספר", hint: "שם שאוצריא מנרמלת או ממזגת" },
-  reference: { title: "שם המקום", hint: "heRef_2 חסר" },
+  reference: { title: "שם המקום", hint: "שם המקום ביעד חסר" },
   unverified: { title: "לא נבדק", hint: "השורה לא נטענה, ולכן לא נבדקה" },
-  "in-db": { title: "כבר במסד", hint: "המסד הפתוח כבר מכיל קישור בין אותן שורות (לפי כלל השוויון האחד, core/links/equality.ts)" },
+  "in-db": { title: "כבר במסד", hint: "המסד הפתוח כבר מכיל קישור בין אותן שורות" },
   "db-copy": { title: "הועתק מהמסד", hint: "קישורים שהועתקו מהמסד: מה ששוחזר, ומה חסר כדי לייצא אותם בבטחה" },
   "library-file": { title: "קובץ הספרייה", hint: "הקובץ שייוצא יחליף את קובץ הקישורים של הספר בספרייה: טענו אותו מהספרייה או אשרו במפורש" },
   other: { title: "אחר", hint: "" },
@@ -92,22 +92,22 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/anchor-out-of-line": "סמנו מחדש את המילים בבונה.",
   "export/unknown-type": "בחרו בבונה סוג קשר מהרשימה.",
   "export/linker": "בחרו בבונה סוג קשר אחר.",
-  "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\" (source).",
+  "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\".",
   "export/sefaria-both": "מחקו את הקישור, או קשרו לספר שאינו של ספריא.",
-  "export/heref-missing": "כתבו בבונה שם מקום (heRef_2), למשל שם הספר ומספר הפרק.",
+  "export/heref-missing": "כתבו בבונה שם מקום ביעד, למשל שם הספר ומספר הפרק.",
   "export/line-not-verified": "פתחו את הספר (או את המסד שבו הוא נמצא) והריצו את הבדיקה שוב.",
   "export/in-db": "אם הקישור כבר נמצא בספרייה, מחקו אותו מהפרויקט.",
   "export/in-db-other-type": "אין צורך לתקן. ודאו שאינכם יוצרים קישור כפול.",
-  "export/db-copy": "בדקו את heRef_2 ואת סוג הקשר לפני הייצוא.",
+  "export/db-copy": "בדקו את שם המקום ביעד ואת סוג הקשר לפני הייצוא.",
   "export/file-held": "תקנו את הבעיה של הקובץ כולו שמתוארת בהסבר.",
   "export/unsafe-title": "שנו את שם הספר במקור שלו.",
   "export/title-not-normalized": "כתבו את שם הספר בדיוק כפי שהוא במסד.",
-  "sefaria/both-refs": "הסירו אחד מהשדות ref_1 או ref_2.",
-  "sefaria/ref1-side": "הסירו את ref_1.",
-  "sefaria/ref2-side": "הסירו את ref_2.",
+  "sefaria/both-refs": "הסירו בבונה את אחד משני ציוני ספריא.",
+  "sefaria/ref1-side": "הסירו בבונה את ציון ספריא של המקור.",
+  "sefaria/ref2-side": "הסירו בבונה את ציון ספריא של היעד.",
   "sefaria/both-sides": "מחקו את הקישור: קישור בין שני ספרי ספריא לא נשלח מקובץ.",
-  "sefaria/ref1-required": "כתבו את ציון ספריא באנגלית של שורת המקור (ref_1), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
-  "sefaria/ref2-required": "כתבו את ציון ספריא באנגלית של שורת היעד (ref_2), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
+  "sefaria/ref1-required": "כתבו בבונה את ציון ספריא של שורת המקור (באנגלית), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
+  "sefaria/ref2-required": "כתבו בבונה את ציון ספריא של שורת היעד (באנגלית), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
   "sefaria/range-side": "קשרו שורה אחת במקום טווח בצד של ספר ספריא.",
   "sefaria/anchor-range": "השאירו עוגן על מילה אחת, בלי סוף.",
   "sefaria/anchor-into-sefaria": "הסירו את העוגן.",
@@ -122,7 +122,7 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
   heading: FIX_BY_CODE["export/heading-line"]!,
   anchor: "סמנו מחדש את המילים בבונה, או הסירו את העוגן.",
   type: "בחרו בבונה סוג קשר מתאים.",
-  sefaria: "תקנו את שדות ref_1/ref_2 או את העוגן לפי ההסבר.",
+  sefaria: "תקנו את ציון ספריא או את העוגן לפי ההסבר.",
   title: "בדקו את שם הספר מול השם שבמסד.",
   reference: FIX_BY_CODE["export/heref-missing"]!,
   unverified: FIX_BY_CODE["export/line-not-verified"]!,
@@ -198,10 +198,10 @@ export function redundantDuplicates(report: QaReport): string[] {
 /** The report as CSV (UTF-8 with BOM so Excel shows Hebrew), for review outside the tool. */
 export function qaCsv(report: QaReport): string {
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const head = ["חומרה", "קטגוריה", "ספר מקור", "שורת מקור", "ספר יעד", "שורת יעד", "heRef_2", "סוג", "הסבר", "קוד"];
+  const head = ["חומרה", "קטגוריה", "ספר מקור", "שורת מקור", "ספר יעד", "שורת יעד", "שם המקום ביעד", "סוג", "הסבר", "קוד", "פרטים טכניים"];
   const sev: Record<Severity, string> = { error: "שגיאה", warning: "אזהרה", info: "מידע" };
   const rows = report.issues.map((i) =>
-    [sev[i.problem.severity], QA_CATEGORIES[i.category].title, i.link.source.book.title, i.link.source.line + 1, i.link.target.book.title, i.link.target.line + 1, i.link.heRef2, i.link.declaredType, i.problem.message, i.problem.code].map(esc).join(","),
+    [sev[i.problem.severity], QA_CATEGORIES[i.category].title, i.link.source.book.title, i.link.source.line + 1, i.link.target.book.title, i.link.target.line + 1, i.link.heRef2, i.link.declaredType, i.problem.message, i.problem.code, i.problem.detail ?? ""].map(esc).join(","),
   );
   return `﻿${[head.map(esc).join(","), ...rows].join("\r\n")}\r\n`;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { mappingGaps, recordsToLinksFiles, type FieldOrFixed, type RecordsMapping, type RecordsTable } from "../../formats/records/records";
 import { TYPE_CHOICES } from "../../state/store";
 import { useStore } from "../context";
@@ -133,7 +134,8 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
                           <td>{String(r.line_index_1)}</td>
                           <td>{String(r.path_2).replace(/\.txt$/i, "")}</td>
                           <td>{String(r.line_index_2)}</td>
-                          <td>{String(r["Conection Type"])}</td>
+                          {/* the type as the builder names it; the file's raw value only in advanced mode (audit F14) */}
+                          <td>{advanced ? String(r["Conection Type"]) : TYPE_LABELS[parseConnectionType(String(r["Conection Type"] ?? "")).type].he}</td>
                         </tr>
                       )),
                     )}

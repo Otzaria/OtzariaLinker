@@ -78,3 +78,36 @@ describe("ranges through the store", () => {
     expect(store.allLinks.value.every((l) => l.source.end === undefined)).toBe(true);
   });
 });
+
+describe("range completion on a book the library treats as Sefaria's (audit F1)", () => {
+  const GEN = file("בראשית.txt", ["<h1>בראשית</h1>", "<h2>פרק א</h2>", "א", "ב", "ג", "ד"]);
+  const MINE = file("הערות לספר.txt", ["<h1>הערות לספר</h1>", "הערה 1", "הערה 2"]);
+
+  it("a submission: no ranges are made on the Sefaria side, and the notice says why; for private use they are", async () => {
+    const store = makeStore();
+    await store.openFiles([GEN, MINE]);
+    const gen = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    const notes = [...store.books.value.values()].find((b) => b.title === "הערות לספר")!;
+    for (const b of [gen, notes]) {
+      store.lines.line(b.key, 0);
+      await vi.waitFor(() => expect(store.lines.count(b.key)).toBeDefined());
+    }
+    // the text file is the library's edition: the user says so with the source's switch
+    for (const s of store.sources.value) store.setLibrarySource(s.info.id, true);
+    expect(store.isSefariaOwned(store.refOf(gen.key))).toBe(true);
+    for (const [src, tgt] of [[2, 1], [4, 2]] as const) {
+      store.pickLine("source", gen.key, src);
+      store.pickLine("target", notes.key, tgt);
+      store.draftType.value = "footnotes";
+      store.createFromDraft();
+    }
+    expect(store.allLinks.value.length).toBe(2);
+
+    expect(await store.ranges.fill(gen.key, "source", false)).toBeNull();
+    expect(store.allLinks.value.every((l) => l.source.end === undefined)).toBe(true);
+    expect(store.notices.value.at(-1)?.text).toContain("ספר של ספריא");
+
+    store.exportPurpose.value = "private";
+    expect(await store.ranges.fill(gen.key, "source", false)).toBe(2);
+  });
+});

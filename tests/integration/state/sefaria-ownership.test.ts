@@ -105,6 +105,49 @@ describe("a text file named like a Sefaria book is the user's book (F2)", () => 
     expect(store.isSefariaOwned(store.refOf(base.key))).toBe(false);
   });
 
+  it("the switch is saved in the project and comes back when the source is opened again — before or after the project", async () => {
+    const { store } = makeStore();
+    await store.openFiles([BASE, COMM]);
+    const base = bookOf(store, "בראשית");
+    store.setLibrarySource(base.key.slice(0, base.key.indexOf(":")), true);
+    await dhRunApproved(store);
+    const text = store.projectText();
+    expect(JSON.parse(text).sources[0].library).toBe(true);
+
+    // the project first, then its files
+    const a = makeStore().store;
+    a.openProject("p.otzlinker.json", text);
+    await a.openFiles([BASE, COMM]);
+    const aBase = bookOf(a, "בראשית");
+    expect(a.isLibrarySource(aBase.key.slice(0, aBase.key.indexOf(":")))).toBe(true);
+    expect(a.isSefariaOwned(a.refOf(aBase.key))).toBe(true);
+    // saved again, the choice is kept
+    expect(JSON.parse(a.projectText()).sources[0].library).toBe(true);
+
+    // the files first, then the project
+    const b = makeStore().store;
+    await b.openFiles([BASE, COMM]);
+    const bBase = bookOf(b, "בראשית");
+    expect(b.isSefariaOwned(b.refOf(bBase.key))).toBe(false);
+    b.openProject("p.otzlinker.json", text);
+    expect(b.isSefariaOwned(b.refOf(bBase.key))).toBe(true);
+    // the user's switch in this session wins over the saved one
+    b.setLibrarySource(bBase.key.slice(0, bBase.key.indexOf(":")), false);
+    expect(b.isSefariaOwned(b.refOf(bBase.key))).toBe(false);
+    expect(JSON.parse(b.projectText()).sources[0].library).toBe(false);
+
+    // other files are not that source: the choice does not move to them
+    const c = makeStore().store;
+    c.openProject("p.otzlinker.json", text);
+    await c.openFiles([txt("s2/בראשית.txt", BASE_LINES)]);
+    expect(c.isSefariaOwned(c.refOf(bookOf(c, "בראשית").key))).toBe(false);
+
+    // a source the user never switched saves no choice
+    const d = makeStore().store;
+    await d.openFiles([BASE, COMM]);
+    expect(JSON.parse(d.projectText()).sources[0].library).toBeUndefined();
+  });
+
   it("a folder that is a library checkout (it has the library's Sefaria list) is the library", async () => {
     const { store } = makeStore();
     await store.openFiles([txt("otzaria-library/books/בראשית.txt", BASE_LINES), txt("otzaria-library/.github/data/sefaria_he_titles.txt", ["בראשית"])]);

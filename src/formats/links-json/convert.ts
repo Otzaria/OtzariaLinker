@@ -27,7 +27,7 @@ export function recordToLink(
   const title = titleFromPath2(rec.path_2);
   let book = resolve(title);
   if (!book) {
-    warn("record/target-not-found", `הספר "${title}" (מ־path_2) לא נמצא בשם מדויק בין הספרים הפתוחים. הגנרטור ידלג על רשומה כזו אם השם לא קיים במסד.`);
+    warn("record/target-not-found", `הספר "${title}" לא נמצא בשם מדויק בין הספרים הפתוחים. אוצריא תדלג על קישור כזה אם השם לא קיים במסד.`);
     book = { key: `unresolved:${title}`, title, origin: "unknown" };
   }
 
@@ -35,11 +35,11 @@ export function recordToLink(
     const line = toLine(oneBased);
     if (endOneBased === undefined) return { book: sourceBook, line };
     const end = toLine(endOneBased);
-    if (end < line) warn("record/range-reversed", `${key} קטן משורת ההתחלה. הגנרטור מתעלם מהטווח ומשאיר את הקישור לשורה אחת.`);
+    if (end < line) warn("record/range-reversed", `${key} לפני שורת ההתחלה. אוצריא מתעלמת מהטווח ומשאירה את הקישור לשורה אחת.`);
     return end > line ? { book: sourceBook, line, end } : { book: sourceBook, line };
   };
-  const source = side(rec.line_index_1, rec.line_index_1_end, "line_index_1_end");
-  const target = { ...side(rec.line_index_2, rec.line_index_2_end, "line_index_2_end"), book };
+  const source = side(rec.line_index_1, rec.line_index_1_end, "סוף הטווח במקור");
+  const target = { ...side(rec.line_index_2, rec.line_index_2_end, "סוף הטווח ביעד"), book };
 
   const label = anchorLabelFromHeRef(rec.heRef_2);
   const link: Link = {

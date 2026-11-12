@@ -177,7 +177,11 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   const createNow = () => {
     const made = store.createFromDraft();
     if (made) store.notify("success", "הקישור נוצר (Ctrl+Z מבטל).");
-    else if (store.draftProblems.value.length) store.notify("error", `הקישור לא נוצר: ${store.draftProblems.value.find((p) => p.severity === "error")?.message ?? ""}`);
+    else if (store.draftProblems.value.length) {
+      // the plain words; the file's field name only in the notice's details (audit F14)
+      const p = store.draftProblems.value.find((x) => x.severity === "error");
+      store.notify("error", `הקישור לא נוצר: ${p?.message ?? ""}`, p?.detail ? [p.detail] : undefined);
+    }
   };
 
   const onKey = (e: KeyboardEvent) => {

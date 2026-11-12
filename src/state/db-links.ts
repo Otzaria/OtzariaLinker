@@ -5,7 +5,7 @@ import { dbLinkOrigin, type DbLinkDirection, type DbLinkQuery, type DbLinkSummar
 import { linkMatchIndex, matchLink, storedLinkIdentity, type LinkMatch, type LinkMatchIndex } from "../core/links/equality";
 import { adoptDbLink } from "../core/links/from-db";
 import type { BookRef, Link } from "../core/links/model";
-import type { LinksFileState, Problem } from "../core/links/validate";
+import { problemText, type LinksFileState, type Problem } from "../core/links/validate";
 import { sourceTitleFromLinksFileName } from "../core/links/titles";
 import { addChanges, commit, deleteChange, linksCount, type Change, type LinkState } from "./history";
 import { CHUNK, type LineStore } from "./lines";
@@ -33,6 +33,8 @@ export interface DbLinksHost {
   readonly exchange: { importLinksFile: ExchangeState["importLinksFile"] };
   loadSefariaTitles(path: string, text: string): boolean;
   isSefariaOwned(book: { readonly title: string }): boolean;
+  /** advanced mode: a notice's details carry the problems' technical side (audit F14) */
+  readonly prefs?: { readonly advanced: ReadonlySignal<boolean> };
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
 }
@@ -221,7 +223,8 @@ export class DbLinksState {
       const r = adoptDbLink(l, `c:${Date.now().toString(36)}:${(++this.copySeq).toString(36)}`, ctx);
       const where = `${l.source.book.title} ${l.source.line + 1} ← ${l.target.book.title} ${l.target.line + 1}`;
       if (!r.link) {
-        blocked.push(`${where}: ${r.problems.find((p) => p.severity === "error")?.message ?? ""}`);
+        const why = r.problems.find((p) => p.severity === "error");
+        blocked.push(`${where}: ${why ? problemText(why, this.host.prefs?.advanced.peek()) : ""}`);
         continue;
       }
       made.push(r.link);
@@ -234,11 +237,11 @@ export class DbLinksState {
     if (made.length) {
       this.host.linkState.value = commit(this.host.linkState.value, made.length === 1 ? "העתקת קישור מהמסד" : `העתקת ${linksCount(made.length)} מהמסד`, addChanges(made));
       this.selected.value = new Set();
-      const details = [...notes.values()].map(({ problem, n }) => `${n > 1 ? `(${n}) ` : ""}${problem.message}`);
+      const details = [...notes.values()].map(({ problem, n }) => `${n > 1 ? `(${n}) ` : ""}${problemText(problem, this.host.prefs?.advanced.peek())}`);
       const missing = [...new Set(made.map((m) => m.source.book.title))].filter((t) => this.linksFile(t) === "missing");
       this.host.notify(
         missing.length ? "warning" : "success",
-        `${made.length === 1 ? "הקישור הועתק" : `הועתקו ${linksCount(made.length)}`} לפרויקט. שם המקום (heRef_2) נלקח מהמסד — בדקו אותו.${missing.length ? ` לפני ייצוא טענו את קובץ הקישורים של ${missing.map((t) => `"${t}"`).join(", ")} מהספרייה: ייצוא בלעדיו היה מחליף את הקובץ שבספרייה.` : ""}`,
+        `${made.length === 1 ? "הקישור הועתק" : `הועתקו ${linksCount(made.length)}`} לפרויקט. שם המקום ביעד נלקח מהמסד — בדקו אותו.${missing.length ? ` לפני ייצוא טענו את קובץ הקישורים של ${missing.map((t) => `"${t}"`).join(", ")} מהספרייה: ייצוא בלעדיו היה מחליף את הקובץ שבספרייה.` : ""}`,
         details,
       );
     }

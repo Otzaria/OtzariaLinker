@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import type { ValidationContext } from "../../../src/core/links/validate";
+import { problemText, type ValidationContext } from "../../../src/core/links/validate";
 import { qaCsv, redundantDuplicates, runQa } from "../../../src/linking/qa";
 import { planExport } from "../../../src/formats/links-json/export";
 
@@ -41,6 +41,16 @@ describe("QA report", () => {
     const csv = qaCsv(report);
     expect(csv.startsWith("﻿")).toBe(true);
     expect(csv.split("\r\n").length).toBe(report.issues.length + 2);
+  });
+
+  it("keeps the plain words in the text and the field names apart, for advanced mode and the saved reports (audit F14)", () => {
+    const r = runQa([mk("noref", { heRef2: " " })], ctx);
+    const missing = r.issues.find((i) => i.problem.code === "export/heref-missing")!.problem;
+    expect(missing.message).not.toContain("heRef_2");
+    expect(missing.detail).toBe("heRef_2");
+    expect(problemText(missing)).toBe(missing.message);
+    expect(problemText(missing, true)).toBe(`${missing.message} (heRef_2)`);
+    expect(qaCsv(r)).toContain('"export/heref-missing","heRef_2"');
   });
 });
 

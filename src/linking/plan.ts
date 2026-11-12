@@ -738,7 +738,7 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
         engine: "dibur-hamatchil",
         source: rel.dependant,
         target: rel.base,
-        why: `${d} מובאת ב־${b} (${VIA_TEXT[rel.via]}). שיטת דיבור המתחיל מחפשת את מילות הפתיחה של כל משנה בגמרא. הקישורים נכתבים מסוג "משנה בתלמוד" (mishnah_in_talmud), כמו במסד; הגנרטור שומר סוג זה כפי שנכתב, בלי היפוך ובלי הורדה ל"אחר".${tail}`,
+        why: `${d} מובאת ב־${b} (${VIA_TEXT[rel.via]}). שיטת דיבור המתחיל מחפשת את מילות הפתיחה של כל משנה בגמרא. הקישורים נכתבים מסוג "משנה בתלמוד", כמו במסד; אוצריא שומרת סוג זה כפי שנכתב, בלי היפוך ובלי הורדה ל"אחר".${tail}`,
         options: { declaredType: "mishnah_in_talmud" },
       },
     ];

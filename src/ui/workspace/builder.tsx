@@ -1,4 +1,5 @@
 import { useEffect } from "preact/hooks";
+import { problemText } from "../../core/links/validate";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
@@ -112,7 +113,8 @@ export function Builder() {
           {problems.map((p) => (
             <li key={p.code} class={p.severity}>
               <Icon name={p.severity === "error" ? "fl_error_circle" : p.severity === "warning" ? "fl_warning" : "fl_info"} size={16} />
-              <span>{p.message}</span>
+              {/* the file's field names only in advanced mode (audit F14) */}
+              <span>{problemText(p, advanced)}</span>
             </li>
           ))}
         </ul>

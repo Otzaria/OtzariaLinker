@@ -127,6 +127,23 @@ describe("maxlinkJob — notes on a main book with no note marks (Sefaria's note
     // the note under "פרק א › פסוק ב" → the main book's line "(ב)" of פרק א
     expect(r.suggestions.map((x) => [x.engine, x.source.line, x.target.line])).toContainEqual(["headings", 3, 3]);
   });
+
+  it("the headings fallback gets the library's Sefaria answer: no range on a Sefaria main book (audit F1)", async () => {
+    const main = text("ספר בלי סימנים.txt", ["<h1>ספר בלי סימנים</h1>", "<h2>פרק א</h2>", "(א) שורה ראשונה של הפרק", "(ב) שורה שנייה של הפרק"]);
+    // a note on the chapter as a whole: by headings it links to the chapter's lines, a range
+    const notes = text("הערות לספר בלי סימנים.txt", ["<h1>הערות לספר בלי סימנים</h1>", "<h2>פרק א</h2>", "הערה על כל הפרק"]);
+    const reg = new SourceRegistry();
+    const books = (await reg.open([main, notes])).sources.flatMap((s) => s.books);
+    const mainKey = books.find((b) => !b.title.startsWith("הערות"))!.key;
+    const plan = planMaxLink({ selected: [books.find((b) => b.title.startsWith("הערות"))!.key], library: books, singleEngines: [] });
+    const targetOf = async (sefariaOwned?: string[]) => {
+      const r = (await maxlinkJob(reg, plan.steps, sefariaOwned ? { sefariaOwned } : {}, {})).items[0]!.result!;
+      expect(r.notes[0]!.code).toBe("maxlink/notes-by-headings");
+      return r.suggestions.find((x) => x.engine === "headings" && x.source.line === 2)!.target;
+    };
+    expect(await targetOf()).toMatchObject({ line: 2, end: 3 });
+    expect((await targetOf([mainKey])).end).toBeUndefined();
+  });
 });
 
 describe("maxlinkJob — the citations engine (single-book)", () => {

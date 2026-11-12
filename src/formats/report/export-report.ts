@@ -1,6 +1,7 @@
 import { pushTo } from "../../core/collections";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { isRange, type Link } from "../../core/links/model";
+import { problemText } from "../../core/links/validate";
 import type { AltTocExportPlan } from "../alt-toc/export";
 import type { ExportPlan } from "../links-json/export";
 import type { SefariaCsvFile } from "../sefaria-csv/write";
@@ -27,6 +28,8 @@ export interface ReportInput {
   altToc: AltTocExportPlan;
   /** what the export is for: the next steps put its route first (default: the library) */
   purpose?: ExportPurpose;
+  /** advanced mode: the problems carry their technical detail (the file's field names; audit F14) */
+  technical?: boolean;
 }
 
 const RULE = (ch: string) => ch.repeat(60);
@@ -62,7 +65,7 @@ export function buildExportReport(r: ReportInput): string {
   L.push(row("טווחים בצד המקור", w.filter((l) => isRange(l.source)).length));
   L.push(row("טווחים בצד היעד", w.filter((l) => isRange(l.target)).length));
   L.push(row("עוגני מילה", w.filter((l) => l.anchor).length));
-  L.push(row("שדות ref_1/ref_2", w.reduce((n, l) => n + (l.ref1 ? 1 : 0) + (l.ref2 ? 1 : 0), 0)));
+  L.push(row(r.technical ? "ציוני ספריא (ref_1/ref_2)" : "ציוני ספריא", w.reduce((n, l) => n + (l.ref1 ? 1 : 0) + (l.ref2 ? 1 : 0), 0)));
   L.push(row("מבני כותרות (alt_toc)", altToc.files.reduce((n, f) => n + f.structures, 0)));
   L.push(row("קובצי alt_toc", altToc.files.length));
   if (altToc.heldBack.length) L.push(row("ספרים שמבני הכותרות שלהם לא ייוצאו", altToc.heldBack.length));
@@ -104,7 +107,7 @@ export function buildExportReport(r: ReportInput): string {
   if (errs.length) {
     section(`קישורים שלא ייוצאו (${errs.length.toLocaleString("he")})`, "!");
     for (const { link, problems } of errs.slice(0, LIMIT))
-      L.push(`  ✗ ${linkPlace(link)}: ${problems.filter((p) => p.severity === "error").map((p) => p.message).join(" ")}`);
+      L.push(`  ✗ ${linkPlace(link)}: ${problems.filter((p) => p.severity === "error").map((p) => problemText(p, r.technical)).join(" ")}`);
     if (errs.length > LIMIT) L.push(`  … ועוד ${(errs.length - LIMIT).toLocaleString("he")}`);
   }
   if (altToc.heldBack.length) {
@@ -119,7 +122,7 @@ export function buildExportReport(r: ReportInput): string {
   if (warned.length || altWarnings.length) {
     section(`אזהרות (${(warned.length + altWarnings.length).toLocaleString("he")})`);
     for (const { link, problems } of warned.slice(0, LIMIT))
-      L.push(`  • ${linkPlace(link)}: ${problems.filter((p) => p.severity !== "info").map((p) => p.message).join(" ")}`);
+      L.push(`  • ${linkPlace(link)}: ${problems.filter((p) => p.severity !== "info").map((p) => problemText(p, r.technical)).join(" ")}`);
     if (warned.length > LIMIT) L.push(`  … ועוד ${(warned.length - LIMIT).toLocaleString("he")}`);
     for (const m of altWarnings.slice(0, LIMIT)) L.push(`  • ${m}`);
   }

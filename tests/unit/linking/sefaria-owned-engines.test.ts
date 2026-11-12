@@ -82,6 +82,28 @@ describe("one rule for 'Sefaria book' in the engines and the export (audit F1)",
     expect(sefariaCodes(after.suggestions, owned)).toEqual([]);
   });
 
+  it("headings: no range on a base the library treats as Sefaria's (the same predicate)", () => {
+    // a commentary on the chapter as a whole: the engine links it to the chapter's lines, a range
+    const onChapter: EngineBook = { book: COMM, lines: lines(["<h1>ביאור חדש על בראשית</h1>", "<h2>פרק א</h2>", "הסבר כללי על כל הפרק."]) };
+    const rangeErrors = (ss: readonly Suggestion[], o: (b: BookRef) => boolean) =>
+      ss.flatMap((s) => validateLink(asLink(s), ctxFor(o, "submission")).filter((p) => p.code === "sefaria/range-side").map((p) => p.code));
+    const before = runEngine("headings", onChapter, base, {});
+    expect(before.suggestions.length).toBe(1);
+    expect(before.suggestions[0]!.target).toMatchObject({ line: 2, end: 5 });
+    expect(rangeErrors(before.suggestions, owned)).toEqual(["sefaria/range-side"]);
+
+    const r = runEngine("headings", onChapter, base, { sefariaOwned: [BASE.key] });
+    expect(r.suggestions.length).toBe(1);
+    expect(r.suggestions[0]!.target.line).toBe(2);
+    expect(r.suggestions[0]!.target.end).toBeUndefined();
+    expect(r.suggestions[0]!.reasons.map((x) => x.code)).toContain("heading/range-sefaria");
+    expect(rangeErrors(r.suggestions, owned)).toEqual([]);
+    expect(r.suggestions.flatMap((s) => s.alternatives).every((c) => c.target.end === undefined)).toBe(true);
+
+    // a base the library does not treat as Sefaria's keeps its range
+    expect(runEngine("headings", onChapter, base, { sefariaOwned: [] }).suggestions[0]!.target.end).toBe(5);
+  });
+
   it("citations: no anchor and no range into a book the library treats as Sefaria's", () => {
     const citing: EngineBook = { book: COMM, lines: lines(["<h1>ביאור חדש על בראשית</h1>", "כמו שכתוב (בראשית א) וכן (בראשית א, ב) הלאה."]) };
     // בראשית with heRefs as the database has them (origin "otzaria": a book the database did not mark as Sefaria's)

@@ -44,7 +44,7 @@ describe("_report.txt", () => {
     expect(line("לא ייוצאו (שגיאה)")).toMatch(/ 1$/);
     expect(line("טווחים בצד המקור")).toMatch(/ 1$/);
     expect(line("עוגני מילה")).toMatch(/ 1$/);
-    expect(line("שדות ref_1/ref_2")).toMatch(/ 0$/);
+    expect(line("ציוני ספריא")).toMatch(/ 0$/); // plain words (audit F14); the field names only in advanced mode
     expect(line("מבני כותרות (alt_toc)")).toMatch(/ 1$/);
     expect(report).toContain("(commentary) — 1");
     expect(report).toContain("(reference) — 1");

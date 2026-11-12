@@ -36,6 +36,8 @@ export interface ExchangeHost {
   /** the link revision last written to disk — a saved export updates it */
   readonly savedRevision: Signal<number>;
   readonly exportPurpose: ReadonlySignal<"submission" | "private">;
+  /** advanced mode: the report carries the problems' technical detail (audit F14) */
+  readonly prefs?: { readonly advanced: ReadonlySignal<boolean> };
   readonly lines: Pick<LineStore, "peek">;
   readonly altToc: Pick<AltTocState, "loadLines" | "plan">;
   bookOf(ref: BookRef): SourceBook | undefined;
@@ -276,7 +278,7 @@ export class ExchangeState {
       changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
     }
     if (!changes.length) return;
-    this.commit(`השלמת ציוני ספריא (ref_1/ref_2) ל־${linksCount(changes.length)}`, changes);
+    this.commit(`השלמת ציוני ספריא ל־${linksCount(changes.length)}`, changes);
     // plain words: the notice also shows in simple mode and in the guided flow (the field names are in the history label)
     host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
   }
@@ -306,7 +308,7 @@ export class ExchangeState {
 
   /** `_report.txt` for a plan (and the CSV files, when exporting as CSV). */
   exportReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): string {
-    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc, purpose: this.host.exportPurpose.peek() });
+    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc, purpose: this.host.exportPurpose.peek(), technical: this.host.prefs?.advanced.peek() === true });
   }
 
   /** What to do with the files of this export, the route of its purpose first (audit F13). */
