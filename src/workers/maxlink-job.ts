@@ -85,7 +85,9 @@ export async function maxlinkJob(
           }
         }
         ctx.signal?.throwIfAborted();
-        result = runEngine(step.engine, loaded.source, loaded.target, optionsOf(step.engine), inner);
+        // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
+        const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
+        result = runEngine(step.engine, loaded.source, loaded.target, { ...step.options, ...user }, inner);
       } else {
         loaded = null;
         const run = runners[step.engine];
