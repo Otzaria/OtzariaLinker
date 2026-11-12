@@ -1,6 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import type { EngineContext, EngineResult } from "../linking/automatic";
-import { AliasIndex, buildHeadingsIndex, buildRefIndex, CitationRun, NamedUnitIndex, unitKindOf, unitsFromAltToc, type CatalogBook, type CitationsOptions, type NamedUnit, type NamedUnitSource, type TargetIndex, type UnitKind } from "../linking/automatic/citations";
+import { AliasIndex, dafStructureFromAltToc, type DafStructure, buildHeadingsIndex, buildRefIndex, CitationRun, NamedUnitIndex, unitKindOf, unitsFromAltToc, type CatalogBook, type CitationsOptions, type NamedUnit, type NamedUnitSource, type TargetIndex, type UnitKind } from "../linking/automatic/citations";
 import type { SourceRegistry } from "../sources/registry";
 
 /** Lines read per step of the source scan (as the in-book search). */
@@ -25,6 +25,9 @@ const aliasCache = new WeakMap<SourceRegistry, { sig: string; aliases: AliasInde
 /** another book's own named units (its alt_toc chapters / parshiyot), read when a unit cited by name points into it */
 const ownUnitsCache = new WeakMap<SourceRegistry, Map<string, readonly NamedUnit[] | null>>();
 const MAX_OWN_UNITS = 300;
+/** a book's printed pagination (alt_toc "דפים"), read when a citation of it by daf needs it */
+const pagesCache = new WeakMap<SourceRegistry, Map<string, DafStructure | null>>();
+const MAX_PAGES = 50;
 
 /*
  * The citations engine in the worker (single-book): reads the SOURCE book chunk by chunk, then
@@ -48,7 +51,7 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
   };
   let scanned = 0;
   for await (const chunk of registry.scan(source.key, CHUNK)) {
-    run.scan(chunk.lines.map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading })));
+    run.scan(chunk.lines.map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef })));
     scanned += chunk.lines.length;
     const total = Math.max(scanned, chunk.total ?? 0);
     ctx.progress?.(Math.round((scanned / total) * 500), 1000);
@@ -58,7 +61,13 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
   for (const [i, book] of targets.entries()) {
     const { index, heRefs } = await loadIndex(registry, book);
     const own = run.needsUnits(book) ? await ownUnits(registry, book) : null;
-    run.resolveWith(index, book, heRefs ? (line) => heRefs.get(line) ?? null : undefined, own);
+    const pages = run.wantsPages(book, index) ? await pagesOf(registry, book) : null;
+    run.resolveWith(index, book, heRefs ? (line) => heRefs.get(line) ?? null : undefined, own, pages);
+    // "תוס' … ד"ה רבי מאיר": the commentator's amud, read to find the line of the ד"ה (a few dozen lines each)
+    for (const span of mergeSpans(run.diburSpans(book))) {
+      const lines = await registry.lines(book.key, span.line, span.end);
+      run.refineDibur(book, lines.map((l) => ({ index: l.index, text: l.anchorText })), heRefs ? (line) => heRefs.get(line) ?? null : undefined);
+    }
     ctx.progress?.(500 + Math.round(((i + 1) / targets.length) * 490), 1000);
     await tick();
   }
@@ -124,6 +133,38 @@ async function ownUnits(registry: SourceRegistry, book: BookRef): Promise<readon
   cache.set(book.key, units);
   while (cache.size > MAX_OWN_UNITS) cache.delete(cache.keys().next().value!);
   return units;
+}
+
+/** overlapping line spans as one (each amud is read once) */
+function mergeSpans(spans: readonly { line: number; end: number }[]): { line: number; end: number }[] {
+  const out: { line: number; end: number }[] = [];
+  for (const s of [...spans].sort((a, b) => a.line - b.line)) {
+    const last = out.at(-1);
+    if (last && s.line <= last.end + 1) last.end = Math.max(last.end, s.end);
+    else out.push({ ...s });
+  }
+  return out;
+}
+
+/** A book's printed pagination from its alt_toc ("Daf Zohar"), or null; cached per registry. */
+async function pagesOf(registry: SourceRegistry, book: BookRef): Promise<DafStructure | null> {
+  let cache = pagesCache.get(registry);
+  if (!cache) pagesCache.set(registry, (cache = new Map()));
+  if (cache.has(book.key)) return cache.get(book.key)!;
+  let ds: DafStructure | null = null;
+  try {
+    const structures = await registry.altToc(book.key);
+    if (structures?.length) {
+      const info = (await registry.citationCatalog()).find((x) => x.book.key === book.key)?.book;
+      const last = info?.lineCount ? info.lineCount - 1 : ((await registry.heRefs(book.key))?.at(-1)?.index ?? null);
+      if (last !== null) ds = dafStructureFromAltToc(book, structures, last);
+    }
+  } catch {
+    ds = null;
+  }
+  cache.set(book.key, ds);
+  while (cache.size > MAX_PAGES) cache.delete(cache.keys().next().value!);
+  return ds;
 }
 
 /**

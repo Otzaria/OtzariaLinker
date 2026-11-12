@@ -1,3 +1,4 @@
+import { FileName } from "../shell/file-name";
 import type { ExportPlan } from "../../formats/links-json/export";
 import { pickFiles } from "../files";
 import { useStore } from "../context";
@@ -44,7 +45,7 @@ export function DbCopyFiles({ plan, onChange }: { plan: ExportPlan; onChange: ()
           const unverified = why.get(t) === "export/file-unverified";
           return (
             <li key={t}>
-              <span class="grow">{t}_links.json</span>
+              <span class="grow"><FileName name={`${t}_links.json`} /></span>
               {unverified && <span class="status edited">עותק מהפרויקט</span>}
               <button class="btn text" onClick={() => void load(false, t)}>
                 <Icon name="oz_document_links" size={16} /> טעינת הקובץ…

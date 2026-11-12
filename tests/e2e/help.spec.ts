@@ -18,10 +18,13 @@ test("help: F1 and the app-bar button open the guide; chapters navigate inside i
   await nav.getByRole("link", { name: /^8\. / }).click();
   await expect(nav.getByRole("link", { name: /^8\. / })).toHaveAttribute("aria-current", "location");
   await expect(help.locator('h2[id^="8-"]')).toBeInViewport();
-  expect(page.url()).toBe(distUrl); // an in-guide link never navigates the page
+  // an in-guide link never navigates the page: only the route's fragment names the section
+  expect(page.url().split("#")[0]).toBe(distUrl);
+  expect(decodeURIComponent(new URL(page.url()).hash)).toMatch(/^#\/help\/8-/);
 
   await page.keyboard.press("Escape");
   await expect(help).toBeHidden();
+  await expect.poll(() => new URL(page.url()).hash.replace(/^#\/?$/, "")).toBe(""); // Esc went back to home's entry
 
   await page.getByRole("button", { name: "עזרה" }).click();
   await expect(help).toBeVisible();

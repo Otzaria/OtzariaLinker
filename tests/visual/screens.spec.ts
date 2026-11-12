@@ -69,6 +69,12 @@ test("home: task cards and the drop strip", async ({ page }) => {
   await snap(page, "home");
 });
 
+test("start: a guided workflow asks for its sources step by step", async ({ page }) => {
+  await page.getByRole("button", { name: /תיקייה מול אוצריא/ }).click();
+  await expect(page.getByRole("dialog", { name: "תיקייה מול אוצריא" })).toBeVisible();
+  await snap(page, "start-task");
+});
+
 test("workspace: two books, an existing link and two picked lines in the builder", async ({ page }) => {
   await openFiles(page, [txt("פירוש על בראשית.txt", ["<h1>פירוש על בראשית</h1>", "בראשית - פירוש ראשון", "ויאמר - פירוש שני"])]);
   await pickBooks(page, "פירוש על בראשית", /^בראשית/);
@@ -133,7 +139,7 @@ test("max-link: the report after a run on a folder", async ({ page }) => {
   ]);
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("radio", { name: "קישור מרבי" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("6 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
   await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
   await expect(page.locator("details.ml-report")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /אישור כל הוודאיות/ })).toBeEnabled();

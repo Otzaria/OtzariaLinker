@@ -20,6 +20,7 @@ import { BookFind } from "./book-find";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { editionRows, lineMappingCsv, type EditionDiff, type EditionRow } from "../linking/edition-map";
 import { loadPreferences, type Preferences } from "./preferences";
+import type { DialogId, SuggestMode } from "./router";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
 import { RangesState } from "./ranges";
@@ -113,10 +114,14 @@ export class AppStore {
   /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
+  /** what the suggestions tab sets up: two books, a batch, or max-link (the route "#/maxlink") */
+  readonly suggestMode = signal<SuggestMode>("pair");
+  /** the guided task whose sheet is open on the home screen (dialog "start") */
+  readonly startTask = signal<string | null>(null);
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
-  readonly intent = signal<{ engine?: EngineId; batch?: boolean; maxlink?: boolean } | null>(null);
+  readonly intent = signal<{ engine?: EngineId; sourceId?: string } | null>(null);
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -248,7 +253,7 @@ export class AppStore {
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${opened.length.toLocaleString("he")} ספרים מ־${res.sources.map((s) => s.info.label).join(", ")}.`);
+      this.notify("success", `נפתחו ${opened.length.toLocaleString("he")} ספרים מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
       this.chooseRoles(opened);
       this.screen.value = "workspace";
     } else if (res.documents.length) this.screen.value = "workspace";
@@ -572,7 +577,7 @@ export class AppStore {
       for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
     });
     if (src.books.length) {
-      this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־${src.info.label}.`);
+      this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
     }
     this.screen.value = "workspace";
@@ -603,13 +608,36 @@ export class AppStore {
   /* ---------------- moving links to a new edition (stage 11) ---------------- */
 
   /** a dialog opened from inside a panel */
-  readonly dialog = signal<"relink" | "help" | "alt-toc" | null>(null);
+  readonly dialog = signal<DialogId | null>(null);
   /** the guide section (heading id) the help opens at */
   readonly helpSection = signal<string | undefined>(undefined);
 
   openHelp(section?: string): void {
     this.helpSection.value = section;
     this.dialog.value = "help";
+  }
+
+  /** Closes a dialog if it is still the open one (a dialog that opened another must not close the new one). */
+  closeDialog(id: DialogId): void {
+    if (this.dialog.peek() === id) this.dialog.value = null;
+  }
+
+  /** Something to show in the workspace: open sources, or links (a restored or imported project). */
+  hasWork(): boolean {
+    return this.sources.peek().length > 0 || this.linkState.peek().links.size > 0;
+  }
+
+  /** A file waiting for a decision shows its dialog (the router names it in the address). */
+  readonly pendingDialog = computed<"map-db" | "import-records" | null>(() =>
+    this.pendingDbs.value.length ? "map-db" : this.exchange.pendingRecords.value.length ? "import-records" : null,
+  );
+
+  /** Back over the mapping wizard or the records dialog: the file is not opened, as with its own "skip". */
+  dismissPending(which: "map-db" | "import-records"): void {
+    if (which === "map-db") {
+      const p = this.pendingDbs.peek()[0];
+      if (p) this.dismissMapping(p.token);
+    } else if (this.exchange.pendingRecords.peek().length) this.exchange.skipRecords();
   }
   /** the last comparison: the plan for the links, and the aligned lines (the diff view, the mapping file) */
   readonly relink = signal<{ oldKey: string; newKey: string; plan: RelinkPlan; stats: Record<string, number>; diff: EditionDiff; rows: EditionRow[] } | null>(null);

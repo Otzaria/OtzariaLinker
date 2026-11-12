@@ -15,7 +15,9 @@ export const QUANTIFIER_CAP = 64;
 export type PatternCheck = { readonly ok: true; readonly regex: RegExp } | { readonly ok: false; readonly reason: string };
 
 /**
- * Accepts a user pattern only when it cannot obviously blow up. JavaScript regexes backtrack and a
+ * Accepts a user pattern only when it cannot obviously blow up. `limits.maxLength` raises the length
+ * limit for an expression EXPANDED from a template whose typed form was held to the default
+ * (pattern/template.ts); every other rule is the same. JavaScript regexes backtrack and a
  * synchronous run cannot be interrupted, so a pattern like `(a+)+$` on a long line would freeze the
  * worker. Refused: invalid syntax, more than 300 characters, back-references, a quantified group
  * that itself contains a quantifier or an alternation ("nested quantifiers" — the classic
@@ -24,10 +26,11 @@ export type PatternCheck = { readonly ok: true; readonly regex: RegExp } | { rea
  * so even a polynomial pattern like `a*a*b` costs at most ~line × 64² steps; markers are short, so
  * no real marker pattern is affected. Lines longer than MAX_CUSTOM_REGEX_INPUT are not searched.
  */
-export function checkCustomPattern(pattern: string, flags = ""): PatternCheck {
+export function checkCustomPattern(pattern: string, flags = "", limits: { readonly maxLength?: number } = {}): PatternCheck {
   const p = String(pattern ?? "");
+  const maxLength = limits.maxLength ?? MAX_PATTERN_LENGTH;
   if (!p.trim()) return { ok: false, reason: "הביטוי ריק." };
-  if (p.length > MAX_PATTERN_LENGTH) return { ok: false, reason: `הביטוי ארוך מדי (יותר מ־${MAX_PATTERN_LENGTH} תווים).` };
+  if (p.length > maxLength) return { ok: false, reason: `הביטוי ארוך מדי (יותר מ־${maxLength} תווים).` };
   if (/\\[1-9]|\\k</.test(p)) return { ok: false, reason: "הפניות חוזרות (כמו \\1) אינן מותרות: הן עלולות להקפיא את הכלי." };
   const shape = quantifierShape(p);
   if (shape.nested) return { ok: false, reason: "קבוצה עם כמת שבתוכה עוד כמת או חלופות (למשל (a+)+) עלולה להקפיא את הכלי. כתבו את הביטוי בלי קינון." };

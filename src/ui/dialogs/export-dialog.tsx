@@ -4,6 +4,7 @@ import type { ExportBundle } from "../../state/exchange";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { DbCopyFiles } from "./db-copy-files";
+import { FileName, ltr } from "../shell/file-name";
 
 /*
  * The confirmation before export (plan, "three extra decisions" §3): in plain words, what will be
@@ -74,7 +75,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <label style="display:grid;gap:4px">
                   <span class="muted">פורמט קובצי הקישורים</span>
                   <select value={format} onChange={(e) => setFormat(e.currentTarget.value as "json" | "sefaria-csv")} aria-label="פורמט קובצי הקישורים">
-                    <option value="json">‎_links.json לספריית אוצריא (מומלץ)</option>
+                    <option value="json">{ltr("_links.json")} לספריית אוצריא (מומלץ)</option>
                     <option value="sefaria-csv">CSV בפורמט ספריא (בלי טווחים ועוגנים)</option>
                   </select>
                 </label>
@@ -87,7 +88,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {csv.map((f) => (
                       <li key={f.name}>
                         <Icon name="oz_document_links" size={18} />
-                        <span class="grow">{f.name}</span>
+                        <span class="grow"><FileName name={f.name} /></span>
                         <span class="muted">{f.rows.toLocaleString("he")} שורות</span>
                       </li>
                     ))}
@@ -102,7 +103,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {plan.files.map((f) => (
                       <li key={f.name}>
                         <Icon name="oz_document_links" size={18} />
-                        <span class="grow">{f.name}</span>
+                        <span class="grow"><FileName name={f.name} /></span>
                         <span class="muted">{f.records.toLocaleString("he")} רשומות</span>
                         {f.isNewFile && <span class="status edited">קובץ חדש</span>}
                       </li>
@@ -123,7 +124,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     {alt.files.map((f) => (
                       <li key={f.name}>
                         <Icon name="oz_text_bullet_list_tree" size={18} />
-                        <span class="grow">alt_toc/{f.name}</span>
+                        <span class="grow"><FileName name={`alt_toc/${f.name}`} /></span>
                         <span class="muted">{f.clears ? "ריק: מוחק את המבנים מהספרייה" : `${f.structures} מבנים, ${f.nodes.toLocaleString("he")} צמתים`}</span>
                         {f.problems.some((p) => p.severity === "warning") && (
                           <span class="status edited" title={f.problems.filter((p) => p.severity === "warning").map((p) => p.message).join("\n")}>

@@ -299,7 +299,7 @@ describe("determinism, abort and progress", () => {
   it("aborting mid-run returns what was found so far; progress is reported", () => {
     const ac = new AbortController();
     const calls: [number, number][] = [];
-    const r = runDiburHamatchilEngine(book(COMM, comm), book(BASE, GENESIS), {}, {
+    const r = runDiburHamatchilEngine(book(COMM, comm), book(BASE, GENESIS), { order: false }, {
       signal: ac.signal,
       progress: (done, total) => {
         calls.push([done, total]);
@@ -361,8 +361,8 @@ describe("a weak match before the previous line's place", () => {
     expect(codesOf(r, 1)).toContain("dh/backward-weak");
   });
 
-  it("a strong backward match stays, with its warning", () => {
-    const r = run(["<b>ויקח אהרן את המחתה.</b> פי׳", "<b>ויאמר משה.</b> פי׳"], base);
+  it("a strong backward match stays, with its warning (when the order pass is off; with it, see order.test.ts)", () => {
+    const r = run(["<b>ויקח אהרן את המחתה.</b> פי׳", "<b>ויאמר משה.</b> פי׳"], base, { order: false });
     const s = byLine(r, 1)!;
     expect(baseSide(s).line).toBe(0);
     expect(s.confidence).toBe("high");

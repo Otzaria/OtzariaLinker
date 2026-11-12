@@ -17,10 +17,10 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
 
   return (
-    <header class="app-bar">
-      <button class="brand" onClick={() => (store.screen.value = "home")} title="למסך הפתיחה">
+    <header class={`app-bar${inWorkspace ? " ws" : ""}`}>
+      <button class="brand" onClick={() => (store.screen.value = "home")} title="למסך הפתיחה" aria-label="מנהל הקישורים — למסך הפתיחה">
         <Icon name="oz_links" size={24} />
-        <span>מנהל הקישורים</span>
+        <span class="brand-name">מנהל הקישורים</span>
       </button>
 
       {inWorkspace && (
@@ -76,6 +76,10 @@ export function AppBar({ onExport }: { onExport: () => void }) {
       <Menu icon="fl_settings" label="הגדרות">
         {(close) => (
           <>
+            {/* on a phone the switch leaves the bar (one row); it lives here instead */}
+            <MenuItem class="narrow-only" checked={prefs.advanced.value} onSelect={() => ((prefs.advanced.value = !prefs.advanced.value), close())}>
+              מצב מתקדם
+            </MenuItem>
             <div class="label">ערכת צבעים</div>
             {(["system", "light", "dark"] as ThemeSetting[]).map((t) => (
               <MenuItem key={t} icon={t === "dark" ? "fl_weather_moon" : "fl_weather_sunny"} checked={prefs.theme.value === t} onSelect={() => ((prefs.theme.value = t), close())}>
@@ -102,9 +106,12 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       {inWorkspace && (
-        <button class="btn filled" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json">
+        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
           <Icon name="oz_link_download" size={18} />
-          ייצוא{count ? ` (${count.toLocaleString("he")})` : ""}
+          <span>
+            <span class="lbl">ייצוא</span>
+            {count ? ` (${count.toLocaleString("he")})` : ""}
+          </span>
         </button>
       )}
     </header>

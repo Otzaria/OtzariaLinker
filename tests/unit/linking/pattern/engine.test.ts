@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BookOrigin } from "../../../../src/core/links/model";
 import { countVisibleChars } from "../../../../src/core/text/offsets";
 import { headingLevel } from "../../../../src/core/text/html";
-import { DEFAULT_PATTERN, runPatternEngine, type PatternOptions } from "../../../../src/linking/automatic/pattern";
-import { defaultFormValues, toEngineOptions } from "../../../../src/linking/automatic/option-specs";
+import { PATTERN_PRESETS, runPatternEngine, type PatternOptions } from "../../../../src/linking/automatic/pattern";
+import { defaultFormValues, ENGINE_OPTION_SPECS, toEngineOptions } from "../../../../src/linking/automatic/option-specs";
 import type { EngineBook, EngineResult } from "../../../../src/linking/automatic/types";
 
 const book = (title: string, key: string, texts: readonly string[], origin: BookOrigin = "personal"): EngineBook => ({
@@ -16,33 +16,34 @@ const pairs = (res: EngineResult) => res.suggestions.map((s) => `${s.source.line
 const codes = (xs: readonly { code: string }[]) => xs.map((x) => x.code);
 const unmatchedCodes = (res: EngineResult) => res.unmatched.flatMap((u) => codes(u.reasons));
 
-describe("target = line (v3's default)", () => {
+describe("target = line (v3's default, now the preset \"v3\")", () => {
   const tgt = ["<h1>יעד</h1>", "שורה 2", "שורה 3", "שורה 4"];
+  const v3: PatternOptions = { preset: "v3" };
 
   it("the number is a 1-based line number of the target; Hebrew numerals are read", () => {
-    const res = run(["<h1>מקור</h1>", "עיין סימן ג", "ובדף 4 שם", "בלי הפניה"], tgt);
+    const res = run(["<h1>מקור</h1>", "עיין סימן ג", "ובדף 4 שם", "בלי הפניה"], tgt, v3);
     expect(pairs(res)).toEqual(["1>2", "2>3"]);
     expect(res.suggestions.every((s) => s.confidence === "certain" && s.engine === "pattern" && s.declaredType === "reference")).toBe(true);
   });
 
   it("only the first match of a line by default; every match with matches: all", () => {
     const src = ["סימן ב וסימן ג"];
-    expect(pairs(run(src, tgt))).toEqual(["0>1"]);
-    expect(pairs(run(src, tgt, { matches: "all" }))).toEqual(["0>1", "0>2"]);
+    expect(pairs(run(src, tgt, v3))).toEqual(["0>1"]);
+    expect(pairs(run(src, tgt, { ...v3, matches: "all" }))).toEqual(["0>1", "0>2"]);
   });
 
   it("a number past the end, or pointing at a heading line, is reported and not suggested", () => {
-    const res = run(["סימן ט", "סימן א"], tgt);
+    const res = run(["סימן ט", "סימן א"], tgt, v3);
     expect(res.suggestions).toEqual([]);
     expect(unmatchedCodes(res)).toEqual(["pattern/out-of-range", "pattern/target-heading"]);
   });
 
   it("heading lines of the source are never searched", () => {
-    expect(run(["<h2>סימן ב</h2>"], tgt).suggestions).toEqual([]);
+    expect(run(["<h2>סימן ב</h2>"], tgt, v3).suggestions).toEqual([]);
   });
 
   it("gematria off: letters are not a number", () => {
-    const res = run(["סימן ב"], tgt, { gematria: false });
+    const res = run(["סימן ב"], tgt, { ...v3, gematria: false });
     expect(res.suggestions).toEqual([]);
     expect(unmatchedCodes(res)).toEqual(["pattern/not-a-number"]);
   });
@@ -52,7 +53,7 @@ describe("anchors are generator-exact raw offsets (v3's TD-H4 drift is gone)", (
   const line = "ראה <b>סימן</b> ג &quot;שם&quot;";
 
   it("the match on the visible text maps back to the raw span the generator counts the same way", () => {
-    const res = run([line], ["א", "ב", "ג"], {}, "otzaria");
+    const res = run([line], ["א", "ב", "ג"], { preset: "v3" }, "otzaria");
     const a = res.suggestions[0]!.anchor!;
     expect(line.slice(a.rawStart, a.rawEnd)).toBe("סימן</b> ג");
     expect(countVisibleChars(line, a.rawStart)).toBe(4);
@@ -60,8 +61,8 @@ describe("anchors are generator-exact raw offsets (v3's TD-H4 drift is gone)", (
   });
 
   it("no anchor when a book is not from the Otzaria library, or anchors are off", () => {
-    expect(run([line], ["א", "ב", "ג"]).suggestions[0]!.anchor).toBeUndefined();
-    expect(run([line], ["א", "ב", "ג"], { anchors: "off" }, "otzaria").suggestions[0]!.anchor).toBeUndefined();
+    expect(run([line], ["א", "ב", "ג"], { preset: "v3" }).suggestions[0]!.anchor).toBeUndefined();
+    expect(run([line], ["א", "ב", "ג"], { preset: "v3", anchors: "off" }, "otzaria").suggestions[0]!.anchor).toBeUndefined();
   });
 });
 
@@ -146,26 +147,46 @@ describe("guards", () => {
   });
 
   it("ids are deterministic and unique", () => {
-    const a = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { matches: "all" });
-    const b = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { matches: "all" });
+    const a = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { preset: "v3", matches: "all" });
+    const b = run(["סימן ב וסימן ג"], ["א", "ב", "ג"], { preset: "v3", matches: "all" });
     expect(a.suggestions.map((s) => s.id)).toEqual(b.suggestions.map((s) => s.id));
     expect(new Set(a.suggestions.map((s) => s.id)).size).toBe(2);
   });
 });
 
 describe("options (simple mode passes the essential ones only)", () => {
-  it("the pattern and the target kind are essential; an invalid pattern blocks the run in both modes", () => {
+  it("the preset and the target are essential; the pattern is essential only with the preset \"custom\"", () => {
     const v = { ...defaultFormValues("pattern"), regex: "(a+)+", "t.certain": 80 };
-    expect(Object.keys(toEngineOptions("pattern", v, "essential").errors)).toEqual(["regex"]);
-    expect(toEngineOptions("pattern", v, "essential").options).toEqual({});
+    // a pattern typed in advanced mode does not leak into simple mode while a preset is chosen
+    expect(toEngineOptions("pattern", v, "essential")).toEqual({ options: {}, errors: {}, changed: 0 });
     expect(Object.keys(toEngineOptions("pattern", v).errors)).toContain("regex");
+    const custom = { ...v, preset: "custom" };
+    expect(Object.keys(toEngineOptions("pattern", custom, "essential").errors)).toEqual(["regex"]);
+    expect(Object.keys(toEngineOptions("pattern", { ...custom, regex: "" }, "essential").errors)).toEqual(["regex"]);
   });
 
-  it("untouched defaults give no options; a changed pattern and target are passed", () => {
+  it("untouched defaults give no options; a chosen preset, a custom template and a target are passed", () => {
     expect(toEngineOptions("pattern", defaultFormValues("pattern"), "essential").options).toEqual({});
-    const v = { ...defaultFormValues("pattern"), regex: "\\((\\d+)\\)", target: "chapter-line" };
-    expect(toEngineOptions("pattern", v, "essential").options).toEqual({ regex: "\\((\\d+)\\)", target: "chapter-line" });
-    expect(defaultFormValues("pattern")["regex"]).toBe(DEFAULT_PATTERN);
+    expect(toEngineOptions("pattern", { ...defaultFormValues("pattern"), preset: "siman-seif-sk" }, "essential").options).toEqual({ preset: "siman-seif-sk" });
+    const v = { ...defaultFormValues("pattern"), preset: "custom", regex: "\\((\\d+)\\)", target: "chapter-line" };
+    expect(toEngineOptions("pattern", v, "essential").options).toEqual({ preset: "custom", regex: "\\((\\d+)\\)", target: "chapter-line" });
+    expect(toEngineOptions("pattern", { ...v, regex: "סי'\\s?{סימן}" }, "essential").errors).toEqual({});
+    expect(toEngineOptions("pattern", { ...v, regex: "סי' {שמש}" }, "essential").errors["regex"]).toContain("{שמש}");
+  });
+
+  it("the preset's own template, shown in the field, is not passed as a custom pattern", () => {
+    const sk = PATTERN_PRESETS.find((p) => p.id === "siman-seif-sk")!;
+    const v = { ...defaultFormValues("pattern"), preset: sk.id, regex: sk.template };
+    expect(toEngineOptions("pattern", v).options).toEqual({ preset: sk.id });
+    expect(toEngineOptions("pattern", { ...v, regex: sk.template.replace("סימן", "סימנא") }).options["regex"]).toBeDefined();
+  });
+
+  it("every preset is offered by name with an example", () => {
+    const spec = ENGINE_OPTION_SPECS.pattern.find((s) => s.key === "preset")!;
+    expect(spec.kind).toBe("select");
+    const choices = spec.kind === "select" ? spec.choices.map(([id]) => id) : [];
+    expect(choices).toEqual([...PATTERN_PRESETS.map((p) => p.id), "custom"]);
+    expect(spec.hintOf?.({ preset: "perek-mishna" })).toContain('"פ"ב מ"ג" ← פרק ב › משנה ג');
   });
 });
 

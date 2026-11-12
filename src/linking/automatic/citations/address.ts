@@ -12,7 +12,14 @@ import type { Tok } from "./text";
  * "ד'" not followed by a numeral are NOT markers, and a compact "ס"ד" is a seif only after a siman.
  */
 
-export type Kind = "perek" | "pasuk" | "siman" | "seif" | "sk" | "halacha" | "mishna" | "daf" | "os" | "mizmor" | "chelek" | "?";
+export type Kind = "perek" | "pasuk" | "siman" | "seif" | "sk" | "halacha" | "mishna" | "daf" | "os" | "mizmor" | "chelek" | SectionKind | "?";
+
+/**
+ * The levels books name in their own headings beyond the classic ones ("כלל", "שער", "רמז", "תשובה"…):
+ * a citation names them ("חכמת אדם כלל ז סי' ג", "לעיל כלל ה"), and a book's own structure says
+ * which of its levels they are (self.ts, resolve.ts).
+ */
+export type SectionKind = "klal" | "shaar" | "maamar" | "remez" | "piska" | "drush" | "teshuva";
 
 export interface AddrElem {
   readonly kind: Kind;
@@ -32,6 +39,8 @@ export interface AddrElem {
   readonly compact?: boolean;
   /** a compact "פ"ו" that is also the plain number 86 (for a book of chapters, either may be meant) */
   readonly alsoNumber?: number;
+  /** read with a marker added in V4 ("ס"ס", "ססי'", "כלל", "שער", "ח"א", "ה'" after a chapter): for the measurement's tally */
+  readonly v4?: true;
 }
 
 export interface Address {
@@ -62,7 +71,13 @@ const WORD_MARKERS: Readonly<Record<string, Kind>> = {
   מזמור: "mizmor",
   // "ח'" is not a marker: "ח' ע"א" is daf 8
   חלק: "chelek",
+  // "ס"ס קכ"ח", "ססי' א'", "רס"י ה'": the end / start of a siman — the siman
+  'ס"ס': "siman", "ססי'": "siman", 'סוס"י': "siman", 'רס"י': "siman", "רסי'": "siman",
+  כלל: "klal", שער: "shaar", מאמר: "maamar", רמז: "remez", פסקה: "piska", דרוש: "drush", תשובה: "teshuva",
 };
+/** the markers added in V4 (for the measurement's tally of new forms) */
+const V4_MARKERS = new Set(['ס"ס', "ססי'", 'סוס"י', 'רס"י', "רסי'", "כלל", "שער", "מאמר", "רמז", "פסקה", "דרוש", "תשובה"]);
+
 /** own keys only: a token like "constructor" is not a marker (security review A10) */
 const marker = (s: string): Kind | undefined => (Object.hasOwn(WORD_MARKERS, s) ? WORD_MARKERS[s] : undefined);
 
@@ -76,7 +91,7 @@ const shape = (t: Tok): string => {
 };
 
 /** A marker word at toks[i] (one or two tokens), or null. */
-function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number } | null {
+function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number; v4?: true } | null {
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
   const full = shape(t);
@@ -89,7 +104,7 @@ function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number 
     const two = toks[i + 1]?.kind === "word" ? marker(`${s} ${shape(toks[i + 1]!)}`) : undefined;
     if (two) return { kind: two, width: 2 };
     const one = marker(s);
-    if (one) return { kind: one, width: 1 };
+    if (one) return { kind: one, width: 1, ...(V4_MARKERS.has(s) && { v4: true }) };
   }
   return null;
 }
@@ -113,6 +128,8 @@ function compactAt(t: Tok | undefined, prev: Kind | null): { kind: Kind; n: numb
     tryPrefix("הל", "halacha") ??
     tryPrefix("ה", "halacha") ??
     tryPrefix("סק", "sk") ??
+    // "ח"א סי' ה", "זוה"ק ח"ב דף קנא": a part (חלק) — only before another element (parseAddress drops it last)
+    (prev === null ? tryPrefix("ח", "chelek") : null) ??
     (prev === "perek" ? tryPrefix("מ", "mishna") : null) ??
     (prev === "siman" ? tryPrefix("ס", "seif") : null)
   );
@@ -162,6 +179,8 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
       j++;
       continue;
     }
+    // "סי' ג' וסי' ד'", "כלל ג' ובכלל ב'": a marker with "ו" opens a second place, not a deeper level
+    if (elems.length && t.kind === "word" && t.text[0] === "ו" && markerAt(toks, j)) break;
     if (t.kind === "word" && POSITION_WORDS.has(t.text) && markerAt(toks, j + 1)) {
       j++;
       continue;
@@ -190,6 +209,8 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     const last = elems[elems.length - 1]!;
     if ((last.kind === "daf" || last.amud !== undefined) && !nextIsMarked(toks, j, lastKind)) break;
   }
+  // "ח"ו" alone is "חס ושלום", not a part: a compact part counts only with a place inside it
+  if (elems.length === 1 && elems[0]!.kind === "chelek" && elems[0]!.compact) return null;
   if (!elems.length) return null;
   // "תהילים פ"ט: ט'": a compact "פ"ט" followed by a plain number is the number 89, not "פרק ט"
   const f = elems[0]!;
@@ -228,7 +249,12 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
   const compact = ((amudAt(toks, j + 1) || gluedSide) && numeralOf(t)) || markerAt(toks, j) ? null : compactAt(t, prev);
   if (compact) {
     const numeral: Numeral = { n: compact.n, form: "gershayim", common: false };
-    return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral, compact: true });
+    return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral, compact: true, ...(compact.kind === "chelek" && { v4: true }) });
+  }
+  // "פ"ג ממע"ש (ה' י"ז)": after a chapter, "ה'" is "הלכה" (alone it is the number 5, or the divine name)
+  if (prev === "perek" && t.kind === "word" && shape(t) === "ה'" && !amudAt(toks, j + 1)) {
+    const num = numeralOf(toks[j + 1]);
+    if (num) return withRange(toks, j + 2, { kind: "halacha", n: num.n, explicit: true, numeral: num, v4: true });
   }
   const m = markerAt(toks, j);
   // "בחולין (דף ע"ב)", "בב"ק דף ע"א": after the full word "דף", "ע"א"/"ע"ב" is daf 71/72 (an amud
@@ -241,7 +267,7 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
     const num = numeralOf(toks[k]);
     if (!num) return null;
     if (m.kind === "daf") return readDaf(toks, k, num, true);
-    return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num });
+    return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num, ...(m.v4 && { v4: true }) });
   }
   // "מנחות דמ"ג ע"ב", "ברכות די"ז ע"א", "ד"ז ע"א": a ד for "דף" glued to the number, before an amud
   const dalet = dafWithDalet(t);

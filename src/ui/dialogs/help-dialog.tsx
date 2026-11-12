@@ -8,12 +8,14 @@ import { Icon } from "../icons/icon";
  * with a side navigation of its sections. `section` opens it at a heading id, for help buttons that
  * point at the part of the guide about the panel they sit in.
  */
-export function HelpDialog({ section, onClose }: { section?: string | undefined; onClose: () => void }) {
+export function HelpDialog({ section, onSection, onClose }: { section?: string | undefined; onSection?: (id: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const rendered = useMemo(() => renderGuide(guide), []);
   const [current, setCurrent] = useState(section ?? rendered.toc[0]?.id ?? "");
 
+  /** the section last shown, so a section that comes back through the address (Back) is not scrolled to twice */
+  const shown = useRef<string | undefined>(undefined);
   const go = (id: string) => {
     const el = content.current?.querySelector(`[id="${CSS.escape(id)}"]`);
     if (!el) return;
@@ -21,12 +23,17 @@ export function HelpDialog({ section, onClose }: { section?: string | undefined;
     // the closest level-2 section, for the navigation highlight
     const top = rendered.toc.find((t) => t.id === id) ? id : sectionOf(el);
     if (top) setCurrent(top);
+    shown.current = id;
+    onSection?.(id); // the address: #/help/<section>
   };
 
   useEffect(() => {
     ref.current?.showModal();
-    if (section) go(section);
   }, []);
+  // the section from the address (an opened link, Back/Forward between sections)
+  useEffect(() => {
+    if (section && section !== shown.current) go(section);
+  }, [section]);
 
   return (
     <dialog ref={ref} class="help-dialog" onClose={onClose} aria-labelledby="help-title">

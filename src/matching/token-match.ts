@@ -10,13 +10,30 @@
  *   • one word ↔ two glued words (והאמר ↔ והא אמר), from lemma_head_match (REUSE_MATRIX §2.5);
  *   • a few fixed Aramaic contractions (קמשמע ↔ קא משמע) from link-generator replacements.ts;
  *   • the divine name written ה׳ ↔ יהוה (also after a prefix letter: וה׳, לה׳);
- *   • the whole-word skeleton (בונה ↔ בנה) when the stems hide it.
+ *   • the whole-word skeleton (בונה ↔ בנה) when the stems hide it;
+ *   • an abbreviation of ./abbreviations.ts written WITHOUT its quote marks ("אעפ" ↔ אף על פי) — only
+ *     the forms that table marks `unmarked`, none of which is a word of its own.
  *
  * Every bridge is a CANDIDATE with a damped similarity, never a rewrite of the text.
  */
 import type { HebToken } from "./hebrew-tokens";
 import { skeleton, stem } from "../core/text/hebrew";
 import { maxEdits, wordSimilarity } from "./similarity";
+import { expansionsOf, UNMARKED_ABBREVIATIONS } from "./abbreviations";
+
+/** An unmarked abbreviation of the table (marked ones are bridged by their letters). */
+const isUnmarkedAbbr = (t: HebToken) => !t.acronym && !t.truncated && UNMARKED_ABBREVIATIONS.has(t.key);
+/** first word of an expansion → the unmarked abbreviations that open with it */
+const UNMARKED_BY_FIRST: ReadonlyMap<string, readonly string[]> = (() => {
+  const m = new Map<string, string[]>();
+  for (const k of UNMARKED_ABBREVIATIONS)
+    for (const e of expansionsOf({ key: k, acronym: false, truncated: false })) {
+      const list = m.get(e[0]!);
+      if (list) list.push(k);
+      else m.set(e[0]!, [k]);
+    }
+  return m;
+})();
 
 export type StepKind = "exact" | "fuzzy" | "acronym" | "truncation" | "split";
 
@@ -163,6 +180,8 @@ export function matchStep(a: readonly HebToken[], i: number, b: readonly HebToke
   }
   if ((x.truncated && truncates(x.key, y.key)) || (y.truncated && truncates(y.key, x.key)))
     return { a: 1, b: 1, sim: BRIDGE_SIM, kind: "truncation" };
+  if (isUnmarkedAbbr(x)) for (const e of expansionsOf(x)) if (sameWords(b, j, e)) return { a: 1, b: e.length, sim: BRIDGE_SIM, kind: "acronym" };
+  if (isUnmarkedAbbr(y)) for (const e of expansionsOf(y)) if (sameWords(a, i, e)) return { a: e.length, b: 1, sim: BRIDGE_SIM, kind: "acronym" };
   const cx = CONTRACTIONS.get(x.key);
   if (cx && sameWords(b, j, cx)) return { a: 1, b: cx.length, sim: BRIDGE_SIM, kind: "split" };
   const cy = CONTRACTIONS.get(y.key);
@@ -272,6 +291,7 @@ export function mayStep(x: HebToken, px: StepProfile, y: HebToken, py: StepProfi
   if (lim && (px.stemLength > py.stemLength ? px.stemLength - py.stemLength : py.stemLength - px.stemLength) <= lim && bitCount(px.mask ^ py.mask) <= 2 * lim) return true;
   // bridges (matchStep tries them only when the words themselves differ)
   if ((x.acronym || y.acronym) && px.first === py.first) return true;
+  if ((isUnmarkedAbbr(x) && expansionsOf(x).some((e) => e[0] === y.key)) || (isUnmarkedAbbr(y) && expansionsOf(y).some((e) => e[0] === x.key))) return true;
   if ((x.truncated && truncates(x.key, y.key)) || (y.truncated && truncates(y.key, x.key))) return true;
   if (px.contractionHead !== null || py.contractionHead !== null) return px.contractionHead === y.key || py.contractionHead === x.key || mayGlue(px, py) || mayGlue(py, px);
   return mayGlue(px, py) || mayGlue(py, px);
@@ -320,7 +340,7 @@ export function stepTable(tokens: readonly HebToken[], profiles: readonly StepPr
     t.stemLength[k] = p.stemLength;
     t.mask[k] = p.mask;
     t.first[k] = tok.truncated || p.contractionHead !== null ? -1 : p.first;
-    t.bridge[k] = (tok.acronym ? 1 : 0) | (p.keyLength >= 5 ? 2 : 0);
+    t.bridge[k] = (tok.acronym || isUnmarkedAbbr(tok) ? 1 : 0) | (p.keyLength >= 5 ? 2 : 0);
   }
   return t;
 }
@@ -340,7 +360,7 @@ export function startsOf(x: HebToken, px: StepProfile, line: StepTable, limit: n
   const xLen = px.stemLength;
   const xMask = px.mask;
   const xFirst = x.truncated || px.contractionHead !== null ? -1 : px.first;
-  const xBridge = (x.acronym ? 1 : 0) | (px.keyLength >= 5 ? 2 : 0);
+  const xBridge = (x.acronym || isUnmarkedAbbr(x) ? 1 : 0) | (px.keyLength >= 5 ? 2 : 0);
   const { keyId, stemId, stemSkeletonId, skeletonId, stemLength, mask, first, bridge } = line;
   for (let k = 0; k < limit; k++) {
     if (keyId[k] === xKey || stemId[k] === xStem || stemSkeletonId[k] === xStemSkel || skeletonId[k] === xSkel) {
@@ -459,6 +479,9 @@ export class StepVocabulary {
       if (short === key) for (const f of fulls) addAll(this.byKey.get(f));
       if (fulls.has(key)) addAll(this.byKey.get(short));
     }
+    // unmarked abbreviations of the table, both ways
+    if (isUnmarkedAbbr(x)) for (const e of expansionsOf(x)) addAll(this.byKey.get(e[0]!));
+    for (const k of UNMARKED_BY_FIRST.get(key) ?? []) addAll(this.byKey.get(k));
     // contractions, both ways
     if (px.contractionHead !== null) addAll(this.byKey.get(px.contractionHead));
     addAll(this.contractions);

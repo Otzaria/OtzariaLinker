@@ -3,6 +3,7 @@ import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseKey, isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
 import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
+import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
 
 /*
  * The max-link planner ("קישור מרבי", stage 8.4): given the books the user selected and every open
@@ -194,6 +195,41 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
   return [{ kind, dependant: ref(book), base: ref(r.target), via: "title", caveats }];
 }
 
+/*
+ * A commentary on the Talmud quotes not only the Gemara but also רש"י / תוספות and the other
+ * intermediate commentators ("תוס' ד"ה X"); the DH engine sets those lines aside when the base is the
+ * text and links ONLY them when the base is that commentator (dibur-hamatchil/addressee.ts). So when
+ * such a commentator on the same base is open, the plan adds that pair too — otherwise those lines
+ * are never linked (measured: 2,469 lines in the DH validation samples).
+ */
+function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<string, PlanBook>, relations: ReadonlyMap<string, Relation[]>, commentariesOn: ReadonlyMap<string, Relation[]>): Extract<PlanStep, { kind: "pair" }>[] {
+  const out: Extract<PlanStep, { kind: "pair" }>[] = [];
+  for (const k of selected) {
+    const book = byKey.get(k);
+    // a translation is not read by its opening words (stepsFor runs only headings on it)
+    if (!book || isTargum(book)) continue;
+    for (const own of relations.get(k) ?? []) {
+      if (own.kind !== "commentary" || own.scope || own.dependant.key !== k) continue;
+      const self = commentatorOfTitle(own.dependant.title)?.key;
+      for (const sib of commentariesOn.get(own.base.key) ?? []) {
+        const who = commentatorOfTitle(sib.dependant.title);
+        if (!who || who.key === self || sib.dependant.key === k) continue;
+        const relation: Relation = { kind: "commentary", dependant: own.dependant, base: sib.dependant, via: "title", caveats: [] };
+        out.push({
+          id: `dibur-hamatchil|${k}>${sib.dependant.key}`,
+          kind: "pair",
+          engine: "dibur-hamatchil",
+          source: own.dependant,
+          target: sib.dependant,
+          relation,
+          why: `${quote(own.dependant.title)} כתוב על ${quote(own.base.title)}, ושורות שבהן הוא מפרש את דברי ${who.name} ("${who.name} ד"ה …", בא"ד) שייכות ל־${quote(sib.dependant.title)}. דיבור המתחיל מקשר רק אותן.`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם" };
 
 /*
@@ -252,12 +288,15 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   // every relation that touches a selected book: as the dependant, or as the base of an open dependant
   const relations = new Map<string, Relation[]>(); // by dependant key
   const problems = new Map<string, string>();
+  /** every open commentary on a base, selected or not: the intermediate commentators come from here */
+  const commentariesOn = new Map<string, Relation[]>();
   for (const b of input.library) {
     const rs = relationsOf(b, byKey, index);
     if ("problem" in rs) {
       if (isSelected.has(b.key)) problems.set(b.key, rs.problem);
       continue;
     }
+    for (const r of rs) if (r.kind === "commentary" && !r.scope) pushTo(commentariesOn, r.base.key, r);
     const touching = rs.filter((r) => isSelected.has(r.dependant.key) || isSelected.has(r.base.key));
     if (touching.length) relations.set(b.key, touching);
   }
@@ -276,6 +315,14 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       steps.push({ id, kind: "pair", ...s, relation: rel });
       bump(s.source.key);
       bump(s.target.key);
+    }
+  if (enabled("dibur-hamatchil"))
+    for (const step of intermediateSteps(selected, byKey, relations, commentariesOn)) {
+      if (seen.has(step.id)) continue;
+      seen.add(step.id);
+      steps.push(step);
+      bump(step.source.key);
+      bump(step.target.key);
     }
   const singles = (input.singleEngines ?? singleBookEngines()).filter(enabled);
   const info = (e: EngineId) => ENGINES.find((x) => x.id === e);

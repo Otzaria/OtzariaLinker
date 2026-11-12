@@ -11,7 +11,10 @@ const nl = String.fromCharCode(10);
 
 async function openFiles(page: Page, files: { name: string; buffer: Buffer; mimeType?: string }[]) {
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: /^(קבצים|הוספת מקור)$/ }).first().click(); // home, then the sources panel
+  // home: the drop strip's "קבצים"; the workspace: "הוספת מקור" → "קבצים"
+  const pickBtn = page.getByRole("button", { name: "קבצים", exact: true });
+  if (!(await pickBtn.isVisible())) await page.getByRole("button", { name: "הוספת מקור" }).click();
+  await pickBtn.click();
   await (await chooser).setFiles(files.map((f) => ({ mimeType: "text/plain", ...f })));
 }
 

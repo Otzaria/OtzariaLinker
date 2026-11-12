@@ -1,6 +1,6 @@
 import { checkCustomPattern } from "../../core/text/safe-regex";
 import type { MarkerStyle } from "./footnotes/markers";
-import { DEFAULT_PATTERN } from "./pattern";
+import { compilePattern, CUSTOM_PRESET, DEFAULT_PRESET, describeLevels, PATTERN_PRESETS, presetById } from "./pattern";
 import { DEFAULT_THRESHOLDS, type EngineId } from "./types";
 
 /*
@@ -21,6 +21,12 @@ interface SpecBase {
   hint?: string;
   /** shown and passed in simple mode too (see above) */
   essential?: boolean;
+  /** essential only while another option has this value (the pattern of "לפי תבנית" when the preset is "custom") */
+  essentialWhen?: { readonly key: string; readonly value: string };
+  /** a hint that depends on the form (the examples of the chosen preset) */
+  hintOf?: (values: FormValues) => string | null;
+  /** options cleared when this one changes (a new preset drops the pattern edited from the previous one) */
+  resets?: readonly string[];
 }
 
 export type OptionSpec =
@@ -29,8 +35,12 @@ export type OptionSpec =
   | (SpecBase & { kind: "boolean"; default: boolean })
   /** a marker style: a select plus a text field for a custom tag or regular expression */
   | (SpecBase & { kind: "marker"; default: "auto" })
-  /** a regular expression, checked by the same guard the engine applies */
-  | (SpecBase & { kind: "regex"; default: string });
+  /**
+   * a regular expression, checked by the same guard the engine applies. `template`: a pattern template
+   * with placeholders (pattern/template.ts); `defaultOf`: the value shown while the field is empty
+   * (the chosen preset's template), which is not passed on.
+   */
+  | (SpecBase & { kind: "regex"; default: string; template?: boolean; defaultOf?: (values: FormValues) => string });
 
 export type FormValue = string | number | boolean;
 export type FormValues = Record<string, FormValue>;
@@ -68,6 +78,9 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "ladder", label: "הרחבת החיפוש בהדרגה לד\"ה מסומן", default: true },
     { kind: "boolean", key: "ladderWide", label: "חיפוש גם בקטעים הסמוכים בספר הבסיס", default: false, hint: "במדידה על ספרים אמיתיים התאמות שנמצאו רק בקטע סמוך היו שגויות ברוב המקרים." },
     { kind: "boolean", key: "inherit", label: "שורות בא\"ד / שם יורשות את מקום השורה הקודמת", default: true },
+    { kind: "boolean", key: "intermediates", label: "שורה על רש\"י/תוספות מקושרת רק לספר של אותו מפרש", default: true, hint: "שורה שפותחת \"רש\"י ד\"ה\" או \"תוס' ד\"ה\" מפרשת את דברי המפרש, ולא את הגמרא." },
+    { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
+    { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
     ...THRESHOLDS,
   ],
   footnotes: [
@@ -91,17 +104,59 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     ...THRESHOLDS,
   ],
   pattern: [
-    { kind: "select", key: "tag", label: "איפה המספר", default: "", essential: true, choices: [["", "בתבנית שלמטה"], ["sup", "בתוך <sup> (כמו \"לפי תגיות\" בגרסה 3)"], ["sub", "בתוך <sub>"], ["small", "בתוך <small>"], ["b", "בתוך <b>"], ["span", "בתוך <span>"]] },
-    { kind: "regex", key: "regex", label: "התבנית (ביטוי רגולרי)", default: DEFAULT_PATTERN, essential: true, hint: "המספר שבסוגריים הראשונים (או בקבוצה בשם n) קובע לאן לקשר. ברירת המחדל תופסת \"סימן יב\", \"דף 5\", \"עמוד ג\"." },
-    { kind: "select", key: "target", label: "המספר הוא", default: "line", essential: true, choices: [["line", "מספר שורה ביעד"], ["chapter-line", "מספר שורה בתוך הפרק (המספור מתחיל מחדש בכל פרק)"], ["heading", "מספר של כותרת ביעד (סימן, פרק, סעיף)"]] },
+    {
+      kind: "select",
+      key: "preset",
+      label: "מה מחפשים",
+      default: DEFAULT_PRESET,
+      essential: true,
+      choices: [...PATTERN_PRESETS.map((p) => [p.id, p.examples[0] ? `${p.name} — "${p.examples[0][0]}"` : p.name] as const), [CUSTOM_PRESET, "תבנית משלכם"]],
+      hintOf: (v) => presetHint(String(v["preset"] ?? DEFAULT_PRESET)),
+      resets: ["regex"],
+    },
+    { kind: "select", key: "tag", label: "איפה המספר", default: "", essential: true, choices: [["", "לפי התבנית"], ["sup", "בתוך <sup> (כמו \"לפי תגיות\" בגרסה 3)"], ["sub", "בתוך <sub>"], ["small", "בתוך <small>"], ["b", "בתוך <b>"], ["span", "בתוך <span>"]] },
+    {
+      kind: "regex",
+      key: "regex",
+      label: "התבנית (ביטוי רגולרי)",
+      default: "",
+      template: true,
+      essentialWhen: { key: "preset", value: CUSTOM_PRESET },
+      defaultOf: (v) => presetById(String(v["preset"] ?? DEFAULT_PRESET))?.template ?? "",
+      hintOf: (v) => {
+        const levels = describeLevels(String(v["regex"] || presetById(String(v["preset"] ?? DEFAULT_PRESET))?.template || ""));
+        return levels ? `רמות: ${levels}. ` + PLACEHOLDER_HINT : PLACEHOLDER_HINT;
+      },
+    },
+    { kind: "select", key: "target", label: "לאן ההפניה מצביעה", default: "", essential: true, choices: [["", "לפי התבנית שנבחרה"], ["tree", "מקום בעץ הכותרות של היעד (סימן › סעיף › ס\"ק)"], ["line", "מספר שורה ביעד"], ["chapter-line", "מספר שורה בתוך הפרק (המספור מתחיל מחדש בכל פרק)"]] },
+    { kind: "select", key: "position", label: "איפה בשורה", default: "anywhere", choices: [["anywhere", "בכל מקום"], ["start", "רק בתחילת השורה (פירוש שכל דיבור בו פותח במקומו)"]] },
+    { kind: "boolean", key: "carry", label: "שורה בלי הפניה ממשיכה את ההפניה שמעליה (עד הכותרת הבאה)", default: false },
+    { kind: "boolean", key: "context", label: "הפניה חלקית (\"ס\"ק ב\") מושלמת מהכותרות של שורת המקור", default: true },
+    { kind: "boolean", key: "otherBooks", label: "לדלג על הפניה אחרי שם של ספר אחר (\"הט\"ז ס\"ק ג\", \"שבת דף כג\")", default: true },
     { kind: "boolean", key: "gematria", label: "לקרוא אותיות כמספר (יב = 12)", default: true },
-    { kind: "select", key: "matches", label: "כמה התאמות בכל שורה", default: "first", choices: [["first", "הראשונה בלבד"], ["all", "כולן"]] },
-    { kind: "boolean", key: "sectionRanges", label: "בכותרת: לקשר לכל הסעיף שתחתיה (טווח)", default: false },
+    { kind: "select", key: "matches", label: "כמה התאמות בכל שורה", default: "", choices: [["", "לפי התבנית"], ["first", "הראשונה בלבד"], ["all", "כולן"]] },
+    { kind: "boolean", key: "sectionRanges", label: "לקשר לכל הסעיף שתחתיה ההפניה מצביעה (טווח)", default: false },
     { kind: "select", key: "anchors", label: "עוגן על המילים שנמצאו", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
     ...THRESHOLDS,
   ],
 };
+
+const PLACEHOLDER_HINT = "מקומות שמורים: {סימן} {סעיף} {ס\"ק} {פרק} {הלכה} {משנה} {פסוק} {דף} {עמוד} {אות} {הערה} {מספר} {עד} {שם_ספר} {שם}. בלעדיהם, המספר שבסוגריים הראשונים הוא מספר.";
+
+/** "פרק ומשנה: …; למשל "פ"ב מ"ג" → פרק ב › משנה ג" */
+function presetHint(id: string): string | null {
+  if (id === CUSTOM_PRESET) return "כתבו תבנית למטה. כל מקום שמור כמו {סימן} הוא רמה בעץ הכותרות של היעד.";
+  const p = presetById(id);
+  if (!p) return null;
+  const ex = p.examples.slice(0, 3).map(([t, path]) => `"${t}" ← ${path}`).join(" · ");
+  return ex ? `${p.description}. למשל: ${ex}` : p.description;
+}
+
+/** essential now: always, or while the option it depends on has its value */
+export function isEssential(spec: OptionSpec, values: FormValues): boolean {
+  return spec.essential === true || (spec.essentialWhen !== undefined && String(values[spec.essentialWhen.key] ?? "") === spec.essentialWhen.value);
+}
 
 /** the text field next to a marker select: `<key>.custom` */
 export const customKey = (key: string): string => `${key}.custom`;
@@ -145,7 +200,7 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
   let thresholdsChanged = false;
 
   for (const spec of ENGINE_OPTION_SPECS[engine]) {
-    if (scope === "essential" && !spec.essential) continue;
+    if (scope === "essential" && !isEssential(spec, values)) continue;
     const raw = values[spec.key];
     if (raw === undefined) continue;
     switch (spec.kind) {
@@ -183,7 +238,12 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
       }
       case "regex": {
         const v = String(raw).trim();
-        const check = checkCustomPattern(v);
+        const shown = spec.defaultOf?.(values) ?? "";
+        if (spec.template && (!v || v === shown)) {
+          if (!shown && isEssential(spec, values)) errors[spec.key] = "כתבו תבנית, או בחרו תבנית מוכנה ב\"מה מחפשים\".";
+          break;
+        }
+        const check = spec.template ? compilePattern(v) : checkCustomPattern(v);
         if (!check.ok) {
           errors[spec.key] = check.reason;
           break;

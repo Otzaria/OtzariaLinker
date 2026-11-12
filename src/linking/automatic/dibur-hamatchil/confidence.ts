@@ -11,7 +11,8 @@
  * Also the acceptance threshold (`dynamicMinThreshold`, source lines 150-190) lives here.
  */
 
-export type Rung = "A" | "B" | "C" | "D";
+/** A–D: the relaxations of the search; L: the letters of the ד"ה found by edit distance (rung L, engine.ts) */
+export type Rung = "A" | "B" | "C" | "D" | "L";
 
 /** What the search measured about the match it returned. */
 export interface MatchEvidence {
@@ -42,7 +43,7 @@ const CONF = {
   W_EXPLICIT: 0.45,
   RUN_SCALE: 3.5,
   MAX_WORD_WEIGHT: 1.3,
-  RUNG_PENALTY: { A: 0.45, B: 0.8, C: 1.25, D: 1.85 } as Record<Rung, number>,
+  RUNG_PENALTY: { A: 0.45, B: 0.8, C: 1.25, D: 1.85, L: 0.8 } as Record<Rung, number>,
   CAL_A: 0.5163,
   CAL_B: 0.1358,
   INHERIT_RETENTION: 0.8,

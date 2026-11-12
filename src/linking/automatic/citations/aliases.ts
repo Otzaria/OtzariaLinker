@@ -124,6 +124,7 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["מגילה", "מגלה"],
   // the database's own names for it ("זוהר") fail the acronym guard (they do not start the title)
   ["ספר הזהר", "זוהר", "זהר", "הזוהר", "הזהר", "ספר הזוהר", 'זוה"ק', 'זה"ק'],
+  ["תקוני הזהר", "תיקוני זוהר", "תיקוני הזוהר", "תקוני זוהר", "תקוני הזוהר", "תיקוני הזהר", "תקוני זהר", 'תקו"ז', 'תיקו"ז'],
 ];
 
 /** the parts of the Shulchan Aruch and the Tur: name → its abbreviations */
@@ -184,8 +185,23 @@ export class AliasIndex {
   }
   /** "יבמו'" → "יבמות": truncated one-word names of the Bavli and Tanakh (only written with a geresh) */
   private readonly truncated = new Map<string, AliasEntry | null>();
+  /**
+   * The responsa of an author, by the author's name as the titles write it ("תשובות הריב"ש" → "ריבש",
+   * "שו"ת מהר"ם מינץ" → "מהרמ מינצ"), with the part of a work in parts ("… חלק ד" → 4). For "הריב"ש סי'
+   * ת"ו", "בתשו' רמ"א סי' ס"ו", "בתשובת הרא"ש כלל ל"ה סי' ד'" (detect.ts).
+   */
+  readonly responsa = new Map<string, { readonly target: AliasTarget; readonly part: number | null }[]>();
+  /** the first words of the authors' names (with and without the article "ה"), a quick test for the scan */
+  readonly responsaFirst = new Set<string>();
+  /**
+   * the other books whose titles name an author of responsa (keys as in `responsa`): "חידושי הרשב"א על …",
+   * "צוואת הריב"ש" — "<author> סי' ה" alone may be one of them, and the place decides (detect.ts)
+   */
+  readonly authorsElsewhere = new Map<string, AliasTarget[]>();
   /** names dropped by the guards (for the run's notes) */
   dropped = 0;
+  /** database names of an author's several works, by first word (dropAuthorNames) */
+  private readonly authorNames = new Map<string, AliasEntry[]>();
   /** while building: where each (book, section) sits in an entry's targets — findIndex per add was quadratic (A8) */
   private targetSlots: Map<AliasEntry, Map<string, number>> | null = new Map();
 
@@ -217,6 +233,15 @@ export class AliasIndex {
         ix.commentariesOn.set(on[1]!, list);
       }
     }
+    // "מדרש תנחומא" → "תנחומא": the database's name of this book (and maybe of "תנחומא בובר" too) is the title
+    // without "מדרש" — a canonical form of THIS book, then (prune() drops the other's database name). Only a
+    // name the database already gives it: "שמואל" (a sage, a book of the Tanakh) is no name of מדרש שמואל
+    for (const c of catalog) {
+      const x = /^מדרש (\S{4,})$/.exec(normTitle(c.book.title));
+      const known = x ? ix.lookup(x[1]!) : undefined;
+      if (x && (c.aliases ?? []).some((a) => normTitle(a) === x[1]) && !known?.targets.some((t) => t.tier === "title" || t.tier === "derived")) ix.add(x[1]!, { book: c.book, tier: "derived", collection: ix.collections.get(c.book.key)! });
+    }
+    ix.indexResponsa(catalog);
     ix.targetSlots = null; // add() is done; the guards below rewrite the target lists
     ix.dropAuthorNames();
     ix.prune();
@@ -294,9 +319,38 @@ export class AliasIndex {
       });
       if (keep.length !== e.targets.length) {
         this.dropped += e.targets.length - keep.length;
+        // kept apart for "ש"ך חו"מ" (detect.ts authorPart) — only a name that can be the AUTHOR's: "ש"ך" of
+        // "שפתי כהן", not "שו"ע" given to "ביאור הגר"א על שולחן ערוך …"
+        const gone = e.targets.filter((t) => !keep.includes(t) && plausibleAcronym(e.text, normTitle(t.book.title).replace(/ על .+$/, "")));
+        if (gone.length) {
+          const list = this.authorNames.get(e.words[0]!.key) ?? [];
+          list.push({ words: e.words, text: e.text, targets: gone, numeric: e.numeric });
+          this.authorNames.set(e.words[0]!.key, list);
+        }
         e.targets.splice(0, e.targets.length, ...keep);
       }
     }
+  }
+
+  /**
+   * The names dropped as an author's ("ש"ך" for both "שפתי כהן על שולחן ערוך יורה דעה" and "… חושן משפט"),
+   * starting at toks[i]: a name that does not say which work, until a part after it does ("ש"ך חו"מ סי'
+   * צ"א", detect.ts).
+   */
+  authorNamesAt(toks: readonly Tok[], i: number): AliasMatch[] {
+    const t = toks[i];
+    if (!t || t.kind !== "word" || !t.gershayim) return [];
+    // most words start no such name (the scan asks for every word)
+    const k = t.key;
+    if (!this.authorNames.has(k) && !this.authorNames.has(k.slice(1)) && !this.authorNames.has(k.slice(2))) return [];
+    const out: AliasMatch[] = [];
+    for (const prefix of prefixesOf(t)) {
+      for (const e of this.authorNames.get(t.key.slice(prefix.length)) ?? []) {
+        const end = matchWords(e.words, toks, i, prefix.length);
+        if (end !== null) out.push({ entry: e, from: i, to: end, prefix });
+      }
+    }
+    return out.sort((a, b) => b.to - a.to);
   }
 
   private prune(): void {
@@ -325,6 +379,38 @@ export class AliasIndex {
         const list = this.byFirst.get(e.words[0]!.key)!;
         list.splice(list.indexOf(e), 1);
       }
+    }
+  }
+
+  private indexResponsa(catalog: readonly CatalogBook[]): void {
+    const authorOf = new Map<string, string>();
+    for (const c of catalog) {
+      const title = normTitle(c.book.title);
+      const m = RESPONSA_TITLE.exec(title);
+      if (!m) continue;
+      const key = authorKey(m[1]!);
+      if (!key) continue;
+      const part = m[2] ? strictValue(m[2]) : null;
+      const list = this.responsa.get(key) ?? [];
+      list.push({ target: { book: c.book, tier: "derived", collection: this.collections.get(c.book.key)! }, part });
+      this.responsa.set(key, list);
+      const w0 = key.split(" ")[0]!;
+      this.responsaFirst.add(w0).add(`ה${w0}`);
+      authorOf.set(c.book.key, key);
+    }
+    if (!this.responsa.size) return;
+    // an author whose name is in another book's title has other works: "<author> סי' ה" alone may be one of them
+    for (const c of catalog) {
+      if (authorOf.has(c.book.key)) continue;
+      const words = (nameWords(normTitle(c.book.title)) ?? []).map((w) => (w.gershayimFromEnd && w.key.startsWith("ה") ? w.key.slice(1) : w.key));
+      for (let a = 0; a < words.length; a++)
+        for (let n = 1; n <= 3 && a + n <= words.length; n++) {
+          const k = words.slice(a, a + n).join(" ");
+          if (!this.responsa.has(k)) continue;
+          const list = this.authorsElsewhere.get(k) ?? [];
+          if (!list.some((x) => x.book.key === c.book.key)) list.push({ book: c.book, tier: "derived", collection: this.collections.get(c.book.key)! });
+          this.authorsElsewhere.set(k, list);
+        }
     }
   }
 
@@ -415,6 +501,16 @@ export function plausibleAcronym(name: string, title: string): boolean {
     at++;
   }
   return true;
+}
+
+/** a title of responsa: "תשובות הריב"ש", "שו"ת מהרי"ק", "שאלות ותשובות רמ"א", "שו"ת הרשב"א חלק ד" → the author, the part */
+const RESPONSA_TITLE = /^(?:שו"ת|שות|תשובות|שאלות ותשובות)\s+(.+?)(?:\s+חלק\s+([א-ת]{1,2}))?$/;
+
+/** An author's name as compared: letters only, final forms unified, the article of an acronym dropped ("הריב"ש" → "ריבש"). */
+export function authorKey(name: string): string | null {
+  const words = nameWords(name);
+  if (!words?.length || words.length > 3) return null;
+  return words.map((w) => (w.gershayimFromEnd && w.key.startsWith("ה") && w.key.length > 2 ? w.key.slice(1) : w.key)).join(" ");
 }
 
 /** a database name shared by more books than this names a collection, not a book */
@@ -580,5 +676,9 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
   // "X א" titles are often cited "X א'"
   const last = /^(.+) ([אבגד])$/.exec(title);
   if (last) out.push({ name: `${last[1]} ${last[2]}'` });
+  // "שו"ת הרשב"א חלק ו" is cited "שו"ת הרשב"א ח"ו"
+  const part = /^(.+) חלק ([א-ט])$/.exec(title);
+  if (part) out.push({ name: `${part[1]} ח"${part[2]}` });
+  // "מדרש תנחומא" is cited "תנחומא" (only when the word names nothing else: added after all names, build())
   return out;
 }

@@ -37,7 +37,9 @@ export interface EngineCase {
   run(input: EngineRun): Promise<readonly Suggestion[]>;
 }
 
-const viaWorkerJob = (engine: "headings" | "dibur-hamatchil" | "footnotes") => async ({ registry, source, target }: EngineRun) => (await engineJob(registry, engine, source, target!, {}, {})).suggestions;
+/** The last full result of a worker-job run (for VALIDATE_DUMP in engines.test.ts: the lines an engine could not place). */
+export let lastResult: EngineResult | null = null;
+const viaWorkerJob = (engine: "headings" | "dibur-hamatchil" | "footnotes") => async ({ registry, source, target }: EngineRun) => (lastResult = await engineJob(registry, engine, source, target!, {}, {})).suggestions;
 
 export const ENGINE_CASES: readonly EngineCase[] = [
   { id: "headings", pairs: "pair", goldTypes: ["COMMENTARY"], run: viaWorkerJob("headings") },

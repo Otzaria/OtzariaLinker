@@ -79,7 +79,9 @@ const SAMPLE: readonly { group: string; title: string }[] = [
 
 /**
  * Floors the full sample must keep (measured 2026-11-12, after the recall round: certain 85.3% strict /
- * 99.9% judged, high 72.3% / 99.8%; recall 93.1%). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
+ * 99.9% judged, high 72.3% / 99.8%; recall 93.1%. After the V4 round the first table — the forms the floors
+ * were set on — is certain 85.3% / 99.9%, high 72.1% / 99.9%, recall 94.5%; the new forms and the internal
+ * references are tallied apart and must keep the same "judged" floors). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
  * of those put the true precision near 99% (certain) and 95% (high) — docs/AUTOMATION_ENGINE.md §6.8.
  */
 const MIN = { certain: { strict: 0.85, judged: 0.99 }, high: { strict: 0.72, judged: 0.98 } } as const;
@@ -99,8 +101,13 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     // CITATIONS_SHARD=k/n: every n-th book from k (several processes in parallel; the reports are merged by hand)
     const [shard, shards] = (process.env.CITATIONS_SHARD ?? "0/1").split("/").map(Number) as [number, number];
     const byLevel = new Map<string, Tally>(LEVELS.map((l) => [l, emptyTally()]));
+    const internal = new Map<string, Tally>(LEVELS.map((l) => [l, emptyTally()]));
+    /** the forms added in V4 (NEW_FORMS), each apart: LINKER covers them little, so they are judged by hand too (§6.8) */
+    const newForms = new Map<string, Map<string, Tally>>();
     const byGroup = new Map<string, Map<string, Tally>>();
     const recall = new Map<string, { linker: number; found: number }>();
+    /** LINKER links from a book to itself, and how many an internal reference found (counted apart from the recall) */
+    const selfGold = { linker: 0, found: 0 };
     const all: (Judged & { group: string; book: string; context?: string; at?: [number, number] | null })[] = [];
     const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
@@ -119,12 +126,24 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       const ms = performance.now() - t0;
       const gold = goldOf(await registry.existingLinks(b.key, 0, Number.MAX_SAFE_INTEGER), b.key);
       const text = new Map((await registry.lines(b.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => [l.index, l.anchorText] as const));
-      const { judged, found, linkerTotal } = judge(result.suggestions, gold, (line) => text.get(line));
+      const { judged, found, linkerTotal, selfTotal } = judge(result.suggestions, gold, (line) => text.get(line));
+      selfGold.linker += selfTotal;
+      selfGold.found += [...found].filter((x) => x.type === "linker-self").length;
       const g = byGroup.get(group) ?? new Map(LEVELS.map((l) => [l, emptyTally()]));
       byGroup.set(group, g);
       for (const j of judged) {
-        add(byLevel.get(j.s.confidence)!, j);
-        add(g.get(j.s.confidence)!, j);
+        // a link inside the book itself ("לעיל סי' ה") is a NEW kind of link the database barely has
+        // (LINKER made a few): its own table, judged by those few and by hand (§6.8), not the floors below
+        const tag = newForm(j.s.rules);
+        if (j.s.target.book.key === b.key) add(internal.get(j.s.confidence)!, j);
+        else if (tag) {
+          const t = newForms.get(tag) ?? new Map(LEVELS.map((l) => [l, emptyTally()]));
+          newForms.set(tag, t);
+          add(t.get(j.s.confidence)!, j);
+        } else {
+          add(byLevel.get(j.s.confidence)!, j);
+          add(g.get(j.s.confidence)!, j);
+        }
         all.push({ ...j, group, book: title, ...(process.env.CITATIONS_REPORT && { context: around(text.get(j.s.source.line) ?? "", j.s.id), at: visibleSpan(text.get(j.s.source.line) ?? "", j.s.id) }) });
       }
       if (process.env.CITATIONS_REPORT) {
@@ -153,6 +172,26 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       const p = precision(t);
       lines.push(`${l.padEnd(10)} ${String(t.n).padStart(6)} ${String(t.correct).padStart(8)} ${String(t.wrong).padStart(6)} ${String(t.unconfirmed).padStart(7)}  ${pct(p.strict).padStart(6)}  ${pct(p.judged).padStart(6)}  ${pct(t.n ? t.exact / t.n : 0)}`);
     }
+    lines.push("", "links inside the book itself (internal references; not in the table above):");
+    for (const [l, t] of internal) {
+      const p = precision(t);
+      if (t.n) lines.push(`${l.padEnd(10)} ${String(t.n).padStart(6)} ${String(t.correct).padStart(8)} ${String(t.wrong).padStart(6)} ${String(t.unconfirmed).padStart(7)}  ${pct(p.strict).padStart(6)}  ${pct(p.judged).padStart(6)}  ${pct(t.n ? t.exact / t.n : 0)}`);
+    }
+    lines.push("", "forms added in V4 (not in the first table): rule | certain n correct/wrong/unconf | high … | possible …");
+    const newAll = new Map<string, Tally>(LEVELS.map((l) => [l, emptyTally()]));
+    for (const [tag, t] of [...newForms].sort()) {
+      const cell = (l: string) => {
+        const x = t.get(l)!;
+        const all = newAll.get(l)!;
+        for (const k of ["n", "correct", "wrong", "unconfirmed", "exact"] as const) all[k] += x[k];
+        return `${x.n} ${x.correct}/${x.wrong}/${x.unconfirmed}`;
+      };
+      lines.push(`${tag.padEnd(22)} | ${cell("certain")} | ${cell("high")} | ${cell("possible")}`);
+    }
+    for (const l of ["certain", "high"]) {
+      const p = precision(newAll.get(l)!);
+      lines.push(`new forms ${l}: ${newAll.get(l)!.n}, strict ${pct(p.strict)}, judged ${pct(p.judged)}`);
+    }
     lines.push("", "group: certain strict/judged (n) | high strict/judged (n) | recall vs LINKER");
     for (const [group, g] of byGroup) {
       const c = g.get("certain")!;
@@ -162,6 +201,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     }
     const totalR = [...recall.values()].reduce((a, r) => ({ linker: a.linker + r.linker, found: a.found + r.found }), { linker: 0, found: 0 });
     lines.push(`recall vs LINKER (all levels): ${pct(totalR.linker ? totalR.found / totalR.linker : 0)} of ${totalR.linker}`);
+    lines.push(`LINKER links of a book to itself, found by internal references: ${selfGold.found} of ${selfGold.linker}`);
     console.log([...timings, "", ...lines].join("\n"));
     if (process.env.CITATIONS_REPORT) writeFileSync(process.env.CITATIONS_REPORT.replace(/.json$/, ".misses.json"), JSON.stringify(misses));
     if (process.env.CITATIONS_REPORT) writeFileSync(process.env.CITATIONS_REPORT.replace(/.json$/, ".books.json"), JSON.stringify(perBook));
@@ -177,10 +217,25 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
         const p = precision(byLevel.get(level)!);
         expect(p.strict, level).toBeGreaterThanOrEqual(MIN[level].strict);
         expect(p.judged, level).toBeGreaterThanOrEqual(MIN[level].judged);
+        // the new forms: where the database has an opinion, it must agree as often
+        expect(precision(newAll.get(level)!).judged, `new forms ${level}`).toBeGreaterThanOrEqual(MIN[level].judged);
+        expect(precision(internal.get(level)!).judged, `internal ${level}`).toBeGreaterThanOrEqual(MIN[level].judged);
       }
     }
   }, 3_600_000);
 });
+
+/**
+ * The forms added in V4 (docs/AUTOMATION_ENGINE.md §6.3), by the rule a suggestion carries. They are
+ * tallied apart from the forms the floors were set on: LINKER barely links most of them (a place in
+ * brackets with no book, responsa by their author, the Zohar's pages…), so their strict precision says
+ * little — they are hand-checked instead, and must agree with the database where it has an opinion.
+ */
+const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4"];
+function newForm(rules: readonly string[]): string | null {
+  for (const f of NEW_FORMS) if (rules.some((r) => r.startsWith(`citations.${f}`))) return f;
+  return null;
+}
 
 /** the visible text around a suggestion's span (its raw offsets are in the id), the span in [brackets] — for hand checks */
 function around(html: string, id: string): string {

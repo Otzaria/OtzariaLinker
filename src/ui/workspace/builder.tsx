@@ -8,6 +8,7 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { LinkItem } from "./links-panel";
 import { plainText } from "./plain-text";
+import { SourceBadge, useBookOrigin } from "./source-badge";
 import { visibleSlice } from "../../matching/hebrew-tokens";
 
 /*
@@ -161,6 +162,7 @@ function StoredAs() {
 function End({ side, pick }: { side: Side; pick: Pick | null }) {
   const store = useStore();
   const label = side === "source" ? "מקור" : "יעד";
+  const origin = useBookOrigin()(pick?.bookKey);
   if (!pick)
     return (
       <div class={`end ${side}`}>
@@ -180,6 +182,12 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
       <button class="what adv-link" style="text-decoration:none;color:inherit" onClick={() => store.reveal(side, pick.bookKey, pick.line)} title="הצגה בספר">
         {title} · {where}
       </button>
+      {/* the same title is open from two sources: say which copy this link is made from */}
+      {origin.ambiguous && origin.source && (
+        <span style="grid-column:1/-1">
+          <SourceBadge source={origin.source} name />
+        </span>
+      )}
       {pick.anchor && (
         <span style="grid-column:1/-1" class="muted">
           עוגן: <mark class="anchor-hl">{pick.anchor.text || (line ? visibleSlice(line.anchorText, pick.anchor.rawStart, pick.anchor.rawEnd ?? pick.anchor.rawStart + 1) : "…")}</mark>{" "}

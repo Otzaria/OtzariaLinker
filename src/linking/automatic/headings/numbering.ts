@@ -50,7 +50,7 @@ const KINDS: readonly KindDef[] = [
   { id: "perek", word: "פרק", the: "הפרק", aliases: ["פרק", "פ'", "פר'", "פרקים"] },
   { id: "pasuk", word: "פסוק", the: "הפסוק", aliases: ["פסוק", "פס'", "פסוקים"] },
   { id: "siman", word: "סימן", the: "הסימן", aliases: ["סימן", "סי'", "סימנים"] },
-  { id: "seif", word: "סעיף", the: "הסעיף", aliases: ["סעיף", "סע'", "סעיפים"] },
+  { id: "seif", word: "סעיף", the: "הסעיף", aliases: ["סעיף", "סע'", "סעי'", "סעיפים"] },
   { id: "seifkatan", word: "סעיף קטן", the: "הסעיף הקטן", aliases: ['ס"ק', "סק", "סעיף קטן"] },
   { id: "daf", word: "דף", the: "הדף", aliases: ["דף", "דפים"] },
   { id: "amud", word: "עמוד", the: "העמוד", aliases: ["עמוד", "עמ'"] },
@@ -67,11 +67,21 @@ const KINDS: readonly KindDef[] = [
   { id: "mitzva", word: "מצוה", the: "המצוה", aliases: ["מצוה", "מצווה"] },
   { id: "teshuva", word: "תשובה", the: "התשובה", aliases: ["תשובה"] },
   { id: "sefer", word: "ספר", the: "הספר", aliases: ["ספר"] },
+  // the structure-reference presets of the pattern engine (pattern/presets.ts) name these too
+  { id: "note", word: "הערה", the: "ההערה", aliases: ["הערה", "הערות"] },
+  { id: "shoresh", word: "שורש", the: "השורש", aliases: ["שורש", "שרש"] },
+  { id: "tikun", word: "תיקון", the: "התיקון", aliases: ["תיקון", "תקון"] },
+  { id: "drush", word: "דרוש", the: "הדרוש", aliases: ["דרוש"] },
 ];
 
 const BY_ALIAS = new Map<string, KindDef>();
 for (const k of KINDS) for (const a of k.aliases) BY_ALIAS.set(a, k);
 const BY_ID = new Map(KINDS.map((k) => [k.id, k] as const));
+
+/** The kind a word names ("סי'" → siman), after quote unification; undefined for an unlisted word. */
+export const kindOfWord = (word: string): string | undefined => BY_ALIAS.get(word.replace(/[׳‘’`´]/g, "'").replace(/[״“”„]/g, '"'))?.id;
+/** Every listed kind id. */
+export const KIND_IDS: readonly string[] = KINDS.map((k) => k.id);
 
 /** Display word of a kind ("פרק"); "" for "?" and "name". */
 export const kindWord = (kind: ElementKind): string => BY_ID.get(kind)?.word ?? (kind.startsWith("w:") ? kind.slice(2) : "");
@@ -121,7 +131,7 @@ export function parseNumeral(token: string, mode: NumberingMode, bare: boolean):
     const n = parseInt(t, 10);
     return n > 0 ? { n, trail } : null;
   }
-  const ord = ORDINALS[t];
+  const ord = Object.hasOwn(ORDINALS, t) ? ORDINALS[t] : undefined;
   if (ord !== undefined && !bare) return { n: ord, trail };
   const quoted = /['"]/.test(t);
   const letters = t.replace(/['"]/g, "");
@@ -172,6 +182,8 @@ interface Parsed {
 }
 
 const SEPARATOR_RE = /^[-–—:,.]/;
+/** a seif katan glued to its number: the quote must be there ("סק"א", "סקי"ב"), so "סקל" is a word */
+const GLUED_SK_RE = /^סק(?:"([א-ת]{1,3}'?)|([א-ת]{1,2}"[א-ת]))[.,:;]?$/;
 
 function parseTokens(text: string, mode: NumberingMode): Parsed {
   const tokens = text.split(" ");
@@ -189,6 +201,14 @@ function parseTokens(text: string, mode: NumberingMode): Parsed {
       if (!a) break;
       out.push({ kind: "amud", n: a[0], label: a[0] === 1 ? "עמוד א" : "עמוד ב" });
       i += a[1];
+      continue;
+    }
+    // "סק"א", "סקי"ב": a seif katan glued to its number (seifKatan.ts of otzaria-link-generator @7ad8b2c, rewritten)
+    const glued = kind ? null : GLUED_SK_RE.exec(tok);
+    const gluedNum = glued ? parseNumeral((glued[1] ?? glued[2])!, "strict", false) : null;
+    if (gluedNum) {
+      out.push({ kind: "seifkatan", n: gluedNum.n, label: `ס"ק ${toGematria(gluedNum.n)}` });
+      i += 1;
       continue;
     }
     const kindNum = kind && tokens[i + width] !== undefined ? parseNumeral(tokens[i + width]!, mode, false) : null;
@@ -251,7 +271,10 @@ export function dafElement(n: number, amud: 1 | 2 | undefined): PathElement {
  * line made ENTIRELY of listed kind words and their numerals ("פרק ג", "דף ב ע"א", "סימן יב סעיף ג").
  */
 export function untaggedHeading(html: unknown, mode: NumberingMode): PathElement[] | null {
-  const text = plainText(html);
+  // a heading of at most 24 visible characters is never this long, even with tags (a cheap reject for prose lines)
+  if (String(html ?? "").length > 400) return null;
+  // a whole line in brackets ("(סימן ה)", "[סעיף ג]") is the same heading
+  const text = plainText(html).replace(/^[([]\s*(.*?)\s*[)\]]$/, "$1");
   if (!text || text.length > 24) return null;
   const p = parseTokens(text, mode);
   return p.elements.length && p.explicit && p.consumed === p.total ? p.elements : null;
@@ -265,7 +288,8 @@ const NOT_MARKERS = new Set(["שם", "שם'", "כו'", "וכו'", "עי'"]);
  * is no kind word, so the numeral must LOOK like one (descending letters, gershayim or digits).
  */
 export function inlineMarker(html: unknown, mode: NumberingMode): number | null {
-  const m = /^\(([^()\s]{1,6})\)/.exec(plainText(html));
+  // only the start of the line matters; plainText of a whole long line is the cost of analyzeBook
+  const m = /^\(([^()\s]{1,6})\)/.exec(plainText(String(html ?? "").slice(0, 300)));
   if (!m || NOT_MARKERS.has(m[1]!)) return null;
   const num = parseNumeral(m[1]!, mode, true);
   return num ? num.n : null;
