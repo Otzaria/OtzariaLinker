@@ -60,6 +60,19 @@ function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook
   return { ...r, notes: [note, ...r.notes] };
 }
 
+/**
+ * A notes book whose main book carries no note marks (Sefaria's notes on מכילתא דרשב"י, on מדרש אגדה, on
+ * מדרש לקח טוב: no marker, no number on the note lines) gives the footnotes engine nothing to match.
+ * Such notes follow the main book's headings ("פרק ג › פסוק א" over the notes of that verse), so when the
+ * footnotes engine found nothing, the headings engine links them as a commentary (notes → main book).
+ * Measured: docs/AUTOMATION_ENGINE.md §5.1.
+ */
+function notesAsCommentary(r: EngineResult, main: EngineBook, notes: EngineBook, ctx: EngineContext): EngineResult {
+  const h = runEngine("headings", notes, main, {}, ctx);
+  const note: Reason = { code: "maxlink/notes-by-headings", text: `שיטת הערות השוליים לא מצאה סימני הערה שמתאימים לשורות "${notes.book.title}", ולכן ההערות קושרו לפי הכותרות של שני הספרים, כמו פירוש.` };
+  return { suggestions: h.suggestions, notes: [note, ...r.notes, ...h.notes], unmatched: h.unmatched };
+}
+
 /** Lowers the given confidences to "possible", with a warning that says why. */
 function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reason): EngineResult {
   return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
@@ -128,6 +141,7 @@ export async function maxlinkJob(
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
         result = runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner);
+        if (step.engine === "footnotes" && !result.suggestions.length) result = notesAsCommentary(result, loaded.source, loaded.target, inner);
         results.set(`${step.engine}|${key}`, result);
       } else {
         loaded = null;

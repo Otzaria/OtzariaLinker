@@ -113,6 +113,22 @@ describe("maxlinkJob", () => {
   });
 });
 
+describe("maxlinkJob — notes on a main book with no note marks (Sefaria's notes on מכילתא דרשב\"י)", () => {
+  it("when the footnotes engine finds nothing, the notes are linked by headings, as a commentary", async () => {
+    const main = text("ספר בלי סימנים.txt", ["<h1>ספר בלי סימנים</h1>", "<h2>פרק א</h2>", "(א) שורה ראשונה של הפרק", "(ב) שורה שנייה של הפרק", "<h2>פרק ב</h2>", "(א) שורה אחרת"]);
+    const notes = text("הערות לספר בלי סימנים.txt", ["<h1>הערות לספר בלי סימנים</h1>", "<h2>פרק א</h2>", "<h3>פסוק ב</h3>", "הערה על השורה השנייה בלי מספר", "<h2>פרק ב</h2>", "<h3>פסוק א</h3>", "הערה אחרת"]);
+    const reg = new SourceRegistry();
+    const books = (await reg.open([main, notes])).sources.flatMap((s) => s.books);
+    const plan = planMaxLink({ selected: [books.find((b) => b.title.startsWith("הערות"))!.key], library: books, singleEngines: [] });
+    expect(plan.steps.map((s) => s.engine)).toEqual(["footnotes"]);
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    const r = res.items[0]!.result!;
+    expect(r.notes[0]!.code).toBe("maxlink/notes-by-headings");
+    // the note under "פרק א › פסוק ב" → the main book's line "(ב)" of פרק א
+    expect(r.suggestions.map((x) => [x.engine, x.source.line, x.target.line])).toContainEqual(["headings", 3, 3]);
+  });
+});
+
 describe("maxlinkJob — the citations engine (single-book)", () => {
   it("runs once on the selected book, through its registered runner", async () => {
     const { reg, all, byTitle } = await setup();
