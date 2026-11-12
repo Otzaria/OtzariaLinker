@@ -101,8 +101,8 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const byLevel = new Map<string, Tally>(LEVELS.map((l) => [l, emptyTally()]));
     const byGroup = new Map<string, Map<string, Tally>>();
     const recall = new Map<string, { linker: number; found: number }>();
-    const all: (Judged & { group: string; book: string; context?: string })[] = [];
-    const misses: { book: string; line: number; target: string; heRef: string; span: string }[] = [];
+    const all: (Judged & { group: string; book: string; context?: string; at?: [number, number] | null })[] = [];
+    const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
     for (const [k, { group, title }] of SAMPLE.entries()) {
@@ -125,7 +125,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       for (const j of judged) {
         add(byLevel.get(j.s.confidence)!, j);
         add(g.get(j.s.confidence)!, j);
-        all.push({ ...j, group, book: title, ...(process.env.CITATIONS_REPORT && { context: around(text.get(j.s.source.line) ?? "", j.s.id) }) });
+        all.push({ ...j, group, book: title, ...(process.env.CITATIONS_REPORT && { context: around(text.get(j.s.source.line) ?? "", j.s.id), at: visibleSpan(text.get(j.s.source.line) ?? "", j.s.id) }) });
       }
       if (process.env.CITATIONS_REPORT) {
         const missed = gold.filter((x) => x.type === "linker" && !found.has(x));
@@ -134,7 +134,9 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
           if (!lineText.has(m.line)) lineText.set(m.line, (await registry.lines(b.key, m.line, m.line))[0]?.anchorText ?? "");
           const a = m.link.dbAnchors?.find((x) => x.side === 0);
           const vis = visible(lineText.get(m.line)!);
-          misses.push({ book: title, line: m.line, target: m.bookTitle, heRef: m.link.heRef2, span: a ? vis.slice(Math.max(0, a.charStart - 15), (a.charEnd ?? a.charStart) + 5).join("") : "" });
+          const end = a ? (a.charEnd ?? a.charStart) : 0;
+          // the span with some context, its visible offsets and its exact words (to tell which misses an emitted suggestion overlaps)
+          misses.push({ book: title, line: m.line, target: m.bookTitle, heRef: m.link.heRef2, span: a ? vis.slice(Math.max(0, a.charStart - 40), end + 15).join("") : "", ...(a && { at: [a.charStart, end] as [number, number], words: vis.slice(a.charStart, end).join("") }) });
         }
       }
       const r = recall.get(group) ?? { linker: 0, found: 0 };
@@ -167,7 +169,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
       writeFileSync(
         process.env.CITATIONS_REPORT,
         JSON.stringify(
-          all.map((j) => ({ group: j.group, book: j.book, verdict: j.verdict, exact: j.exact, confidence: j.s.confidence, score: j.s.score, line: j.s.source.line, target: j.s.target.book.title, tline: j.s.target.line, tend: j.s.target.end, heRef2: j.s.heRef2, rules: j.s.rules, reason: j.s.reasons.map((r) => r.text).join(" | "), context: j.context })),
+          all.map((j) => ({ group: j.group, book: j.book, verdict: j.verdict, exact: j.exact, confidence: j.s.confidence, score: j.s.score, line: j.s.source.line, target: j.s.target.book.title, tline: j.s.target.line, tend: j.s.target.end, heRef2: j.s.heRef2, rules: j.s.rules, reason: j.s.reasons.map((r) => r.text).join(" | "), context: j.context, at: j.at })),
         ),
       );
     if (!only && shards === 1) {
@@ -188,6 +190,12 @@ function around(html: string, id: string): string {
   const a = countVisibleChars(html, Number(m[1]));
   const b = countVisibleChars(html, Number(m[2]));
   return `${vis.slice(Math.max(0, a - 70), a).join("")}[${vis.slice(a, b).join("")}]${vis.slice(b, b + 70).join("")}`;
+}
+
+/** the visible offsets of a suggestion's span (from its id) */
+function visibleSpan(html: string, id: string): [number, number] | null {
+  const m = /@(\d+)-(\d+)>/.exec(id);
+  return m ? [countVisibleChars(html, Number(m[1])), countVisibleChars(html, Number(m[2]))] : null;
 }
 
 /** the visible characters of a line (one per unit, an entity as one char) — to show a missed LINKER span */
