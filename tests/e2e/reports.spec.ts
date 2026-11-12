@@ -22,11 +22,13 @@ test("QA: the report is saved as one offline HTML page, grouped by severity, wit
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
-  const rec = (l1: number, l2: number) => ({ line_index_1: l1, heRef_2: "בראשית", path_2: "בראשית.txt", line_index_2: l2, "Conection Type": "reference" });
+  // new links from a sheet: an untouched record of a library file is kept as it is, its errors are
+  // warnings (validate.asExported), so the errors group comes from links the user brings
+  const rec = (l1: number, l2: number) => `${l1},בראשית,בראשית.txt,${l2},reference`;
   await openFiles(page, [
     { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
     { name: "ספר שלי.txt", buffer: Buffer.from(["<h1>ספר שלי</h1>", "שורה ב", "שורה ג", "שורה ד"].join(nl)) },
-    { name: "ספר שלי_links.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify([rec(2, 3), rec(2, 3), rec(3, 1)], null, 2)) },
+    { name: "ספר שלי_links.csv", mimeType: "text/csv", buffer: Buffer.from(["line_index_1,heRef_2,path_2,line_index_2,Conection Type", rec(2, 3), rec(2, 3), rec(3, 1)].join(nl)) },
   ]);
   await page.getByRole("tab", { name: /בדיקה/ }).click({ timeout: 30_000 });
   await page.getByRole("button", { name: "בדיקת הקישורים" }).click();
