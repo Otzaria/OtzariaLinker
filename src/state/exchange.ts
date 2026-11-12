@@ -13,6 +13,7 @@ import { recordToObject } from "../formats/links-json/serialize";
 import { parseLinksCsv } from "../formats/links-csv/parse";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
 import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-report";
+import { nextSteps, type NextStepsRoute } from "../formats/report/next-steps";
 import { planSefariaCsv, type SefariaCsvFile } from "../formats/sefaria-csv/write";
 import type { AltTocState } from "./alt-toc";
 import { addChanges, commit, fileChange, fileFingerprint, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
@@ -276,7 +277,13 @@ export class ExchangeState {
 
   /** `_report.txt` for a plan (and the CSV files, when exporting as CSV). */
   exportReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): string {
-    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc });
+    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc, purpose: this.host.exportPurpose.peek() });
+  }
+
+  /** What to do with the files of this export, the route of its purpose first (audit F13). */
+  nextSteps(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): NextStepsRoute[] {
+    const files = (csv ? csv.length : plan.files.length) + plan.altToc.files.length;
+    return nextSteps({ format: csv ? "sefaria-csv" : "json", purpose: this.host.exportPurpose.value, altToc: plan.altToc.files.length > 0, zip: files > 1 });
   }
 
   saveReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): void {

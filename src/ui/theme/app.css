@@ -352,3 +352,14 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .alt-rows { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
 .alt-row { display: grid; grid-template-columns: 64px 1fr 90px auto auto; gap: 6px; align-items: center; }
 .alt-row.bad input { border-color: var(--error); }
+
+/* export: "what now?" (audit F13) */
+.saved-note { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--on-surface); }
+.saved-note .icon { color: var(--primary); }
+.next-steps { display: flex; flex-direction: column; gap: 6px; }
+.next-steps details { padding: 6px 10px; border-radius: var(--radius); background: var(--surface-container-low); }
+.next-steps summary { cursor: pointer; font-weight: 600; }
+.next-steps ol { margin: 6px 0 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 4px; }
+.next-steps p { margin: 6px 0 0; font-size: var(--fs-sm); }
+.next-steps-box > summary { cursor: pointer; color: var(--primary); }
+.next-steps-box > .next-steps { margin-top: 8px; }

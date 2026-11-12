@@ -78,6 +78,15 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   expect(file.suggestedFilename()).toBe("פירוש על בראשית_links.json");
   const records = JSON.parse(readFileSync(await file.path(), "utf8")) as Record<string, unknown>[];
   expect(records).toEqual([{ line_index_1: 2, heRef_2: "בראשית, א, א", path_2: "בראשית.txt", line_index_2: 3, ref_2: "Genesis 1:1", "Conection Type": "source" }]);
+  // after the download the dialog says what to do with the file (audit F13): the library first, open
+  await expect(dialog.getByRole("heading", { name: "מה עכשיו?" })).toBeVisible();
+  await expect(dialog.locator('details[data-route="library"]')).toHaveAttribute("open", "");
+  await expect(dialog.locator('details[data-route="library"]')).toContainText("otzaria-library");
+  await expect(dialog.locator('details[data-route="personal"] summary')).toHaveText("לאוצריא שלכם בלבד (הספרייה האישית)");
+  await expect(dialog.locator('details[data-route="database"]')).toContainText("הכלי לא כותב קישורים לתוך מסד");
+  await shot(page, "5b-export-next");
+  await dialog.getByRole("button", { name: "סגירה" }).click();
+  await expect(dialog).toHaveCount(0);
 
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);

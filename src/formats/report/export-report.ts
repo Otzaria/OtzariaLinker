@@ -4,12 +4,13 @@ import { isRange, type Link } from "../../core/links/model";
 import type { AltTocExportPlan } from "../alt-toc/export";
 import type { ExportPlan } from "../links-json/export";
 import type { SefariaCsvFile } from "../sefaria-csv/write";
+import { nextStepsText, type ExportPurpose } from "./next-steps";
 
 /*
  * `_report.txt`: a plain-text Hebrew summary that travels with the export — version 3 wrote one
  * into every export (legacy/OtzariaLinker-v3.html, `ExportBuilder.report`). It says what was
- * written and where each file goes in otzaria-library, what was held back and why, and the
- * warnings. Deterministic for a given input (the date is passed in), LF line breaks, no BOM.
+ * written and where each file goes in otzaria-library, what was held back and why, the
+ * warnings, and what to do with the files (next-steps.ts). Deterministic for a given input (the date is passed in), LF line breaks, no BOM.
  */
 export const REPORT_FILE_NAME = "_report.txt";
 
@@ -24,6 +25,8 @@ export interface ReportInput {
   /** the CSV files, when format is "sefaria-csv" */
   csv?: readonly SefariaCsvFile[];
   altToc: AltTocExportPlan;
+  /** what the export is for: the next steps put its route first (default: the library) */
+  purpose?: ExportPurpose;
 }
 
 const RULE = (ch: string) => ch.repeat(60);
@@ -121,16 +124,9 @@ export function buildExportReport(r: ReportInput): string {
     for (const m of altWarnings.slice(0, LIMIT)) L.push(`  • ${m}`);
   }
 
-  L.push("", RULE("="));
-  if (r.format === "json")
-    L.push(
-      "את התיקיות links/ ו־alt_toc/ מעתיקים לשורש otzaria-library, ליד תיקיית הספרים.",
-      "כל קובץ מחליף את הקובץ של אותו ספר בספרייה: קובץ קישורים מחליף את כל הקישורים הידניים של הספר, וקובץ alt_toc את כל מבני הכותרות שלו.",
-    );
-  else
-    L.push(
-      "קובצי ה־CSV מיועדים להעלאת קישורים לספריא, ולא לספריית אוצריא. אין בהם טווחים ועוגני מילה.",
-      ...(altToc.files.length ? ["את התיקייה alt_toc/ מעתיקים לשורש otzaria-library, ליד תיקיית הספרים."] : []),
-    );
+  // what to do with the files, for each way back to Otzaria (audit F13)
+  section("מה עושים עכשיו עם הקבצים", "=");
+  const files = (r.format === "json" ? links.files.length : (r.csv?.length ?? 0)) + altToc.files.length;
+  L.push(...nextStepsText({ format: r.format, purpose: r.purpose ?? "submission", altToc: altToc.files.length > 0, zip: files > 1 }));
   return L.join("\n") + "\n";
 }

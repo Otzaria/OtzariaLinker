@@ -5,6 +5,7 @@ import { planAltTocExport } from "../../../src/formats/alt-toc/export";
 import { planExport } from "../../../src/formats/links-json/export";
 import { buildExportReport, REPORT_FILE_NAME } from "../../../src/formats/report/export-report";
 import { planSefariaCsv } from "../../../src/formats/sefaria-csv/write";
+import { nextSteps, nextStepsText } from "../../../src/formats/report/next-steps";
 
 const S: BookRef = { key: "t:1", title: "פירוש על בראשית", origin: "otzaria" };
 const T: BookRef = { key: "t:2", title: "בראשית", origin: "otzaria" };
@@ -70,5 +71,32 @@ describe("_report.txt", () => {
     expect(r).toContain("פירוש על בראשית.links.csv  (2 שורות)");
     expect(r).toContain("קובצי ה־CSV מיועדים להעלאת קישורים לספריא");
     expect(r).not.toContain("links/פירוש");
+  });
+
+  it("ends with what to do with the files: the library, the user's own Otzaria (unverified), not into a database (audit F13)", () => {
+    const tail = report.slice(report.indexOf("מה עושים עכשיו עם הקבצים"));
+    expect(tail).toMatch(/^מה עושים עכשיו עם הקבצים\n=+\n\nלספריית אוצריא, לכל המשתמשים:\n {2}1\. פותחים את קובץ ה־ZIP\./);
+    expect(tail).toContain("בקשת משיכה");
+    expect(tail).toContain("לאוצריא שלכם בלבד (הספרייה האישית):");
+    expect(tail).toContain('"ייבוא נתונים"');
+    expect(tail).toContain("שימו לב: המסלול הזה מתואר לפי הקוד של אוצריא, ועוד לא נבדק בפועל");
+    expect(tail).toContain("הכלי לא כותב קישורים לתוך מסד");
+    // private use puts the personal library first
+    const priv = buildExportReport({ date: "d", app: "a", format: "json", links: plan, altToc, purpose: "private" });
+    expect(priv.slice(priv.indexOf("מה עושים עכשיו"))).toMatch(/=\n\nלאוצריא שלכם בלבד/);
+  });
+});
+
+describe("next steps after an export", () => {
+  it("one file is taken as is; without alt_toc only links/ is copied; CSV is for Sefaria only", () => {
+    const [lib] = nextSteps({ format: "json", purpose: "submission", altToc: false, zip: false });
+    expect(lib!.steps[0]).toBe("לוקחים את הקובץ שירד.");
+    expect(lib!.steps[1]).toMatch(/^את התיקייה links\/ מעתיקים/);
+    expect(nextSteps({ format: "json", purpose: "submission", altToc: false, zip: false }).map((r) => r.id)).toEqual(["library", "personal", "database"]);
+    expect(nextSteps({ format: "json", purpose: "private", altToc: false, zip: true }).map((r) => r.id)).toEqual(["personal", "library", "database"]);
+    const csv = nextSteps({ format: "sefaria-csv", purpose: "submission", altToc: true, zip: true });
+    expect(csv.map((r) => r.id)).toEqual(["sefaria"]);
+    expect(csv[0]!.steps.join(" ")).toContain("alt_toc/");
+    expect(nextStepsText({ format: "json", purpose: "submission", altToc: false, zip: false })[0]).toBe("");
   });
 });
