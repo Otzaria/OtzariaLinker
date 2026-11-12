@@ -622,6 +622,8 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     }
     if (window.kind === "caller") reasons.push(r("dh/window-caller", "החיפוש הוגבל לטווח שנקבע לפי מבנה הספרים"));
     else if (window.kind === "heading") reasons.push(r("dh/window-heading", `החיפוש הוגבל לקטע "${window.label}" בספר הבסיס`));
+    else if (window.kind === "unit") reasons.push(r("dh/window-unit", `החיפוש הוגבל לשורה הממוספרת שהכותרת בפירוש מציינת (${window.label})`));
+    else if (window.kind === "page") reasons.push(r("dh/window-page", `החיפוש הוגבל לעמוד "${window.label}", לפי סימני העמודים שבספר הבסיס`));
     else reasons.push(r("dh/window-book", "החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש"));
     if (prevIn !== null && win.line >= prevIn) {
       rules.push("dh/order");
