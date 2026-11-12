@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
+import { pushTo } from "../../src/core/collections";
 import type { Link } from "../../src/core/links/model";
 import type { EngineContext, EngineId } from "../../src/linking/automatic/types";
 import { mergeSuggestions, type MergeItem } from "../../src/linking/merge";
@@ -77,6 +78,7 @@ const DIR = resolve(process.env.BENCH_DIR ?? ".bench");
 /** hand-check and miss examples are kept for one book in SAMPLE_EVERY (by rank), to keep the cache small */
 const SAMPLE_EVERY = 4;
 const PER_BUCKET = 2;
+const MAX_LINKS_FOR_MISSES = 60_000;
 
 interface OracleData {
   /** id → [top category, lines] */
@@ -93,6 +95,8 @@ interface BookRecord {
   errors: string[];
   /** steps stopped by BENCH_STEP_S (their partial result is kept) */
   stopped: string[];
+  /** wall time of each step, in the plan's order (maxlinkJob's own measure) */
+  stepMs?: number[];
   raw: number;
   merged: number;
   contradictedPairs: number;
@@ -287,6 +291,16 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     return out;
   }
 
+  /** every database link at a book, both directions (the oracle's counts) */
+  let totals: Map<number, number> | null = null;
+  function linkTotal(id: number): number {
+    if (!totals) {
+      totals = new Map();
+      for (const [, s, t, n] of data.rows) for (const b of s === t ? [s] : [s, t]) totals.set(b, (totals.get(b) ?? 0) + n);
+    }
+    return totals.get(id) ?? 0;
+  }
+
   /** the dominant stored type of each book this one is linked with (both directions), from the oracle's counts */
   let pairIndex: Map<number, [string, number, number][]> | null = null;
   function pairTypesOf(id: number): Map<number, string> {
@@ -369,12 +383,16 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     rec.raw = merged.stats.input;
     rec.merged = merged.stats.output;
     rec.contradictedPairs = merged.stats.contradictedPairs ?? 0;
+    rec.stepMs = res.items.map((i) => i.ms);
+    // examples are kept for one book in SAMPLE_EVERY — misses only where reading all its links is cheap
+    // (a base book's are mostly incoming: בראשית took 150 s to read; its misses show up from the other ends)
     const keep = rankOf(SEED, `book:${id}`) % SAMPLE_EVERY === 0;
-    if (!merged.suggestions.length && !keep) return { ...rec, ms: Date.now() - t0 };
+    const keepMisses = keep && linkTotal(id) <= MAX_LINKS_FOR_MISSES;
+    if (!merged.suggestions.length && !keepMisses) return { ...rec, ms: Date.now() - t0 };
 
     // the database's links at the lines the run speaks about (all of them for a book whose examples are kept)
     const at = merged.suggestions.flatMap((s) => [s.source, s.target].filter((x) => x.book.key === book.key).map((x) => x.line));
-    const links = await linksAt(book.key, at, keep || new Set(at).size > 0.3 * (book.lineCount ?? 0));
+    const links = await linksAt(book.key, at, keepMisses || new Set(at).size > 0.3 * (book.lineCount ?? 0));
     const db = indexDbLinks(book.key, links, own);
     db.pairType = pairTypesOf(id);
     let text: Map<number, string> | null = null;
@@ -392,7 +410,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       for (const x of score.scored) {
         if (x.verdict === "correct") continue;
         const k = `${x.group}|${x.s.confidence}|${x.pairType}|${x.verdict}`;
-        buckets.set(k, [...(buckets.get(k) ?? []), x]);
+        pushTo(buckets, k, x);
       }
       rec.fresh = [];
       for (const list of buckets.values())
@@ -413,38 +431,40 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
             rank: rankOf(SEED, x.s.id),
           });
       // misses: links this book is responsible for (it owns them, or one end of an undirected pair), PER_BUCKET per type
-      const found = new Set([...score.matched.values()].flatMap((s) => [...s]));
-      const fromLine = new Map<number, typeof score.scored>();
-      for (const x of score.scored) fromLine.set(x.bLine, [...(fromLine.get(x.bLine) ?? []), x]);
-      const byType = new Map<string, { line: number; e: DbEnd }[]>();
-      const seen = new Set<number>();
-      for (const [line, list] of db.byLine)
-        for (const e of list) {
-          if (found.has(e.id) || seen.has(e.id)) continue;
-          if (!(e.owner === `D:${id}` || (e.owner[0] === "U" && ownerBooks(e.owner).includes(id)))) continue;
-          seen.add(e.id);
-          byType.set(e.type, [...(byType.get(e.type) ?? []), { line, e }]);
-        }
-      rec.misses = [];
-      for (const [type, list] of byType)
-        for (const { line, e } of list.sort((a, b) => rankOf(SEED, `link:${a.e.id}`) - rankOf(SEED, `link:${b.e.id}`)).slice(0, PER_BUCKET)) {
-          const here = fromLine.get(line) ?? [];
-          rec.misses.push({
-            id: e.id,
-            type,
-            owner: e.owner,
-            line,
-            other: byId.get(e.other)?.title ?? `#${e.other}`,
-            oLine: e.oFrom,
-            oEnd: e.oTo,
-            text: excerpt(lineText(line), e.span ?? null),
-            oText: excerpt(await otherLine(e.other, e.oFrom), null, 70),
-            planned: isRelated(id, e.other) || isRelated(e.other, id),
-            toOther: here.filter((x) => x.other === e.other).map((x) => x.oFrom),
-            atLine: here.length,
-            rank: rankOf(SEED, `link:${e.id}`),
-          });
-        }
+      if (keepMisses) {
+        const found = new Set([...score.matched.values()].flatMap((s) => [...s]));
+        const fromLine = new Map<number, typeof score.scored>();
+        for (const x of score.scored) pushTo(fromLine, x.bLine, x);
+        const byType = new Map<string, { line: number; e: DbEnd }[]>();
+        const seen = new Set<number>();
+        for (const [line, list] of db.byLine)
+          for (const e of list) {
+            if (found.has(e.id) || seen.has(e.id)) continue;
+            if (!(e.owner === `D:${id}` || (e.owner[0] === "U" && ownerBooks(e.owner).includes(id)))) continue;
+            seen.add(e.id);
+            pushTo(byType, e.type, { line, e });
+          }
+        rec.misses = [];
+        for (const [type, list] of byType)
+          for (const { line, e } of list.sort((a, b) => rankOf(SEED, `link:${a.e.id}`) - rankOf(SEED, `link:${b.e.id}`)).slice(0, PER_BUCKET)) {
+            const here = fromLine.get(line) ?? [];
+            rec.misses.push({
+              id: e.id,
+              type,
+              owner: e.owner,
+              line,
+              other: byId.get(e.other)?.title ?? `#${e.other}`,
+              oLine: e.oFrom,
+              oEnd: e.oTo,
+              text: excerpt(lineText(line), e.span ?? null),
+              oText: excerpt(await otherLine(e.other, e.oFrom), null, 70),
+              planned: isRelated(id, e.other) || isRelated(e.other, id),
+              toOther: here.filter((x) => x.other === e.other).map((x) => x.oFrom),
+              atLine: here.length,
+              rank: rankOf(SEED, `link:${e.id}`),
+            });
+          }
+      }
     }
     return { ...rec, ms: Date.now() - t0 };
   }
@@ -547,7 +567,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     const misses = [...runBooks].flatMap((b) => (done.get(b)?.misses ?? []).map((x) => ({ book: done.get(b)!.title, ...x }))).filter((m) => !matched.get(`${m.type}|${m.owner}`)?.has(m.id));
     const take = <T extends { rank: number }>(list: T[], key: (x: T) => string, n: number) => {
       const by = new Map<string, T[]>();
-      for (const x of list) by.set(key(x), [...(by.get(key(x)) ?? []), x]);
+      for (const x of list) pushTo(by, key(x), x);
       return Object.fromEntries([...by].map(([k, xs]) => [k, xs.sort((a, b) => a.rank - b.rank).slice(0, n)]));
     };
     writeFileSync(

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Link, LinkSide } from "../../src/core/links/model";
+import { pushTo } from "../../src/core/collections";
 import { countVisibleChars } from "../../src/core/text/offsets";
 import type { Confidence, EngineId, Suggestion } from "../../src/linking/automatic/types";
 
@@ -56,7 +57,7 @@ export interface Stratum {
 export function stratify(units: readonly Unit[], seed: string, minShare = 0.01): Stratum[] {
   const total = units.reduce((n, u) => n + u.links, 0);
   const by = new Map<string, Unit[]>();
-  for (const u of units) by.set(u.stratum, [...(by.get(u.stratum) ?? []), u]);
+  for (const u of units) pushTo(by, u.stratum, u);
   const out: Stratum[] = [];
   const rest: Unit[] = [];
   for (const [name, us] of [...by].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
