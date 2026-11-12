@@ -1,7 +1,7 @@
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal } from "@preact/signals";
-import { parseProject, serializeProject } from "../projects/project-format";
-import type { SourceBook } from "../core/books";
+import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
+import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
@@ -781,11 +781,52 @@ export class AppStore {
 
   /* ---------------- projects, autosave, recovery ---------------- */
 
+  /** The sources the open project was saved with (audit F10); missingSources lists those not open again. */
+  readonly projectSources = signal<ProjectSource[]>([]);
+
+  /**
+   * The project's sources that are not open yet, each with the titles its links still wait for. A
+   * source that recorded its titles is back when they are all open (whatever source holds them — the
+   * links bind by title); an older project's source, by its label.
+   */
+  readonly missingSources = computed<(ProjectSource & { missingTitles: string[] })[]>(() => {
+    const open = this.booksByTitle.value;
+    const labels = new Set(this.sources.value.map((s) => s.info.label));
+    return this.projectSources.value.flatMap((s) => {
+      const missingTitles = (s.titles ?? []).filter((t) => !open.has(t));
+      const missing = s.titles?.length ? missingTitles.length > 0 : !labels.has(s.label);
+      return missing ? [{ ...s, missingTitles }] : [];
+    });
+  });
+
+  /** The user does not want to open the project's sources again: the list goes away. */
+  dismissMissingSources(): void {
+    this.projectSources.value = [];
+  }
+
+  /** What a project records of each open source: its files and the titles its links use (audit F10). */
+  private projectSourcesNow(): ProjectSource[] {
+    const used = new Map<string, Set<string>>();
+    for (const l of this.allLinks.value)
+      for (const side of [l.source, l.target]) {
+        const b = this.bookOf(side.book);
+        if (b) used.set(sourceIdOfBookKey(b.key), (used.get(sourceIdOfBookKey(b.key)) ?? new Set()).add(b.title));
+      }
+    const open = this.sources.value.map((s): ProjectSource => {
+      const files = s.info.kind === "text-files" ? s.books.flatMap((b) => (b.path ? [b.path] : [])).slice(0, 5000) : [];
+      const titles = [...(used.get(s.info.id) ?? [])].slice(0, 5000);
+      return { label: s.info.label, kind: s.info.kind, books: s.books.length, ...(files.length && { files }), ...(titles.length && { titles }) };
+    });
+    // a source still missing from the project this one was opened from stays in it: saving before reopening must not forget it
+    const labels = new Set(open.map((s) => s.label));
+    return [...open, ...this.missingSources.value.filter((s) => !labels.has(s.label)).map(({ missingTitles: _m, ...s }) => s)];
+  }
+
   projectText(): string {
     const titleOf = (k: string | null) => (k ? this.refOf(k).title : null);
     return serializeProject(
       {
-        sources: this.sources.value.map((s) => ({ label: s.info.label, kind: s.info.kind, books: s.books.length })),
+        sources: this.projectSourcesNow(),
         links: this.allLinks.value,
         rejectedSuggestions: [...this.suggestions.rejected.value],
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
@@ -831,12 +872,12 @@ export class AppStore {
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
+      this.projectSources.value = p.sources;
       this.screen.value = "workspace";
     });
-    const open = new Set(this.sources.value.map((s) => s.info.label));
-    const missing = p.sources.filter((s) => !open.has(s.label)).map((s) => s.label);
-    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.`);
-    if (missing.length) this.notify("info", `כדי לראות את הקישורים על הטקסט, פתחו שוב את המקורות: ${missing.join(", ")}. הקישורים יתחברו לספרים לפי השם.`);
+    const missing = this.missingSources.value.length;
+    // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את המקור של הפרויקט" : `את ${missing.toLocaleString("he")} המקורות של הפרויקט`} — הרשימה ב"מקורות וספרים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
     if (snapshots.length)

@@ -188,6 +188,52 @@ describe("AppStore — projects and autosave", () => {
     expect(plan.counts).toMatchObject({ new: 1, heldBack: 0 });
   });
 
+  it("a project reopened without its sources lists them by name until they are open again (audit F10)", async () => {
+    const a = makeStore();
+    await a.store.openFiles([DB, COMMENTARY]);
+    const comm = [...a.store.books.value.values()].find((b) => b.title === "פירוש על בראשית")!;
+    const ber = [...a.store.books.value.values()].find((b) => b.title === "בראשית")!;
+    await a.store.lines.load(ber.key, 0, 5);
+    await a.store.lines.load(comm.key, 0, 2);
+    a.store.pickLine("source", comm.key, 1);
+    a.store.pickLine("target", ber.key, 2);
+    a.store.createFromDraft();
+    const text = a.store.projectText();
+    const stored = JSON.parse(text).sources;
+    expect(stored).toEqual([
+      { label: "seforim.db", kind: "otzaria-db", books: a.store.sources.value[0]!.books.length, titles: ["בראשית"] },
+      { label: "פירוש על בראשית.txt", kind: "text-files", books: 1, files: ["פירוש על בראשית.txt"], titles: ["פירוש על בראשית"] },
+    ]);
+
+    const b = makeStore();
+    b.store.openProject("work.otzlinker.json", text);
+    expect(b.store.missingSources.value.map((s) => [s.label, s.missingTitles])).toEqual([
+      ["seforim.db", ["בראשית"]],
+      ["פירוש על בראשית.txt", ["פירוש על בראשית"]],
+    ]);
+    // the success notice points at the list, and does not fade into nothing on its own
+    expect(b.store.notices.value.at(-1)!.text).toContain("מקורות וספרים");
+    // saving before reopening keeps the sources the project still waits for
+    expect(JSON.parse(b.store.projectText()).sources).toEqual(stored);
+
+    await b.store.openFiles([COMMENTARY]);
+    expect(b.store.missingSources.value.map((s) => s.label)).toEqual(["seforim.db"]);
+    await b.store.openFiles([DB]);
+    expect(b.store.missingSources.value).toEqual([]);
+  });
+
+  it("an old project's sources (labels only) are missing until a source with that label opens; hiding clears the list", async () => {
+    const b = makeStore();
+    const old = { format: "otzaria-linker-project", version: 1, savedAt: "", app: "3", sources: [{ label: "seforim.db", kind: "otzaria-db", books: 9, files: [3, "x"], titles: "bad" }], links: [], rejectedSuggestions: [], view: { source: null, target: null } };
+    b.store.openProject("old.otzlinker.json", JSON.stringify(old));
+    expect(b.store.missingSources.value).toEqual([{ label: "seforim.db", kind: "otzaria-db", books: 9, files: ["x"], missingTitles: [] }]);
+    b.store.dismissMissingSources();
+    expect(b.store.missingSources.value).toEqual([]);
+    b.store.openProject("old.otzlinker.json", JSON.stringify(old));
+    await b.store.openFiles([DB]);
+    expect(b.store.missingSources.value).toEqual([]);
+  });
+
   it("autosave writes after a change and offers recovery in a new session", async () => {
     const mem = new Map<string, string>();
     const kv = { get: async (k: string) => mem.get(k) ?? null, set: async (k: string, v: string) => void mem.set(k, v), delete: async (k: string) => void mem.delete(k) };

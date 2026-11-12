@@ -4,6 +4,7 @@ import { Icon } from "../icons/icon";
 import { AddSources } from "./add-sources";
 import { BookList } from "./book-picker";
 import { badgeOf, SourceBadge } from "./source-badge";
+import { ReopenSources } from "./reopen-sources";
 
 /** Open sources (databases, folders, files), adding more, and a search over all their books. */
 export function SourcesBody() {
@@ -13,6 +14,8 @@ export function SourcesBody() {
   return (
     <>
       <div class="sources-list">
+        {/* with no book open the source reader shows the list; once some are open, it is here */}
+        {store.books.value.size > 0 && <ReopenSources />}
         {sources.length === 0 && (
           <p class="muted empty-sources">
             אין מקור פתוח. הוסיפו תיקייה, קבצים או מסד — אפשר כמה מקורות יחד, ולקשר בין ספרים של מקורות שונים.
