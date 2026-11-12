@@ -70,8 +70,69 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/library-file-not-loaded": "library-file",
   "export/file-held": "library-file",
   "export/unsafe-title": "title",
+  "export/reversed-dependency": "type",
+  "export/anchor-on-notes-line": "anchor",
 };
 export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (code.startsWith("sefaria/") ? "sefaria" : "other");
+
+/*
+ * What to do about a problem, for the saved report (qa-html.ts): by code where one action fits,
+ * otherwise by category. Many messages already end with an instruction; this line says it on its own,
+ * so a reader of the report sees the action next to every issue.
+ */
+const FIX_BY_CODE: Readonly<Record<string, string>> = {
+  "export/duplicate": "מחקו את ההעתק (\"מחיקת העתקים כפולים\" בלשונית הבדיקה), או קשרו אותו לשורה אחרת.",
+  "export/heading-line": "קשרו לשורה שאחרי הכותרת.",
+  "export/line-not-in-db": "קשרו לשורה שאחרי הכותרת הריקה.",
+  "export/range-end-heading": "קצרו את הטווח כך שיסתיים לפני שורת הכותרת.",
+  "export/range-ignored": "תקנו בבונה את סוף הטווח כך שיהיה אחרי ההתחלה, או הסירו אותו.",
+  "export/anchor-dropped-flip": "הסירו את העוגן, או בחרו סוג קשר שנשמר בכיוון הזה.",
+  "export/anchor-on-notes-line": "הסירו את העוגן מהקישור.",
+  "export/anchor-end-ignored": "סמנו מחדש את המילים בבונה, או השאירו עוגן על מילה אחת.",
+  "export/anchor-out-of-line": "סמנו מחדש את המילים בבונה.",
+  "export/unknown-type": "בחרו בבונה סוג קשר מהרשימה.",
+  "export/linker": "בחרו בבונה סוג קשר אחר.",
+  "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\" (source).",
+  "export/sefaria-both": "מחקו את הקישור, או קשרו לספר שאינו של ספריא.",
+  "export/heref-missing": "כתבו בבונה שם מקום (heRef_2), למשל שם הספר ומספר הפרק.",
+  "export/line-not-verified": "פתחו את הספר (או את המסד שבו הוא נמצא) והריצו את הבדיקה שוב.",
+  "export/in-db": "אם הקישור כבר נמצא בספרייה, מחקו אותו מהפרויקט.",
+  "export/in-db-other-type": "אין צורך לתקן. ודאו שאינכם יוצרים קישור כפול.",
+  "export/db-copy": "בדקו את heRef_2 ואת סוג הקשר לפני הייצוא.",
+  "export/file-held": "תקנו את הבעיה של הקובץ כולו שמתוארת בהסבר.",
+  "export/unsafe-title": "שנו את שם הספר במקור שלו.",
+  "export/title-not-normalized": "כתבו את שם הספר בדיוק כפי שהוא במסד.",
+  "sefaria/both-refs": "הסירו אחד מהשדות ref_1 או ref_2.",
+  "sefaria/ref1-side": "הסירו את ref_1.",
+  "sefaria/ref2-side": "הסירו את ref_2.",
+  "sefaria/both-sides": "מחקו את הקישור: קישור בין שני ספרי ספריא לא נשלח מקובץ.",
+  "sefaria/ref1-required": "כתבו את ציון ספריא באנגלית של שורת המקור (ref_1), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
+  "sefaria/ref2-required": "כתבו את ציון ספריא באנגלית של שורת היעד (ref_2), או בחרו בחלון הייצוא \"לשימוש פרטי\".",
+  "sefaria/range-side": "קשרו שורה אחת במקום טווח בצד של ספר ספריא.",
+  "sefaria/anchor-range": "השאירו עוגן על מילה אחת, בלי סוף.",
+  "sefaria/anchor-into-sefaria": "הסירו את העוגן.",
+  "sefaria/pending-anchor-hash": "הסירו את העוגן, או השאירו אותו לתהליך של הספרייה.",
+};
+
+const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
+  duplicate: FIX_BY_CODE["export/duplicate"]!,
+  "missing-book": "פתחו את המסד או את קובץ הספר, או תקנו את שם הספר כך שיהיה זהה בדיוק לשם במסד.",
+  "out-of-range": "תקנו בבונה את מספר השורה או את סוף הטווח לשורה שקיימת בספר.",
+  heading: FIX_BY_CODE["export/heading-line"]!,
+  anchor: "סמנו מחדש את המילים בבונה, או הסירו את העוגן.",
+  type: "בחרו בבונה סוג קשר מתאים.",
+  sefaria: "תקנו את שדות ref_1/ref_2 או את העוגן לפי ההסבר.",
+  title: "בדקו את שם הספר מול השם שבמסד.",
+  reference: FIX_BY_CODE["export/heref-missing"]!,
+  unverified: FIX_BY_CODE["export/line-not-verified"]!,
+  "in-db": FIX_BY_CODE["export/in-db"]!,
+  "db-copy": "טענו את קובץ הקישורים של הספר מהספרייה לפני הייצוא.",
+  "library-file": "טענו את קובץ הקישורים של הספר מהספרייה, או אשרו בחלון הייצוא שזה קובץ חדש.",
+  other: "פתחו את הקישור בבונה ותקנו לפי ההסבר.",
+};
+
+/** One sentence: what the user can do about this problem (Hebrew). */
+export const suggestedFix = (code: string, category: QaCategory = categoryOf(code)): string => FIX_BY_CODE[code] ?? FIX_BY_CATEGORY[category];
 
 export interface QaIssue {
   link: Link;
