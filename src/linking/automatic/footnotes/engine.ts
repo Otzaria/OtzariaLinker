@@ -9,7 +9,7 @@ import { confidenceOf, type Candidate, type EngineBook, type EngineContext, type
 import { alignChapters } from "./align";
 import { headingCounter, headingSections, isPlainKey, pairSections, resetChapters, type Chapter, type Occ } from "./chapters";
 import {
-  MAX_CUSTOM_REGEX_INPUT, appRecognisesMarker, compileStyle, detectMarkers, leadingMarker,
+  MAX_CUSTOM_REGEX_INPUT, appRecognisesMarker, compileStyle, detectMarkers, labelCommentators, leadingMarker,
   type CompiledStyle, type Marker, type MarkerStyle, type Numbering,
 } from "./markers";
 
@@ -41,9 +41,11 @@ export interface FootnotesOptions {
   readonly mainMarkers?: MarkerStyle | "auto";
   /**
    * How a NOTE line opens. "auto" (default) recognises (12) [12] 12. 12) יב) <sup>יב</sup> <b>12</b>;
-   * a style limits it to that style.
+   * a style limits it to that style. "position": the note lines carry no number at all, and the n-th
+   * note line of a section is note n of the same section in the book. "auto" falls back to it when
+   * almost no note line opens with a marker and the notes book has section headings (POSITIONAL_MAX).
    */
-  readonly notesMarkers?: MarkerStyle | "auto";
+  readonly notesMarkers?: MarkerStyle | "auto" | "position";
   /** "start" (default): a notes line counts only if it OPENS with its marker. "anywhere": every marker in it. */
   readonly notesMarkerPosition?: "start" | "anywhere";
   /**
@@ -86,6 +88,17 @@ const CLOSE_CALL_MARGIN = 0.3;
 /** how the chapter of a match is known; "sequence" = stars-only markers paired by order */
 type Alignment = "given" | "confirmed" | "reset" | "rescued" | "rescue" | "sequence";
 const PROGRESS_EVERY = 256;
+/*
+ * Notes numbered by position. Sefaria's notes books (R' Hartman's notes on the Maharal: "הערות ומקורות
+ * על תפארת ישראל", 6,091 links) print no number in the note line: the book holds
+ * <i data-commentator data-label="12"></i>, and note 12 of a chapter is simply the 12th line under the
+ * chapter's heading in the notes book. Measured on the real database: 6,085 of the 6,091 links follow
+ * exactly that rule. "auto" uses it only when at most this share of the note lines opens with a
+ * marker (the notes are unnumbered, not partly numbered), and only with sections paired by heading.
+ */
+const POSITIONAL_MAX = 0.1;
+/** a section whose note count differs from its highest marker: an unnumbered note may have shifted the rest */
+const POSITION_MISMATCH_SCORE = 0.75;
 const LIST_MAX = 20;
 
 const r = (code: string, text: string): Reason => ({ code, text });
@@ -93,6 +106,8 @@ const lineList = (xs: readonly number[]) =>
   xs.slice(0, LIST_MAX).map((x) => x + 1).join(", ") + (xs.length > LIST_MAX ? ` ועוד ${xs.length - LIST_MAX}` : "");
 
 interface Hit {
+  /** notes numbered by position: the section's note count and its highest marker in the book */
+  readonly position?: { readonly notes: number; readonly mainMax: number };
   readonly occ: Occ;
   readonly chapter: Chapter;
   readonly lines: readonly number[];
@@ -150,7 +165,8 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   runNotes.push(...titleWarnings(notes, declaredType));
 
   /* ---- styles ---- */
-  const notesStyle = compileOrNote(options.notesMarkers ?? "auto", "הערות", runNotes);
+  const notesOpt = options.notesMarkers ?? "auto";
+  const notesStyle = notesOpt === "position" ? "auto" : compileOrNote(notesOpt, "הערות", runNotes);
   const mainStyleOpt = options.mainMarkers ?? "auto";
   const mainStyleFixed = mainStyleOpt === "auto" ? "auto" : compileOrNote(mainStyleOpt, "הספר", runNotes);
   if (notesStyle === null || mainStyleFixed === null) return { suggestions: [], notes: runNotes, unmatched: [] };
@@ -158,18 +174,27 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   /* ---- notes side ---- */
   const anywhere = options.notesMarkerPosition === "anywhere";
   const notesLines = notes.lines;
-  const rawNoteOccs: Occ[] = [];
-  const unmarkedNoteLines: number[] = [];
+  let rawNoteOccs: Occ[] = [];
+  let unmarkedNoteLines: number[] = [];
+  const contentLines: number[] = [];
   for (const l of notesLines) {
     tick();
     if (l.heading !== null) continue;
     const text = withoutBom(l.text);
     if (!stripTags(text)) continue;
+    contentLines.push(l.index);
     const found: Marker[] = anywhere
       ? notesStyle === "auto" ? withLead(text, includeInline) : detectMarkers(text, notesStyle, { includeInlineNoteMarkers: includeInline })
       : [leadingMarker(text, notesStyle, { includeInlineNoteMarkers: includeInline })].filter((m): m is Marker => m !== null);
     if (!found.length) unmarkedNoteLines.push(l.index);
     for (const m of found) rawNoteOccs.push({ line: l.index, marker: m });
+  }
+  const sectioned = notesLines.some((l) => l.heading !== null && l.heading > 1);
+  const positional = notesOpt === "position" || (notesOpt === "auto" && !anywhere && sectioned && contentLines.length > 0 && rawNoteOccs.length <= contentLines.length * POSITIONAL_MAX);
+  if (positional) {
+    rawNoteOccs = positionalOccs(notesLines, contentLines, options.headingLevel);
+    unmarkedNoteLines = [];
+    runNotes.push(r("footnotes/positional", "שורות ספר ההערות אינן נפתחות במספר. כל שורה נחשבת להערה הבאה בפרק שלה: השורה ה־12 תחת כותרת היא הערה 12 של אותו פרק בספר. הפרקים מותאמים לפי הכותרות."));
   }
   const numbering = decideNumbering(options.numbering ?? "auto", rawNoteOccs);
   const noteOccs = numbering ? rawNoteOccs.filter((o) => o.marker.numbering === numbering || isStar(o)) : rawNoteOccs;
@@ -207,7 +232,11 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   /* ---- chapters and the walk ---- */
   const mainHeadingBetween = headingCounter(main.lines);
   const notesHeadingBetween = headingCounter(notesLines);
-  const plan = planChapters(main, notes, mainOccs, noteOccs, options, notesHeadingBetween, runNotes);
+  const plan = planChapters(main, notes, mainOccs, noteOccs, positional ? { ...options, chapterSplit: "headings" } : options, notesHeadingBetween, runNotes);
+  if (positional && !plan.byHeadings) {
+    runNotes.push(r("footnotes/positional-no-headings", "ההערות אינן ממוספרות, ואף כותרת בספר ההערות לא נמצאה גם בספר. בלי פרקים משותפים אי אפשר לדעת איזו שורה היא איזו הערה, ולכן לא הוצעו קישורים."));
+    return { suggestions: [], notes: runNotes, unmatched: [] };
+  }
   const hits: Hit[] = [];
   const misses: Miss[] = [];
   const transitions: Transition[] = [];
@@ -216,7 +245,9 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
     const res = greedy
       ? walk(g.mainOccs, g.chapters, g.start, mainHeadingBetween, plan.chapters, tick)
       : walkGlobal(g.mainOccs, g.chapters, g.start, mainHeadingBetween, plan.chapters, tick, runNotes);
-    hits.push(...res.hits);
+    // notes numbered by position: is the section's count of note lines its highest marker in the book?
+    const position = positional ? { notes: g.chapters.reduce((n, c) => n + c.occs.length, 0), mainMax: g.mainOccs.reduce((n, o) => Math.max(n, o.marker.num), 0) } : undefined;
+    hits.push(...(position ? res.hits.map((h) => ({ ...h, position })) : res.hits));
     misses.push(...res.misses);
     transitions.push(...res.transitions);
     const stars = pairStars(g.starMain, g.starNotes, g.label);
@@ -443,6 +474,8 @@ const numbered = (xs: readonly Occ[]) => xs.filter((o) => !isStar(o));
 const stars = (xs: readonly Occ[]) => xs.filter(isStar);
 
 interface Plan {
+  /** the chapters come from headings the two books share */
+  readonly byHeadings?: boolean;
   readonly chapters: readonly Chapter[];
   readonly groups: readonly Group[];
   readonly orphanMain: readonly Occ[];
@@ -499,6 +532,7 @@ function planChapters(
       } else orphanMain.push(...leftMain);
       const unpaired = withOccs.length - pairs.size;
       return {
+        byHeadings: true,
         chapters, groups, orphanMain,
         describe: `הפרקים זוהו לפי כותרות: ${pairs.size} פרקים בהערות הותאמו לכותרת זהה בספר${unpaired ? `, ו־${unpaired} פרקים בלי כותרת מקבילה קושרו לפי איפוס המספור (בביטחון נמוך יותר)` : ""}.`,
       };
@@ -536,8 +570,11 @@ function buildSuggestion(
   const reasons: Reason[] = [];
   const warnings: Reason[] = [];
   const rules: string[] = [`marker:${m.style}`, h.seq ? "match:order" : "match:exact-key"];
-  const shown = m.visible.trim();
-  if (h.seq)
+  const shown = m.style === "label" ? m.token : m.visible.trim();
+  if (h.position) {
+    rules.push("notes:position");
+    reasons.push(r("footnotes/position", `שורות ההערות אינן ממוספרות: השורה ${target + 1} היא ההערה ה־${m.num} תחת "${h.chapter.label ?? ""}" בספר ההערות, והסימן בשורה ${h.occ.line + 1} בספר הוא ${m.num}.`));
+  } else if (h.seq)
     reasons.push(r("footnotes/sequence", `הסימן "${shown}" אינו מספר, ולכן הותאם לפי הסדר: הוא ה־${h.seq.index + 1} מתוך ${h.seq.count} בספר${h.chapter.label ? ` תחת "${h.chapter.label}"` : ""}, וההערה בשורה ${target + 1} היא ה־${h.seq.index + 1} מתוך ${h.seq.count} בהערות.`));
   else reasons.push(r("footnotes/exact", `הסימן "${shown}" בשורה ${h.occ.line + 1} זהה לסימן שבתחילת ההערה בשורה ${target + 1}.`));
 
@@ -583,6 +620,11 @@ function buildSuggestion(
     rules.push("chapter:close-call");
     reasons.push(r("footnotes/close-call", "שיוך הסימן לפרק הזה בהערות כמעט שקול לשיוך לפרק אחר. כדאי לבדוק."));
   }
+  if (h.position && h.position.notes !== h.position.mainMax) {
+    score = Math.min(score, POSITION_MISMATCH_SCORE);
+    rules.push("notes:position-count");
+    reasons.push(r("footnotes/position-count", `בפרק הזה יש ${h.position.notes} שורות הערה, והסימן הגבוה בספר הוא ${h.position.mainMax}. ייתכן שהערה נמשכת על פני שתי שורות וכל ההערות שאחריה זזו, ולכן לבדיקה.`));
+  }
   if (h.repeat) {
     score = Math.min(score, SCORE.repeat);
     rules.push("repeat");
@@ -615,12 +657,13 @@ function buildSuggestion(
 
   const label = labelOf(m);
   const heRef2 = withAnchorLabel(heRefOf(target), label);
-  const anchor: RawAnchor = { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(label && anchorLabelFromHeRef(heRef2) === label ? { label } : {}) };
+  // a data-label element shows nothing: there are no characters to anchor on, the link is the line's
+  const anchor: RawAnchor | undefined = m.style === "label" ? undefined : { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(label && anchorLabelFromHeRef(heRef2) === label ? { label } : {}) };
   return {
     id: `footnotes:${main.book.key}#${h.occ.line}@${m.rawStart}>${notes.book.key}#${target}`,
     engine: "footnotes",
     source: { book: main.book, line: h.occ.line },
-    anchor,
+    ...(anchor && { anchor }),
     target: { book: notes.book, line: target },
     declaredType,
     heRef2,
@@ -747,7 +790,11 @@ function chooseMainStyle(
   main: EngineBook, opts: { numbering?: Numbering; includeInlineNoteMarkers: boolean }, noteNums: ReadonlySet<number>, runNotes: Reason[], signal: AbortSignal | undefined,
 ): CompiledStyle {
   let best: { style: CompiledStyle; matched: number; found: number } | null = null;
-  for (const s of MAIN_CANDIDATES) {
+  // Sefaria's data-label markers, one candidate per commentator: a book may carry the notes of several
+  const commentators = new Set<string>();
+  for (const l of main.lines) for (const who of labelCommentators(l.text)) commentators.add(who);
+  const candidates: MarkerStyle[] = [...MAIN_CANDIDATES, ...[...commentators].map((label) => ({ label }))];
+  for (const s of candidates) {
     const c = compileStyle(s);
     if (!c.ok) continue;
     let matched = 0;
@@ -767,9 +814,29 @@ function chooseMainStyle(
 }
 
 function describeStyle(s: CompiledStyle): string {
+  if (s.kind === "label") return s.commentator ? `סימני ההערות של "${s.commentator}" (data-label)` : "סימני הערות מסוג data-label";
   if (s.kind === "parentheses") return "מספרים בסוגריים, כמו (12)";
   if (s.kind === "regex") return `ביטוי מותאם /${s.regex.source}/`;
   return `תגית <${s.tag}>`;
+}
+
+/**
+ * Note lines with no marker, numbered by their place in their heading section (1, 2, 3 … under each
+ * heading; POSITIONAL_MAX). The synthetic marker spans nothing: the anchor is on the book's side.
+ */
+function positionalOccs(lines: EngineBook["lines"], content: readonly number[], level: number | undefined): Occ[] {
+  const { sectionOf } = headingSections(lines, level && level >= 1 && level <= 6 ? level : undefined);
+  const out: Occ[] = [];
+  let section = -1;
+  let k = 0;
+  for (const line of content) {
+    const s = sectionOf[line] ?? 0;
+    if (s !== section) (section = s), (k = 0);
+    k++;
+    const n = String(k);
+    out.push({ line, marker: { rawStart: 0, rawEnd: 0, visible: n, token: n, num: k, key: n, numbering: "digits", decorated: false, style: "position" } });
+  }
+  return out;
 }
 
 /** The generator strips a BOM from the first line before it counts offsets (LINK_FORMATS §1.6). */

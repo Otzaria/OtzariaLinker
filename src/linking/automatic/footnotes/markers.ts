@@ -30,6 +30,13 @@ export type MarkerStyle =
   /** any element name, e.g. `{ tag: "small" }` */
   | { readonly tag: string }
   /**
+   * Sefaria's note places: an EMPTY element `<i data-commentator="…" data-label="12"></i>` in the line
+   * (the number is the label; nothing is visible). "label" reads every commentator; `{ label: name }`
+   * one of them. 423 books of the official database carry such markers (dibur-hamatchil/markers.ts).
+   */
+  | "label"
+  | { readonly label: string }
+  /**
    * A JavaScript regular expression run on the RAW line (tags included). Group `n` (named) or
    * group 1 holds the number; without groups the whole match is read (wrappers are stripped).
    * Flags: only i, m, s, u are kept. See checkCustomPattern for what is refused and why.
@@ -54,7 +61,8 @@ export interface Marker {
   readonly numbering: Numbering | "stars";
   /** wrapped in parentheses/brackets or other punctuation besides stars */
   readonly decorated: boolean;
-  readonly style: "sup" | "sub" | "tag" | "parentheses" | "regex" | "leading";
+  /** "label": a Sefaria data-label element (nothing visible); "position": a note line with no marker, numbered by its place in its section */
+  readonly style: "sup" | "sub" | "tag" | "parentheses" | "regex" | "leading" | "label" | "position";
   /** set when a malformed tag was repaired: "unclosed" | "close-without-gt" */
   readonly broken?: "unclosed" | "close-without-gt";
   /** a `<sup class="footnote-marker">` — the generator's own marker of an inline (line_note) footnote */
@@ -260,10 +268,49 @@ function detectRegex(html: string, map: VisibleMap, regex: RegExp, opts: DetectO
 
 const stripTagsLoose = (s: string) => s.replace(/<[^>]*>?/g, "");
 
+/* ------------------------------------------------------------------ Sefaria data-label elements */
+
+const LABEL_TAG_RE = /<([a-z][a-z0-9]*)\b([^>]*)>/gi;
+const ATTR_RE: Readonly<Record<string, RegExp>> = { "data-commentator": /\bdata-commentator\s*=\s*(["'])([^"']*)\1/i, "data-label": /\bdata-label\s*=\s*(["'])([^"']*)\1/i };
+const attr = (attrs: string, name: "data-commentator" | "data-label"): string | null => ATTR_RE[name]!.exec(attrs)?.[2] ?? null;
+
+/**
+ * `<i data-commentator="X" data-label="12"></i>`: the element (with its closing tag when it follows
+ * at once) is the marker. Elements without data-commentator, or whose label is not a number
+ * ("⚬"), are not markers.
+ */
+function detectLabels(html: string, commentator: string | undefined, opts: DetectOptions): Marker[] {
+  if (!html.includes("data-label")) return [];
+  const out: Marker[] = [];
+  for (const m of html.matchAll(LABEL_TAG_RE)) {
+    const who = attr(m[2] ?? "", "data-commentator");
+    const label = attr(m[2] ?? "", "data-label");
+    if (who === null || label === null || (commentator !== undefined && who !== commentator)) continue;
+    const p = parseMarkerToken(label);
+    if (!p || !accept(p, opts)) continue;
+    const openEnd = m.index + m[0].length;
+    const close = /^<\s*\/\s*([a-z][a-z0-9]*)\s*>/i.exec(html.slice(openEnd));
+    out.push({ rawStart: m.index, rawEnd: openEnd + (close && close[1]!.toLowerCase() === m[1]!.toLowerCase() ? close[0].length : 0), visible: "", ...p, style: "label" });
+  }
+  return out;
+}
+
+/** The commentators whose data-label markers a line holds (chooseMainStyle tries each). */
+export function labelCommentators(html: string): string[] {
+  if (!html.includes("data-label")) return [];
+  const out: string[] = [];
+  for (const m of html.matchAll(LABEL_TAG_RE)) {
+    const who = attr(m[2] ?? "", "data-commentator");
+    if (who !== null && attr(m[2] ?? "", "data-label") !== null && !out.includes(who)) out.push(who);
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ public */
 
 export type CompiledStyle =
   | { readonly kind: "tag"; readonly tag: string; readonly style: Marker["style"] }
+  | { readonly kind: "label"; readonly commentator?: string }
   | { readonly kind: "parentheses" }
   | { readonly kind: "regex"; readonly regex: RegExp };
 
@@ -271,6 +318,8 @@ export type CompiledStyle =
 export function compileStyle(style: MarkerStyle): { ok: true; compiled: CompiledStyle } | { ok: false; reason: string } {
   if (style === "sup" || style === "sub") return { ok: true, compiled: { kind: "tag", tag: style, style } };
   if (style === "parentheses") return { ok: true, compiled: { kind: "parentheses" } };
+  if (style === "label") return { ok: true, compiled: { kind: "label" } };
+  if (typeof style === "object" && style && "label" in style) return { ok: true, compiled: { kind: "label", commentator: String(style.label) } };
   if (typeof style === "object" && style && "tag" in style) {
     const tag = escapeTag(String(style.tag).replace(/[<>/\s]/g, ""));
     return tag ? { ok: true, compiled: { kind: "tag", tag, style: "tag" } } : { ok: false, reason: "שם התגית ריק או לא תקין." };
@@ -299,6 +348,7 @@ export function detectMarkers(text: string, style: MarkerStyle | CompiledStyle, 
   let found: Marker[];
   if (compiled.kind === "tag") found = detectTag(html, map, compiled.tag, compiled.style, opts);
   else if (compiled.kind === "parentheses") found = detectParentheses(map, opts);
+  else if (compiled.kind === "label") found = detectLabels(html, compiled.commentator, opts);
   else found = detectRegex(html, map, compiled.regex, opts);
   return found.sort((a, b) => a.rawStart - b.rawStart);
 }

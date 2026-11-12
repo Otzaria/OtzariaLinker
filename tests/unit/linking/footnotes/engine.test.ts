@@ -284,3 +284,41 @@ describe("cooperation with the worker", () => {
 
 /** Narrowing helper for readers of the result in other tests. */
 export const sourceText = (s: Suggestion, main: EngineBook) => main.lines[s.source.line]!.text.slice(s.anchor!.rawStart, s.anchor!.rawEnd);
+
+describe("Sefaria's notes: data-label markers in the book, unnumbered note lines (notes numbered by position)", () => {
+  const mark = (n: number, who = "Notes by R") => `<i data-commentator="${who}" data-label="${n}"></i>`;
+  const main = [
+    "<h1>ספר</h1>",
+    "<h2>פרק א</h2>",
+    `שורה${mark(1)} ועוד${mark(2)}`,
+    `שורה שנייה${mark(3)}${mark(1, "Other")}`,
+    "<h2>פרק ב</h2>",
+    `פרק אחר${mark(1)} וסוף${mark(2)}`,
+  ];
+  const notes = ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", "הערה ראשונה", "הערה שנייה", "הערה שלישית", "<h2>פרק ב</h2>", "הערה א", "הערה ב"];
+
+  it("note n of a chapter is the n-th line under the chapter's heading; the commentator whose labels fit is chosen", () => {
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["2>2", "2>3", "3>4", "5>6", "5>7"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+    expect(codes(res.notes)).toContain("footnotes/positional");
+    expect(res.notes.find((n) => n.code === "footnotes/style-auto")!.text).toContain("Notes by R");
+  });
+
+  it("a data-label element shows nothing: no anchor", () => {
+    expect(run(main, notes).suggestions.every((s) => s.anchor === undefined)).toBe(true);
+  });
+
+  it("a chapter whose note count is not its highest marker is left for review", () => {
+    const res = run(main, [...notes.slice(0, 5), "המשך של הערה שלישית", ...notes.slice(5)]);
+    const inA = res.suggestions.filter((s) => s.source.line < 4);
+    expect(inA.every((s) => s.confidence === "possible" && s.rules.includes("notes:position-count"))).toBe(true);
+    expect(res.suggestions.filter((s) => s.source.line === 5).every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("numbered note lines keep the usual reading; unnumbered notes with no shared headings link nothing", () => {
+    expect(codes(run(main, ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", "(1) א", "(2) ב", "(3) ג"]).notes)).not.toContain("footnotes/positional");
+    const flat = run(["<h1>ספר</h1>", `שורה${mark(1)}`], ["<h1>הערות לספר</h1>", "<h2>מבוא</h2>", "הערה"]);
+    expect(flat.suggestions).toEqual([]);
+  });
+});
