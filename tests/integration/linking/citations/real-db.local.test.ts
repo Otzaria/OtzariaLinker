@@ -16,7 +16,7 @@ import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, ty
  *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db npx vitest run tests/integration/linking/citations/real-db.local.test.ts
  * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title>[;<title>…] runs only those books;
  * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then);
- * CITATIONS_SAMPLE=heldout runs the held-out sample (HELDOUT) instead.
+ * CITATIONS_SAMPLE=heldout / heldout2 runs a held-out sample (HELDOUT, HELDOUT2) instead.
  *
  * The sample: 17 category groups, from each the 3 books with the smallest sha1(book id) among those with
  * 200–6000 lines and at least 20 LINKER links (deterministic for a given library build; the script
@@ -145,6 +145,68 @@ const HELDOUT: readonly { group: string; title: string }[] = [
 ];
 
 /**
+ * A SECOND held-out sample, for the final numbers of the round of 12.11 (CITATIONS_SAMPLE=heldout2): HELDOUT's
+ * contexts were read while working, so this one was chosen before any of its suggestions were looked at — the same
+ * criteria, sha1("heldout2-2026-11-12:" + book id), without the books of SAMPLE and HELDOUT (53 books: two
+ * categories have fewer than four left).
+ */
+const HELDOUT2: readonly { group: string; title: string }[] = [
+  { group: "הלכה", title: "עצי בשמים" },
+  { group: "הלכה", title: "משנה למלך על משנה תורה, הלכות אישות" },
+  { group: "הלכה", title: "תורת נביאים" },
+  { group: "הלכה", title: "כסף משנה על משנה תורה, הלכות בית הבחירה" },
+  { group: "חסידות", title: "כליל תפארת חלק ד" },
+  { group: "חסידות", title: "מראה יחזקאל על התורה" },
+  { group: "חסידות", title: "מגן אבות חלק ב" },
+  { group: "חסידות", title: "דברי יהושע (פריידין)" },
+  { group: "לימוד יומי", title: "חק לישראל - בראשית" },
+  { group: "מדרש", title: "פסיקתא דרב כהנא" },
+  { group: "מדרש", title: "מדרש שמואל" },
+  { group: "מדרש", title: "ביאור הרד\"ל על פרקי דרבי אליעזר" },
+  { group: "מדרש", title: "מתנות כהונה על רות רבה" },
+  { group: "מחשבת ישראל", title: "באר הגולה" },
+  { group: "מחשבת ישראל", title: "פירושים והערות מהרב יהושע הרטמן על נר מצוה" },
+  { group: "מחשבת ישראל", title: "פת לחם" },
+  { group: "מחשבת ישראל", title: "מלמד התלמידים" },
+  { group: "משנה", title: "גר\"א על פרקי אבות" },
+  { group: "משנה", title: "יכין סוטה" },
+  { group: "משנה", title: "תוספות יום טוב על משנה נדה" },
+  { group: "משנה", title: "רש\"י על משנה אבות" },
+  { group: "סדר התפילה", title: "סדר מעמדות" },
+  { group: "סדר התפילה", title: "סידור נוסח עדות המזרח" },
+  { group: "סדר התפילה", title: "מעבר יבק" },
+  { group: "סדר התפילה", title: "סידור אשכנז" },
+  { group: "ספרות עזר", title: "שפה לנאמנים" },
+  { group: "ספרות עזר", title: "ספר פעלי הכפל (תרגום רמבג)" },
+  { group: "ספרות עזר", title: "הגהות מנחם ציון" },
+  { group: "ספרות עזר", title: "שדי חמד כללים מערכת נ" },
+  { group: "ספרי מוסר", title: "חמדת ימים ג" },
+  { group: "ספרי מוסר", title: "יערות דבש חלק א" },
+  { group: "ספרי מוסר", title: "אורחות צדיקים" },
+  { group: "ספרי מוסר", title: "בלבבי משכן אבנה - ו" },
+  { group: "קבלה", title: "שערי צדק (ביאור ספר יצירה)" },
+  { group: "קבלה", title: "הקדמות לחכמת האמת - ספר הזוהר" },
+  { group: "קבלה", title: "אור השכל" },
+  { group: "קבלה", title: "בנין שמואל" },
+  { group: "שו״ת", title: "אבני מילואים" },
+  { group: "שו״ת", title: "באר חיים מרדכי חלק ג" },
+  { group: "שו״ת", title: "אבני נזר חושן משפט" },
+  { group: "שו״ת", title: "נחלת יהושע" },
+  { group: "תלמוד בבלי", title: "חידוד הלכות על נדה" },
+  { group: "תלמוד בבלי", title: "רשב״א על ברכות" },
+  { group: "תלמוד בבלי", title: "פסקי הרא\"ש על בבא מציעא" },
+  { group: "תלמוד בבלי", title: "גליוני השס על סנהדרין" },
+  { group: "תלמוד ירושלמי", title: "נועם ירושלמי על חלה" },
+  { group: "תלמוד ירושלמי", title: "ירושלמי מבואר ומפורש על שקלים" },
+  { group: "תלמוד ירושלמי", title: "נועם ירושלמי על נדרים" },
+  { group: "תלמוד ירושלמי", title: "פני משה על תלמוד ירושלמי כתובות" },
+  { group: "תנ״ך", title: "זבח השלמים" },
+  { group: "תנ״ך", title: "רד\"ק על בראשית" },
+  { group: "תנ״ך", title: "תעלומות חכמה על קהלת" },
+  { group: "תנ״ך", title: "אדרת אליהו (ר יוסף חיים)" },
+];
+
+/**
  * Floors the full sample must keep (measured 2026-11-12, after the recall round: certain 85.3% strict /
  * 99.9% judged, high 72.3% / 99.8%; recall 93.1%. After the V4 round the first table — the forms the floors
  * were set on — is certain 85.3% / 99.9%, high 72.1% / 99.9%, recall 94.5%; the new forms and the internal
@@ -179,8 +241,8 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
-    const heldout = process.env.CITATIONS_SAMPLE === "heldout";
-    for (const [k, { group, title }] of (heldout ? HELDOUT : SAMPLE).entries()) {
+    const heldout = process.env.CITATIONS_SAMPLE === "heldout" || process.env.CITATIONS_SAMPLE === "heldout2";
+    for (const [k, { group, title }] of (process.env.CITATIONS_SAMPLE === "heldout2" ? HELDOUT2 : heldout ? HELDOUT : SAMPLE).entries()) {
       if (only && !only.split(";").includes(title)) continue;
       if (k % shards !== shard) continue;
       const b = books.find((x) => x.title === title);
