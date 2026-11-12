@@ -344,3 +344,21 @@ describe("citations: \"(שם)\" after an author's name is that author's book", (
     expect(lines("ועל זה מקשה הגמ' (שם) והא")).toHaveLength(2);
   });
 });
+
+describe("citations: \"דף X\" with no tractate, in a commentary on a tractate", () => {
+  const onYev = (line: string) => scan([line], "פסקי תוספות על יבמות", "pt-yev");
+  it("is a daf of that tractate", () => {
+    const [c] = onYev('לא תחנם בכל עובדי כוכבים. ד"ה ההוא: [דף כג]');
+    expect(books(c!)).toEqual(["yev"]);
+    expect(loc(c!)).toBe("daf:23");
+    expect(c!.rule).toBe("base-daf");
+    expect(loc(onYev('וכן מבואר בדף מ"ו ע"ב ע"ש')[0]!)).toBe("daf:46b");
+  });
+  it("not \"ד'\", not after a book we do not know, and not without a base tractate", () => {
+    expect(onYev("והם ד' ט' אנשים")).toHaveLength(0);
+    expect(onYev("ועיין במהרש\"א דף ט' ע\"ש")).toHaveLength(0);
+    expect(scan(['ד"ה ההוא: [דף כג]'], "ספר כלשהו")).toHaveLength(0);
+    // a tractate named a few words before (past a full stop) is the daf's book
+    expect(onYev('וכן בסוף גיטין מייתי לה הש"ס. [דף פ"ט] גם')).toHaveLength(0);
+  });
+});

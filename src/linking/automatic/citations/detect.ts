@@ -56,7 +56,7 @@ export interface Citation {
   readonly numericName: boolean;
   /**
    * the rule that read the book or the place, beyond the form (engine.ts scores and explains it):
-   * "rambam-topic-full" / "-first" / "-initials" — "רמב"ם פ"ט מתרומות"
+   * "rambam-topic-full" / "-first" / "-initials" — "רמב"ם פ"ט מתרומות"; "base-daf" — "דף לה" in a commentary on a tractate
    */
   readonly rule?: string;
 }
@@ -429,7 +429,7 @@ export class CitationScanner {
       if (named(before(toks, i, 1)) || named(before(toks, i, 2)) || titled(1) || titled(2) || named(toks[addr.to]) || named(toks[addr.to + 1])) return this.drop("siman-of-another-book");
       return this.emit(toks, line, { from: i, to: addr.to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false });
     }
-    if (!RELATIVE.test(t.text)) return null;
+    if (!RELATIVE.test(t.text)) return this.baseDaf(toks, i, line);
     const addr = parseAddress(toks, i + 1, { enclosed: opensBefore(toks, i) });
     if (!addr) return null;
     const e = addr.elems[0]!;
@@ -437,6 +437,26 @@ export class CitationScanner {
     if (!isDaf) return null;
     const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
     return this.emit(toks, line, { from: i, to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false });
+  }
+
+  /**
+   * "ד"ה חוץ: דף לה", "וכן בדף מ"ו ע"ב": the word "דף" and a number with no tractate, in a commentary on
+   * a tractate ("פסקי תוספות על יבמות") — a daf of that tractate. Only the full word "דף" ("ד'" is also
+   * "ארבע"), only a daf, and not when a book we do not know is named right before ("במהרש"א דף ט'").
+   * Weaker than "לעיל"/"לקמן" (which say "in this tractate"): the book is inferred, so at most "high".
+   */
+  private baseDaf(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (this.base?.collection !== "bavli" || !DAF_WORD.test(t.text) || t.gershayim || t.geresh) return null;
+    const addr = parseAddress(toks, i, { enclosed: opensBefore(toks, i) });
+    const e = addr?.elems[0];
+    if (!addr || !e || e.kind !== "daf" || !e.explicit || addr.elems.length > 1) return null;
+    const named = (x: Tok | undefined) => !!x && x.kind === "word" && (x.gershayim || x.geresh) && !numeralOf(x) && !COMMON_ABBREVIATIONS.has(wordShape(x)) && !/^ו?ד"ה$/.test(wordShape(x)) && !wordIn(x, COMMENTATORS) && !wordIn(x, QUALIFIERS);
+    if (named(before(toks, i, 1))) return this.drop("daf-of-another-book");
+    // "בסוף גיטין מייתי לה הש"ס. [דף פ"ט]": a tractate named a few words before is the daf's book
+    for (let j = Math.max(0, i - 8); j < i; j++) if (this.aliases.matchAt(toks, j).some((m) => m.entry.targets.some((x) => x.collection === "bavli"))) return this.drop("daf-of-another-book");
+    const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
+    return this.emit(toks, line, { from: i, to, candidates: [this.base], name: t.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "relative", numericName: false, rule: "base-daf" });
   }
 
   /** "(שם)", "(שם ד)", "שם פסוק ד", "שם דף ה ע"ב" at toks[i]. */
@@ -618,6 +638,9 @@ const NOT_AUTHORS = new Set(['הנ"ל', 'ה"ה', 'הנז"ל', 'הע"ה']);
 const HONORIFICS = new Set(['ז"ל', 'זצ"ל', 'ז"ל:', 'נ"י', 'שליט"א', 'זלה"ה', 'ע"ה']);
 /** words that name another work before a siman ("בתשובה סימן צ"ז") */
 const OTHER_WORK = /^[וב]{0,2}(?:תשובה|תשובות|תשו|ספר|ס|שו"ת|שות)$/;
+
+/** the word "דף" with a ב/ו ("בדף", "ובדף") — not "ד'" */
+const DAF_WORD = /^(?:ו?ב)?דף$/;
 
 /** "לעיל", "לקמן", with a prefix ("ולקמן", "דלעיל", "כדלקמן") */
 const RELATIVE = /^(?:[ודכ]{0,2})(?:לעיל|לקמן|להלן)$/;

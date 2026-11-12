@@ -123,6 +123,19 @@ describe("citations engine (in memory)", () => {
       [12, "citations.ibid-full"],
     ]);
     expect(r.suggestions[1]!.confidence).not.toBe("certain");
+    // "(שם)" alone says nothing of the place: at most "possible"
+    expect(r.suggestions[2]!.confidence).toBe("possible");
+  });
+
+  it("a daf with no tractate in a commentary on one: that tractate, \"high\" at most; elsewhere nothing", () => {
+    const onBer = (line: string) => runCitationsEngine({ book: ref("c", "פסקי תוספות על ברכות", "otzaria"), lines: [{ index: 0, text: line, heading: null }] }, library()).suggestions;
+    const [a] = onBer('ד"ה חוץ: [דף ג ע"ב]');
+    expect(a!.target).toEqual({ book: BER, line: 14 });
+    expect(a!.confidence).toBe("high");
+    expect(a!.rules).toContain("citations.base-daf");
+    // with "לעיל" the book says it: as sure as before
+    expect(onBer("ועיין לעיל ג' ע\"ב")[0]!.confidence).toBe("certain");
+    expect(runCitationsEngine(source(['ד"ה חוץ: [דף ג ע"ב]']), library()).suggestions).toHaveLength(0);
   });
 });
 

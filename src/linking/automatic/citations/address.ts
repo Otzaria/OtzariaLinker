@@ -84,7 +84,8 @@ function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number 
   for (let p = 0; p <= 2; p++) {
     if (p && !/^[ובד]$/.test(full[p - 1]!)) break;
     const s = full.slice(p);
-    if (p && s.length < 3) break;
+    // "בד'" is not "in daf", but "בדף" is
+    if (p && s.length < 3 && s !== "דף") break;
     const two = toks[i + 1]?.kind === "word" ? marker(`${s} ${shape(toks[i + 1]!)}`) : undefined;
     if (two) return { kind: two, width: 2 };
     const one = marker(s);

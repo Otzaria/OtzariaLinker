@@ -65,7 +65,11 @@ const PENALTY = {
   singleBare: 0.03,
   wholeDaf: 0.04,
   amudFromBareLetter: 0.04,
-  ibidFull: 0.09,
+  /**
+   * "(שם)" alone: the place is the last citation's, and nothing in the words confirms it — at most "possible"
+   * (§6.8: 12% confirmed by the database, about 70% right by hand; it was 0.09, "high")
+   */
+  ibidFull: 0.16,
   ibidPartial: 0.1,
   ibidBook: 0.06,
   commentator: 0.03,
@@ -97,6 +101,8 @@ const PENALTY = {
   unitFallback: 0.03,
   /** a Rambam topic read from its initials ("פ"ג מא"ב"): one topic has them, but an abbreviation is a guess */
   rambamInitials: 0.04,
+  /** "דף לה" with no tractate in a commentary on one: the tractate is inferred from the book, not written */
+  baseDaf: 0.07,
 } as const;
 
 export interface Pending {
@@ -332,6 +338,8 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
   "ibid-shape": '"שם" שאי אפשר להשלים',
   "ibid-other-book": '"שם" אחרי שם של ספר אחר',
   "siman-of-another-book": "סימן של ספר אחר שנזכר לידו",
+  "daf-of-another-book": "דף של ספר אחר שנזכר לידו",
+  "rambam-topic-unknown": 'פרק אחרי "רמב"ם" בלי שם הלכות שאפשר לזהות',
 };
 
 /**
@@ -395,6 +403,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
   if (c.rule === "rambam-topic-initials") s -= PENALTY.rambamInitials;
+  if (c.rule === "base-daf") s -= PENALTY.baseDaf;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   // a unit whose location was found inside it: the location is the citation and the name confirms
   // it — with the book named next to it, as sure as "<tractate> <daf>"
@@ -420,6 +429,7 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "rambam-topic-full": `שם ההלכות נכתב בלי "הלכות" (או בקיצור "ה'"), ונמצא בשמות ספרי משנה תורה`,
   "rambam-topic-first": "נכתבה רק המילה הראשונה של שם ההלכות, ואין עוד הלכות שמתחילות בה",
   "rambam-topic-initials": "שם ההלכות נכתב בראשי תיבות, ורק הלכות אחת מתאימות להם",
+  "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
 };
 
 const KIND_WORD: Readonly<Record<string, string>> = {
