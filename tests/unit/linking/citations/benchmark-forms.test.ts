@@ -30,6 +30,11 @@ const CATALOG = [
   book("me", "מאירת עיניים על שולחן ערוך חושן משפט", "sefaria", ['מ"ע', 'סמ"ע']),
   book("rivash", 'תשובות הריב"ש'),
   book("tzavaat", 'צוואת הריב"ש'),
+  book("oh-gen", "אור החיים על בראשית", "otzaria", ['אוה"ח']),
+  book("oh-lev", "אור החיים על ויקרא", "otzaria", ['אוה"ח']),
+  book("m-ned", "משנה נדרים"),
+  book("ls-ned", "לחם שמים על משנה נדרים", "otzaria", ['לח"מ']),
+  book("ls-shab", "לחם שמים על משנה שבת", "otzaria", ['לח"מ']),
 ];
 /** the Bavli's chapters (alt_toc "Chapters") */
 const UNITS = NamedUnitIndex.build([
@@ -93,6 +98,15 @@ describe("a commentator's ד\"ה", () => {
     expect(c!.rule).toBe("dibur-here");
     // without the line's reference, nothing
     expect(scan(['רש"י ד"ה ואי מאי קאמר'], "חידושים על בבא קמא")).toHaveLength(0);
+  });
+  it("a commentary named by its name in the library, when it is on the cited book", () => {
+    const [c] = scan(['ובאוה"ח [ויקרא א, ב] כתב']);
+    expect(books(c)).toEqual(["oh-lev"]);
+    expect(c!.rule).toBe("commentator-named");
+    // no אור החיים on דברים in the library: the verse
+    expect(books(scan(['ובאוה"ח [דברים א, ב] כתב'])[0])).toEqual(["deut"]);
+    // the acronym must be the author's initials: "לח"מ" is לחם משנה, not the database's name of לחם שמים
+    expect(books(scan(['ובלח"מ [רפ"ה דנדרים] כתב'])[0])).not.toContain("ls-ned");
   });
   it('a commentator after the place moves it only with its ד"ה', () => {
     expect(books(scan(['ושותים בצמאה (ב"ק פד:), כרש"י ובעלי התוספות'])[0])).toEqual(["bk"]);

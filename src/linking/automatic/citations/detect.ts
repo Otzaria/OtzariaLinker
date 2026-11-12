@@ -1010,6 +1010,37 @@ export class CitationScanner {
     return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
   }
 
+  /**
+   * A commentary named right before the citation by one of its names in the library — an acronym
+   * ("אוה"ח", "גו"א", "רמב"ן") the database gives to "<author> על <book>" — when that commentary is on the
+   * cited book: the citation is its words there. Only quoted acronyms (a plain word is too often running text).
+   */
+  private libraryCommentaryBefore(toks: readonly Tok[], from: number, candidates: readonly AliasTarget[]): { name: string; targets: AliasTarget[] } | null {
+    const at = beforeIndex(toks, from, 1);
+    const last = toks[at];
+    if (at < 0 || last?.kind !== "word" || !last.gershayim || numeralOf(last)) return null;
+    for (let start = Math.max(0, at - 2); start <= at; start++) {
+      for (const m of [...this.aliases.matchAt(toks, start), ...this.aliases.authorNamesAt(toks, start)]) {
+        if (m.to !== at + 1) continue;
+        const targets: AliasTarget[] = [];
+        for (const c of candidates) {
+          const on = this.aliases.commentariesOn.get(c.book.title.replace(/[״]/g, '"')) ?? [];
+          // the acronym must be the AUTHOR's initials ("אוה"ח" — אור החיים): book_acronym also gives "לח"מ" to לחם שמים
+          const letters = keyOfName(m.entry.text).replace(/ /g, "");
+          for (const t of m.entry.targets) {
+            const x = on.find((y) => y.book.key === t.book.key);
+            if (!x || targets.some((y) => y.book.key === t.book.key)) continue;
+            const author = keyOfName(x.author).replace(/^ה(?=\S)/, "").split(" ");
+            if (author.join("") === letters || abbreviates(letters, author)) targets.push({ book: t.book, tier: c.tier, collection: c.collection });
+          }
+        }
+        const own = this.own(targets);
+        if (own.length) return { name: m.entry.text, targets: own };
+      }
+    }
+    return null;
+  }
+
   /** the targets without the source book itself */
   private own(targets: readonly AliasTarget[]): AliasTarget[] {
     return targets.filter((t) => t.book.key !== this.sourceKey);
@@ -1066,6 +1097,7 @@ export class CitationScanner {
       const afterAny = before ? undefined : commentatorAfter(toks, c.to);
       const after = afterAny && isDibur(toks, afterAny.next) ? afterAny : undefined;
       const who = before ?? after?.who;
+      let lib: { name: string; targets: AliasTarget[] } | null = null;
       const dh = isDibur(toks, after ? after.next : c.to);
       const named = candidates.some((x) => / על /.test(x.book.title));
       // "תוס' (מנחות צג.) ד"ה X", "יבמות מ"ז ע"ב תוד"ה במקום": the words of the ד"ה
@@ -1079,6 +1111,13 @@ export class CitationScanner {
         movedFrom = candidates;
         candidates = moved;
         commentator = who;
+      } else if (!named && (lib = this.libraryCommentaryBefore(toks, c.from, candidates)) !== null) {
+        // "ובאוה"ח [שמות ג, ד]", "ובגו"א [ויקרא פ"א]": a commentary's name in the library, on the cited book
+        movedFrom = candidates;
+        candidates = lib.targets;
+        commentator = lib.name;
+        rule = rule ?? "commentator-named";
+        if (dh) diburWords = diburWordsAt(toks, c.to);
       } else if (dh && !named) {
         this.drop("dibur-without-commentator");
         return c.to;
