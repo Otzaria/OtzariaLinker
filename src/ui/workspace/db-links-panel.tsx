@@ -107,6 +107,8 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
   };
   const copy = (links: Link[]) => void s.adopt(links);
   const pick = store.pick[side].value;
+  // only what copying can make something of (whyNotCopyable: the row's button says the same)
+  const copyable = shown.filter((l) => !s.whyNotCopyable(l));
 
   return (
     <>
@@ -162,8 +164,13 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
         <span class="muted dbl-count" aria-live="polite">
           {list?.loading && !shown.length ? "טוען…" : `${(list?.total ?? 0).toLocaleString("he")} קישורים${shown.length < (list?.total ?? 0) ? `, מוצגים ${shown.length.toLocaleString("he")}` : ""}`}
         </span>
-        <button class="btn text" onClick={() => (s.selected.value = new Set(shown.map((l) => l.id)))} disabled={!shown.length}>
-          סימון המוצגים
+        <button
+          class="btn text"
+          onClick={() => (s.selected.value = new Set(copyable.map((l) => l.id)))}
+          disabled={!copyable.length}
+          title={copyable.length < shown.length ? `${(shown.length - copyable.length).toLocaleString("he")} מהמוצגים אינם ניתנים להעתקה (ספריא↔ספריא, ציטוט אוטומטי, או כבר בפרויקט), ולכן לא יסומנו` : undefined}
+        >
+          {copyable.length === shown.length ? "סימון המוצגים" : `סימון מה שאפשר להעתיק (${copyable.length.toLocaleString("he")} מתוך ${shown.length.toLocaleString("he")})`}
         </button>
         <button class="btn tonal" onClick={() => copy(shown.filter((l) => selected.has(l.id)))} disabled={!selected.size || !!store.task.value} title="יוצר בפרויקט קישורים חדשים כמו אלה, שאפשר לערוך ולייצא. הקישורים שבמסד לא משתנים">
           <Icon name="fl_copy" size={16} />
@@ -258,6 +265,7 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
   const type = parseConnectionType(l.declaredType).type;
   const origin = dbLinkOrigin(l);
   const inProject = s.inProject(l);
+  const why = s.whyNotCopyable(l);
   const where = (line: number, end?: number) => (end !== undefined ? `${line + 1}–${end + 1}` : `${line + 1}`);
   // the listed book's end stays in its reader; the other end goes to the other reader
   const show = () => {
@@ -271,7 +279,7 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
     <li class="link-item dbl-item" tabIndex={0} onClick={show} onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && show()} title="הצגת שני צדי הקישור">
       <div class="ends">
         {checked !== undefined && (
-          <input type="checkbox" checked={checked} onClick={(e) => e.stopPropagation()} onChange={() => s.toggleSelected(l.id)} aria-label="סימון להעתקה" />
+          <input type="checkbox" checked={checked} disabled={!!why && !checked} title={why ?? undefined} onClick={(e) => e.stopPropagation()} onChange={() => s.toggleSelected(l.id)} aria-label="סימון להעתקה" />
         )}
         <span class="status dbl-status" title={DB_LINK_ORIGIN_LABELS[origin].hint}>
           {DB_LINK_ORIGIN_LABELS[origin].he}
@@ -285,7 +293,7 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         </span>
       </div>
       <div class="acts" onClick={(e) => e.stopPropagation()}>
-        <button class="icon-btn" onClick={() => void s.adopt([l])} disabled={origin === "linker" || origin === "sefaria" || inProject === "same-link" || !!store.task.value} title={origin === "linker" || origin === "sefaria" ? "אי אפשר לכתוב קישור כזה בקובץ קישורים" : inProject === "same-link" ? "כבר בפרויקט" : "העתקה לפרויקט"} aria-label="העתקה לפרויקט">
+        <button class="icon-btn" onClick={() => void s.adopt([l])} disabled={!!why || !!store.task.value} title={why ?? "העתקה לפרויקט"} aria-label="העתקה לפרויקט">
           <Icon name="fl_copy" size={18} />
         </button>
       </div>

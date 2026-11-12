@@ -1,7 +1,7 @@
 import { computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { ConnectionType } from "../core/links/connection-type";
-import { type DbLinkDirection, type DbLinkQuery, type DbLinkSummary, type DbLinksUnavailable } from "../core/links/db-links";
+import { dbLinkOrigin, type DbLinkDirection, type DbLinkQuery, type DbLinkSummary, type DbLinksUnavailable } from "../core/links/db-links";
 import { linkMatchIndex, matchLink, storedLinkIdentity, type LinkMatch, type LinkMatchIndex } from "../core/links/equality";
 import { adoptDbLink } from "../core/links/from-db";
 import type { BookRef, Link } from "../core/links/model";
@@ -145,6 +145,18 @@ export class DbLinksState {
   /** How a database link stands against the project, by the shared rule. */
   inProject(l: Link): LinkMatch | null {
     return matchLink(l, this.projectIndex.value);
+  }
+
+  /**
+   * Whether "copy to the project" can make anything of a database link, or why not (Hebrew): a LINKER
+   * citation or a Sefaria↔Sefaria link cannot be written in a links file, and one already in the project
+   * is not copied again. One rule for the row's button and for "select the shown" (product audit F11).
+   */
+  whyNotCopyable(l: Link): string | null {
+    const origin = dbLinkOrigin(l);
+    if (origin === "linker" || origin === "sefaria") return "אי אפשר לכתוב קישור כזה בקובץ קישורים";
+    if (this.inProject(l) === "same-link") return "כבר בפרויקט";
+    return null;
   }
 
   /** The picked line's links: the project's and the database's, kept apart (the per-line view). */
