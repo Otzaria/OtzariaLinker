@@ -67,7 +67,8 @@ export function judge(suggestions: readonly Suggestion[], gold: readonly GoldLin
   for (const s of suggestions) {
     const list = byLine.get(`${s.source.line}|${s.target.book.key}`) ?? [];
     const from = s.target.line;
-    const to = s.target.end ?? s.target.line;
+    // a unit narrowed to its first line (citedSpan) still names the whole unit: a stored link inside it agrees
+    const to = s.citedSpan?.end ?? s.target.end ?? s.target.line;
     const hits = list.filter((g) => g.from <= to && from <= g.to);
     for (const h of hits) found.add(h);
     let verdict: Verdict = hits.length ? "correct" : list.length ? "wrong" : "unconfirmed";

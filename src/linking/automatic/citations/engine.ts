@@ -256,7 +256,8 @@ export class CitationRun {
       }
       seen.add(pairKey);
       counts.resolved++;
-      const { reasons, warnings, rules } = explain(c, best.target, res, ranged, anchor !== undefined, allowAnchor, this.notesLines.has(c.line));
+      const narrowed = res.end > res.line && !ranged ? (this.opts.ranges ? "sefaria" : "settings") : null;
+      const { reasons, warnings, rules } = explain(c, best.target, res, narrowed, anchor !== undefined, allowAnchor, this.notesLines.has(c.line));
       if (rival && confidence === "ambiguous") warnings.push({ code: "citations/ambiguous", text: `השם "${c.name}" מתאים גם ל${rival.target.book.title}, ושם המקום קיים גם כן` });
       suggestions.push({
         id,
@@ -264,6 +265,7 @@ export class CitationRun {
         source: { book: this.source, line: c.line },
         ...(anchor && { anchor }),
         target,
+        ...(narrowed && { citedSpan: { line: res.line, end: res.end } }),
         declaredType: "reference",
         heRef2: best.heRef?.trim() ? best.heRef : res.label,
         score: round(best.score),
@@ -418,7 +420,7 @@ const COLLECTION_WORD: Readonly<Record<Collection, string>> = {
   tanakh: 'תנ"ך', bavli: "תלמוד בבלי", mishna: "משנה", yerushalmi: "תלמוד ירושלמי", tosefta: "תוספתא", rambam: 'רמב"ם', sa: "שולחן ערוך", "sa-commentary": "מפרשי השולחן ערוך", tur: "טור", other: "",
 };
 
-function explain(c: Citation, t: AliasTarget, r: Resolution, ranged: boolean, anchored: boolean, anchorAllowed: boolean, notesLine: boolean): { reasons: Reason[]; warnings: Reason[]; rules: string[] } {
+function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria" | "settings" | null, anchored: boolean, anchorAllowed: boolean, notesLine: boolean): { reasons: Reason[]; warnings: Reason[]; rules: string[] } {
   const reasons: Reason[] = [];
   const warnings: Reason[] = [];
   const rules: string[] = [`citations.${c.form}`, `citations.name-${t.tier}`];
@@ -469,8 +471,11 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, ranged: boolean, an
   }
   if (r.end > r.line) {
     rules.push("citations.range");
-    if (ranged) reasons.push({ code: "citations/range", text: `ההפניה היא ליחידה שלמה, ולכן הקישור לכל השורות שלה (${r.line + 1}–${r.end + 1})` });
-    else warnings.push({ code: "citations/range-first-line", text: "ההפניה היא ליחידה שלמה; לפי ההגדרות הקישור הוא לשורה הראשונה שלה בלבד" });
+    const lines = `${r.line + 1}–${r.end + 1}`;
+    if (!narrowed) reasons.push({ code: "citations/range", text: `ההפניה היא ליחידה שלמה, ולכן הקישור לכל השורות שלה (${lines})` });
+    else if (narrowed === "sefaria")
+      warnings.push({ code: "citations/range-first-line", text: `ההפניה היא ליחידה שלמה (שורות ${lines}). הספר מספריא, והסנכרון השבועי מעדכן רק את שורת ההתחלה, ולכן הקישור הוא לשורה הראשונה שלה בלבד` });
+    else warnings.push({ code: "citations/range-first-line", text: `ההפניה היא ליחידה שלמה (שורות ${lines}); לפי ההגדרות הקישור הוא לשורה הראשונה שלה בלבד` });
   }
   if (c.evidence === "medium") warnings.push({ code: "citations/bare-numbers", text: "המקום כתוב במספרים בלי סימן (פרק, סימן, דף) ובלי גרשיים" });
   if (c.numericName) warnings.push({ code: "citations/numeric-name", text: `השם "${c.name}" יכול להיקרא גם כמספר` });

@@ -44,6 +44,12 @@ export interface Suggestion {
   readonly source: LinkSide;
   readonly anchor?: RawAnchor;
   readonly target: LinkSide;
+  /**
+   * The whole place the mention names, when `target` is only its first line (a cited unit in a Sefaria
+   * book: the weekly sync remaps only the start, so no range is stored — B1; or ranges are off in the
+   * settings). Shown to the reviewer; the real-DB measure counts a stored link anywhere in it as a match.
+   */
+  readonly citedSpan?: { readonly line: number; readonly end: number };
   /** canonical lower-case connection type, e.g. "commentary" */
   readonly declaredType: string;
   /** heRef_2 for the target, built from the target book's title and headings */

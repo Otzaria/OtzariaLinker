@@ -236,5 +236,7 @@ describe("named units in a Sefaria book", () => {
     };
     const [s] = run(["כדאמרינן בברכות פרק מאימתי ע״ש"], SRC, lib).suggestions;
     expect(s!.target).toEqual({ book: BER_S, line: 1 });
+    expect(s!.citedSpan).toEqual({ line: 1, end: amud(4, 1) - 1 });
+    expect(s!.warnings.map((w) => w.code)).toContain("citations/range-first-line");
   });
 });
