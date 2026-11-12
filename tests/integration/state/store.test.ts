@@ -241,6 +241,22 @@ describe("AppStore — moving links to a new edition", () => {
     expect(store.linkState.value.undo.length).toBe(undoBefore + 1);
     expect(store.allLinks.value.map((l) => [l.source.book.key, l.source.line])).toEqual([[newB!.key, 2], [newB!.key, 3], [newB!.key, 4]]);
   });
+
+  it("the comparison keeps the aligned lines, and the mapping old → new is saved as CSV", async () => {
+    const { store, saved } = makeStore();
+    const v1 = ["<h1>ספר</h1>", "שורה ראשונה של הספר", "שורה שנייה של הספר"];
+    const v2 = ["<h1>ספר</h1>", "הקדמה חדשה לגמרי", ...v1.slice(1)];
+    const links = JSON.stringify([{ line_index_1: 2, heRef_2: "בסיס", path_2: "בסיס.txt", line_index_2: 1, "Conection Type": "reference" }]);
+    await store.openFiles([{ path: "ישן/ספר.txt", blob: new Blob([v1.join("\n")]) }, { path: "ספר_links.json", blob: new Blob([links]) }]);
+    await store.openFiles([{ path: "חדש/ספר.txt", blob: new Blob([v2.join("\n")]) }]);
+    const [oldB, newB] = [...store.books.value.values()];
+    await store.planRelinkFor(oldB!.key, newB!.key);
+    expect(store.relink.value!.rows.map((r) => r.kind)).toEqual(["same", "inserted", "same", "same"]);
+    store.saveLineMapping();
+    const file = saved.at(-1)!;
+    expect(file.name).toMatch(/^מיפוי-שורות-\d{4}-\d\d-\d\d\.csv$/);
+    expect((file.data as string).split("\r\n").slice(1, 5)).toEqual(['"1","1","זהה","","same"', '"","2","נוספה","","inserted"', '"2","3","זהה","","same"', '"3","4","זהה","","same"']);
+  });
 });
 
 describe("AppStore — links from a spreadsheet", () => {

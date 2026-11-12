@@ -1,0 +1,24 @@
+/* The diff view of the relink dialog (edition-diff.tsx). Kept beside the component; tokens only (tokens.css). */
+dialog.relink { width: min(1100px, calc(100vw - 32px)); }
+.ediff { display: grid; gap: 8px; }
+.ediff-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: var(--fs-sm); margin-inline-start: auto; }
+.ediff-key { padding-inline-start: 8px; border-inline-start: 4px solid var(--outline-variant); }
+.ediff-scroll { overflow: auto; max-height: 50vh; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface); }
+.ediff-table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+.ediff-table th { position: sticky; top: 0; background: var(--surface-container-high); text-align: start; padding: 4px 8px; font-weight: 600; }
+.ediff-table td { padding: 3px 8px; vertical-align: top; border-top: 1px solid var(--outline-variant); }
+.ediff-table td.ln { color: var(--on-surface-variant); text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; width: 1%; }
+.ediff-table td.tx { font-family: var(--font-book); font-size: calc(var(--fs-md) * var(--font-scale)); width: 45%; overflow-wrap: anywhere; }
+.ediff-table td.st { white-space: nowrap; color: var(--on-surface-variant); width: 1%; }
+.ediff-key.k-changed { border-color: var(--warning); }
+.ediff-table tr.k-changed { background: color-mix(in srgb, var(--warning-container) 45%, transparent); }
+.ediff-table tr.k-deleted { background: color-mix(in srgb, var(--error-container) 50%, transparent); }
+.ediff-table tr.k-inserted { background: color-mix(in srgb, var(--tertiary-container) 55%, transparent); }
+.ediff-table tr.k-moved, .ediff-table tr.k-moved-in { background: color-mix(in srgb, var(--secondary-container) 55%, transparent); }
+.ediff-key.k-deleted { border-color: var(--error); }
+.ediff-key.k-inserted { border-color: var(--tertiary); }
+.ediff-key.k-moved { border-color: var(--secondary); }
+.ediff-table del { background: color-mix(in srgb, var(--error) 22%, transparent); text-decoration: line-through; }
+.ediff-table ins { background: color-mix(in srgb, var(--tertiary) 28%, transparent); text-decoration: none; }
+.ediff-pager { display: flex; gap: 8px; align-items: center; justify-content: center; }
+dialog.relink .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }

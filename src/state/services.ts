@@ -46,7 +46,7 @@ export interface BooksService {
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
-  diffBooks(oldKey: string, newKey: string, opts?: CallOptions): Promise<{ to: number[]; fate: LineFate[]; stats: Record<string, number> }>;
+  diffBooks(oldKey: string, newKey: string, opts?: CallOptions): Promise<{ to: number[]; fate: LineFate[]; similarity: number[]; moves: [number, number][]; newLength: number; stats: Record<string, number> }>;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>, opts?: CallOptions): Promise<BatchResultItem[]>;
   searchBook(bookKey: string, query: string, options: { limit?: number }, opts?: CallOptions): Promise<BookSearchResult>;
   /** alt_toc structures the book's database already has (null: its source cannot have any) */

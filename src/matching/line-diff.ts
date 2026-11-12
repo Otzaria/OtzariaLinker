@@ -166,3 +166,71 @@ function wordJaccard(a: Set<string>, b: Set<string>): number {
   for (const w of a) if (b.has(w)) inter++;
   return inter / (a.size + b.size - inter);
 }
+
+/**
+ * Lines that moved: an old line the alignment left unmatched whose exact text is the text of exactly
+ * one unmatched new line — and of no other unmatched old line. The alignment is monotone by design,
+ * so a block moved elsewhere comes out as deleted + inserted; this pairs them back FOR DISPLAY and for
+ * the mapping file. Repeated or blank text is never paired (that would be a guess). Pure.
+ */
+export function findMoves(oldLines: readonly string[], newLines: readonly string[], to: ArrayLike<number>): [number, number][] {
+  const usedNew = new Uint8Array(newLines.length);
+  for (let i = 0; i < to.length; i++) if (to[i]! >= 0) usedNew[to[i]!] = 1;
+  const once = (lines: readonly string[], free: (k: number) => boolean) => {
+    const m = new Map<string, number>(); // text → index, or -1 when it repeats
+    for (let k = 0; k < lines.length; k++) if (free(k) && lines[k]!.trim()) m.set(lines[k]!, m.has(lines[k]!) ? -1 : k);
+    return m;
+  };
+  const oldOnce = once(oldLines, (i) => (to[i] ?? -1) < 0);
+  const newOnce = once(newLines, (j) => !usedNew[j]);
+  const out: [number, number][] = [];
+  for (const [text, i] of oldOnce) {
+    const j = newOnce.get(text);
+    if (i >= 0 && j !== undefined && j >= 0) out.push([i, j]);
+  }
+  return out.sort((a, b) => a[0] - b[0]);
+}
+
+/** A run of words of one side of a word diff; `changed` = not in the other side. */
+export interface WordSpan {
+  text: string;
+  changed: boolean;
+}
+
+/**
+ * Word-level diff of two versions of a line, for showing an edited line: LCS on words split at white
+ * space (the words keep their spaces, so joining the spans gives the line back). Lines longer than
+ * `maxWords` are returned whole, marked changed — the view stays fast on a 50K-line book. Pure.
+ */
+export function wordDiff(oldText: string, newText: string, maxWords = 400): { old: WordSpan[]; new: WordSpan[] } {
+  const a = oldText.match(/\S+\s*|\s+/g) ?? [];
+  const b = newText.match(/\S+\s*|\s+/g) ?? [];
+  if (a.length > maxWords || b.length > maxWords) return { old: spans(a, () => true), new: spans(b, () => true) };
+  const key = (w: string) => w.trim();
+  const n = a.length;
+  const m = b.length;
+  const dp = new Uint16Array((n + 1) * (m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i * (m + 1) + j] = key(a[i]!) === key(b[j]!) ? dp[(i + 1) * (m + 1) + j + 1]! + 1 : Math.max(dp[(i + 1) * (m + 1) + j]!, dp[i * (m + 1) + j + 1]!);
+  const keepA = new Uint8Array(n);
+  const keepB = new Uint8Array(m);
+  for (let i = 0, j = 0; i < n && j < m; ) {
+    if (key(a[i]!) === key(b[j]!)) (keepA[i++] = 1), (keepB[j++] = 1);
+    else if (dp[(i + 1) * (m + 1) + j]! >= dp[i * (m + 1) + j + 1]!) i++;
+    else j++;
+  }
+  return { old: spans(a, (k) => !keepA[k]), new: spans(b, (k) => !keepB[k]) };
+}
+
+/** Joins neighbouring words with the same state into one span. */
+function spans(words: readonly string[], changed: (k: number) => boolean): WordSpan[] {
+  const out: WordSpan[] = [];
+  words.forEach((w, k) => {
+    const c = changed(k) && w.trim() !== "";
+    const last = out[out.length - 1];
+    if (last && last.changed === c) last.text += w;
+    else out.push({ text: w, changed: c });
+  });
+  return out;
+}
