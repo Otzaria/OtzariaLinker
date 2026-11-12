@@ -7,7 +7,7 @@
 
 ## 1. מה המאגר
 
-OtzariaLinker 2.0: כלי ליצירה, עריכה, ייבוא וייצוא של קובצי `_links.json` לספריית אוצריא.
+OtzariaLinker 4.0: כלי ליצירה, עריכה, ייבוא וייצוא של קובצי `_links.json` לספריית אוצריא.
 **קוד המקור מודולרי** (TypeScript + Preact, תחת `src/`), ו־Vite **בונה ממנו קובץ HTML אחד**,
 `dist/OtzariaLinker.html`, שהמשתמש פותח מ־`file://` בלי רשת ([ADR 0001](docs/adr/0001-modular-source-single-file-distribution.md)).
 

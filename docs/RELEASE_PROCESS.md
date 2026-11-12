@@ -54,10 +54,10 @@
 
 השחרור מופעל **כשמפרסמים GitHub Release**. אין צורך להעלות קבצים ידנית.
 
-1. מעדכנים את `version` ב־`package.json` (וב־`package-lock.json`, למשל `npm version 2.0.0 --no-git-tag-version`),
+1. מעדכנים את `version` ב־`package.json` (וב־`package-lock.json`, למשל `npm version 4.0.0 --no-git-tag-version`),
    ומתעדים את השינויים.
 2. commit, ומיזוג ל־`main`.
-3. יוצרים tag בשם `v<version>` בדיוק (למשל `v2.0.0-alpha.1`), ומפרסמים Release ממנו. גרסת אלפא או בטא:
+3. יוצרים tag בשם `v<version>` בדיוק (למשל `v4.0.0-alpha.1`), ומפרסמים Release ממנו. גרסת אלפא או בטא:
    מסמנים "pre-release".
 4. ה־workflow:
    - עושה checkout ל־tag;

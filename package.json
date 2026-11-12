@@ -1,6 +1,6 @@
 {
   "name": "otzaria-linker",
-  "version": "2.0.0-alpha.0",
+  "version": "4.0.0-alpha.0",
   "private": true,
   "description": "כלי אופליין ליצירה, עריכה, ייבוא וייצוא של קישורים בין ספרים לספריית אוצריא",
   "license": "GPL-3.0-or-later",

@@ -59,11 +59,11 @@ export interface ProjectFile {
   view: { source: string | null; target: string | null };
   altToc?: AltTocBook[];
   /**
-   * Optional (added in 2.0 without a version bump: older readers ignore it): how databases in
+   * Optional (added in 4.0 without a version bump: older readers ignore it): how databases in
    * someone else's schema were mapped, by schema fingerprint, so reopening one skips the wizard.
    */
   dbMappings?: SavedDbMapping[];
-  /** Optional (2.0): the library links files the project holds, by fingerprint (ProjectLibraryFile). */
+  /** Optional (4.0): the library links files the project holds, by fingerprint (ProjectLibraryFile). */
   libraryFiles?: ProjectLibraryFile[];
 }
 

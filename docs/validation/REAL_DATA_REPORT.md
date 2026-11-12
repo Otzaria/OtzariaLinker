@@ -1,6 +1,6 @@
 <div dir="rtl">
 
-# אימות OtzariaLinker 2.0 מול הנתונים האמיתיים
+# אימות OtzariaLinker 4.0 מול הנתונים האמיתיים
 
 תאריך: 2026-11-11. ענף `feat/v2-validate` (מבוסס על `rewrite/v2` ב־`98e8467`).
 

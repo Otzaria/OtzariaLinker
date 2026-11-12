@@ -268,7 +268,7 @@ _report.txt
   "format": "otzaria-linker-project",
   "version": 1,
   "savedAt": "2026-11-11T12:00:00.000Z",
-  "app": "2.0.0-alpha.0",
+  "app": "4.0.0-alpha.0",
   "sources": [{ "label": "seforim.db", "kind": "otzaria-db", "books": 8154 }],
   "links": [{ "id": "…", "status": "new", "provenance": "user",
               "source": { "book": { "title": "…", "origin": "otzaria" }, "line": 3 },
