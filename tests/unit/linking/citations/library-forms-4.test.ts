@@ -47,6 +47,11 @@ const CATALOG: CatalogBook[] = [
   book("mid-ps", "מדרש תהילים"),
   book("mkesef", "משנה כסף"),
   book("rashi-deut", 'רש"י על דברים'),
+  book("rashi-gen", 'רש"י על בראשית'),
+  book("malbim-ps", 'מלבי"ם על תהילים'),
+  book("bech", "בכורות"),
+  book("ket", "כתובות"),
+  book("tos-bech", "תוספות על בכורות"),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -222,6 +227,32 @@ describe("a commentator and \"שם\"", () => {
   it("not after a citation that is no daf (Gemara) or chapter and verse (Tanakh), nor far from it", () => {
     expect(scan([`כמבואר בקידושין פ"ב (תוס' שם)`])).toHaveLength(1);
     expect(scan([`כמבואר בקידושין דף ס"ד ע"א`, ...Array.from({ length: 8 }, () => "טקסט"), `ותוס' שם כתבו`])).toHaveLength(1);
+  });
+});
+
+describe("commentators on the Tanakh", () => {
+  it(`"והמלבי"ם [תהלים עח, נ]": a commentator by one word moves the verse to his commentary`, () => {
+    expect(books(scan([`וכן כתב הגר"א והמלבי"ם [תהלים עח, נ], ואיוב`])[0])).toEqual(["malbim-ps"]);
+  });
+  it(`"(בראשית יב ה) … ופירש רש"י (ד"ה אשר)": his words on the verse just cited`, () => {
+    const cs = scan([`כתיב (בראשית יב ה) ואת הנפש אשר עשו בחרן, ופירש רש"י (ד"ה אשר) דאברהם היה מגייר`]);
+    expect(cs.map(books)).toEqual([["gen"], ["rashi-gen"]]);
+    expect(loc(cs[1])).toBe("?:12 ?:5");
+    expect(cs[1]!.dh?.[0]).toBe("אשר");
+    // no verse just cited: nothing
+    expect(scan([`ופירש רש"י (ד"ה אשר) דאברהם היה מגייר`])).toHaveLength(0);
+  });
+});
+
+describe("a chapter by its name, then \"and in <another tractate>\"", () => {
+  it(`"התוס' בס"פ יש בכור ובכתובות ר"פ אע"פ": "ובכתובות" opens the next citation`, () => {
+    const units = NamedUnitIndex.build([
+      { book: { key: "bech", title: "בכורות", origin: "sefaria" }, kind: "chapter", entries: [{ name: "על אלו מומין", line: 0 }, { name: "יש בכור לנחלה", line: 100 }], lastLine: 199 },
+      { book: { key: "ket", title: "כתובות", origin: "sefaria" }, kind: "chapter", entries: [{ name: "בתולה נשאת", line: 0 }, { name: "אף על פי", line: 100 }], lastLine: 199 },
+    ]);
+    const sc = new CitationScanner(AliasIndex.build(CATALOG), "src", {}, "ספר כלשהו", units);
+    sc.scanLine(0, `וכ"כ עוד התוס' בס"פ יש בכור ובכתובות ר"פ אע"פ`, null);
+    expect(sc.citations.map(books)).toEqual([["tos-bech"], ["ket"]]);
   });
 });
 

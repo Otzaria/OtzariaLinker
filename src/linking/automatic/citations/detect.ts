@@ -132,6 +132,8 @@ const COMMENTATORS: readonly (readonly [string, string])[] = [
   ["תו'", "תוספות"],
   // "תוד"ה" — תוספות דיבור המתחיל, one word
   ['תוד"ה', "תוספות"],
+  // commentators on the Tanakh by one word ("והמלבי"ם [תהלים עח, נ]")
+  ['מלבי"ם', 'מלבי"ם'], ['רלב"ג', 'רלב"ג'], ["ספורנו", "ספורנו"], ["אברבנאל", "אברבנאל"],
 ];
 
 const PREFIX_LETTERS = /^[ובהלכדמש]{1,2}/;
@@ -598,7 +600,8 @@ export class CitationScanner {
     const beforeBook = this.bookBefore(toks, from);
     let afterBook: AliasMatch | null = null;
     let addr: Address | null = null;
-    const glued = this.aliases.matchAt(toks, k).find((m) => m.prefix !== "" && /[דבמ]$/.test(m.prefix));
+    // ("התוס' בס"פ יש בכור ובכתובות ר"פ אע"פ": "and in Ketubot" opens the next citation, it is not this chapter's book)
+    const glued = this.aliases.matchAt(toks, k).find((m) => m.prefix !== "" && /[דבמ]$/.test(m.prefix) && !m.prefix.startsWith("ו"));
     if (glued) {
       afterBook = glued;
       k = glued.to;
@@ -867,16 +870,19 @@ export class CitationScanner {
     // the last citation's tractate — the one it named, also when it was moved to a commentator ("רש"י ד"ה …, ותוד"ה …")
     const named = (x: { c: Citation }) => (x.c.movedFrom ?? x.c.candidates).filter((y) => y.collection === "bavli");
     const lastDaf = last && last.elems.length && (last.elems[0]!.kind === "daf" || last.elems[0]!.amud !== undefined) && named(last).length ? last : null;
-    const books = lastDaf ? named(lastDaf) : this.base?.collection === "bavli" ? [this.base] : null;
+    // "(בראשית יב ה) … ופירש רש"י (ד"ה אשר)": a verse just cited — the commentator's words on it
+    const verse = !lastDaf && !elems && last && !last.c.internal && last.elems.length === 2 && last.elems.every((e) => e.kind === "?" || e.kind === "perek" || e.kind === "pasuk") ? (last.c.movedFrom ?? last.c.candidates).filter((y) => y.collection === "tanakh") : [];
+    const lastVerse = verse.length ? last : null;
+    const books = lastDaf ? named(lastDaf) : lastVerse ? verse : this.base?.collection === "bavli" ? [this.base] : null;
     if (!books?.length) return null;
     // no daf written and none before it: in a commentary on the tractate, the daf the citing line is on ("רש"י ד"ה X")
-    const here = !elems && !lastDaf ? this.hereDaf() : null;
-    const place = elems ?? lastDaf?.elems ?? here;
+    const here = !elems && !lastDaf && !lastVerse ? this.hereDaf() : null;
+    const place = elems ?? lastDaf?.elems ?? lastVerse?.elems ?? here;
     if (!place) return null;
     const moved = this.toCommentary(books, who);
     if (!moved.length) return this.drop("commentator-not-in-library");
     const dh = diburWordsAt(toks, compact ? i : k);
-    return this.emit(toks, line, { ...(dh && { dh }), from: i, to: Math.max(to, i + 1), candidates: moved, name: wordShape(t), elems: place, evidence: "strong", bracketed: false, ibid: elems || !lastDaf ? "none" : "partial", ...(lastDaf && !elems && { ibidOf: lastDaf.c.seq }), form: "forward", numericName: false, commentators: false, rule: here ? "dibur-here" : "dibur-context", commentator: who, movedFrom: books });
+    return this.emit(toks, line, { ...(dh && { dh }), from: i, to: Math.max(to, i + 1), candidates: moved, name: wordShape(t), elems: place, evidence: "strong", bracketed: false, ibid: elems || !(lastDaf ?? lastVerse) ? "none" : "partial", ...((lastDaf ?? lastVerse) && !elems && { ibidOf: (lastDaf ?? lastVerse)!.c.seq }), form: "forward", numericName: false, commentators: false, rule: here ? "dibur-here" : "dibur-context", commentator: who, movedFrom: books });
   }
 
   /**
