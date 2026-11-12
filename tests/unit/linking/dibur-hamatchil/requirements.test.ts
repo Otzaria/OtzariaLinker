@@ -77,6 +77,16 @@ describe("§2 intermediate commentators: a line on רש\"י/תוספות belongs
     expect(commentatorOfTitle('רש"י על בראשית')?.key).toBe("rashi");
   });
 
+  it("addressedOnly (the planner's step to another commentator): a line that names no one is not searched in the commentator", () => {
+    // a ד"ה that names nobody, quoting words תוספות also quote: without the option it would match there
+    const plain = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>וצריך לעצים</b> חייב שתים כו' הנה", "<b>שם תוס'</b> בד\"ה וצריך לעצים עיין בדבריהם"];
+    expect(byLine(run(plain, TOS, TOSAFOT), 2)).toBeDefined();
+    const res = run(plain, TOS, TOSAFOT, { addressedOnly: true });
+    expect(byLine(res, 2)).toBeUndefined();
+    expect(why(res, 2)).toEqual(["dh/not-addressed"]);
+    expect(baseSide(byLine(res, 3)!).line).toBe(4);
+  });
+
   it("the option `intermediates: false` links every line to the base, as before", () => {
     const res = run(comm, DAF, GEMARA, { intermediates: false });
     expect(why(res, 3)).not.toContain("dh/intermediate");

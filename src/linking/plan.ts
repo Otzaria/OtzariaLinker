@@ -472,6 +472,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
           target: sib.dependant,
           relation,
           why: `${quote(own.dependant.title)} כתוב על ${quote(own.base.title)}, ושורות שבהן הוא מפרש את דברי ${who.name} ("${who.name} ד"ה …", בא"ד) שייכות ל־${quote(sib.dependant.title)}. דיבור המתחיל מקשר רק אותן.`,
+          options: { addressedOnly: true },
         });
       }
     }

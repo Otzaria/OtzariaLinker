@@ -71,6 +71,16 @@ export interface DhOptions {
    */
   readonly intermediates?: boolean;
   /**
+   * when the base is an intermediate commentator: link ONLY the lines that quote it by name ("רש"י ד"ה
+   * X", "תוס' בד"ה X", and the בא"ד lines after them). Off by default — a commentary written on רש"י
+   * itself (שפתי חכמים) names no one and is all about it. The max-link planner turns it on for the
+   * step from a commentary on a text to the other commentators on that text (plan.ts intermediateSteps):
+   * without it every unlabeled line was searched in the commentator's words and matched wherever both
+   * quote the same verse or Gemara (library benchmark, 2026-11-12: ~87K suggestions in pairs the
+   * database never links, "אבן עזרא על תהילים" → "רש"י על תהילים", "רש"י על חולין" → "ריטב"א על חולין").
+   */
+  readonly addressedOnly?: boolean;
+  /**
    * a paragraph without a ד"ה of its own (no bold opening) after a ד"ה line of the same section belongs
    * to that ד"ה's place, in a book whose ד"ה lines are bold and whose sections hold few of them
    * (default true; the "item" of build_artzot_hachaim_links.py)
@@ -244,6 +254,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored);
   const notes: Reason[] = [policy.reason];
   const routeIntermediates = options.intermediates !== false;
+  const addressedOnly = options.addressedOnly === true;
   const continueItems = options.continueItems !== false;
   /** the intermediate commentator the base book is (רש"י על …, תוספות על …), else null */
   const baseIs: Commentator | null = commentatorOfTitle(base.book.title);
@@ -966,6 +977,8 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       return r("dh/intermediate", `השורה מפרשת את דברי ${who.name}, ולא את ספר הבסיס; היא שייכת לשורה של ${who.name}`);
     if (!who && explicitText && baseIs)
       return r("dh/not-intermediate", `השורה מפרשת את הטקסט עצמו (גמרא/משנה), ולא את ${baseIs.name} שהוא ספר הבסיס`);
+    if (addressedOnly && baseIs && !who)
+      return r("dh/not-addressed", `השורה אינה מזכירה את ${baseIs.name}, ולכן היא מפרשת את הטקסט ולא את דבריו`);
     return null;
   };
   const total = commentary.lines.length;

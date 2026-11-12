@@ -174,6 +174,9 @@ describe("planMaxLink — intermediate commentators", () => {
     expect(s).toContain("dibur-hamatchil:קרן אורה על מועד קטן>רש\"י על מועד קטן");
     expect(s).toContain("dibur-hamatchil:קרן אורה על מועד קטן>תוספות על מועד קטן");
     expect(s.filter((x) => x.startsWith("headings:") && x.includes(">תוספות"))).toEqual([]);
+    // only the lines that name the commentator (dibur-hamatchil addressedOnly)
+    const step = planPairs({ selected: ["t:1"], library: lib }).steps.find((x) => x.kind === "pair" && x.target.key === "db:3");
+    expect(step?.kind === "pair" && step.options).toEqual({ addressedOnly: true });
   });
   it("a commentator is not read against itself, and \"תוספות הרא\"ש\" is not תוספות", () => {
     const s = steps(planPairs({ selected: ["db:3", "t:2"], library: lib }));
