@@ -165,6 +165,14 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
       j++;
       continue;
     }
+    // "במנחות פ"ק (ז'.)": a daf in brackets after a chapter is where in it
+    if (lastKind === "perek" && isPunct(t, OPEN)) {
+      const d = readElem(toks, j + 1, lastKind);
+      if (d && (d.elem.kind === "daf" || d.elem.amud !== undefined)) {
+        j++;
+        continue;
+      }
+    }
     const e = readElem(toks, j, lastKind);
     if (!e) break;
     // "תהילים קי"ט: פ"ט": after a number, a compact "פ"ט" is the number 89, not a chapter
@@ -176,6 +184,10 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     j = e.next;
     to = j;
     if (elems.length >= 4) break;
+    // "דף מ"ד ת"ר", "ל"א ע"ב לא", "לקמן ה' ע"ב רב": a daf with its amud (or "דף X") is as deep as a
+    // citation goes — the words after it are the quote, not more levels (only a marked level follows)
+    const last = elems[elems.length - 1]!;
+    if ((last.kind === "daf" || last.amud !== undefined) && !nextIsMarked(toks, j, lastKind)) break;
   }
   if (!elems.length) return null;
   // "תהילים פ"ט: ט'": a compact "פ"ט" followed by a plain number is the number 89, not "פרק ט"
@@ -185,7 +197,8 @@ export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?:
     if (asNumber) elems[0] = { kind: "?", n: asNumber.n, explicit: false, numeral: asNumber };
   }
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
-  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit);
+  // "לקמן ה' ע"ב", "במ"ק כ' ע"ב": an amud written out (ע"א / ע"ב) makes even an everyday word a daf
+  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && (e.amud === undefined || !!e.amudGlued));
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
   const closed = (bracketed || !!opts.enclosed) && isPunct(toks[to], CLOSE);
   // two numerals in a row ("ברכות נה א") are evidence too, unless one of them is an everyday word
@@ -217,6 +230,10 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
     return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral, compact: true });
   }
   const m = markerAt(toks, j);
+  // "בחולין (דף ע"ב)", "בב"ק דף ע"א": after the full word "דף", "ע"א"/"ע"ב" is daf 71/72 (an amud
+  // follows only a number) — "ד' ע"א" stays daf 4 side a
+  const ayin = m?.kind === "daf" && m.width === 1 && /דף$/.test(shape(t)) ? amudAt(toks, j + 1) : null;
+  if (ayin && ayin[1] === 1) return readDaf(toks, j + 1, { n: 70 + ayin[0], form: "gershayim", common: false }, true);
   // "ד' ע"א" is daf 4 side a, not "דף ע"א"
   if (m && !amudAt(toks, j + m.width)) {
     const k = j + m.width;
@@ -225,18 +242,21 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
     if (m.kind === "daf") return readDaf(toks, k, num, true);
     return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num });
   }
+  // "מנחות דמ"ג ע"ב", "ברכות די"ז ע"א", "ד"ז ע"א": a ד for "דף" glued to the number, before an amud
+  const dalet = dafWithDalet(t);
+  if (dalet && amudAt(toks, j + 1)) return readDaf(toks, j, dalet, true);
   const num = numeralOf(t);
   if (!num) return null;
   // glued "." / ":" right after a bare numeral (or digits) is an amud (כג. / כג:), unless another
   // numeral is glued after it ("ח:ח", Sefaria's chapter:verse)
   const after = toks[j + 1];
-  if (sideMark(num, after)) {
+  if (sideMark(num, after, toks[j + 2])) {
     const glueNext = toks[j + 2];
     // a ":" after a quoted numeral and before another numeral is a separator ("קי"ט: פ"ט")
     const separator = glueNext && numeralOf(glueNext) && (glueNext.glued || (after!.text === ":" && num.form !== "bare" && num.form !== "digits"));
     if (!separator) return readDaf(toks, j, num, false);
   }
-  if (amudAt(toks, j + 1)) return readDaf(toks, j, num, false);
+  if (amudAt(toks, j + 1) || commaAmud(toks, j + 1)) return readDaf(toks, j, num, false);
   return withRange(toks, j + 1, { kind: "?", n: num.n, explicit: false, numeral: num });
 }
 
@@ -244,9 +264,10 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null): { elem: A
  * A "." / ":" glued to a numeral marks the amud: after a bare numeral both do ("כג.", "כג:"); after a
  * quoted one only ":" ("מ"א:", "ט':"), since "כ"ג." is far more often the end of a sentence.
  */
-function sideMark(num: Numeral, after: Tok | undefined): boolean {
+function sideMark(num: Numeral, after: Tok | undefined, afterThat?: Tok): boolean {
   if (!after || !after.glued || !isPunct(after, ".:")) return false;
-  return num.form === "bare" || num.form === "digits" || after.text === ":";
+  // …and "." too when a closing bracket follows at once ("(כ'.)", "(שבת י"א.)"): no sentence ends there
+  return num.form === "bare" || num.form === "digits" || after.text === ":" || isPunct(afterThat, CLOSE);
 }
 
 /** A daf numeral at toks[k] and its side: "כג." "כג:" "כ"ג ע"א" "כג עמוד ב" "כ ב" "ל"ד א'". */
@@ -256,11 +277,13 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
   let maybeAmud: 1 | 2 | undefined;
   let glued = false;
   const after = toks[next];
-  if (sideMark(num, after)) {
+  if (sideMark(num, after, toks[next + 1])) {
     amud = after!.text === "." ? 1 : 2;
     glued = true;
     next++;
   } else {
+    // "ברכות ל"ג, ע"א"
+    if (commaAmud(toks, next)) next++;
     const a = amudAt(toks, next);
     if (a) {
       amud = a[0];
@@ -284,6 +307,26 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
     ...(glued && { amudGlued: true }),
   };
   return { elem, next };
+}
+
+/** ", ע"א" — a comma between a daf and its amud ("ברכות ל"ג, ע"א") */
+const commaAmud = (toks: readonly Tok[], i: number): boolean => isPunct(toks[i], ",") && !!amudAt(toks, i + 1);
+
+/** after a daf: the next element (past a separator) carries a marker of its own */
+function nextIsMarked(toks: readonly Tok[], j: number, prev: Kind | null): boolean {
+  const at = isPunct(toks[j], ",:;") ? j + 1 : j;
+  return !!readElem(toks, at, prev)?.elem.explicit;
+}
+
+/**
+ * "דמ"ג", "די"ז", "דקנ"א", "ד"ז": the letter ד ("דף") glued to a daf number that is canonical without
+ * it (the whole word is no numeral: "דמ"ג" would be 47). "ד"ה" is דיבור המתחיל.
+ */
+function dafWithDalet(t: Tok): Numeral | null {
+  if (t.kind !== "word" || !t.gershayim || t.geresh || t.text[0] !== "ד" || t.gershayimAt !== t.text.length - 1 || t.key === "דה") return null;
+  if (numeralOf(t)) return null;
+  const n = strictValue(t.text.slice(1));
+  return n && n >= 2 ? { n, form: "gershayim", common: false } : null;
 }
 
 /** "א-ג" / "א - ג": a range on the element just read. */

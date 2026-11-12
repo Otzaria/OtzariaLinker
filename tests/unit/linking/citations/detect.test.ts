@@ -273,3 +273,74 @@ describe("citations: a Rambam topic after a chapter (\"רמב\"ם פ\"ט מתר�
     expect(books(oneR('וכדאיתא בפ"ב דמ"ש ובירושלמי'))).toEqual(["m-ms"]);
   });
 });
+
+describe("citations: a daf as the library writes it (§6.2)", () => {
+  const TALMUD = [...CATALOG, book("hul", "חולין"), book("men", "מנחות"), book("ket", "כתובות"), book("kid", "קידושין"), book("az", "עבודה זרה"), book("m-az", "משנה עבודה זרה")];
+  const scanT = (lines: string[]): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(TALMUD), "src", {}, "ספר כלשהו");
+    lines.forEach((l, i) => sc.scanLine(i, l, null));
+    return sc.citations;
+  };
+  const oneT = (line: string) => {
+    const c = scanT([line]);
+    expect(c, line).toHaveLength(1);
+    return c[0]!;
+  };
+
+  it("\"דף ע\"א\" / \"דף ע\"ב\" is daf 71 / 72; \"ד' ע\"א\" stays daf 4", () => {
+    expect(loc(oneT('כמו שכתבו בחולין (דף ע"ב) שכתב'))).toBe("daf:72");
+    expect(loc(oneT('ובב"ק דף ע"ב ע"ב וכן'))).toBe("daf:72b");
+    expect(loc(oneT('בבבא קמא ד\' ע"א איתא'))).toBe("daf:4a");
+  });
+
+  it("a ד for \"דף\" glued to the number, before an amud", () => {
+    expect(loc(oneT('ואמרו (מנחות דמ"ג ע"ב) ראיה'))).toBe("daf:43b");
+    expect(loc(oneT('עיין בגמרא ברכות ד"ז ע"א וכו\''))).toBe("daf:7a");
+    expect(scanT(['ואמרו מנחות דמ"ג ראיה'])).toHaveLength(0);
+  });
+
+  it("an amud after a comma; an amud makes even an everyday word a daf", () => {
+    expect(loc(oneT('כי "החטא ממית" (ברכות ל"ג, ע"א). וכשאדם'))).toBe("daf:33a");
+    expect(loc(oneT('ובקידושין ה\' ע"ב והרי'))).toBe("daf:5b");
+    expect(scanT(["שמות ה' הם קדושים"])).toHaveLength(0);
+  });
+
+  it("the words after a daf with its amud are the quote, not more levels", () => {
+    const a = oneT('[א.] שבת דף מ"ד ת"ר מותר השמן');
+    expect(loc(a)).toBe("daf:44");
+    expect(a.text).toBe('שבת דף מ"ד');
+    expect(loc(oneT('ועיין יבמות ל"א ע"ב לא שייך'))).toBe("daf:31b");
+  });
+
+  it("a daf in brackets after a chapter; a \".\" before a closing bracket is the amud", () => {
+    expect(loc(oneT("ואנן קיי\"ל בפ\"ב דכתובות (כ'.) דאין"))).toBe("perek:2 daf:20a");
+    expect(loc(oneT("ומייתי לה במנחות פ\"ק (ז'.) אמר"))).toBe("perek:1 daf:7a");
+    expect(loc(oneT('כמו שמצינו (שבת י"א.) באותן'))).toBe("daf:11a");
+    expect(loc(oneT('כמו שמצינו שבת י"א. ואמר'))).toBe("?:11");
+  });
+
+  it("a tractate whose name is a numeral, with a daf and its amud; without the amud it is a number", () => {
+    expect(books(oneT('ועי\' במס\' ע"ז נ"ב ע"א מאי'))).toContain("az");
+    expect(scanT(['והוא ע"ז נ"ב שנה'])).toHaveLength(0);
+  });
+
+  it("\"בנזיר (שם)\": the book, at the last citation's place", () => {
+    const c = scanT(["כדאיתא בשבת כג. ואמר", "ובשבת (שם) אמר"]);
+    expect(c.map((x) => x.ibid)).toEqual(["none", "book"]);
+    expect(loc(c[1]!)).toBe("daf:23a");
+  });
+});
+
+describe("citations: \"(שם)\" after an author's name is that author's book", () => {
+  it("past the bracket and ז\"ל; not after a running-text word", () => {
+    const lines = (second: string) => scan(['כדאיתא בשבת כג. ואמר', second]);
+    expect(lines('ובזה יתבאר מה שהקשה המ"ל (שם) ע"ז')).toHaveLength(1);
+    expect(lines('והנה הרשב"א [שם] הקשה')).toHaveLength(1);
+    expect(lines('לשונו של הרמב"ם ז"ל (שם) שכתב')).toHaveLength(1);
+    expect(lines('וכתבו תוס\' (שם) דאיכא')).toHaveLength(1);
+    // "וגו' (שם כז)", "קיי"ל (שם)", "הגמ' (שם)": the last citation
+    expect(lines("ויקח משה וגו' (שם כד.) ואם")).toHaveLength(2);
+    expect(lines('ואע"ג דקיי"ל (שם) אין')).toHaveLength(2);
+    expect(lines("ועל זה מקשה הגמ' (שם) והא")).toHaveLength(2);
+  });
+});

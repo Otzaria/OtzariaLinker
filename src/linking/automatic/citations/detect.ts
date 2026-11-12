@@ -180,11 +180,12 @@ export class CitationScanner {
     for (const m of matches) {
       // "כמ"ש באה"ע סי' קמ"א": a name that is also running text ("מ"ש" — מה שכתב) is a name only after a chapter ("פ"ב דמ"ש")
       if (RUNNING_TEXT_NAMES.has(m.entry.text)) continue;
-      // "בחולין שם": the book with the last citation's location
-      if (this.ibidOn && isWord(toks[m.to], "שם") && this.last) {
+      // "בחולין שם", "בנזיר (שם)": the book with the last citation's location
+      const shem = isWord(toks[m.to], "שם") ? m.to + 1 : opensAt(toks, m.to) && isWord(toks[m.to + 1], "שם") && closesAt(toks, m.to + 2) ? m.to + 3 : -1;
+      if (this.ibidOn && shem > 0 && this.last) {
         const cands = this.own(m.entry.targets).filter((c) => this.last!.c.candidates.some((p) => p.book.key === c.book.key));
         if (cands.length) {
-          const end = m.to + 1;
+          const end = shem;
           return this.emit(toks, line, { from: i, to: end, candidates: cands, name: m.entry.text, elems: this.last.elems, evidence: "strong", bracketed: false, ibid: "book", ibidOf: this.last.c.seq, form: "forward", numericName: false, m });
         }
       }
@@ -192,7 +193,9 @@ export class CitationScanner {
       const sec = m.entry.targets.some((t) => t.section) ? null : sectionAt(toks, m.to);
       const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i) });
       if (!addr) continue;
-      if (m.entry.numeric && !addr.elems[0]!.explicit) {
+      // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
+      const dafOfTractate = addr.elems[0]!.amud !== undefined && m.entry.targets.some((t) => t.collection === "bavli");
+      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate) {
         this.drop("numeric-name");
         continue;
       }
@@ -443,6 +446,13 @@ export class CitationScanner {
     // "הפ"ת שם סק"ט": "שם" after a name we do not know refers to THAT book, not to our last citation
     const prev = toks[i - 1];
     if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !this.aliases.matchAt(toks, i - 1).length) return this.drop("ibid-other-book");
+    // …and so does "המ"ל (שם)", "הרשב"א [שם]", "הרמב"ם ז"ל (שם)": an author's name before the bracket
+    // (past ז"ל) — a quoted name with the article, or a commentator's ("רש"י (שם)")
+    let at = beforeIndex(toks, i, 1);
+    if (at >= 0 && HONORIFICS.has(wordShape(toks[at]!))) at = beforeIndex(toks, i, 2);
+    const author = at >= 0 && at < i - 1 ? toks[at] : undefined;
+    const quotedAuthor = author?.kind === "word" && author.gershayim && author.text[0] === "ה" && !NOT_AUTHORS.has(wordShape(author));
+    if (author?.kind === "word" && !numeralOf(author) && !this.aliases.matchAt(toks, at).length && (quotedAuthor || wordIn(author, COMMENTATORS) || wordIn(author, QUALIFIERS) === "rambam")) return this.drop("ibid-other-book");
     const inBracket = toks[i - 1]?.kind === "punct" && "([".includes(toks[i - 1]!.text);
     // "(שם שם לב)": the same book and the same chapter — the numbers replace the deepest level
     const twice = isWord(toks[i + 1], "שם") ? 1 : 0;
@@ -602,6 +612,10 @@ const RUNNING_TEXT_NAMES = new Set(['מ"ש']);
 
 /** quoted abbreviations of running text that name no book ("כמ"ש בסימן…", "ע"ש") */
 const COMMON_ABBREVIATIONS = new Set(['כמ"ש', 'וכמ"ש', 'כמש"כ', 'וכמש"כ', 'ע"ש', 'וע"ש', 'עיי"ש', "וכו'", "כו'", 'א"כ', 'מ"מ', 'הנ"ל', 'כנ"ל', 'ז"ל', 'ע"פ', "עי'", "ועי'", 'ס"ל', 'דס"ל', 'וכ"כ', 'כ"כ', "כדאי'", "עיין", 'ר"ל', 'ג"כ', 'וכ"ש', 'כ"ש', "אפי'", "ואפי'"]);
+/** quoted words with the article that are not an author ("הנ"ל", "ה"ה" — הוא הדין) */
+const NOT_AUTHORS = new Set(['הנ"ל', 'ה"ה', 'הנז"ל', 'הע"ה']);
+/** honorifics after an author's name ("הרמב"ם ז"ל (שם)") */
+const HONORIFICS = new Set(['ז"ל', 'זצ"ל', 'ז"ל:', 'נ"י', 'שליט"א', 'זלה"ה', 'ע"ה']);
 /** words that name another work before a siman ("בתשובה סימן צ"ז") */
 const OTHER_WORK = /^[וב]{0,2}(?:תשובה|תשובות|תשו|ספר|ס|שו"ת|שות)$/;
 
