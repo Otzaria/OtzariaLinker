@@ -1,4 +1,6 @@
-import { checkCustomPattern, type MarkerStyle } from "./footnotes/markers";
+import { checkCustomPattern } from "../../core/text/safe-regex";
+import type { MarkerStyle } from "./footnotes/markers";
+import { DEFAULT_PATTERN } from "./pattern";
 import { DEFAULT_THRESHOLDS, type EngineId } from "./types";
 
 /*
@@ -6,16 +8,29 @@ import { DEFAULT_THRESHOLDS, type EngineId } from "./types";
  * generically and the same description validates what reaches the worker. Only options that make
  * sense to a person are listed; function-valued options (DH `windows`) never cross the worker.
  *
+ * An ESSENTIAL option is part of the method itself (the pattern of "לפי תבנית"): it is shown and passed
+ * in simple mode too; every other option is advanced mode only.
+ *
  * Form values are plain strings/numbers/booleans keyed by `key`; `toEngineOptions` turns them into the
  * engine's own option object, dropping anything at its default so a run with untouched settings is
  * byte-identical to a run without them.
  */
+interface SpecBase {
+  key: string;
+  label: string;
+  hint?: string;
+  /** shown and passed in simple mode too (see above) */
+  essential?: boolean;
+}
+
 export type OptionSpec =
-  | { kind: "select"; key: string; label: string; hint?: string; choices: readonly (readonly [value: string, label: string])[]; default: string }
-  | { kind: "number"; key: string; label: string; hint?: string; min: number; max: number; step?: number; default: number }
-  | { kind: "boolean"; key: string; label: string; hint?: string; default: boolean }
+  | (SpecBase & { kind: "select"; choices: readonly (readonly [value: string, label: string])[]; default: string })
+  | (SpecBase & { kind: "number"; min: number; max: number; step?: number; default: number })
+  | (SpecBase & { kind: "boolean"; default: boolean })
   /** a marker style: a select plus a text field for a custom tag or regular expression */
-  | { kind: "marker"; key: string; label: string; hint?: string; default: "auto" };
+  | (SpecBase & { kind: "marker"; default: "auto" })
+  /** a regular expression, checked by the same guard the engine applies */
+  | (SpecBase & { kind: "regex"; default: string });
 
 export type FormValue = string | number | boolean;
 export type FormValues = Record<string, FormValue>;
@@ -74,7 +89,20 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
     ...THRESHOLDS,
   ],
+  pattern: [
+    { kind: "select", key: "tag", label: "איפה המספר", default: "", essential: true, choices: [["", "בתבנית שלמטה"], ["sup", "בתוך <sup> (כמו \"לפי תגיות\" בגרסה 3)"], ["sub", "בתוך <sub>"], ["small", "בתוך <small>"], ["b", "בתוך <b>"], ["span", "בתוך <span>"]] },
+    { kind: "regex", key: "regex", label: "התבנית (ביטוי רגולרי)", default: DEFAULT_PATTERN, essential: true, hint: "המספר שבסוגריים הראשונים (או בקבוצה בשם n) קובע לאן לקשר. ברירת המחדל תופסת \"סימן יב\", \"דף 5\", \"עמוד ג\"." },
+    { kind: "select", key: "target", label: "המספר הוא", default: "line", essential: true, choices: [["line", "מספר שורה ביעד"], ["chapter-line", "מספר שורה בתוך הפרק (המספור מתחיל מחדש בכל פרק)"], ["heading", "מספר של כותרת ביעד (סימן, פרק, סעיף)"]] },
+    { kind: "boolean", key: "gematria", label: "לקרוא אותיות כמספר (יב = 12)", default: true },
+    { kind: "select", key: "matches", label: "כמה התאמות בכל שורה", default: "first", choices: [["first", "הראשונה בלבד"], ["all", "כולן"]] },
+    { kind: "boolean", key: "sectionRanges", label: "בכותרת: לקשר לכל הסעיף שתחתיה (טווח)", default: false },
+    { kind: "select", key: "anchors", label: "עוגן על המילים שנמצאו", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
+    { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...THRESHOLDS,
+  ],
 };
+
+export const hasEssentialOptions = (engine: EngineId): boolean => ENGINE_OPTION_SPECS[engine].some((s) => s.essential);
 
 /** the text field next to a marker select: `<key>.custom` */
 export const customKey = (key: string): string => `${key}.custom`;
@@ -110,7 +138,7 @@ export interface OptionsCheck {
  * select values must be one of the choices, and a custom regular expression must pass the same
  * guard the engine applies (checkCustomPattern) — so the worker never sees a value the UI could not show.
  */
-export function toEngineOptions(engine: EngineId, values: FormValues): OptionsCheck {
+export function toEngineOptions(engine: EngineId, values: FormValues, scope: "all" | "essential" = "all"): OptionsCheck {
   const options: Record<string, unknown> = {};
   const errors: Record<string, string> = {};
   let changed = 0;
@@ -118,6 +146,7 @@ export function toEngineOptions(engine: EngineId, values: FormValues): OptionsCh
   let thresholdsChanged = false;
 
   for (const spec of ENGINE_OPTION_SPECS[engine]) {
+    if (scope === "essential" && !spec.essential) continue;
     const raw = values[spec.key];
     if (raw === undefined) continue;
     switch (spec.kind) {
@@ -151,6 +180,18 @@ export function toEngineOptions(engine: EngineId, values: FormValues): OptionsCh
         if (v === spec.default) break;
         changed++;
         options[spec.key] = spec.key === "targetStartsWithDh" ? v === "yes" : v;
+        break;
+      }
+      case "regex": {
+        const v = String(raw).trim();
+        const check = checkCustomPattern(v);
+        if (!check.ok) {
+          errors[spec.key] = check.reason;
+          break;
+        }
+        if (v === spec.default) break;
+        options[spec.key] = v;
+        changed++;
         break;
       }
       case "marker": {

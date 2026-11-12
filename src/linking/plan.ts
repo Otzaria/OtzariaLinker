@@ -16,8 +16,12 @@ import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
  * commentaries written on it. Nothing is guessed: no relation → the book is listed with the reason.
  */
 
-/** Engines that read TWO books (input source → input target). Every other registered engine reads one book. */
-export const PAIR_ENGINES = ["headings", "dibur-hamatchil", "footnotes"] as const satisfies readonly EngineId[];
+/**
+ * Engines that read TWO books (input source → input target). Every other registered engine reads one book.
+ * "pattern" is listed so it is never taken for a single-book engine; the planner never schedules it
+ * (stepsFor picks engines per relation, and a pattern is the user's own).
+ */
+export const PAIR_ENGINES = ["headings", "dibur-hamatchil", "footnotes", "pattern"] as const satisfies readonly EngineId[];
 export type PairEngineId = (typeof PAIR_ENGINES)[number];
 /**
  * Single-book engines (e.g. citations, "מראי מקומות"): they read one book and link it to lines in any

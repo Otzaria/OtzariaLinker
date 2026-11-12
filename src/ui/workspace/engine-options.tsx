@@ -2,18 +2,34 @@ import { customKey, ENGINE_OPTION_SPECS, MARKER_CHOICES, type FormValues, type O
 import type { EngineId } from "../../linking/automatic";
 
 /*
- * The engine's settings (advanced mode), rendered from ENGINE_OPTION_SPECS. The form holds plain
- * values; RunForm turns them into engine options with toEngineOptions and refuses to start while
- * `check.errors` is not empty.
+ * The engine's settings, rendered from ENGINE_OPTION_SPECS. The form holds plain values; RunForm
+ * turns them into engine options with toEngineOptions and refuses to start while `check.errors` is
+ * not empty. ESSENTIAL options (the pattern of "לפי תבנית") are always shown, above the rest;
+ * the others only in advanced mode, folded.
  */
+type OnChange = (key: string, value: string | number | boolean) => void;
+
+export function EssentialOptions({ engine, values, check, onChange }: { engine: EngineId; values: FormValues; check: OptionsCheck; onChange: OnChange }) {
+  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => s.essential);
+  if (!specs.length) return null;
+  return (
+    <div class="builder" style="padding:0">
+      {specs.map((spec) => (
+        <Field key={`${engine}:${spec.key}`} spec={spec} values={values} error={check.errors[spec.key]} onChange={onChange} />
+      ))}
+    </div>
+  );
+}
+
 export function EngineOptions({ engine, values, check, onChange, onReset }: {
   engine: EngineId;
   values: FormValues;
   check: OptionsCheck;
-  onChange: (key: string, value: string | number | boolean) => void;
+  onChange: OnChange;
   onReset: () => void;
 }) {
-  const specs = ENGINE_OPTION_SPECS[engine];
+  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => !s.essential);
+  if (!specs.length) return null;
   return (
     <details class="held engine-options" open={check.changed > 0 || Object.keys(check.errors).length > 0}>
       <summary>
@@ -31,7 +47,7 @@ export function EngineOptions({ engine, values, check, onChange, onReset }: {
   );
 }
 
-function Field({ spec, values, error, onChange }: { spec: OptionSpec; values: FormValues; error: string | undefined; onChange: (key: string, value: string | number | boolean) => void }) {
+function Field({ spec, values, error, onChange }: { spec: OptionSpec; values: FormValues; error: string | undefined; onChange: OnChange }) {
   const id = `opt-${spec.key.replace(/\W/g, "-")}`;
   const hint = error ? <span class="field-error" role="alert">{error}</span> : spec.hint ? <span class="muted">{spec.hint}</span> : null;
   switch (spec.kind) {
@@ -60,6 +76,14 @@ function Field({ spec, values, error, onChange }: { spec: OptionSpec; values: Fo
               <option key={v} value={v}>{l}</option>
             ))}
           </select>
+          {hint}
+        </label>
+      );
+    case "regex":
+      return (
+        <label class="field" for={id}>
+          {spec.label}
+          <input id={id} type="text" dir="ltr" spellcheck={false} value={String(values[spec.key] ?? spec.default)} aria-invalid={!!error} onInput={(e) => onChange(spec.key, e.currentTarget.value)} />
           {hint}
         </label>
       );

@@ -60,7 +60,7 @@ export interface Suggestion {
 }
 
 /** "citations" is a SINGLE-BOOK engine: it reads one source and links into whatever books are open (workers/citations-job.ts). */
-export type EngineId = "headings" | "footnotes" | "dibur-hamatchil" | "citations";
+export type EngineId = "headings" | "footnotes" | "dibur-hamatchil" | "citations" | "pattern";
 
 /** The minimal per-line facts an engine needs (a subset of SourceLine, so engines stay in `linking`). */
 export interface EngineLine {

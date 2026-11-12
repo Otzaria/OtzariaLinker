@@ -8,7 +8,7 @@ import type { SuggestionState } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
-import { EngineOptions } from "./engine-options";
+import { EngineOptions, EssentialOptions } from "./engine-options";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
 /*
@@ -90,12 +90,13 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   /** settings per engine, kept while the form is open so switching engines does not lose them */
   const [formValues, setFormValues] = useState<Partial<Record<EngineId, FormValues>>>({});
   const values = formValues[engine] ?? defaultFormValues(engine);
-  const check = useMemo(() => toEngineOptions(engine, values), [engine, values]);
-  const invalid = advanced && Object.keys(check.errors).length > 0;
+  // outside advanced mode only the essential options (a pattern) count; the rest run at their defaults
+  const check = useMemo(() => toEngineOptions(engine, values, advanced ? "all" : "essential"), [engine, values, advanced]);
+  const invalid = Object.keys(check.errors).length > 0;
+  const onOption = (key: string, v: string | number | boolean) => setFormValues((all) => ({ ...all, [engine]: { ...values, [key]: v } }));
 
   const start = async () => {
-    // outside advanced mode the engines run with their defaults, whatever was set before
-    const options = advanced ? check.options : {};
+    const options = check.options;
     const ok = single ? await store.runCitations(s!, options) : mode === "pair" ? await store.runEngine(engine, s!, t!, options) : await store.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
@@ -104,14 +105,14 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
       <h3 style="margin:0">קישור אוטומטי</h3>
       <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
         <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
-        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), (engine === "footnotes" || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), (info.noBatch || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים ותבנית מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
         <button class="chip" role="radio" aria-checked={mode === "maxlink"} aria-pressed={mode === "maxlink"} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
       </div>
       {mode === "maxlink" ? <MaxLinkForm onDone={onDone} onCancel={onCancel} /> : <>
       <label class="field">
         שיטה
         <select value={engine} onChange={(e) => setEngine(e.currentTarget.value as EngineId)}>
-          {ENGINES.filter((e) => mode === "pair" || (e.id !== "footnotes" && !e.singleBook)).map((e) => (
+          {ENGINES.filter((e) => mode === "pair" || (!e.noBatch && !e.singleBook)).map((e) => (
             <option key={e.id} value={e.id}>{e.title}</option>
           ))}
         </select>
@@ -160,12 +161,13 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
           )}
         </>
       )}
+      <EssentialOptions engine={engine} values={values} check={check} onChange={onOption} />
       {advanced ? (
         <EngineOptions
           engine={engine}
           values={values}
           check={check}
-          onChange={(key, v) => setFormValues((all) => ({ ...all, [engine]: { ...values, [key]: v } }))}
+          onChange={onOption}
           onReset={() => setFormValues((all) => ({ ...all, [engine]: defaultFormValues(engine) }))}
         />
       ) : (
