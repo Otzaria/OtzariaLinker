@@ -507,13 +507,17 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     for (const type of types) {
       const kinds = design.get(type)!;
       const parts: Record<string, Estimate & { links: number; populationUnits: number }> = {};
+      // the measured owners that miss the most links (where engine or planner work pays most)
+      const worst: { owner: string; kind: string; links: number; matched: number }[] = [];
       for (const k of kinds) {
         const strata = k.strata.map((st) => {
           const obs = chosen(st)
             .filter((u) => ran(u.id))
             .map((u) => {
               for (const b of ownerBooks(u.id)) runBooks.add(b);
-              return { scope: u.links, matched: matched.get(`${type}|${u.id}`)?.size ?? 0 };
+              const m = matched.get(`${type}|${u.id}`)?.size ?? 0;
+              worst.push({ owner: ownerBooks(u.id).map((b) => byId.get(b)?.title ?? `#${b}`).join(" ↔ "), kind: k.kind, links: u.links, matched: m });
+              return { scope: u.links, matched: m };
             });
           return { links: st.links, population: st.units.length, obs };
         });
@@ -523,7 +527,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       const recall = L ? Object.values(parts).reduce((a, p) => a + (p.units ? (p.links / L) * p.recall : 0), 0) : 0;
       const ci = L ? Math.sqrt(Object.values(parts).reduce((a, p) => a + (p.units ? ((p.links / L) * p.ci) ** 2 : 0), 0)) : 0;
       const T = totals.get(type)!;
-      perType[type] = { dbLinks: T, recall: pct(recall), ci: pct(ci), parts };
+      perType[type] = { dbLinks: T, recall: pct(recall), ci: pct(ci), parts, worst: worst.sort((a, b) => b.links - b.matched - (a.links - a.matched)).slice(0, 15) };
       libTotal += T;
       libMatched += recall * T;
       libVar += ((T / grand) * ci) ** 2;
