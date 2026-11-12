@@ -389,3 +389,26 @@ describe("citations: a chapter by its ordinal word", () => {
     expect(scan(["כדאיתא בפרק קמא ושם"])).toHaveLength(0);
   });
 });
+
+describe("citations: abbreviations of the Tanakh's books", () => {
+  const TN = [...CATALOG, book("kings2", "מלכים ב"), book("sam1", "שמואל א"), book("ch1", "דברי הימים א"), book("shir", "שיר השירים")];
+  const scanN = (line: string): Citation[] => {
+    const sc = new CitationScanner(AliasIndex.build(TN), "src", {}, "ספר כלשהו");
+    sc.scanLine(0, line, null);
+    return sc.citations;
+  };
+  it("\"תה'\", \"שיה\"ש\", \"דהי\"א\", \"דה\"י א'\"", () => {
+    expect(scanN("כמו בעמוד ענן (תה' צט ז) על משה").map(books)).toEqual([["ps"]]);
+    expect(scanN('שנאמר (שיה"ש ה, י) דודי').map(books)).toEqual([["shir"]]);
+    expect(scanN('שנאמר (דהי"א כט, כג) וישב').map(books)).toEqual([["ch1"]]);
+    expect(scanN("כתיב (דה\"י א' כ\"ח) דע").map(books)).toEqual([["ch1"]]);
+  });
+  it("\"(מ\"א יד י)\": a numeral name with chapter and verse in brackets is the Tanakh book only; bare, it is a number", () => {
+    const k = scanN('כאשר יבער הגלל (מ"א יד י) על כן');
+    expect(k.map(books)).toEqual([["kings1"]]);
+    expect(scanN('ושם האחד סנה (ש"א יד ד), ואחר').map(books)).toEqual([["sam1"]]);
+    expect(scanN('והוא בן מ"א יד שנה')).toHaveLength(0);
+    // "מ"א סי' ש"ז": a siman is the Magen Avraham's
+    expect(books(scanN('מג"א סי\' ש"ז ס"ק ח')[0]!)).toEqual(["ma"]);
+  });
+});

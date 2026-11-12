@@ -173,7 +173,7 @@ export class CitationScanner {
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
-      const next = this.forward(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? (this.ibidOn ? this.ibid(toks, i, line) : null);
+      const next = this.forward(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? (this.ibidOn ? this.ibid(toks, i, line) : null);
       if (next !== null) i = next - 1;
     }
   }
@@ -204,7 +204,9 @@ export class CitationScanner {
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       const dafOfTractate = addr.elems[0]!.amud !== undefined && m.entry.targets.some((t) => t.collection === "bavli");
-      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate) {
+      // "(תה' צט ז)": a Tanakh name that is also a numeral, with chapter and verse in brackets closing after them
+      const bracketVerse = opensBefore(toks, i) && addr.closed && addr.elems.length === 2 && addr.elems.every((e) => e.kind === "?") && m.entry.targets.every((t) => t.collection === "tanakh");
+      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate && !bracketVerse) {
         this.drop("numeric-name");
         continue;
       }
@@ -217,6 +219,24 @@ export class CitationScanner {
       return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: m.entry.numeric, m });
     }
     return null;
+  }
+
+  /**
+   * "(מ"א יד י)", "(ש"ב א ו)": a book of the Tanakh whose usual name is a numeral — and is also the database's
+   * name of another book (מ"א מגן אברהם, מ"ב משנה ברורה), so it is not in the name index. Only right after
+   * an opening bracket, with a chapter and a verse as bare numbers and the bracket closing after them.
+   */
+  private numericTanakh(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (!opensBefore(toks, i) || !t.gershayim || t.geresh) return null;
+    const title = Object.hasOwn(NUMERIC_TANAKH, wordShape(t)) ? NUMERIC_TANAKH[wordShape(t)] : undefined;
+    const targets = title ? this.aliases.lookup(title)?.targets.filter((x) => x.tier === "title" && x.collection === "tanakh") : undefined;
+    if (!targets?.length) return null;
+    const addr = parseAddress(toks, i + 1, { enclosed: true });
+    if (!addr || !addr.closed || addr.elems.length !== 2 || !addr.elems.every((e) => e.kind === "?")) return null;
+    const cands = this.own(targets.map((x) => ({ ...x, tier: "derived" as const })));
+    if (!cands.length) return this.drop("self");
+    return this.emit(toks, line, { from: i, to: addr.to, candidates: cands, name: wordShape(t), elems: addr.elems, evidence: addr.evidence, bracketed: true, ibid: "none", form: "forward", numericName: true });
   }
 
   /** "פ"ג מהל' תרומות ה"א", "בפ"ק דכריתות (דף ה')", "בפרק ב' ממסכת טהרות" at toks[i]. */
@@ -886,6 +906,9 @@ function perekAt(toks: readonly Tok[], i: number): { n: number; next: number; or
   }
   return null;
 }
+
+/** books of the Tanakh whose usual short name is a numeral (and another book's name in the database) */
+const NUMERIC_TANAKH: Readonly<Record<string, string>> = { 'ש"א': "שמואל א", 'ש"ב': "שמואל ב", 'מ"א': "מלכים א", 'מ"ב': "מלכים ב" };
 
 /** ordinal words for a chapter ("פרק קמא", "פ' שלישי") */
 const ORDINALS: Readonly<Record<string, number>> = { קמא: 1, ראשונ: 1, תנינא: 2, שני: 2, שלישי: 3, רביעי: 4, חמישי: 5, ששי: 6, שישי: 6, שביעי: 7, שמיני: 8, תשיעי: 9, עשירי: 10 };
