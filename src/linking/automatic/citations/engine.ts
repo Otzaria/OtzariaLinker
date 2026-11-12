@@ -1,5 +1,4 @@
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
-import { isSefariaOwned } from "../../../core/links/sefaria-titles";
 import {
   confidenceOf,
   CONFIDENCE_ORDER,
@@ -393,5 +392,8 @@ export function runCitationsEngine(source: EngineBook, library: CitationLibrary,
   return run.finish(ctx);
 }
 
-/** a book the library manages through Sefaria refs: the database says Sefaria, or the library list does */
-const sefariaSide = (book: BookRef): boolean => book.origin === "sefaria" || isSefariaOwned(book);
+/**
+ * a book the library manages through Sefaria refs, by the database origin: the library list
+ * (core/links/sefaria-titles.ts) stays out of the worker bundle; the export checks ranges by the list
+ */
+const sefariaSide = (book: BookRef): boolean => book.origin === "sefaria";
