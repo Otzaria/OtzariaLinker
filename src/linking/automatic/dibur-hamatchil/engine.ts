@@ -171,6 +171,10 @@ function lowerBound(arr: readonly number[], below: (v: number) => boolean): numb
 
 const BOLD_LINE_RE = /^\s*(?:[([][^)\]<]{0,8}[)\]]\s*)?<(b|strong)\b/i;
 const NOTE_RE = /class\s*=\s*["']?footnote/i;
+/** addressedOnly "cap": a book names the base's commentator when this many of its ד"ה lines do… */
+const NAMES_MIN = 5;
+/** …and this share of them */
+const NAMES_SHARE = 0.05;
 
 /** A placement of one commentary line on the base, before it is shaped into a Suggestion. */
 interface Placement {
@@ -279,9 +283,30 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const tableOf = (p: number): StepTable => (bTables[p] ??= stepTable(bTokens[p]!, bProfiles[p]!));
   const cExtract = new Map<number, ExtractedDh>();
   for (const l of commentary.lines) cExtract.set(l.index, extractDh(l, maxWords));
-  const addressedOnly = options.addressedOnly === true;
-  /** addressedOnly "cap": the commentary lines that do not name the base's commentator (capped to possible) */
-  const unaddressed = options.addressedOnly === "cap" && baseIs ? new Set<number>() : null;
+  /*
+   * addressedOnly "cap": a book that names the base's commentator on its lines (מהרש"א, ערוך לנר: "תוד"ה …"
+   * on a fifth to a third of them) tells which lines are about it, and the others are about the text — as
+   * addressedOnly; searching them too pushed correct lines out of the order (ערוך לנר על יבמות → רש"י:
+   * 321 → 272 of the database's links). A book that hardly ever names it (מזרחי, גור אריה: under 1%) is
+   * about it throughout: every line is searched, and the unnamed ones are left for review.
+   */
+  let dhLines = 0;
+  let naming = 0;
+  for (const e of cExtract.values())
+    if (e.kind === "dh") {
+      dhLines++;
+      if (e.addressee?.kind === "named" && e.addressee.commentator.key === baseIs?.key) naming++;
+    }
+  const names = naming >= NAMES_MIN && naming >= NAMES_SHARE * dhLines;
+  const addressedOnly = options.addressedOnly === true || (options.addressedOnly === "cap" && names);
+  /** addressedOnly "cap", in a book that does not name the commentator: its lines (capped to possible) */
+  const unaddressed = options.addressedOnly === "cap" && !names && baseIs ? new Set<number>() : null;
+  if (options.addressedOnly === "cap" && baseIs)
+    notes.push(
+      names
+        ? r("dh/addressed-labels", `הפירוש מזכיר את ${baseIs.name} בשמו ב־${naming} מתוך ${dhLines} שורות דיבור המתחיל, ולכן רק השורות האלה (וההמשך שלהן) מחופשות בדבריו.`)
+        : r("dh/addressed-rarely", `הפירוש כמעט אינו מזכיר את ${baseIs.name} בשמו (${naming} מתוך ${dhLines} שורות), ולכן הוא כתוב עליו כולו: כל שורה מחופשת בדבריו, ושורה שאינה מזכירה אותו נשארת לבדיקה.`),
+    );
   /*
    * Item paragraphs (continueItems): a book whose ד"ה lines open with bold, and whose sections hold few
    * of them — the median section (with any) has at most 3 — writes one ד"ה per item and continues it in

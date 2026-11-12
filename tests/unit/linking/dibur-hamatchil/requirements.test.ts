@@ -105,6 +105,16 @@ describe("§2 intermediate commentators: a line on רש\"י/תוספות belongs
     expect(kept.rules).not.toContain("dh/not-addressed-cap");
   });
 
+  it('addressedOnly "cap" in a book that names the commentator on its lines: only those lines, as addressedOnly', () => {
+    const labeled = ["<h1>קרן אורה</h1>", "<h2>דף ב.</h2>", "<b>ואין עושין עוגיות גומות סביב הגפנים.</b> כן הוא"];
+    for (const dh of ["משקין בית השלחין", "ואין עושין עוגיות", "וצריך לעצים", "חייב שתים", "משקין בית השלחין", "וצריך לעצים"]) labeled.push(`<b>שם תוס'</b> בד"ה ${dh} עיין בדבריהם`);
+    const res = run(labeled, TOS, TOSAFOT, { addressedOnly: "cap" });
+    expect(res.notes.map((n) => n.code)).toContain("dh/addressed-labels");
+    expect(byLine(res, 2)).toBeUndefined();
+    expect(why(res, 2)).toEqual(["dh/not-addressed"]);
+    expect(run(labeled.slice(0, 3), TOS, TOSAFOT, { addressedOnly: "cap" }).notes.map((n) => n.code)).toContain("dh/addressed-rarely");
+  });
+
   it("the option `intermediates: false` links every line to the base, as before", () => {
     const res = run(comm, DAF, GEMARA, { intermediates: false });
     expect(why(res, 3)).not.toContain("dh/intermediate");
