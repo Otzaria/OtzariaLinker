@@ -135,6 +135,7 @@ describe.runIf(DB)("check 5: engines vs the links already in the database", () =
         ms: r.ms,
         suggestions: r.suggestions,
         certainHigh: `${(r.byConfidence.certain?.correct ?? 0) + (r.byConfidence.high?.correct ?? 0)}/${(r.byConfidence.certain?.judged ?? 0) + (r.byConfidence.high?.judged ?? 0)}`,
+        byConfidence: Object.fromEntries(Object.entries(r.byConfidence).map(([k, v]) => [k, `${v.correct}/${v.judged}`])),
         recall: pct(r.recalledStrong, r.goldLines),
         goldLines: r.goldLines,
         wrong: r.wrong.slice(0, 4),
