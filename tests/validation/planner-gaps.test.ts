@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
 import type { EngineId } from "../../src/linking/automatic/types";
-import { evidenceFromCounts, linkedFields, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
+import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
 import { SourceRegistry } from "../../src/sources/registry";
 import { mergeSuggestions, type MergeItem } from "../../src/linking/merge";
 import { maxlinkJob } from "../../src/workers/maxlink-job";
@@ -41,14 +41,18 @@ describe.runIf(DB)("max-link planner gaps on the real database", () => {
     const selected = SELECT.map((t) => byTitle.get(t)).filter((b): b is SourceBook => !!b);
     const keys = new Set(books.map((b) => b.key));
     const evidence: LinkedEvidence[] = books.flatMap((b) => (b.linkedBases ?? []).map((base) => ({ dependant: b.key, base })));
-    for (const b of selected) {
-      const s = await registry.dbLinkSummary(b.key);
-      if ("byBook" in s) evidence.push(...evidenceFromCounts(b.key, s.byBook).filter((e) => keys.has(e.dependant) && keys.has(e.base)));
-    }
+    const read = async (key: string) => {
+      const s = await registry.dbLinkSummary(key);
+      if ("byBook" in s) evidence.push(...evidenceFromCounts(key, s.byBook).filter((e) => keys.has(e.dependant) && keys.has(e.base)));
+    };
+    for (const b of selected) await read(b.key);
+    // and the books they follow, as the app's evidence pass does (MaxLinkState.gatherEvidence)
+    const sel0 = new Set(selected.map((b) => b.key));
+    for (const k of evidenceToFollow(evidence, new Map(books.map((b) => [b.key, b] as const)))) if (!sel0.has(k)) await read(k);
     const fields = linkedFields(evidence);
     const library: PlanBook[] = books.map((b) => {
       const f = fields.get(b.key);
-      return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...(f && { linkedBases: f.linkedBases }), ...(f && Object.keys(f.linkedKinds).length && { linkedKinds: f.linkedKinds }) };
+      return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...linkedProps(f) };
     });
     const sel = new Set(selected.map((b) => b.key));
     const plan = planMaxLink({ selected: [...sel], library, singleEngines: [], ...(ENGINES && { engines: ENGINES }) });

@@ -3,7 +3,7 @@ import type { DbLinkBookCount } from "../core/links/db-links";
 import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
-import { resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
+import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
 
 /*
@@ -63,6 +63,13 @@ export interface PlanBook extends BookRef {
    * A base absent here is a commentary base.
    */
   readonly linkedKinds?: Readonly<Record<string, LinkedKind>>;
+  /** COMMENTARY, TARGUM and MIDRASH links per linked base, where the evidence counted them (evidenceFromCounts) */
+  readonly linkedCounts?: Readonly<Record<string, number>>;
+  /**
+   * linkedCounts covers every book this one is a commentary on: its own link summary was read, so a
+   * base absent from linkedCounts has no such link to it at all.
+   */
+  readonly linkedComplete?: boolean;
 }
 
 /** What the existing links say a dependant is, besides a commentary (evidenceFromCounts). */
@@ -73,6 +80,10 @@ export interface LinkedEvidence {
   readonly dependant: string;
   readonly base: string;
   readonly kind?: LinkedKind;
+  /** how many links of that type the summary counted */
+  readonly count?: number;
+  /** read from the dependant's OWN link summary, which counts every book it is linked to */
+  readonly complete?: boolean;
 }
 
 /*
@@ -91,35 +102,85 @@ export const LINKED_MIN = 20;
  */
 export function evidenceFromCounts(bookKey: string, byBook: readonly DbLinkBookCount[]): LinkedEvidence[] {
   const out: LinkedEvidence[] = [];
-  const add = (dependant: string, base: string, kind?: LinkedKind) => {
-    if (dependant !== base) out.push({ dependant, base, ...(kind && { kind }) });
+  const add = (dependant: string, base: string, count: number, kind?: LinkedKind) => {
+    if (dependant !== base) out.push({ dependant, base, ...(kind && { kind }), count, ...(dependant === bookKey && { complete: true }) });
   };
   for (const b of byBook) {
-    if (b.commentaryIn) add(bookKey, b.bookKey);
-    if (b.commentaryOut) add(b.bookKey, bookKey);
-    if (b.targumIn >= LINKED_MIN) add(bookKey, b.bookKey, "targum");
-    if (b.targumOut >= LINKED_MIN) add(b.bookKey, bookKey, "targum");
-    if (b.midrashIn >= LINKED_MIN) add(bookKey, b.bookKey, "midrash");
-    if (b.midrashOut >= LINKED_MIN) add(b.bookKey, bookKey, "midrash");
+    if (b.commentaryIn) add(bookKey, b.bookKey, b.commentaryIn);
+    if (b.commentaryOut) add(b.bookKey, bookKey, b.commentaryOut);
+    if (b.targumIn >= LINKED_MIN) add(bookKey, b.bookKey, b.targumIn, "targum");
+    if (b.targumOut >= LINKED_MIN) add(b.bookKey, bookKey, b.targumOut, "targum");
+    if (b.midrashIn >= LINKED_MIN) add(bookKey, b.bookKey, b.midrashIn, "midrash");
+    if (b.midrashOut >= LINKED_MIN) add(b.bookKey, bookKey, b.midrashOut, "midrash");
   }
   return out;
 }
 
+/** What the evidence says about one dependant (linkedFields), as PlanBook fields. */
+export interface LinkedFields {
+  linkedBases: string[];
+  linkedKinds: Record<string, LinkedKind>;
+  /**
+   * COMMENTARY, TARGUM and MIDRASH links per base, where counted: per type the larger count when both
+   * sides' summaries were read, summed over the types ("ספרא" ← "ויקרא": 3 COMMENTARY and 1,833 MIDRASH)
+   */
+  linkedCounts: Record<string, number>;
+  linkedComplete: boolean;
+}
+
 /** Folds evidence into PlanBook fields: a pair seen as a commentary stays a commentary. */
-export function linkedFields(evidence: readonly LinkedEvidence[]): Map<string, { linkedBases: string[]; linkedKinds: Record<string, LinkedKind> }> {
-  const byDep = new Map<string, Map<string, LinkedKind | "commentary">>();
+export function linkedFields(evidence: readonly LinkedEvidence[]): Map<string, LinkedFields> {
+  const byDep = new Map<string, { kinds: Map<string, LinkedKind | "commentary">; counts: Map<string, number>; complete: boolean }>();
   for (const e of evidence) {
-    const m = byDep.get(e.dependant) ?? new Map<string, LinkedKind | "commentary">();
-    if (m.get(e.base) !== "commentary") m.set(e.base, e.kind ?? "commentary");
-    byDep.set(e.dependant, m);
+    const d = byDep.get(e.dependant) ?? { kinds: new Map<string, LinkedKind | "commentary">(), counts: new Map<string, number>(), complete: false };
+    if (d.kinds.get(e.base) !== "commentary") d.kinds.set(e.base, e.kind ?? "commentary");
+    if (e.count !== undefined) {
+      const k = `${e.base}|${e.kind ?? "commentary"}`;
+      d.counts.set(k, Math.max(d.counts.get(k) ?? 0, e.count));
+    }
+    if (e.complete) d.complete = true;
+    byDep.set(e.dependant, d);
   }
-  const out = new Map<string, { linkedBases: string[]; linkedKinds: Record<string, LinkedKind> }>();
-  for (const [dep, m] of byDep) {
+  const out = new Map<string, LinkedFields>();
+  for (const [dep, d] of byDep) {
     const linkedKinds: Record<string, LinkedKind> = {};
-    for (const [base, kind] of m) if (kind !== "commentary") linkedKinds[base] = kind;
-    out.set(dep, { linkedBases: [...m.keys()], linkedKinds });
+    for (const [base, kind] of d.kinds) if (kind !== "commentary") linkedKinds[base] = kind;
+    const linkedCounts: Record<string, number> = {};
+    for (const [k, n] of d.counts) {
+      const base = k.slice(0, k.lastIndexOf("|"));
+      linkedCounts[base] = (linkedCounts[base] ?? 0) + n;
+    }
+    out.set(dep, { linkedBases: [...d.kinds.keys()], linkedKinds, linkedCounts, linkedComplete: d.complete });
   }
   return out;
+}
+
+/**
+ * The books whose own link summary the evidence pass reads too (MaxLinkState.gatherEvidence): those a
+ * book whose summary was read is linked to as its base by at least EVIDENCE_MIN links, when nothing
+ * but their own links tells what THEY are written on (no declaration, no "X על Y"). siblingRelations
+ * needs that: "מלבי"ם על ויקרא" follows "ספרא", which is a midrash on "ויקרא" only by its MIDRASH links.
+ */
+export function evidenceToFollow(evidence: readonly LinkedEvidence[], books: ReadonlyMap<string, { title: string; bases?: readonly string[] }>): string[] {
+  const out = new Set<string>();
+  for (const e of evidence) {
+    // the dependant's declared base is an anchor, not a sibling: its own base does not matter
+    if (!e.complete || (e.count ?? 0) < EVIDENCE_MIN || out.has(e.base) || books.get(e.dependant)?.bases?.includes(e.base)) continue;
+    const b = books.get(e.base);
+    if (b && !b.bases?.length && declaredBaseTitle(b.title) === null) out.add(e.base);
+  }
+  return [...out];
+}
+
+/** The PlanBook fields of linkedFields, the empty ones left out. */
+export function linkedProps(f: LinkedFields | undefined): Pick<PlanBook, "linkedBases" | "linkedKinds" | "linkedCounts" | "linkedComplete"> {
+  if (!f) return {};
+  return {
+    linkedBases: f.linkedBases,
+    ...(Object.keys(f.linkedKinds).length && { linkedKinds: f.linkedKinds }),
+    ...(Object.keys(f.linkedCounts).length && { linkedCounts: f.linkedCounts }),
+    ...(f.linkedComplete && { linkedComplete: true }),
+  };
 }
 
 /**
@@ -263,7 +324,97 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
     const linked = linkedRelations(book, byKey);
     return linked.length || talmud.length ? [...linked, ...talmud] : own;
   }
-  return [...own, ...baseOfBase(book, own, byKey), ...talmud];
+  const fixed = unlinkedTitleBase(book, own, byKey) ?? own;
+  const all = [...fixed, ...siblingRelations(book, fixed, byKey, index)];
+  return [...all, ...baseOfBase(book, all, byKey), ...talmud];
+}
+
+/*
+ * How many COMMENTARY links make the existing links a relation BESIDE the declaration or the title
+ * (siblingRelations, unlinkedTitleBase). Below it, a pair is too small to plan two engines for, and the
+ * stray links of the library's commentary layer stay out (measured on the real database,
+ * docs/AUTOMATION_ENGINE.md §5.1: every pair below it of a related dependant was under 0.5% of its links).
+ */
+export const EVIDENCE_MIN = 100;
+
+/**
+ * Does `x` declare or name `baseKey` as its base, or show it by enough existing links? A count under
+ * EVIDENCE_MIN is not enough: "ישעיהו" has a few COMMENTARY links from "דברים" (the haftarot), and is
+ * not written on it.
+ */
+function writtenOn(x: PlanBook, baseKey: string, index: TitleIndex): boolean {
+  if (x.bases?.includes(baseKey)) return true;
+  if (x.linkedBases?.includes(baseKey)) {
+    const n = x.linkedCounts?.[baseKey];
+    // a TARGUM / MIDRASH base passed LINKED_MIN; an uncounted one is default_commentator
+    if (x.linkedKinds?.[baseKey] || n === undefined || n >= EVIDENCE_MIN) return true;
+  }
+  return pairOne(x, index).target?.key === baseKey;
+}
+
+/*
+ * The library links a commentary to ANOTHER commentary on its own base, besides (or instead of) that
+ * base: "מעדני יום טוב על ברכות" is declared on the Bavli, but explains the Rosh — 1,503 COMMENTARY links
+ * from "פסקי הרא"ש על ברכות", 81 from "ברכות"; "מלבי"ם על ויקרא" follows the "ספרא" (1,905) as well as
+ * the verses (1,911); "מזרחי" explains "רש"י על בראשית" in its "בראשית" part. When the existing links
+ * show such a sibling X — at least EVIDENCE_MIN of them, X written on one of this book's own bases —
+ * X is a base too, in the same part of the book as that base (its scope). Only a commentary on a base
+ * of this book: a book the links show but that is not written on one of its bases is left to the
+ * declaration and the title (a midrash's verses from all of the Bible, "מדרש לקח טוב" ← "תהילים").
+ */
+function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] {
+  const counts = book.linkedCounts;
+  if (!counts) return [];
+  const have = new Set(own.map((r) => r.base.key));
+  const anchors = own.filter((r) => r.kind === "commentary" && !r.through && !r.dependence);
+  const out: Relation[] = [];
+  for (const x of linkedOpen(book, byKey)) {
+    const n = counts[x.key] ?? 0;
+    if (n < EVIDENCE_MIN || have.has(x.key) || book.linkedKinds?.[x.key] || basesOf(x).includes(book.key)) continue;
+    const hits = anchors.filter((r) => writtenOn(x, r.base.key, index));
+    // written on two parts of this book ("מזרחי" on all five books, for "יריעות שלמה על התורה"): no one part to read
+    if (!hits.length || (hits.length > 1 && hits.some((r) => r.scope))) continue;
+    const on = hits[0]!;
+    have.add(x.key);
+    const onN = counts[on.base.key] ?? 0;
+    out.push({
+      kind: "commentary",
+      dependant: ref(book),
+      base: ref(x),
+      via: "links",
+      caveats: [`${quote(x.title)} כתוב גם הוא על ${quote(on.base.title)}, והמסד מקשר את הספר אליו ${n.toLocaleString("he")} פעמים (אל ${quote(on.base.title)}: ${onN.toLocaleString("he")}).`],
+      ...(on.scope && { scope: on.scope }),
+    });
+  }
+  return out;
+}
+
+/*
+ * A title that names a base the library never links the book to, when the links name another one:
+ * "ביאור הגרא על תקוני הזהר" resolves to "תקוני הזהר", and all its 9,052 COMMENTARY links go to "תקוני
+ * הזהר מסודר על פי הגרא". Only when the book's own link summary was read (linkedComplete: the title's base
+ * really has none), and the other book holds at least EVIDENCE_MIN links and half of them. A declaration
+ * (book_base_text) is never replaced: it is the library's own statement.
+ */
+function unlinkedTitleBase(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>): Relation[] | null {
+  const counts = book.linkedCounts;
+  if (!counts || !book.linkedComplete || own.length !== 1) return null;
+  const r = own[0]!;
+  if (r.via !== "title" || r.kind !== "commentary" || (counts[r.base.key] ?? 0) > 0) return null;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  let best: PlanBook | undefined;
+  for (const x of linkedOpen(book, byKey)) if (!book.linkedKinds?.[x.key] && !basesOf(x).includes(book.key) && (counts[x.key] ?? 0) > (best ? counts[best.key]! : 0)) best = x;
+  const n = best ? counts[best.key]! : 0;
+  if (!best || n < EVIDENCE_MIN || 2 * n < total) return null;
+  return [
+    {
+      kind: "commentary",
+      dependant: ref(book),
+      base: ref(best),
+      via: "links",
+      caveats: [`השם מציין את ${quote(r.base.title)}, אבל במסד אין ביניהם אף קישור פירוש, ו־${n.toLocaleString("he")} קישורים אל ${quote(best.title)}; הכלי הולך לפי המסד.`],
+    },
+  ];
 }
 
 /** A book that could be a tractate on its own: no "X על Y", no dependenceType. */
@@ -336,20 +487,27 @@ const AS_TEXT: Readonly<Record<LinkedKind | "commentary", string>> = { commentar
 /**
  * A commentary on a commentary is linked to the base of its base too, when the database links it
  * there ("שפתי חכמים" is written on "רש"י על בראשית", and the library links it to "בראשית" as well:
- * 89K COMMENTARY links, LIBRARY_BENCHMARK.md §6.1). Unscoped: it follows the same chapters and verses.
+ * 89K COMMENTARY links, LIBRARY_BENCHMARK.md §6.1). It follows the same chapters and verses, so it
+ * takes the scope of the commentary it explains: unscoped when that one is, and in the same part of
+ * the book when the book is written on several ("שפתי חכמים" is declared on the five "רש"י על …", each
+ * in its own part, and the library links each part to its book of the Torah too).
  */
 function baseOfBase(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>): Relation[] {
   if (!book.linkedBases?.length) return [];
-  const direct = own.filter((r) => r.kind === "commentary" && !r.scope);
+  const direct = own.filter((r) => r.kind === "commentary" && !r.through && !r.dependence);
   const have = new Set(own.map((r) => r.base.key));
   const out: Relation[] = [];
   for (const b of linkedOpen(book, byKey)) {
     // a TARGUM / MIDRASH link to the base of the base says nothing about a commentary on a commentary
     if (have.has(b.key) || book.linkedKinds?.[b.key]) continue;
+    // a handful of links is not a relation: "ר"ן על פסחים" explains the Rif, and the library links it to
+    // the Bavli 4 times — headings would read the Rif's pages as the Talmud's
+    const n = book.linkedCounts?.[b.key];
+    if (n !== undefined && n < LINKED_MIN) continue;
     const via = direct.find((r) => basesOf(byKey.get(r.base.key)).includes(b.key));
     if (!via) continue;
     have.add(b.key);
-    out.push({ kind: "commentary", dependant: ref(book), base: ref(b), via: "links", caveats: [`פירוש על ${quote(via.base.title)}, שכתוב על ${quote(b.title)}; המסד מקשר אותו גם ל־${quote(b.title)}.`] });
+    out.push({ kind: "commentary", dependant: ref(book), base: ref(b), via: "links", caveats: [`פירוש על ${quote(via.base.title)}, שכתוב על ${quote(b.title)}; המסד מקשר אותו גם ל־${quote(b.title)}.`], ...(via.scope && { scope: via.scope }) });
   }
   return out;
 }

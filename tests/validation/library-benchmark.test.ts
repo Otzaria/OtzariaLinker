@@ -6,7 +6,7 @@ import { pushTo } from "../../src/core/collections";
 import type { Link } from "../../src/core/links/model";
 import type { EngineContext, EngineId } from "../../src/linking/automatic/types";
 import { mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../src/linking/merge";
-import { LINKED_MIN, linkedFields, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
+import { LINKED_MIN, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
 import { SourceRegistry } from "../../src/sources/registry";
 import { maxlinkJob } from "../../src/workers/maxlink-job";
 import { DB, fileBlob, fingerprint, oracle, cleanupTmp } from "./env";
@@ -213,13 +213,14 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         const base = keyOfId(s);
         const dependant = keyOfId(t);
         if (!base || !dependant || s === t) continue;
-        if (type === "COMMENTARY") evidence.push({ dependant, base });
-        else if ((type === "TARGUM" || type === "MIDRASH") && n >= LINKED_MIN) evidence.push({ dependant, base, kind: type === "TARGUM" ? "targum" : "midrash" });
+        // the oracle counts every link of every book: each count is complete (evidenceFromCounts' "own summary")
+        if (type === "COMMENTARY") evidence.push({ dependant, base, count: n, complete: true });
+        else if ((type === "TARGUM" || type === "MIDRASH") && n >= LINKED_MIN) evidence.push({ dependant, base, kind: type === "TARGUM" ? "targum" : "midrash", count: n, complete: true });
       }
       const fields = linkedFields(evidence);
       const library: PlanBook[] = books.map((b) => {
         const f = fields.get(b.key);
-        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...(f && { linkedBases: f.linkedBases }), ...(f && Object.keys(f.linkedKinds).length && { linkedKinds: f.linkedKinds }) };
+        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...linkedProps(f) };
       });
       // every relation of the library at once: the planner's steps for "all books selected"
       const plan = planMaxLink({ selected: books.map((b) => b.key), library, singleEngines: ["citations"] });
