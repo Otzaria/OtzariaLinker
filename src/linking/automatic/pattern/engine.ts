@@ -97,6 +97,10 @@ const CARRY_CAP = 0.9;
 const MAX_RANGE = 40;
 /** visible characters from a named reference on that are matched against the target's heading names */
 const NAME_WINDOW = 60;
+/** "שם" / "ושם" right before a reference: ibid */
+const IBID_RE = /(?:^|[^א-ת])ו?שם\s*$/;
+/** words that bring a list of references back to the book itself: "ולקמן", "לעיל", "במכילתין" */
+const BACK_HOME_RE = /(?:^|[^א-ת])[ובד]?(?:לעיל|לקמן|להלן|בסמוך|כאן|מכילתין|מסכתין|בפרקין|פרקין|דידן|ע"ל|עיין לעיל)(?:[^א-ת]|$)/;
 /** visible characters before a reference searched for the name of another book */
 const BEFORE_WINDOW = 50;
 const AFTER_WINDOW = 30;
@@ -339,9 +343,13 @@ function readGroups(m: RegExpMatchArray, groups: readonly GroupSpec[], vis: stri
     if (v === undefined || !at) continue;
     const spec = g.spec;
     if (spec.role === "level" || spec.role === "any" || spec.role === "daf" || spec.role === "n") {
-      const num = parseRefNumeral(v);
+      // "פ"ק" is פרק קמא, the first chapter, not chapter 100
+      const num = spec.role === "level" && spec.kind === "perek" && v === "ק" ? { n: 1, marked: true, ambiguous: false } : parseRefNumeral(v);
       if (!num) {
         out.bad = true;
+        // "במ"ב פרק בתרא": the outer level is missing, so the inner one alone would be misplaced
+        const kind = spec.role === "level" ? spec.kind : spec.role === "daf" ? "daf" : "?";
+        if (out.elements.some((e) => rankOf(e.kind) >= rankOf(kind))) out.elements = [];
         break;
       }
       if (spec.role === "n") {
@@ -386,8 +394,18 @@ function readGroups(m: RegExpMatchArray, groups: readonly GroupSpec[], vis: stri
     }
     prevEnd = at[1];
   }
+  // "משנה ה' פ"ג": levels written deepest first are read in their usual order (פרק › משנה)
+  if (out.elements.length > 1) out.elements = [...out.elements].sort((a, b) => rankOf(a.kind) - rankOf(b.kind));
   return out;
 }
+
+/** the usual order of levels, outer first; kinds at the same rank keep the template's order */
+const RANK: Readonly<Record<string, number>> = {
+  sefer: 0, chelek: 0, shaar: 1, maamar: 1, klal: 1, parsha: 1, shoresh: 1, tikun: 1, drush: 1,
+  perek: 2, siman: 2, daf: 2, mizmor: 2, mitzva: 2, teshuva: 2,
+  mishna: 3, halacha: 3, pasuk: 3, seif: 3, os: 3, note: 3, amud: 3, seifkatan: 4, "?": 5,
+};
+const rankOf = (kind: string): number => RANK[kind] ?? 3;
 
 /** The kind word right before a {מספר}: "בסי' " → siman, "ס"ק " → seifkatan, "סעיף קטן " → seifkatan. */
 function inferKind(before: string): string {
@@ -523,8 +541,15 @@ function treePlacer(source: EngineBook, target: EngineBook, options: PatternOpti
   const guardBooks = options.otherBooks !== false;
   const sourceStructure = useContext ? analyzeBook(source, { numbering: "lenient", untaggedHeadings: true }) : null;
   const opts = { sectionRanges: options.sectionRanges === true, context: useContext };
+  // a list of references after another book's name stays with it until the text returns to this book
+  // ("ברש"י שבת טז ע"ב ד"ה… יז ע"א ד"ה…", "פי"ח דשבת … שם משנה א")
+  let sticky: { line: number; book: string } | null = null;
+  let previous: { line: number; path: readonly PathElement[] } | null = null;
   return (m) => {
-    const other = guardBooks && m.before !== undefined ? otherBook(m.before, m.after ?? "", target.book.title, tree.structure.kinds) : undefined;
+    let other = guardBooks && m.before !== undefined ? otherBook(m.before, m.after ?? "", target.book.title, tree.structure.kinds) : undefined;
+    if (other) sticky = { line: m.line, book: other };
+    else if (guardBooks && sticky?.line === m.line && !BACK_HOME_RE.test((m.before ?? "").slice(-24))) other = sticky.book;
+    else sticky = null;
     if (other) return { unplaced: r("pattern/other-book", `לפני ההפניה כתוב "${other}": זו הפניה לספר אחר, לא לספר היעד.`) };
     if (m.book !== undefined && !bookMatches(m.book, target.book.title)) return { unplaced: r("pattern/other-book", `ההפניה היא ל"${m.book}", לא לספר היעד "${target.book.title}".`) };
     let elements = m.ref.elements;
@@ -535,8 +560,11 @@ function treePlacer(source: EngineBook, target: EngineBook, options: PatternOpti
       elements = [...elements.slice(0, m.name.at), ...named.filter((e) => !kinds.has(e.kind)), ...elements.slice(m.name.at)];
     }
     if (!elements.length) return { unplaced: r("pattern/no-heading", "בהפניה אין מקום לקרוא.") };
-    const context = sourceStructure?.lines[m.pos]?.path ?? [];
-    const p = tree.place({ elements, ...(m.ref.to !== undefined ? { to: m.ref.to } : {}) }, context, opts);
+    // "בפ"ק משנה ד' … שם משנה ב'": "שם" (ibid) is the place of the reference before it in the line
+    const ibid = previous?.line === m.line && IBID_RE.test((m.before ?? "").slice(-8));
+    const context = ibid ? previous!.path : (sourceStructure?.lines[m.pos]?.path ?? []);
+    const p = tree.place({ elements, ...(m.ref.to !== undefined ? { to: m.ref.to } : {}) }, ibid ? context : context, { ...opts, context: useContext || ibid });
+    if (!("unplaced" in p)) previous = { line: m.line, path: tree.pathAt(p.target.line) ?? elements };
     if ("unplaced" in p || !m.ambiguous || p.score <= SCORE.ambiguous) return p;
     return { ...p, score: SCORE.ambiguous, warnings: [...p.warnings, r("pattern/ambiguous-number", `המספר "${m.token}" הוא גם מילה רגילה; כדאי לוודא שזו באמת הפניה.`)] };
   };

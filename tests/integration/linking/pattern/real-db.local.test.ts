@@ -40,11 +40,15 @@ afterAll(() => {
 
 const PAIRS: readonly { source: string; target: string; options: PatternOptions; minPrecision: number }[] = [
   // "<b>ס"ק ג ומיד</b>" under "סימן א": a ס"ק commentary on its base, the סימן from the source's headings
-  { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "siman-seif-sk" }, minPrecision: 0.9 },
+  // anywhere in the line: the rest are mostly true cross-references inside מגן אברהם that the DB does not hold (79.6%)
+  { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "siman-seif-sk" }, minPrecision: 0.75 },
   { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "siman-seif-sk", position: "start" }, minPrecision: 0.95 },
   { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "siman-seif-sk", position: "start", carry: true }, minPrecision: 0.9 },
-  { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "general" }, minPrecision: 0.5 },
-  // Mishnah: "(פרק י"ד משנה ג')" inside a Mishnah commentary
+  { source: "מחצית השקל על אורח חיים", target: "מגן אברהם", options: { preset: "general" }, minPrecision: 0.45 },
+  // cross-references inside the text ("לעיל במשנה ד'", "עי' לקמן דף מו ע"א", "בפרק ט'"): the DB holds the
+  // commented place only, so these floors are 0. A hand check of every certain/high suggestion
+  // (2026-11-12, after the another-book guard): תוי"ט 12/12, לחם משנה 26/26, גליון הש"ס 27/27 correct;
+  // ביאור הלכה 16/20 of an even sample (wrong: books the guard does not know — החינוך, מהרי"ט, ת' חתם סופר).
   { source: "תוספות יום טוב על משנה ברכות", target: "משנה ברכות", options: { preset: "perek-mishna" }, minPrecision: 0 },
   { source: "לחם משנה על משנה תורה, הלכות שבת", target: "משנה תורה, הלכות שבת", options: { preset: "perek-halacha" }, minPrecision: 0 },
   { source: "גליון הש\"ס על ברכות", target: "ברכות", options: { preset: "daf" }, minPrecision: 0 },

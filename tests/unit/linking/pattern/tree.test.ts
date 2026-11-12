@@ -222,3 +222,29 @@ describe("a commentary whose comments open with their place (position: start, ca
     expect(new Set(res.suggestions.map((s) => s.id)).size).toBe(3);
   });
 });
+
+describe("readings learned from a hand check of real commentaries", () => {
+  const mishna = ["<h1>משנה ברכות</h1>", "<h2>פרק א</h2>", "(א) א", "(ב) ב", "(ג) ג", "(ד) ד", "<h2>פרק ב</h2>", "(א) א", "(ב) ב"];
+
+  it('"משנה ה\' פ"ג" (deepest first) and "שם משנה ב" (ibid of the reference before it)', () => {
+    const res = run(["<h2>פרק ב</h2>", "עיין במשנה ג' פ\"א", "עיין בפ\"ק משנה ד' ופירוש השעות שם משנה ב'"], mishna, { preset: "perek-mishna" }, "משנה ברכות");
+    expect(pairs(res)).toEqual(["1>4", "2>5", "2>3"]);
+  });
+
+  it('"לפ"ז" is לפי זה, not פרק ז; "פ"ק (דף יח:)" is the Talmud\'s chapter; "פרק ו\' דפסחים" another tractate', () => {
+    const res = run(["ולפ\"ז אין קושיא", "בפ\"ק (דף י\"ח:) אמרו", "בריש פרק ב' דפסחים"], mishna, { preset: "perek-mishna" }, "משנה ברכות");
+    expect(res.suggestions).toEqual([]);
+  });
+
+  it("a list after another tractate's name stays with it until \"לקמן\" returns to the book", () => {
+    const bavli = ["<h1>ברכות</h1>", "<h2>דף ב.</h2>", "א", "<h2>דף ג.</h2>", "ב", "<h2>דף ד.</h2>", "ג"];
+    const res = run(['וכן ברש"י שבת ב ע"א ד"ה למ"ד. ג ע"א ד"ה הניחא. ולקמן ד ע"א'], bavli, { preset: "daf" }, "ברכות");
+    expect(pairs(res)).toEqual(["0>6"]);
+  });
+
+  it("Rambam: another הלכות before or after the chapter is not the target's", () => {
+    const rambam = ["<h1>משנה תורה, הלכות שבת</h1>", "<h2>פרק א</h2>", "(א) א", "<h2>פרק ב</h2>", "(א) א"];
+    const res = run(["כמ\"ש בפרק ב' מהלכות תרומות", "בפרק ב' מאיסורי ביאה", "[ובהל' י\"ט פ\"ב]", "כמ\"ש בפרק ב'"], rambam, { preset: "perek-halacha" }, "משנה תורה, הלכות שבת");
+    expect(pairs(res)).toEqual(["3>4"]);
+  });
+});

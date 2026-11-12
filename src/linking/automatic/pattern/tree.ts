@@ -92,6 +92,12 @@ export class TargetTree {
     this.names.sort((a, b) => b.words - a.words || b.key.length - a.key.length);
   }
 
+  /** the heading path of a target line (by line index), for "שם" after a reference */
+  pathAt(lineIndex: number): readonly PathElement[] | null {
+    const pos = this.book.lines.findIndex((l) => l.index === lineIndex);
+    return pos < 0 ? null : (this.structure.lines[pos]?.path ?? null);
+  }
+
   get hasNumberedHeadings(): boolean {
     return this.units.some((u) => !u.marker && u.path.some((e) => e.kind !== "name"));
   }

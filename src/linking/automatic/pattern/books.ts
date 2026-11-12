@@ -32,6 +32,10 @@ export const BOOK_WORDS: readonly string[] = [
   "תוס'", "תוספות", "מהרש\"א", "מהרש\"ל", "ירושלמי", "תוספתא", "סמ\"ג", "סמ\"ק", "טור", "ר\"ן", "ריטב\"א", "רשב\"א", "מחה\"ש", "א\"א",
   "ט\"א", "מ\"ז", "ק\"נ", "עו\"ש", "שה\"ג", "כנה\"ג", "חו\"י", "מעדני", "פרישה", "דרישה", "סמ\"ע", "ערוה\"ש", "כה\"ח", "שולחן", "חינוך", "החינוך",
   "זוהר", "זהר", "מדרש", "ספרא", "ספרי", "מכילתא", "תנחומא", "ילקוט", "רבה", "ש\"ס",
+  // the parts of the Tur and the Shulchan Aruch: "ביו"ד סימן רעו" is not אורח חיים
+  "או\"ח", "יו\"ד", "אה\"ע", "אבה\"ע", "חו\"מ", "אורח חיים", "יורה דעה", "אבן העזר", "חושן משפט", "חשן משפט",
+  // responsa and novellae: "רע"א בתשובותיו סימן ז", "בחידושי רע"א בסי' לב", "בשו"ת … סי'"
+  "שו\"ת", "תשובת", "תשובות", "תשובותיו", "בתשובה", "חידושי", "רע\"א", "מהרי\"ל", "מהר\"ם", "ריב\"ש", "רדב\"ז", "חוו\"י",
 ];
 
 /** words between a book's name and its location: "מ"א לקמן סי' צ"א", "בש"ך שם ס"ק ו" */
@@ -98,7 +102,7 @@ function initials(letters: string, words: readonly string[]): boolean {
  *   after:  "פרק ו' דפסחים", "פ"ג מהלכות תרומות" (when the target is not הלכות תרומות)
  */
 export function otherBook(before: string, after: string, targetTitle: string, targetKinds: ReadonlySet<string> = new Set()): string | undefined {
-  return otherBefore(before, targetTitle, targetKinds) ?? otherAfter(after, targetTitle);
+  return otherBefore(before, targetTitle, targetKinds) ?? otherAfter(after, targetTitle, targetKinds);
 }
 
 const tokens = (s: string): string[] => s.replace(/[()[\]{},.:;—–-]/g, " ").replace(/[״]/g, '"').replace(/׳/g, "'").trim().split(/\s+/).filter(Boolean);
@@ -114,27 +118,36 @@ function otherBefore(before: string, targetTitle: string, targetKinds: ReadonlyS
     const kind = withoutPrefixes(words[i - 1]!).map(kindOfWord).find(Boolean);
     if (kind && kind !== "daf" && !targetKinds.has(kind)) return words[i - 1];
   }
-  for (let steps = 0; i >= 0 && steps < 4; i--, steps++) {
+  // Rambam: "בהל' יום טוב פ"ד", "בהלכות שבת" — another הלכות than the target's
+  for (let j = Math.max(0, i - 2); j <= i; j++) {
+    if (/^[ובלמד]{0,2}(?:הלכות|הל')$/.test(words[j]!) && words[j + 1] && !titleHasHilchot(targetTitle, words[j + 1]!)) return `${words[j]} ${words[j + 1]}`;
+  }
+  for (let steps = 0; i >= 0 && steps < 6; i--, steps++) {
     const w = words[i]!;
     if (withoutPrefixes(w).some((x) => FILLER_KEYS.has(x))) continue;
-    // a tractate, possibly two words ("בבא קמא")
+    // a tractate or a book, possibly two words ("בבא קמא", "מעשר שני") — before the numeral test,
+    // since "ע"ז", "ר"ה" and "שני" are numerals too
     const two = i >= 1 ? `${words[i - 1]} ${w}` : "";
     for (const cand of [two, w]) {
       if (!cand) continue;
       for (const x of withoutPrefixes(cand)) {
         const k = bookKey(x);
-        if ((TRACTATE_KEYS.has(k) || BOOK_KEYS.has(k)) && !bookMatches(x, targetTitle)) return x;
+        if (TRACTATE_KEYS.has(k) || BOOK_KEYS.has(k)) return bookMatches(x, targetTitle) ? undefined : x;
       }
     }
+    // the location parts of the other book's own reference: "נזיר פ"ז דף כה", "שבת דף כג"
+    if (steps < 4 && (parseRefNumeral(w) || /^[ובלמ]?[רס]?פ"[א-ת]{1,2}$/.test(w) || withoutPrefixes(w).some((x) => kindOfWord(x)))) continue;
     return undefined;
   }
   return undefined;
 }
 
-function otherAfter(after: string, targetTitle: string): string | undefined {
+function otherAfter(after: string, targetTitle: string, targetKinds: ReadonlySet<string>): string | undefined {
   const words = tokens(after);
   const first = words[0];
   if (!first) return undefined;
+  // "בפ"ק (דף י"ח:)": a chapter followed by its daf is the Talmud's, when the target has no dafs
+  if (targetKinds.size && !targetKinds.has("daf") && /^(?:דף|ד')$/.test(first)) return "דף";
   // "דפסחים", "דבבא קמא", "מברכות"
   const m = /^[דמב](.{2,})$/.exec(first);
   if (m) {
@@ -144,8 +157,15 @@ function otherAfter(after: string, targetTitle: string): string | undefined {
   }
   // "מהלכות תרומות", "מהל' שבת", "דהלכות"
   if (/^[מדב]?(?:הלכות|הל'|ה')$/.test(first) && words[1]) {
-    const name = bookKey(words[1]);
-    if (name.length >= 2 && !bookKey(targetTitle).split(" ").includes(name)) return `${first} ${words[1]}`;
+    if (!titleHasHilchot(targetTitle, words[1])) return `${first} ${words[1]}`;
   }
+  // a Rambam target: "פרק ט"ו מאיסורי ביאה", "בפרק שני מלכות תעניות" name another הלכות
+  if (/הלכות/.test(targetTitle) && /^מ[א-ת]{3,}$/.test(first) && !bookKey(targetTitle).split(" ").includes(first.slice(1))) return first;
   return undefined;
+}
+
+/** "הלכות <name>" is the target's own: "משנה תורה, הלכות שבת" has שבת, "משנה ברכות" has no הלכות at all */
+function titleHasHilchot(title: string, name: string): boolean {
+  const t = bookKey(title);
+  return t.includes("הלכות") && t.split(" ").includes(bookKey(name));
 }
