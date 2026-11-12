@@ -136,8 +136,11 @@ export class MaxLinkState {
     return ok === true;
   }
 
-  /** The plan for a scope, with only the ticked engines (all when `engines` is absent). */
-  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
+  /**
+   * The plan for a scope, with only the ticked engines (all when `engines` is absent). `preferSource`:
+   * the source whose books are the bases when a base is open in several (MaxLinkPlan.baseSources).
+   */
+  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>, preferSource?: string): MaxLinkPlan {
     const evidence = this.evidence.value;
     const library: PlanBook[] = [...this.host.books.value.values()].map((b) => {
       // default_commentator (read at open) is commentary evidence like a COMMENTARY link
@@ -150,7 +153,7 @@ export class MaxLinkState {
         ...linkedProps(fields),
       };
     });
-    return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }) });
+    return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }), ...(preferSource && { preferSource }) });
   }
 
   /** Runs a plan and makes its merged suggestions the current run. */

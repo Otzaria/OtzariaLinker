@@ -536,3 +536,44 @@ describe("planMaxLink — a commentary on a commentary, declared on both (book_b
     expect(pairs(p).every((s) => s.relation.scope && !s.relation.through)).toBe(true);
   });
 });
+
+describe("planMaxLink — a base open in several sources (product audit F4)", () => {
+  // the audit's scenario 4: a folder (source s1) with בראשית and two commentaries, and the Otzaria database (s2) with בראשית
+  const lib = [
+    book("s1:תורה/בראשית.txt", "בראשית"),
+    book("s1:פירושים/ביאור חדש על בראשית.txt", "ביאור חדש על בראשית"),
+    book("s1:פירושים/ביאור קצר על בראשית.txt", "ביאור קצר על בראשית"),
+    book("s2:1", "בראשית", { origin: "sefaria", isBaseBook: true }),
+  ];
+  const folder = lib.slice(0, 3).map((b) => b.key);
+  const targetsOf = (p: ReturnType<typeof planMaxLink>) => new Set(p.steps.flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])));
+
+  it("by default a commentary is paired with the base in its own source, and the plan says why", () => {
+    const p = planMaxLink({ selected: folder, library: lib });
+    expect(targetsOf(p)).toEqual(new Set(["s1:תורה/בראשית.txt"]));
+    const row = p.books.find((b) => b.book.title === "ביאור קצר על בראשית")!;
+    expect(row.decisions.join(" ")).toContain("מאותו מקור");
+    expect(row.unpaired).toBeUndefined();
+    expect(p.identified).toBe(3);
+    expect(p.baseSources).toEqual([{ title: "בראשית", sources: ["s1", "s2"] }]);
+  });
+
+  it("the user can choose the database's edition instead", () => {
+    const p = planMaxLink({ selected: folder, library: lib, preferSource: "s2" });
+    expect(targetsOf(p)).toEqual(new Set(["s2:1"]));
+    expect(p.books.find((b) => b.book.title === "ביאור חדש על בראשית")!.decisions.join(" ")).toContain("שבחרתם");
+  });
+
+  it("a commentary whose base is open only in OTHER sources, twice, is not paired — and the row says why even though citations runs on it", () => {
+    const other = [book("s3:ביאור על בראשית.txt", "ביאור על בראשית"), book("s1:בראשית.txt", "בראשית"), book("s2:1", "בראשית", { origin: "sefaria" })];
+    const p = planMaxLink({ selected: ["s3:ביאור על בראשית.txt"], library: other });
+    const row = p.books[0]!;
+    expect(row.steps).toBeGreaterThan(0); // the citations engine
+    expect(row.skipped).toBeUndefined();
+    expect(row.unpaired).toContain("בחרו למעלה");
+    // and choosing a source pairs it
+    const chosen = planMaxLink({ selected: ["s3:ביאור על בראשית.txt"], library: other, preferSource: "s1" });
+    expect(chosen.books[0]!.unpaired).toBeUndefined();
+    expect(targetsOf(chosen)).toEqual(new Set(["s1:בראשית.txt"]));
+  });
+});

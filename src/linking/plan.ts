@@ -1,4 +1,5 @@
 import { pushTo } from "../core/collections";
+import { sourceIdOfBookKey } from "../core/books";
 import type { DbLinkBookCount } from "../core/links/db-links";
 import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
@@ -268,6 +269,12 @@ export interface PlanBookRow {
   steps: number;
   /** set when nothing runs on the book: the reason (Hebrew) */
   skipped?: string;
+  /**
+   * The book names a base (by its title or the database) and was not paired with it — why (Hebrew).
+   * Said even when other steps run on the book (citations reads every book), so a commentary is never
+   * left out of its base silently (product audit F4).
+   */
+  unpaired?: string;
 }
 
 export interface MaxLinkPlan {
@@ -278,6 +285,12 @@ export interface MaxLinkPlan {
   identified: number;
   /** steps per engine, for the review ("untick an engine") */
   perEngine: Partial<Record<EngineId, number>>;
+  /**
+   * Sources holding a base some selected book names, when that base is open in more than one source
+   * ("בראשית" in a folder and in the database): the user may choose which source's books are the bases
+   * (PlanInput.preferSource). Empty when no base is open twice.
+   */
+  baseSources: { title: string; sources: string[] }[];
 }
 
 export interface PlanInput {
@@ -289,6 +302,8 @@ export interface PlanInput {
   engines?: ReadonlySet<EngineId>;
   /** single-book engines available (default: every registered non-pair engine) */
   singleEngines?: readonly SingleEngineId[];
+  /** the source whose books are the bases when a base is open in several sources (batch.ts resolveBaseKey) */
+  preferSource?: string;
 }
 
 const NOTES_PREFIX = "הערות";
@@ -770,7 +785,7 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
 export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const enabled = (e: EngineId) => !input.engines || input.engines.has(e);
   const byKey = new Map(input.library.map((b) => [b.key, b] as const));
-  const index = titleIndex(input.library);
+  const index = titleIndex(input.library, input.preferSource);
   const selected = [...new Set(input.selected)].filter((k) => byKey.has(k));
   const isSelected = new Set(selected);
 
@@ -846,11 +861,26 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     const n = touches.get(k) ?? 0;
     let skipped: string | undefined;
     if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;
-    return { book: ref(b), decisions, steps: n, ...(skipped !== undefined && { skipped }) };
+    // a book that names a base but was not paired with it: why, even when other steps run on it
+    const unpaired = !owns.length && n > 0 && namesBase(b) ? problems.get(k) : undefined;
+    return { book: ref(b), decisions, steps: n, ...(skipped !== undefined && { skipped }), ...(unpaired !== undefined && { unpaired }) };
   });
+
+  // bases a selected book names that are open in several sources: the user may choose the source
+  const baseSources = new Map<string, Set<string>>();
+  for (const k of selected) {
+    const named = notesBaseTitle(byKey.get(k)!.title) ?? declaredBaseTitle(byKey.get(k)!.title);
+    if (named === null) continue;
+    const hits = (index.exact.get(baseTitleKey(named)) ?? []).filter((x) => x.key !== k);
+    const srcs = new Set(hits.map((x) => sourceIdOfBookKey(x.key)));
+    if (srcs.size > 1) baseSources.set(hits[0]!.title, new Set([...(baseSources.get(hits[0]!.title) ?? []), ...srcs]));
+  }
 
   const perEngine: Partial<Record<EngineId, number>> = {};
   for (const s of steps) perEngine[s.engine] = (perEngine[s.engine] ?? 0) + 1;
   const identified = books.filter((r) => relations.has(r.book.key) || onBase.has(r.book.key)).length;
-  return { steps, books, identified, perEngine };
+  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })) };
 }
+
+/** The book names a base it is written on: by its title ("X על Y", "הערות על Y") or by the database. */
+const namesBase = (b: PlanBook): boolean => declaredBaseTitle(b.title) !== null || notesBaseTitle(b.title) !== null || (b.bases?.length ?? 0) > 0;

@@ -31,6 +31,8 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const [kind, setKind] = useState<ScopeKind>(() => (askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
   const [sourceId, setSourceId] = useState<string>(() => askedSource ?? sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
   const [off, setOff] = useState<ReadonlySet<EngineId>>(new Set());
+  /** the source whose books are the bases when a base is open in several sources ("" = automatic) */
+  const [prefer, setPrefer] = useState("");
   const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
   const books = store.books.value;
 
@@ -43,9 +45,12 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   }, [kind, current, sourceId, books]);
   const evidence = store.maxLink.evidence.value;
   const unchecked = store.maxLink.unchecked.value;
-  const full = useMemo(() => (scope ? store.maxLink.plan(scope) : null), [kind, current, sourceId, books, evidence]);
+  const full = useMemo(() => (scope ? store.maxLink.plan(scope, undefined, prefer || undefined) : null), [kind, current, sourceId, books, evidence, prefer]);
   const enabled = useMemo(() => new Set((Object.keys(full?.perEngine ?? {}) as EngineId[]).filter((e) => !off.has(e))), [full, off]);
-  const plan = useMemo(() => (scope && full ? (off.size ? store.maxLink.plan(scope, enabled) : full) : null), [full, enabled]);
+  const plan = useMemo(() => (scope && full ? (off.size ? store.maxLink.plan(scope, enabled, prefer || undefined) : full) : null), [full, enabled]);
+  const unpaired = plan?.books.filter((b) => b.unpaired).length ?? 0;
+  const baseSources = full?.baseSources ?? [];
+  const labelOf = (id: string) => sources.find((s) => s.info.id === id)?.info.label ?? id;
   const engines = ENGINES.filter((e) => full?.perEngine[e.id]);
   const skipped = plan?.books.filter((b) => b.skipped).length ?? 0;
   const advanced = store.prefs.advanced.value;
@@ -98,7 +103,19 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           <p class="ml-plan-line" role="status">
             {plan.books.length.toLocaleString("he")} ספרים נבחרו · ל־{plan.identified.toLocaleString("he")} נמצא קשר · {plan.steps.length.toLocaleString("he")} הרצות
             {skipped > 0 && ` · ${skipped.toLocaleString("he")} בלי קישור אוטומטי`}
+            {unpaired > 0 && ` · ${unpaired.toLocaleString("he")} בלי ספר הבסיס שלהם`}
           </p>
+          {baseSources.length > 0 && (
+            <label class="field">
+              ספרי הבסיס כשהם פתוחים בכמה מקורות ({baseSources.slice(0, 3).map((b) => `"${b.title}"`).join(", ")}{baseSources.length > 3 ? "…" : ""})
+              <select value={prefer} onChange={(e) => setPrefer(e.currentTarget.value)}>
+                <option value="">אוטומטי: מאותו מקור כמו הפירוש</option>
+                {[...new Set(baseSources.flatMap((b) => b.sources))].map((id) => (
+                  <option key={id} value={id}>מתוך "{labelOf(id)}"</option>
+                ))}
+              </select>
+            </label>
+          )}
           {pending > AUTO_EVIDENCE_BOOKS && scope && (
             <p class="muted" style="margin:0;font-size:var(--fs-sm)">
               {unchecked > 0 ? `הקישורים שכבר יש במסד נבדקו לחלק מהספרים; ל־${pending.toLocaleString("he")} ספרים` : `ל־${pending.toLocaleString("he")} ספרים מהמסד`} הקשר נקבע עכשיו לפי ההצהרה במסד והשם בלבד. בדיקת הקישורים הקיימים מוצאת עוד פירושים ובסיסים (למשל "בית יוסף" על "טור").{" "}
@@ -133,15 +150,18 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
                   />
                 </section>
               ))}
-          <details class="held" open={advanced && plan.books.length <= 12}>
+          <details class="held" open={(advanced || unpaired > 0) && plan.books.length <= 12}>
             <summary>למה כל ספר ({plan.books.length.toLocaleString("he")})</summary>
             <ul class="ml-books">
               {plan.books.slice(0, SHOWN_BOOKS).map((b) => (
-                <li key={b.book.key} class={b.skipped ? "skipped" : ""}>
+                <li key={b.book.key} class={b.skipped || b.unpaired ? "skipped" : ""}>
                   <b>{b.book.title}</b>
                   {b.decisions.map((d, i) => <span key={i}>{d}</span>)}
                   {b.skipped && (
                     <span class="why-not"><Icon name="fl_warning" size={14} /> {b.skipped}</span>
+                  )}
+                  {b.unpaired && (
+                    <span class="why-not"><Icon name="fl_warning" size={14} /> לא קושר לספר הבסיס שלו: {b.unpaired}</span>
                   )}
                 </li>
               ))}

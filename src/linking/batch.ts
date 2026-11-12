@@ -1,5 +1,6 @@
 import { pushTo } from "../core/collections";
 import type { BookRef } from "../core/links/model";
+import { sourceIdOfBookKey } from "../core/books";
 import { baseTitleKey, declaredBaseTitle, looseTitleKey, titleCorpus } from "../core/links/titles";
 
 /*
@@ -22,16 +23,18 @@ export interface TitleIndex {
   readonly exact: ReadonlyMap<string, readonly BookRef[]>;
   /** by looseTitleKey: the same title in another spelling, tried only when `exact` finds nothing */
   readonly loose: ReadonlyMap<string, readonly BookRef[]>;
+  /** the source the user chose for base books open in several sources (resolveBaseKey); absent = automatic */
+  readonly prefer?: string;
 }
 
-export function titleIndex(bases: readonly BookRef[]): TitleIndex {
+export function titleIndex(bases: readonly BookRef[], prefer?: string): TitleIndex {
   const exact = new Map<string, BookRef[]>();
   const loose = new Map<string, BookRef[]>();
   for (const b of bases) {
     pushTo(exact, baseTitleKey(b.title), b);
     pushTo(loose, looseTitleKey(b.title), b);
   }
-  return { exact, loose };
+  return { exact, loose, ...(prefer && { prefer }) };
 }
 
 export type BaseResolution = { target: BookRef; note?: string } | { reason: string };
@@ -39,8 +42,11 @@ export type BaseResolution = { target: BookRef; note?: string } | { reason: stri
 /**
  * The open book a base title names, or why there is none. `k` is the base-title key; `named` is the
  * title as the dependant wrote it, prefixes kept ("משנה ברכות"), used to tell books that share a key
- * apart by their corpus (titles.ts titleCorpus). Then the official library wins over personal copies;
- * more than one candidate left is ambiguous — never a guess.
+ * apart by their corpus (titles.ts titleCorpus). A base open in several sources (בראשית in the user's
+ * folder and in the Otzaria database) is then taken from the source the user chose (index.prefer), else
+ * from the dependant's own source — a commentary in a folder is written on the base in that folder —
+ * else the official library wins over personal copies; each choice is said in the note (product audit
+ * F4). More than one candidate left is ambiguous — never a guess.
  */
 export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, named?: string): BaseResolution {
   let hits = (index.exact.get(k) ?? []).filter((b) => b.key !== self.key);
@@ -60,9 +66,17 @@ export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, name
       pool = same;
     }
   }
+  if (pool.length > 1) {
+    const from = (src: string) => pool.filter((b) => sourceIdOfBookKey(b.key) === src);
+    const chosen = index.prefer ? from(index.prefer) : [];
+    const own = from(sourceIdOfBookKey(self.key));
+    if (chosen.length === 1) (note = [note, `"${chosen[0]!.title}" פתוח בכמה מקורות; נבחר זה מהמקור שבחרתם לספרי הבסיס.`].filter(Boolean).join(" ")), (pool = chosen);
+    else if (own.length === 1) (note = [note, `"${own[0]!.title}" פתוח בכמה מקורות; נבחר זה שמאותו מקור כמו "${self.title}".`].filter(Boolean).join(" ")), (pool = own);
+  }
   const official = pool.filter((b) => b.origin !== "personal");
   if (official.length) pool = official;
-  if (pool.length > 1) return { reason: `נמצאו ${pool.length} ספרים בשם "${pool[0]!.title}". בחרו את הבסיס ידנית.` };
+  if (pool.length > 1)
+    return { reason: `"${pool[0]!.title}" פתוח ב־${new Set(pool.map((b) => sourceIdOfBookKey(b.key))).size > 1 ? `${pool.length} מקורות` : `${pool.length} ספרים באותו שם`}, ולא ברור על איזה מהם הספר כתוב. בחרו למעלה מאיזה מקור לקחת את ספרי הבסיס, או קשרו את הזוג ידנית.` };
   const target = pool[0]!;
   if (spelled) note = [note, `השם "${named ?? k}" נכתב אחרת מ"${target.title}"; הותאם לפי הכתיב.`].filter(Boolean).join(" ");
   return { target, ...(note && { note }) };
