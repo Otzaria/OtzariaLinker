@@ -37,19 +37,27 @@ function fakeHistory(initial = "#/") {
 function fakeHost(work = true) {
   const pendingDbs = signal<string[]>([]);
   const notes: string[] = [];
+  const guidedStep = signal("files");
+  const guidedReady = ["files", "books", "plan"];
   const host: RouterHost = {
-    screen: signal<"home" | "workspace">("home"),
+    screen: signal<"home" | "workspace" | "guided">("home"),
     sideTab: signal<SideTab>("builder"),
     suggestMode: signal<SuggestMode>("pair"),
     dialog: signal<DialogId | null>(null),
     helpSection: signal<string | undefined>(undefined),
     startTask: signal<string | null>(null),
+    guidedStep,
+    showGuided: (step) => {
+      host.screen.value = "guided";
+      // as the flow does: a step it cannot show yet falls back to the first
+      guidedStep.value = step && guidedReady.includes(step) ? step : "files";
+    },
     pendingDialog: computed(() => (pendingDbs.value.length ? "map-db" : null)),
     dismissPending: () => (pendingDbs.value = pendingDbs.value.slice(1)),
     hasWork: () => work,
     notify: (_k, t) => void notes.push(t),
   };
-  return { host, pendingDbs, notes };
+  return { host, pendingDbs, notes, guidedStep };
 }
 
 describe("routes", () => {

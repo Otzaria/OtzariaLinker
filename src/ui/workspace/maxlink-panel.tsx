@@ -17,7 +17,7 @@ import "./maxlink.css";
  * In advanced mode every engine of the plan has its settings (the same forms as a single run); they
  * reach the worker as MaxLinkRunOptions.engineOptions, and an invalid one blocks the run.
  */
-type ScopeKind = MaxLinkScope["kind"];
+type ScopeKind = Exclude<MaxLinkScope["kind"], "sources">;
 const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "מקור או תיקייה", all: "כל הספרים הפתוחים" };
 const ENGINE_TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const SHOWN_BOOKS = 200;

@@ -18,7 +18,7 @@ import { countOf } from "./task-progress";
  * the report. The run is an ordinary SuggestionRun, so the table, inline and card views, approve,
  * reject and undo work on it unchanged. Kept out of store.ts on purpose, like AltTocState.
  */
-export type MaxLinkScope = { kind: "book"; key: string } | { kind: "source"; id: string } | { kind: "all" };
+export type MaxLinkScope = { kind: "book"; key: string } | { kind: "source"; id: string } | { kind: "sources"; ids: readonly string[] } | { kind: "all" };
 
 export interface MaxLinkHost {
   readonly books: ReadonlySignal<Map<string, SourceBook>>;
@@ -79,12 +79,18 @@ export class MaxLinkState {
   selection(scope: MaxLinkScope): string[] {
     if (scope.kind === "book") return this.host.books.value.has(scope.key) ? [scope.key] : [];
     if (scope.kind === "source") return this.host.sources.value.find((s) => s.info.id === scope.id)?.books.map((b) => b.key) ?? [];
+    // several sources (the guided flow's folder, opened in more than one pick), in the order they were opened
+    if (scope.kind === "sources") return this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).flatMap((s) => s.books.map((b) => b.key));
     return [...this.host.books.value.keys()];
   }
 
   scopeLabel(scope: MaxLinkScope): string {
     if (scope.kind === "book") return `הספר "${this.host.refOf(scope.key).title}"`;
     if (scope.kind === "source") return `המקור "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
+    if (scope.kind === "sources") {
+      const labels = this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).map((s) => `"${s.info.label}"`);
+      return labels.length === 1 ? `המקור ${labels[0]}` : `המקורות ${labels.join(", ")}`;
+    }
     return "כל הספרים הפתוחים";
   }
 

@@ -1,5 +1,6 @@
 import { batch, effect, type ReadonlySignal, type Signal } from "@preact/signals";
-import type { NoticeKind, SideTab } from "./store";
+import type { NoticeKind, Screen, SideTab } from "./store";
+import { isGuidedStep } from "./guided-flow";
 
 /*
  * Hash routing (works under file://: only the fragment changes, the document never reloads).
@@ -21,13 +22,13 @@ export type DialogId = "export" | "help" | "relink" | "alt-toc" | "start";
 export type SuggestMode = "pair" | "batch" | "maxlink";
 
 export interface Route {
-  screen: "home" | "workspace";
+  screen: Screen;
   tab?: SideTab;
   /** the suggestions tab in max-link mode */
   maxlink?: boolean;
   /** a dialog over the screen; the transient ones (map-db, import-records) come from pending files */
   dialog?: DialogId | "map-db" | "import-records";
-  /** the help's section (heading id) or the guided task's id */
+  /** the help's section (heading id), the guided task's id, or the guided flow's step */
   section?: string;
 }
 
@@ -55,6 +56,11 @@ export function parseHash(hash: string): Route | null {
     return (TABS as readonly string[]).includes(a) ? { screen: "workspace", tab: a as SideTab } : null;
   }
   if (head === "maxlink" && a === undefined) return { screen: "workspace", tab: "suggestions", maxlink: true };
+  // the guided flow (state/guided-flow.ts): "#/guided" is its first step
+  if (head === "guided") {
+    if (a === undefined || a === "") return { screen: "guided", section: "files" };
+    return isGuidedStep(a) ? { screen: "guided", section: a } : null;
+  }
   if (head && DIALOGS.includes(head)) {
     if (a !== undefined && head !== "help" && head !== "start") return null;
     if (head === "start" && !a) return null;
@@ -67,6 +73,7 @@ export function parseHash(hash: string): Route | null {
 export function formatRoute(r: Route): string {
   if (r.dialog) return `#/${r.dialog}${r.section && (r.dialog === "help" || r.dialog === "start") ? `/${encodeURIComponent(r.section)}` : ""}`;
   if (r.screen === "home") return "#/";
+  if (r.screen === "guided") return `#/guided/${r.section ?? "files"}`;
   if (r.maxlink && r.tab === "suggestions") return "#/maxlink";
   return `#/workspace/${r.tab ?? "builder"}`;
 }
@@ -90,12 +97,16 @@ export interface LocationPort {
 
 /** What the router reads and writes in the store. */
 export interface RouterHost {
-  readonly screen: Signal<"home" | "workspace">;
+  readonly screen: Signal<Screen>;
   readonly sideTab: Signal<SideTab>;
   readonly suggestMode: Signal<SuggestMode>;
   readonly dialog: Signal<DialogId | null>;
   readonly helpSection: Signal<string | undefined>;
   readonly startTask: Signal<string | null>;
+  /** the guided flow's step (shown when screen is "guided") */
+  readonly guidedStep: ReadonlySignal<string>;
+  /** the address asks for the guided flow at a step: the flow shows the furthest it can (state/guided-flow.ts resolveStep) */
+  showGuided(step?: string): void;
   /** files waiting in the mapping wizard / the records dialog: shown as transient dialogs */
   readonly pendingDialog: ReadonlySignal<"map-db" | "import-records" | null>;
   /** dismisses the pending file the transient dialog shows (Back over the mapping wizard) */
@@ -134,6 +145,7 @@ export class Router {
       return { screen: h.screen.value, dialog, ...(section && { section }) };
     }
     if (h.screen.value === "home") return { screen: "home" };
+    if (h.screen.value === "guided") return { screen: "guided", section: h.guidedStep.value };
     const tab = h.sideTab.value;
     return { screen: "workspace", tab, ...(tab === "suggestions" && h.suggestMode.value === "maxlink" && { maxlink: true }) };
   }
@@ -235,6 +247,14 @@ export class Router {
     try {
       batch(() => {
         if (!r) return;
+        // the guided flow needs nothing open: it starts at the step it can show (its first, after a reload)
+        if (r.screen === "guided" && !r.dialog) {
+          const pendingNow = h.pendingDialog.value;
+          if (pendingNow) h.dismissPending(pendingNow);
+          h.dialog.value = null;
+          h.showGuided(r.section);
+          return;
+        }
         const needsWork = r.screen === "workspace" || (r.dialog !== undefined && NEEDS_WORK.has(r.dialog));
         if (needsWork && !h.hasWork()) {
           h.dialog.value = null;
