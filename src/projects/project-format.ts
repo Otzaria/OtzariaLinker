@@ -21,7 +21,7 @@ export const PROJECT_VERSION = 1;
 /**
  * The fingerprint of a library links file the project holds (security review A3). A project only
  * CLAIMS it: a file restored from a project is unverified until the library's file is loaded again
- * and matches (store.importLinksFile) or the user confirms it in the export dialog.
+ * and matches (store.exchange.importLinksFile) or the user confirms it in the export dialog.
  */
 export interface ProjectLibraryFile {
   title: string;

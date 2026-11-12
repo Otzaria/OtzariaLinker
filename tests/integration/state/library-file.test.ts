@@ -49,9 +49,9 @@ const codes = (plan: { heldBack: { problems: { code: string }[] }[] }) => [...ne
 
 describe("A1: a spreadsheet or records file is NEW links, never the book's library file", () => {
   const mapped = (store: AppStore, path: string, text: string) => {
-    store.offerRecords(path, text);
-    const p = store.pendingRecords.value[0]!;
-    store.importRecords({ ...p.mapping, source: { field: "book" }, sourceLine: "from", targetTitle: "to_book", targetLine: "to", type: { field: "kind" } });
+    store.exchange.offerRecords(path, text);
+    const p = store.exchange.pendingRecords.value[0]!;
+    store.exchange.importRecords({ ...p.mapping, source: { field: "book" }, sourceLine: "from", targetTitle: "to_book", targetLine: "to", type: { field: "kind" } });
   };
 
   it("records import: provenance import, status new; the db-copy rule still holds the book; nothing counts as kept", async () => {
@@ -60,7 +60,7 @@ describe("A1: a spreadsheet or records file is NEW links, never the book's libra
     expect(store.allLinks.value.map((l) => [l.provenance, l.status, l.fileIndex])).toEqual([["import", "new", undefined]]);
     expect(store.dbLinks.linksFile(BOOK)).toBe("missing");
     await copyOneDbLink(store);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.files).toEqual([]); // used to write the book's file with only these 2 records, isNewFile false
     expect(codes(plan)).toContain("export/db-copy-no-file");
     expect(plan.counts.kept).toBe(0);
@@ -70,7 +70,7 @@ describe("A1: a spreadsheet or records file is NEW links, never the book's libra
     const store = await opened();
     mapped(store, "sheet.csv", `book,from,to_book,to,kind\n${BOOK},999999,המאיר לארץ על ארצות החיים,999999,commentary\n`);
     store.dbLinks.confirmNewFile(BOOK);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.written).toEqual([]);
     expect(codes(plan)).toContain("export/line-out-of-range");
   });
@@ -90,9 +90,9 @@ describe("A1: a spreadsheet or records file is NEW links, never the book's libra
     const service = { open: async () => ({ sources: [], documents: [], skipped: [] }), lines: async () => [], existingLinks: async () => [], close: async () => {}, headings: async () => [], altToc: async () => null } as unknown as BooksService;
     const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
     const rec = (l: number) => ({ line_index_1: l, heRef_2: `ב ${l}`, path_2: "ב.txt", line_index_2: l, "Conection Type": "reference" });
-    store.importLinksFile("א_links.json", JSON.stringify([rec(1), rec(2), rec(3)], null, 4) + "\n");
-    store.importLinksCsv("א_links.csv", "line_index_1,heRef_2,path_2,line_index_2,Conection Type\n100,x,ב.txt,100,reference\n200,y,ב.txt,200,reference\n");
-    const plan = (await store.prepareExport())!;
+    store.exchange.importLinksFile("א_links.json", JSON.stringify([rec(1), rec(2), rec(3)], null, 4) + "\n");
+    store.exchange.importLinksCsv("א_links.csv", "line_index_1,heRef_2,path_2,line_index_2,Conection Type\n100,x,ב.txt,100,reference\n200,y,ב.txt,200,reference\n");
+    const plan = (await store.exchange.prepareExport())!;
     const f = plan.files[0]!;
     expect(JSON.parse(f.text).map((r: { line_index_1: number }) => r.line_index_1)).toEqual([1, 2, 3, 100, 200]); // was [1, 100, 2, 200, 3]
     expect(f.text.startsWith("[\n    {")).toBe(true); // the library file's 4-space layout is kept
@@ -106,26 +106,26 @@ describe("A2: 'the library file is loaded' follows the undoable state, and only 
     it(`after ${how}, a copied link still waits for the file`, async () => {
       const store = await opened();
       if (how === "undo") {
-        store.importLinksFile(FILE, JSON.stringify([REC]));
+        store.exchange.importLinksFile(FILE, JSON.stringify([REC]));
         expect(store.dbLinks.linksFile(BOOK)).toBe("imported");
         store.undo();
         expect(store.allLinks.value).toEqual([]);
-      } else store.importLinksFile(FILE, "[{ truncated download");
+      } else store.exchange.importLinksFile(FILE, "[{ truncated download");
       expect(store.dbLinks.linksFile(BOOK)).toBe("missing");
       await copyOneDbLink(store);
-      const plan = (await store.prepareExport())!;
+      const plan = (await store.exchange.prepareExport())!;
       expect(plan.files).toEqual([]);
       expect(codes(plan)).toContain("export/db-copy-no-file");
     });
 
   it("redo brings the file back; an empty library file counts as loaded", async () => {
     const store = await opened();
-    store.importLinksFile(FILE, JSON.stringify([REC]));
+    store.exchange.importLinksFile(FILE, JSON.stringify([REC]));
     store.undo();
     store.redo();
     expect(store.dbLinks.linksFile(BOOK)).toBe("imported");
     const empty = await opened();
-    empty.importLinksFile(FILE, "[]");
+    empty.exchange.importLinksFile(FILE, "[]");
     expect(empty.dbLinks.linksFile(BOOK)).toBe("imported");
   });
 });
@@ -133,7 +133,7 @@ describe("A2: 'the library file is loaded' follows the undoable state, and only 
 describe("A3: a saved project's copy of a library file is a snapshot until verified", () => {
   const projectWith = (records: object[], change?: (s: AppStore) => void) => {
     const a = makeStore();
-    a.importLinksFile(FILE, JSON.stringify(records));
+    a.exchange.importLinksFile(FILE, JSON.stringify(records));
     change?.(a);
     return a.projectText();
   };
@@ -143,12 +143,12 @@ describe("A3: a saved project's copy of a library file is a snapshot until verif
     store.openProject("p.json", projectWith([REC]));
     expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
     await copyOneDbLink(store);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.files).toEqual([]);
     expect(codes(plan)).toContain("export/file-unverified");
     // the explicit confirmation lets it through
     store.dbLinks.confirmNewFile(BOOK);
-    expect((await store.prepareExport())!.files.map((f) => f.records)).toEqual([2]);
+    expect((await store.exchange.prepareExport())!.files.map((f) => f.records)).toEqual([2]);
   });
 
   it("loading the same library file verifies the snapshot and keeps the project's changes", async () => {
@@ -156,10 +156,10 @@ describe("A3: a saved project's copy of a library file is a snapshot until verif
     const text = projectWith([REC, OTHER], (a) => a.deleteLinks([a.allLinks.value[1]!.id]));
     const store = await opened();
     store.openProject("p.json", text);
-    store.importLinksFile(FILE, lib);
+    store.exchange.importLinksFile(FILE, lib);
     expect(store.dbLinks.linksFile(BOOK)).toBe("imported");
     expect(store.allLinks.value.map((l) => l.status)).toEqual(["existing", "deleted"]);
-    const plan = (await store.prepareExport())!;
+    const plan = (await store.exchange.prepareExport())!;
     expect(plan.files.map((f) => [f.records, f.isNewFile])).toEqual([[1, false]]);
   });
 
@@ -168,7 +168,7 @@ describe("A3: a saved project's copy of a library file is a snapshot until verif
     const forged = { ...real, links: real.links.map((l: { target: object }) => ({ ...l, target: { ...l.target, line: 5 } })) };
     const store = await opened();
     store.openProject("p.json", JSON.stringify(forged));
-    store.importLinksFile(FILE, JSON.stringify([REC]));
+    store.exchange.importLinksFile(FILE, JSON.stringify([REC]));
     expect(store.dbLinks.linksFile(BOOK)).toBe("imported");
     expect(store.allLinks.value.map((l) => l.target.line)).toEqual([1306]);
   });
@@ -177,7 +177,7 @@ describe("A3: a saved project's copy of a library file is a snapshot until verif
     const text = projectWith([REC], (a) => a.setType([a.allLinks.value[0]!.id], "reference"));
     const store = await opened();
     store.openProject("p.json", text);
-    store.importLinksFile(FILE, JSON.stringify([REC, OTHER]));
+    store.exchange.importLinksFile(FILE, JSON.stringify([REC, OTHER]));
     expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
     expect(store.allLinks.value).toHaveLength(1);
     expect(store.notices.value.at(-1)!.kind).toBe("error");
@@ -202,11 +202,11 @@ describe("A3: a new link of a book the database says has links waits for the boo
     store.draftType.value = "reference";
     store.draftTypeTouched.value = true;
     expect(store.createFromDraft()).not.toBeNull();
-    let plan = (await store.prepareExport())!;
+    let plan = (await store.exchange.prepareExport())!;
     expect(plan.files).toEqual([]);
     expect(codes(plan)).toEqual(["export/library-file-not-loaded"]);
     store.dbLinks.confirmNewFile("א");
-    plan = (await store.prepareExport())!;
+    plan = (await store.exchange.prepareExport())!;
     expect(plan.files.map((f) => [f.name, f.isNewFile])).toEqual([["א_links.json", true]]);
   });
 });

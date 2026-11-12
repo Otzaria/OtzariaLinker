@@ -82,9 +82,9 @@ DEFAULT_THRESHOLDS = { certain: 0.95, high: 0.85, possible: 0.6, ambiguityMargin
 כל עוד יש שגיאה, הכפתור "חיפוש התאמות" מושבת. מחוץ למצב מתקדם המנועים רצים עם ברירות המחדל, חוץ מהאפשרויות החיוניות.
 אפשרויות שהן פונקציות (`windows` של דיבור המתחיל) אינן חוצות את ה־worker, ולכן אינן בטופס.
 
-### 1.3 מה המצב עושה עם ההצעות (`src/state/store.ts`)
+### 1.3 מה המצב עושה עם ההצעות (`src/state/suggestions.ts`)
 
-- `approveSuggestions` יוצר קישורים `auto:<id>` עם `provenance: "auto"`, בפקודה אחת.
+- `SuggestionsState.approve` יוצר קישורים `auto:<id>` עם `provenance: "auto"`, בפקודה אחת.
 - המצב של הצעה **נגזר** ולא נשמר: `approved` אם יש קישור `auto:<id>` שלא נמחק; `rejected` אם
   `rejectionKey` שלה ברשימת הדחיות; `exists` אם אותן שתי שורות כבר מקושרות (`linePairKey`: בכל סוג
   ובכל כיוון), בקישור אחר של הפרויקט או במסד הפתוח (`dbLinkKeys`, נטען לספרי המקור של הריצה); אחרת
@@ -98,7 +98,7 @@ DEFAULT_THRESHOLDS = { certain: 0.95, high: 0.85, possible: 0.6, ambiguityMargin
 <בסיס>" של הגנרטור (`declaredBaseKey` / `baseTitleKey` ב־`src/core/links/titles.ts`, שמתעלמים ממירכאות
 ומקידומות כמו "מסכת" או "תלמוד בבלי"). הוא לא מנחש: שם שאינו בצורה הזו, בסיס שאינו פתוח, או כמה בסיסים
 שווים (אחרי העדפת הספרייה הרשמית על עותק אישי) — הספר לא מזווג, עם סיבה בעברית. `batchJob` ב־Worker
-מריץ את המנוע זוג אחר זוג, וכשל בזוג נרשם ולא עוצר. `AppStore.runBatch` מאחד את כל ההצעות לריצה אחת,
+מריץ את המנוע זוג אחר זוג, וכשל בזוג נרשם ולא עוצר. `SuggestionsState.runBatch` מאחד את כל ההצעות לריצה אחת,
 עם שורת סיכום לכל ספר (`run.batch`). הזיווג מתאים למנועים שקלטם "פירוש ← בסיס" (כותרות, ד"ה).
 
 ## 2. מנוע הכותרות (`headings/`)
@@ -337,8 +337,8 @@ precision ≥0.95 ו־recall ≥0.6; ברכות precision ≥0.9.
 מסומנות. הכלל המנחה: **דיוק קודם**. האיחוד אף פעם לא מוסיף קישור שאף מנוע לא הציע, ואף פעם לא מנפח מספרים.
 
 ```
-AppStore.planMaxLink(scope)            → MaxLinkPlan (state/maxlink.ts → linking/plan.ts, טהור)
-AppStore.runMaxLink(plan, label)       → BooksService.runMaxLink → Worker: maxlinkJob (workers/maxlink-job.ts)
+AppStore.maxLink.plan(scope)           → MaxLinkPlan (state/maxlink.ts → linking/plan.ts, טהור)
+AppStore.maxLink.run(plan, label)      → BooksService.runMaxLink → Worker: maxlinkJob (workers/maxlink-job.ts)
                                        ← StepResult לכל שלב + מפתחות הקישורים שבמסד
   → mergeSuggestions (linking/merge.ts, טהור) → SuggestionRun אחד עם run.maxlink (הדוח)
 ```
@@ -431,10 +431,10 @@ AppStore.runMaxLink(plan, label)       → BooksService.runMaxLink → Worker: m
 
 **מזהים.** `mx:<שתי השורות>` (ו־`@<עוגן>` כשמנוע אחד נתן כמה), בלי שמות מנועים: אותו קישור שומר על המזהה
 כשמנוע מצטרף או יוצא, ולכן אישור שורד הרצה חוזרת. הדחייה נשמרת תחת כל המפתחות שלה (`rejectionKeys` ב־
-`store.ts`): המפתח של כל הצעה גולמית מדויקת, ומפתח בלי מנוע ובלי כיוון. כך דחייה מריצה של מנוע בודד
+`state/suggestions.ts`): המפתח של כל הצעה גולמית מדויקת, ומפתח בלי מנוע ובלי כיוון. כך דחייה מריצה של מנוע בודד
 תקפה גם בקישור מרבי, ולהפך.
 
-**"כבר קיים" בין ריצות** (תיקון ב־`suggestionState`): קישור שאושר מריצה **אחרת** (מנוע אחר, או קישור
+**"כבר קיים" בין ריצות** (תיקון ב־`SuggestionsState.state`): קישור שאושר מריצה **אחרת** (מנוע אחר, או קישור
 מרבי) נחשב "כבר קיים". קודם כל קישור `auto:` הוחרג, ולכן הצעה של מנוע שני לאותן שורות נראתה ממתינה,
 ואישור שלה יצר קישור כפול.
 
@@ -444,7 +444,7 @@ AppStore.runMaxLink(plan, label)       → BooksService.runMaxLink → Worker: m
 
 כולל, לפי ספר (הספר של "המקום") ולפי מנוע: ספרים שנבדקו, ספרים שזוהה להם קשר, הצעות, ודאיות, לבדיקה,
 אושרו, נדחו, כבר קיימים, כפילויות שאוחדו, הסכמות, סתירות, שגיאות. המצבים החיים (אושרו, נדחו, קיימים)
-מחושבים מחדש מ־`suggestionState`, ולכן הדוח עוקב אחרי אישור ו־undo. ייצוא CSV ב־UTF-8 עם BOM, כמו דוח
+מחושבים מחדש מ־`SuggestionsState.state`, ולכן הדוח עוקב אחרי אישור ו־undo. ייצוא CSV ב־UTF-8 עם BOM, כמו דוח
 הבדיקה.
 
 ### 5.5 חיבור מנוע של ספר אחד (מראי מקומות)

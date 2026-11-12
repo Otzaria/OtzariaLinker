@@ -12,7 +12,7 @@ import "./records-dialog.css";
  */
 export function RecordsDialog() {
   const store = useStore();
-  const p = store.pendingRecords.value[0];
+  const p = store.exchange.pendingRecords.value[0];
   return p ? <Mapper key={p.path} path={p.path} table={p.table} initial={p.mapping} /> : null;
 }
 
@@ -48,7 +48,7 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
 
   return (
     <dialog ref={ref} class="records-dialog" // closing after "ייבוא" must not skip the NEXT waiting file: only skip while this one is still first
-      onClose={() => store.pendingRecords.value[0]?.path === path && store.skipRecords()} aria-labelledby="records-title">
+      onClose={() => store.exchange.pendingRecords.value[0]?.path === path && store.exchange.skipRecords()} aria-labelledby="records-title">
       <div class="dlg">
         <header>
           <Icon name="oz_document_links" size={24} />
@@ -151,7 +151,7 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
             class="btn filled"
             disabled={gaps.length > 0}
             onClick={() => {
-              store.importRecords(m);
+              store.exchange.importRecords(m);
               ref.current?.close();
             }}
           >

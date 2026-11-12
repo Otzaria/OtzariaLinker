@@ -18,6 +18,12 @@
 - **מצב אחד.** `AppStore` (`src/state/store.ts`) מחזיק signals לכל מה שהמסכים מציגים, ומתודה לכל פעולה של
   המשתמש. הקישורים משתנים **רק** דרך `history.commit`, ולכן כל פעולה ניתנת לביטול
   ([ADR 0003](adr/0003-ui-framework.md), [ADR 0005](adr/0005-ui-decisions.md)).
+  ה־store עצמו מחזיק את המקורות, הקריאה והבחירה בקוראים, הבונה, הקישורים וההיסטוריה, פרויקטים ושמירה
+  אוטומטית, הודעות ומשימות, ואת הקשר הכללים (`validation()`, `loadLinkLines`, רשימת ספרי ספריא, מטרת הייצוא)
+  שהבונה, הייצוא והבדיקה חולקים. כל השאר הוא מודול שה־store יוצר וחושף כשדה קריאה בלבד, עם ממשק `Host` צר
+  שה־store מממש: `suggestions` (הצעות אוטומטיות), `exchange` (ייבוא וייצוא), `quality` (בדיקת איכות),
+  `maxLink`, `dbLinks`, `altToc`, `ranges`. מסך קורא למודול ישירות (`store.exchange.prepareExport()`), בלי
+  עטיפות על ה־store.
 - **מודל קישור אחד** (`src/core/links/model.ts`), בלי תלות בפורמט. כל פורמט ממיר אליו ובחזרה בגבול שלו.
 
 ## 2. השכבות
@@ -62,7 +68,7 @@
 | `projects` | קובץ הפרויקט: כתיבה, קריאה ואימות | `project-format.ts` |
 | `diagnostics` | יומן מובנה וחסום בגודל, בלי טקסט ספרים. מחובר ל־`AppStore` דרך `state/diagnostics.ts`, ונשמר כקובץ JSONL מתפריט ההגדרות (`AppStore.saveDiagnostics`) | `log.ts` |
 | `workers` | פרוטוקול RPC טיפוסי עם ביטול והתקדמות; ה־Worker; הרצת מנוע על שני ספרים שלמים, אצווה של זוגות, ותוכנית קישור מרבי (זוג אחד בזיכרון בכל פעם); מנוע מראי המקומות על ספר אחד (המקור בנתחים, אינדקס מקומות לכל ספר מצוטט, במטמון חסום); חיפוש בטקסט של ספר, בנתחים; בדיקת הפעלה (`self-check.ts`: הקורא העצל והמפענח של zstd על דוגמאות זעירות) | `rpc.ts`, `sources.worker.ts`, `sources-api.ts`, `sources-handlers.ts` (המימוש היחיד של `SourcesApi`; גם בבדיקות, בלי postMessage), `engine-job.ts`, `citations-job.ts`, `maxlink-job.ts`, `search-job.ts`, `self-check.ts` |
-| `state` | `AppStore`; היסטוריה עם undo/redo ומעבר לכל נקודה בה; מטמון שורות; חיפוש בכל קורא; קישור מרבי (תכנון, הרצה, דוח חי); העדפות ופריסה; קישורי המסד בלשונית הקישורים והעתקתם לפרויקט; מבני `alt_toc`; פעולות הטווחים; יומן האבחון; ממשקי השירותים | `store.ts`, `history.ts`, `lines.ts`, `book-find.ts`, `preferences.ts`, `db-links.ts`, `maxlink.ts`, `alt-toc.ts`, `ranges.ts`, `diagnostics.ts`, `services.ts` |
+| `state` | `AppStore` (מקורות, קריאה ובחירה, בונה, קישורים, פרויקטים, הקשר הוולידציה) והמודולים שהוא יוצר: הצעות אוטומטיות (ריצת מנוע, מראי מקומות, אצווה, אישור ודחייה); ייבוא קובצי קישורים, גיליונות ורשומות, וייצוא; בדיקת האיכות; קישור מרבי (תכנון, הרצה, דוח חי); קישורי המסד בלשונית הקישורים והעתקתם לפרויקט; מבני `alt_toc`; פעולות הטווחים. וגם: היסטוריה עם undo/redo ומעבר לכל נקודה בה; מטמון שורות; חיפוש בכל קורא; העדפות ופריסה; יומן האבחון; ממשקי השירותים | `store.ts`, `suggestions.ts`, `exchange.ts`, `quality.ts`, `maxlink.ts`, `db-links.ts`, `alt-toc.ts`, `ranges.ts`, `history.ts`, `lines.ts`, `book-find.ts`, `preferences.ts`, `diagnostics.ts`, `services.ts` |
 | `ui` | המסכים: מסך פתיחה, סרגל עליון, סביבת עבודה, קוראים, חיפוש בקורא, בונה, רשימות, הצעות (כולל הגדרות המנועים במצב מתקדם), בדיקה, רשימת היסטוריה, חלונות ייצוא, אשף מיפוי למסד במבנה אחר, ייבוא רשומות עם מיפוי שדות, מבני `alt_toc`, מעבר מהדורה ועזרה; ערכת נושא ואייקונים | `app.tsx`, `screens/home.tsx`, `workspace/*.tsx`, `dialogs/*.tsx`, `help/`, `theme/`, `icons/` |
 | `app` | נקודת ההרכבה: יוצר את ה־Worker ומחליף אותו כשהוא קורס או נתקע, מתאים אותו ל־`BooksService`, `Saver` של הורדות, אחסון IndexedDB לשמירה האוטומטית, ומרנדר | `main.tsx`, `books-service.ts` (המיפוי היחיד `BooksService` ← `SourcesApi`), `idb-store.ts` |
 
@@ -83,7 +89,7 @@
        links-json / project → טקסט מפוענח, מוחזר כמסמך
        אחר         → skipped, עם סיבה בעברית
   ← OpenResult { sources (+ספרים), documents, skipped, needsMapping? }
-  → AppStore: sources.value; importLinksFile / openProject לכל מסמך; הודעות
+  → AppStore: sources.value; exchange.importLinksFile / openProject לכל מסמך; הודעות
   → needsMapping: מיפוי שמור לאותה טביעת מבנה → openMapped מיד; אחרת pendingDbs → אשף המיפוי
        (ui/dialogs/db-mapping-dialog.tsx) → AppStore.openMapped → BooksService.openMapped
        → Worker: SourceRegistry.openMapped(token, mapping) → MappedDbSource (סריקה אחת אם אין אינדקס)
@@ -107,7 +113,7 @@ Reader (ui) → LineStore (state/lines.ts): נתחים של 200 שורות, עד
 
 ```
 בחירה בקוראים → AppStore.pick / draft (computed) → validateLink (חי)
-  → createFromDraft / deleteLinks / setType / approveSuggestions / importLinksFile / openProject
+  → createFromDraft / deleteLinks / setType / suggestions.approve / exchange.importLinksFile / openProject
   → store.apply(label, changes) → history.commit → linkState.value (revision + 1)
 ```
 
@@ -117,29 +123,29 @@ undo מחזיר בדיוק את מה שהפעולה שינתה. ההיסטורי
 ### 4.4 מנועים אוטומטיים
 
 ```
-SuggestionsPanel → AppStore.runEngine(engine, sourceKey, targetKey)
+SuggestionsPanel → AppStore.suggestions.runEngine(engine, sourceKey, targetKey)
   → BooksService.runEngine → Worker: engineJob קורא את שני הספרים כולם (anchorText)
   → runEngine (linking, טהור) → EngineResult { suggestions, notes, unmatched }
-  ← AppStore.run; מצב כל הצעה נגזר: pending / approved / rejected / exists
-  → approveSuggestions → קישורים "auto:<id>" דרך history.commit
+  ← suggestions.run; מצב כל הצעה נגזר (suggestions.state): pending / approved / rejected / exists
+  → suggestions.approve → קישורים "auto:<id>" דרך history.commit
 
-מראי מקומות (ספר אחד): AppStore.runCitations(sourceKey)
+מראי מקומות (ספר אחד): AppStore.suggestions.runCitations(sourceKey)
   → BooksService.runCitations → Worker: citationsJob: registry.scan (נתחים) → ההפניות והספרים שהן מציינות
   → לכל ספר מצוטט: registry.heRefs (בלי טקסט) או הכותרות → אינדקס מקומות (במטמון) → CitationRun.finish
   ← EngineResult, כמו מנוע של זוג
 
-אצווה: AppStore.runBatch(engine, sourceId)
+אצווה: AppStore.suggestions.runBatch(engine, sourceId)
   → pairByTitle (linking/batch.ts): כל ספר במקור ← ספר הבסיס ששמו מופיע ב"… על <בסיס>"
   → BooksService.runBatch → Worker: batchJob מריץ engineJob זוג אחר זוג; כשל בזוג לא עוצר
   ← כל ההצעות ב־run אחד, ו־run.batch עם שורת סיכום לכל ספר
 
-קישור מרבי: AppStore.planMaxLink(scope) → MaxLinkState.plan → planMaxLink (linking/plan.ts, טהור)
+קישור מרבי: AppStore.maxLink.plan(scope) (MaxLinkState) → planMaxLink (linking/plan.ts, טהור)
   קשר לכל ספר: book_base_text של המסד (SourceBook.bases) ← "הערות … על Y" ← "X על Y"
   שלבים: pair (headings, dibur-hamatchil לפירוש; footnotes לספר הערות) ו־single (מנוע ספר אחד)
-→ AppStore.runMaxLink(plan) → BooksService.runMaxLink → Worker: maxlinkJob (זוג אחד בזיכרון; כשל בשלב לא עוצר)
+→ AppStore.maxLink.run(plan) → BooksService.runMaxLink → Worker: maxlinkJob (זוג אחד בזיכרון; כשל בשלב לא עוצר)
   ← StepResult לכל שלב, ומפתחות הקישורים שבמסד לספרים שנקראו
 → mergeSuggestions (linking/merge.ts, טהור): כפילויות, הסכמה, הכלה, סתירה, כיול זוג ספרים מול קישורי המסד, "כבר קיים"
-  ← run אחד עם run.maxlink; הדוח (buildReport) מחושב חי מול suggestionState
+  ← run אחד עם run.maxlink; הדוח (buildReport) מחושב חי מול suggestions.state
 ```
 
 המנוע לא יוצר קישורים. "אושרה" פירושו "קיים קישור `auto:<id>`", ולכן undo מחזיר את ההצעה ל"ממתינה".
@@ -169,8 +175,8 @@ SuggestionsPanel → AppStore.runEngine(engine, sourceKey, targetKey)
 ### 4.6 ייצוא ובדיקה
 
 ```
-AppStore.prepareExport / runQualityCheck
-  → טעינת הנתחים שבהם נמצאים קצוות כל הקישורים
+AppStore.exchange.prepareExport / AppStore.quality.run
+  → AppStore.loadLinkLines: טעינת הנתחים שבהם נמצאים קצוות כל הקישורים (וקישורי המסד סביבם)
   → planExport / runQa  — שניהם על validateExport, עם ValidationContext של השורות שנטענו
   → חלון הייצוא / לשונית הבדיקה → Saver (הורדה)
 ```

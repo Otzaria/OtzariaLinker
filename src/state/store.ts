@@ -5,45 +5,39 @@ import type { SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
-import { normalizeTitle, path2ForTitle, sourceTitleFromLinksFileName, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
+import { path2ForTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
-import { linkToRecord, recordToLink } from "../formats/links-json/convert";
-import { recordToObject } from "../formats/links-json/serialize";
-import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
-import { pairByTitle, type BatchPair } from "../linking/batch";
-import { assertSafeExportPaths, planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
-import { parseLinksJson } from "../formats/links-json/parse";
-import { parseLinksCsv } from "../formats/links-csv/parse";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, fileFingerprint, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LibraryFile, type LinkState } from "./history";
+import type { EngineId } from "../linking/automatic";
+import { pairByTitle } from "../linking/batch";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
-import type { AltTocExportPlan } from "../formats/alt-toc/export";
-import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-report";
-import { planSefariaCsv, type SefariaCsvFile } from "../formats/sefaria-csv/write";
-import type { BookHeading } from "../core/books";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
-import { qaCsv, runQa, type QaReport } from "../linking/qa";
 import { planRelink, type RelinkItem, type RelinkPlan } from "../linking/relink";
 import { loadPreferences, type Preferences } from "./preferences";
-import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
-import { detectLayout, type JsonLayout } from "../formats/links-json/layout";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
 import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
-import { MaxLinkState, type MaxLinkRunOptions, type MaxLinkScope } from "./maxlink";
-import type { MaxLinkRunInfo } from "../linking/maxlink-report";
-import { linePairKey } from "../linking/merge";
-import type { MaxLinkPlan } from "../linking/plan";
+import { MaxLinkState } from "./maxlink";
+import { SuggestionsState } from "./suggestions";
+import { ExchangeState } from "./exchange";
+import { QualityState } from "./quality";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
  * methods for everything a user can do. Screens read signals and call methods; they never change
  * links directly. Links change only through history.commit, so every action is undoable.
+ *
+ * The store itself keeps the open sources, reading and picking, the builder, the project's links and
+ * their history, projects and autosave, notices and tasks, and the rules context (validation()) that
+ * the builder, the export and the quality check share. Everything else is a module the store creates
+ * and exposes as a readonly field, each with a narrow Host interface the store satisfies: suggestions,
+ * exchange (import and export), quality, maxLink, dbLinks, altToc, ranges.
  */
 
 export type Side = "source" | "target";
@@ -77,37 +71,6 @@ export interface Task {
 export type Screen = "home" | "workspace";
 export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
 
-/** What the export dialog shows and saves: the links plan and the alt_toc files. */
-export interface ExportBundle extends ExportPlan {
-  altToc: AltTocExportPlan;
-}
-
-/** One run of an automatic engine and the user's decisions on it. */
-export interface SuggestionRun {
-  engine: EngineId;
-  /** "<source> ← <target>" or "אצווה: N ספרים" */
-  label: string;
-  result: EngineResult;
-  at: number;
-  /** a batch run: one summary row per book (paired or not) */
-  batch?: BatchRow[];
-  /** a max-link run: the plan, every step's outcome and the merge counts (state/maxlink.ts) */
-  maxlink?: MaxLinkRunInfo;
-}
-
-export interface BatchRow {
-  source: BookRef;
-  target: BookRef | null;
-  /** why the book was not run (unpaired) or failed */
-  problem?: string;
-  suggestions: number;
-  certain: number;
-  high: number;
-  review: number;
-}
-/** pending → the user has not decided; approved → a link exists for it; exists → the project already has that link */
-export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
-
 export class AppStore {
   readonly prefs: Preferences;
   readonly lines: LineStore;
@@ -121,6 +84,12 @@ export class AppStore {
   readonly maxLink: MaxLinkState;
   /** range suggestions, cutting and completion (state/ranges.ts) */
   readonly ranges: RangesState;
+  /** automatic suggestions: engine, citations and batch runs, and the user's decisions (state/suggestions.ts) */
+  readonly suggestions: SuggestionsState;
+  /** importing links files, sheets and records; the export (state/exchange.ts) */
+  readonly exchange: ExchangeState;
+  /** the quality check and its report (state/quality.ts) */
+  readonly quality: QualityState;
 
   readonly screen = signal<Screen>("home");
   readonly sources = signal<OpenedSource[]>([]);
@@ -143,24 +112,10 @@ export class AppStore {
   /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
-  readonly run = signal<SuggestionRun | null>(null);
-  /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
-  readonly dbLinkKeys = signal<ReadonlySet<string>>(new Set());
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
   readonly intent = signal<{ engine?: EngineId; batch?: boolean; maxlink?: boolean } | null>(null);
-  /** the last quality report; null until the user runs the check */
-  readonly qa = signal<QaReport | null>(null);
-  /** the link revision the report was made on — a different revision means the report is stale */
-  readonly qaRevision = signal(-1);
-  /**
-   * Rejected suggestions, by a key made of book TITLES and positions (rejectionKey) — session book keys
-   * change between sessions, titles do not — so a rejection survives re-runs and saved projects.
-   */
-  readonly rejected = signal<ReadonlySet<string>>(new Set());
-  /** the suggestion shown in the inline/card views */
-  readonly currentSuggestion = signal<string | null>(null);
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -247,6 +202,9 @@ export class AppStore {
     this.dbLinks = new DbLinksState(this, service);
     this.maxLink = new MaxLinkState(this, service, saver);
     this.ranges = new RangesState(this, service);
+    this.suggestions = new SuggestionsState(this, service);
+    this.exchange = new ExchangeState(this, service, saver);
+    this.quality = new QualityState(this, saver);
   }
 
   /* ---------------- sources ---------------- */
@@ -277,9 +235,9 @@ export class AppStore {
             this.notify("error", `"${d.path}" לא נטען: ${(err as Error)?.message ?? String(err)}. שאר הקבצים נטענו.`);
           }
     };
-    each("links-json", (p, t) => this.importLinksFile(p, t));
-    each("links-csv", (p, t) => this.importLinksCsv(p, t));
-    each("records", (p, t) => this.offerRecords(p, t));
+    each("links-json", (p, t) => this.exchange.importLinksFile(p, t));
+    each("links-csv", (p, t) => this.exchange.importLinksCsv(p, t));
+    each("records", (p, t) => this.exchange.offerRecords(p, t));
     each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
     each("project", (p, t) => this.openProject(p, t));
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
@@ -363,6 +321,13 @@ export class AppStore {
     if (ref.key === bookKey) return true;
     const b = this.books.value.get(bookKey);
     return !!b && ref.key.startsWith("unresolved:") && ref.title === b.title;
+  }
+
+  /** The open book a title (or a path_2) names, a non-personal one first; null when none is open. */
+  resolveTitle(title: string): BookRef | null {
+    const hits = this.booksByTitle.value.get(title) ?? this.booksByTitle.value.get(titleFromPath2(title));
+    const b = hits?.find((x) => x.origin !== "personal") ?? hits?.[0];
+    return b ? this.refOf(b.key) : null;
   }
 
   /* ---------------- reading and picking ---------------- */
@@ -574,213 +539,6 @@ export class AppStore {
     return this.allLinks.value.filter((l) => this.sameBook(l.source.book, bookKey) || this.sameBook(l.target.book, bookKey));
   }
 
-  /* ---------------- automatic suggestions ---------------- */
-
-  async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
-    const source = this.refOf(sourceKey);
-    const target = this.refOf(targetKey);
-    const result = await this.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, options, opts));
-    if (!result) return false;
-    await this.loadDbLinkKeys([source.key]);
-    batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now() };
-      this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
-      this.sideTab.value = "suggestions";
-    });
-    const c = this.suggestionCounts.value;
-    this.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
-    return true;
-  }
-
-  /**
-   * The citations engine (single book): the references in one book ("(בראשית א, ב)", "ב"ק דף ט:"),
-   * linked into whatever books are open. There is no target to pick.
-   */
-  async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
-    const source = this.refOf(sourceKey);
-    const result = await this.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, options, opts));
-    if (!result) return false;
-    await this.loadDbLinkKeys([source.key]);
-    batch(() => {
-      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}`, result, at: Date.now() };
-      this.currentSuggestion.value = result.suggestions[0]?.id ?? null;
-      this.sideTab.value = "suggestions";
-    });
-    const c = this.suggestionCounts.value;
-    this.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
-    return true;
-  }
-
-  /**
-   * Batch linking (stage 8.4): every book of one open source (e.g. a folder of commentaries) against
-   * the base book its title names, among all open books. Unpaired books are listed with the reason.
-   */
-  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}): Promise<boolean> {
-    const src = this.sources.value.find((s) => s.info.id === sourceId);
-    if (!src) return false;
-    const commentaries = src.books.map((b) => this.refOf(b.key));
-    const bases = [...this.books.value.values()].map((b) => this.refOf(b.key));
-    const pairs = pairByTitle(commentaries, bases);
-    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
-    if (!runnable.length) {
-      this.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
-      return false;
-    }
-    const items = await this.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), options, opts));
-    if (!items) return false;
-    await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
-    const suggestions: Suggestion[] = [];
-    const notes: Reason[] = [];
-    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.reason && { problem: p.reason }), suggestions: 0, certain: 0, high: 0, review: 0 }));
-    for (const it of items) {
-      const row = rows.find((r) => r.source.key === it.source.key)!;
-      if (it.error) row.problem = it.error;
-      for (const sg of it.result?.suggestions ?? []) {
-        suggestions.push(sg);
-        row.suggestions++;
-        if (sg.confidence === "certain") row.certain++;
-        else if (sg.confidence === "high") row.high++;
-        else row.review++;
-      }
-      for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
-    }
-    batch(() => {
-      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows };
-      this.currentSuggestion.value = suggestions[0]?.id ?? null;
-      this.sideTab.value = "suggestions";
-    });
-    const failed = rows.filter((r) => r.problem).length;
-    this.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
-    return true;
-  }
-
-  /**
-   * The library may already have a suggested link (compatibility review #7): read the database links
-   * of the run's source books, so such suggestions show as "already exists" instead of as new.
-   */
-  private async loadDbLinkKeys(bookKeys: readonly string[]): Promise<void> {
-    const keys = new Set<string>();
-    for (const key of new Set(bookKeys)) {
-      try {
-        for (const l of await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
-      } catch {
-        /* a source without links (text files) or a read error: nothing to compare with */
-      }
-    }
-    this.dbLinkKeys.value = keys;
-  }
-
-  readonly suggestionState = computed(() => {
-    const run = this.run.value;
-    const m = new Map<string, SuggestionState>();
-    if (!run) return m;
-    const links = this.linkState.value.links;
-    const rejected = this.rejected.value;
-    // every other link counts — also one approved from ANOTHER run (another engine, a max-link run), which
-    // would otherwise be approved twice; only this run's own approvals are left out
-    const ownIds = new Set(run.result.suggestions.map((s) => `auto:${s.id}`));
-    const existing = new Set<string>();
-    for (const l of links.values()) if (l.status !== "deleted" && !ownIds.has(l.id)) existing.add(linePairKey(l));
-    for (const k of this.dbLinkKeys.value) existing.add(k);
-    for (const s of run.result.suggestions) {
-      const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejectionKeys(s).some((k) => rejected.has(k)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
-    }
-    return m;
-  });
-
-  readonly suggestionCounts = computed(() => {
-    const c: Record<Confidence | SuggestionState, number> = { certain: 0, high: 0, possible: 0, ambiguous: 0, none: 0, pending: 0, approved: 0, rejected: 0, exists: 0 };
-    const st = this.suggestionState.value;
-    for (const s of this.run.value?.result.suggestions ?? []) {
-      c[s.confidence]++;
-      c[st.get(s.id) ?? "pending"]++;
-    }
-    return c;
-  });
-
-  suggestionLink(s: Suggestion): Link {
-    return {
-      id: `auto:${s.id}`,
-      status: "new",
-      provenance: "auto",
-      source: s.source,
-      target: s.target,
-      declaredType: s.declaredType,
-      // every engine's reference, never blank (B3): the target's title and line otherwise
-      heRef2: s.heRef2.trim() ? s.heRef2 : `${s.target.book.title} ${s.target.line + 1}`,
-      ...(s.anchor && { anchor: s.anchor }),
-    };
-  }
-
-  approveSuggestions(ids: readonly string[]): number {
-    const run = this.run.value;
-    if (!run) return 0;
-    const st = this.suggestionState.value;
-    const want = new Set(ids);
-    const links = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists").map((s) => this.suggestionLink(s));
-    if (!links.length) return 0;
-    const ids2 = new Set(links.map((l) => l.id.slice(5)));
-    batch(() => {
-      this.apply(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
-      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys));
-      if ([...keys].some((k) => this.rejected.value.has(k))) this.rejected.value = new Set([...this.rejected.value].filter((k) => !keys.has(k)));
-    });
-    return links.length;
-  }
-
-  rejectSuggestions(ids: readonly string[]): void {
-    const approved = ids.map((id) => `auto:${id}`).filter((id) => this.linkState.value.links.has(id));
-    batch(() => {
-      if (approved.length) this.apply(approved.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approved.length.toLocaleString("he")} הצעות`, approved.map((id) => ({ id, before: this.linkState.value.links.get(id)! })));
-      this.rejected.value = new Set([...this.rejected.value, ...this.keysOf(ids)]);
-    });
-  }
-
-  resetSuggestions(ids: readonly string[]): void {
-    const drop = new Set(this.keysOf(ids));
-    this.rejected.value = new Set([...this.rejected.value].filter((k) => !drop.has(k)));
-  }
-
-  private keysOf(ids: readonly string[]): string[] {
-    const want = new Set(ids);
-    return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).flatMap(rejectionKeys);
-  }
-
-  /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */
-  pendingAtLeast(level: Confidence): string[] {
-    const st = this.suggestionState.value;
-    const max = CONFIDENCE_ORDER.indexOf(level);
-    return (this.run.value?.result.suggestions ?? []).filter((s) => st.get(s.id) === "pending" && CONFIDENCE_ORDER.indexOf(s.confidence) <= max).map((s) => s.id);
-  }
-
-  /** Moves the inline/card view to a suggestion and shows both ends in the readers. */
-  showSuggestion(id: string): void {
-    const s = this.run.value?.result.suggestions.find((x) => x.id === id);
-    if (!s) return;
-    batch(() => {
-      this.currentSuggestion.value = id;
-      // show each end in the reader that already holds its book (a suggestion may run base → commentary)
-      const sideOf = (key: string, fallback: Side): Side => (this.view.source.value === key ? "source" : this.view.target.value === key ? "target" : fallback);
-      const a = sideOf(s.source.book.key, "source");
-      const b: Side = a === "source" ? "target" : "source";
-      for (const [side, end] of [[a, s.source], [b, s.target]] as const) {
-        this.pick[side].value = { bookKey: end.book.key, line: end.line, ...(end.end !== undefined && { end: end.end }) };
-        this.reveal(side, end.book.key, end.line);
-      }
-    });
-  }
-
-  /** Max-link: the plan for a scope (books, engines, reasons) — nothing runs yet. */
-  planMaxLink(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
-    return this.maxLink.plan(scope, engines);
-  }
-
-  /** Max-link: runs a plan; its merged suggestions become the current run. */
-  runMaxLink(plan: MaxLinkPlan, scopeLabel: string, options?: MaxLinkRunOptions): Promise<boolean> {
-    return this.maxLink.run(plan, scopeLabel, options);
-  }
-
   /* ---------------- databases in someone else's schema (mapping wizard) ---------------- */
 
   /** databases waiting for the mapping wizard; the dialog shows the first */
@@ -885,137 +643,18 @@ export class AppStore {
     return changes.length;
   }
 
-  /* ---------------- import / export ---------------- */
+  /* ---------------- the rules context: validation and the library's rules ---------------- */
 
-  /**
-   * Loads a book's links file FROM THE LIBRARY: its records become "file" links, and the project now
-   * holds that book's file (LinkState.files) — the export writes it back as the library's file plus
-   * the user's changes, and replaces the library's file with it. Only a file that parsed counts as
-   * loaded, and undoing the import forgets it (security review A1, A2).
-   *
-   * Loading a book's file again: the same file (fingerprint and every untouched record) only marks it
-   * loaded in this session — that is how a file restored from a saved project is verified (A3). A
-   * different file replaces the project's copy when the user changed nothing in it; otherwise nothing
-   * changes and the user is told why (the tool never merges two versions of a file silently).
+  /*
+   * One context for every check of a link: the builder's live check (draftProblems), the export
+   * (exchange.prepareExport) and the quality check (quality.run). It is built from what the store
+   * owns — the open books, the loaded lines, the database links (dbLinks) — and the library's rules
+   * (its Sefaria titles, the export's purpose), so it stays here rather than in the export module:
+   * the builder must not depend on the export to check a link, and the three must never disagree.
    */
-  importLinksFile(path: string, text: string): void {
-    const sourceTitle = sourceTitleFromLinksFileName(path);
-    if (!sourceTitle) return void this.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו ספר המקור.`);
-    const parsed = parseLinksJson(text);
-    const fatal = parsed.issues.find((i) => i.index < 0 && i.level === "error" && (i.code === "file/not-json" || i.code === "file/not-array"));
-    if (fatal)
-      return void this.notify("error", `"${path}" לא נטען: ${fatal.message} קובץ הקישורים של "${sourceTitle}" לא נחשב טעון, ולכן ייצוא שלו עדיין מחכה לקובץ תקין מהספרייה.`);
-    const sourceRef = this.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
-    const fileKey = `${sourceTitle}#${this.linkSeq++}`;
-    const issues = [...parsed.issues];
-    const links = parsed.records.map((r, i) => {
-      const { link, issues: more } = recordToLink(r, i, sourceRef, (t) => this.resolveTitle(t), `file:${fileKey}:${i}`);
-      issues.push(...more);
-      return link;
-    });
-    const file: LibraryFile = { title: sourceTitle, records: parsed.records.length, hash: fileFingerprint(text), verified: true, layout: detectLayout(text) };
-    const s = this.linkState.value;
-    const prev = s.files.get(sourceTitle);
-    const held = [...s.links.values()].filter((l) => l.provenance === "file" && l.source.book.title === sourceTitle);
-    let removed: Change[] = [];
-    if (prev || held.length) {
-      if (prev && sameLibraryFile(prev, file, held, links)) {
-        if (prev.verified) return void this.notify("info", `קובץ הקישורים של "${sourceTitle}" כבר טעון, והקובץ שנבחר זהה לו. לא השתנה דבר.`);
-        this.linkState.value = commit(s, `אימות ${sourceTitle}_links.json מול הספרייה`, [], Date.now(), [], [fileChange(s, sourceTitle, { ...prev, verified: true, layout: file.layout! })]);
-        return void this.notify("success", `קובץ הקישורים של "${sourceTitle}" שנטען זהה לעותק שבפרויקט. הספר מוכן לייצוא.`);
-      }
-      const changed = held.filter((l) => l.status !== "existing").length;
-      if (changed)
-        return void this.notify(
-          "error",
-          `"${path}" שונה מקובץ הקישורים של "${sourceTitle}" שבפרויקט, ובפרויקט יש ${linksCount(changed)} ערוכים או מחוקים מתוכו. הכלי לא ממזג שתי גרסאות של קובץ. כדי לעבוד על הקובץ העדכני: בטלו או מחקו את השינויים בקישורים של הספר וטענו שוב; או אשרו בחלון הייצוא שהעותק שבפרויקט הוא העדכני.`,
-        );
-      removed = held.map((l) => ({ id: l.id, before: l }));
-    }
-    this.linkState.value = commit(s, `ייבוא ${sourceTitle}_links.json (${linksCount(links.length)})`, [...removed, ...addChanges(links)], Date.now(), [], [fileChange(s, sourceTitle, file)]);
-    if (removed.length) this.notify("info", `העותק הקודם של קובץ הקישורים של "${sourceTitle}" (${linksCount(removed.length)}) הוחלף בקובץ שנטען.`);
-    const errors = issues.filter((i) => i.level === "error");
-    const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
-    if (parsed.generatorRejectsFile)
-      this.notify("error", `"${path}": אוצריא הייתה דוחה את הקובץ הזה כולו כמו שהוא (${new Set(errors.map((e) => e.index)).size} רשומות פגומות). הרשומות התקינות נטענו; בייצוא הקובץ ייכתב מחדש תקין.`, details);
-    else if (issues.length) this.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.`, details);
-    else this.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".`);
-    if (sourceRef.origin === "unknown") this.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
-  }
-
-  /** A spreadsheet of links (CSV/TSV): NEW links, one batch per source book (importSheetLinks). */
-  importLinksCsv(path: string, text: string): void {
-    const r = parseLinksCsv(text, path);
-    // a sheet whose columns are not the library's names: let the user map them instead of failing
-    if (!r.files.length && r.problems.some((p) => p.startsWith("חסרה עמודה"))) return this.offerRecords(path, text);
-    if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${path}": ${r.problems.length} בעיות בגיליון.`, r.problems.slice(0, 100));
-    this.importSheetLinks(path, r.files);
-  }
-
-  /**
-   * Links from a spreadsheet or a records file. They go through the links-file parser (one set of
-   * rules), but they are NOT the library's file of their book: they are new links (provenance
-   * "import", status "new"), validated and held back like any new link, and they never mark the
-   * book's library file as loaded nor change how it is written (security review A1). Book titles are
-   * matched exactly, and else by the generator's normalisation when that names exactly one open book
-   * (ASCII " for gershayim and the like — compatibility review B7). ONE undoable action.
-   */
-  private importSheetLinks(path: string, files: readonly { sourceTitle: string; text: string }[]): void {
-    if (!files.length) return;
-    const byNorm = new Map<string, Set<string>>();
-    for (const t of this.booksByTitle.value.keys()) {
-      const n = normalizeTitle(t);
-      byNorm.set(n, (byNorm.get(n) ?? new Set()).add(t));
-    }
-    const fixed = new Map<string, string>();
-    const resolve = (title: string): BookRef | null => {
-      const exact = this.resolveTitle(title);
-      if (exact) return exact;
-      const hits = byNorm.get(normalizeTitle(titleFromPath2(title)));
-      if (hits?.size !== 1) return null;
-      const dbTitle = [...hits][0]!;
-      fixed.set(titleFromPath2(title), dbTitle);
-      return this.resolveTitle(dbTitle);
-    };
-    const links: Link[] = [];
-    const issues: string[] = [];
-    let dropped = 0;
-    for (const f of files) {
-      const parsed = parseLinksJson(f.text);
-      const sourceRef = resolve(f.sourceTitle) ?? { key: `unresolved:${f.sourceTitle}`, title: f.sourceTitle, origin: "unknown" as const };
-      const batch = this.linkSeq++;
-      for (const i of parsed.issues) issues.push(`${f.sourceTitle}${i.index >= 0 ? `, רשומה ${i.index + 1}` : ""}: ${i.message}`);
-      parsed.records.forEach((r, i) => {
-        const { link, issues: more } = recordToLink(r, i, sourceRef, resolve, `imp:${batch.toString(36)}:${i}`);
-        for (const x of more) issues.push(`${f.sourceTitle}, רשומה ${i + 1}: ${x.message}`);
-        // a new link: none of the library-file bookkeeping (position, key order, unknown fields)
-        const { fileIndex: _i, keyOrder: _k, typeNull: _t, passthrough, ...rest } = link;
-        if (passthrough && Object.keys(passthrough).length) dropped++;
-        links.push({ ...rest, status: "new", provenance: "import" });
-      });
-    }
-    if (links.length) this.apply(`ייבוא ${linksCount(links.length)} מ־"${path}"`, addChanges(links));
-    const notes = [
-      ...[...fixed].map(([from, to]) => `השם "${from}" הותאם לספר "${to}" (אותו שם אחרי הנרמול של אוצריא).`),
-      ...(dropped ? [`ב־${linksCount(dropped)} היו עמודות שאינן שדות של קובץ קישורים; הן לא יובאו.`] : []),
-      ...issues,
-    ];
-    if (!links.length) return void this.notify("error", `"${path}": לא יובא אף קישור.`, notes.slice(0, 200));
-    this.notify(
-      notes.length ? "warning" : "success",
-      `יובאו ${linksCount(links.length)} חדשים מ־"${path}". הם נבדקים בייצוא כמו כל קישור חדש, וקובץ הקישורים של כל ספר בספרייה עדיין צריך להיטען לפני ייצוא.`,
-      notes.length ? notes.slice(0, 200) : undefined,
-    );
-  }
-
-  resolveTitle(title: string): BookRef | null {
-    const hits = this.booksByTitle.value.get(title) ?? this.booksByTitle.value.get(titleFromPath2(title));
-    const b = hits?.find((x) => x.origin !== "personal") ?? hits?.[0];
-    return b ? this.refOf(b.key) : null;
-  }
 
   /** Loads the lines at both ends of every link, so the rules can be checked on real lines. */
-  private async loadLinkLines(label: string): Promise<boolean> {
+  async loadLinkLines(label: string): Promise<boolean> {
     const need = new Map<string, Set<number>>();
     for (const l of this.allLinks.value) {
       if (l.status === "deleted") continue;
@@ -1057,109 +696,6 @@ export class AppStore {
     return true;
   }
 
-  /**
-   * Fills the Sefaria refs the library's sync needs where the user did not, from the database heRef of
-   * the line (core/links/sefaria-ref.ts) — ONE undoable action, said in a notice. Only links the user
-   * made or changed; an untouched library record is left as it is in the library (B1).
-   */
-  private fillSefariaRefs(): void {
-    const s = this.linkState.value;
-    const changes: Change[] = [];
-    for (const l of s.links.values()) {
-      if (l.status === "deleted" || l.provenance === "db" || (l.provenance === "file" && l.status === "existing")) continue;
-      const srcSef = this.isSefariaOwned(l.source.book);
-      const tgtSef = this.isSefariaOwned(l.target.book);
-      if (srcSef === tgtSef) continue;
-      const side = srcSef ? l.source : l.target;
-      if ((srcSef ? l.ref1 : l.ref2) !== undefined) continue;
-      const b = this.bookOf(side.book);
-      const ref = b && sefariaRefFromHeRef(this.lines.peek(b.key, side.line)?.heRef);
-      if (!ref) continue;
-      changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
-    }
-    if (!changes.length) return;
-    this.apply(`השלמת ציוני ספריא (ref_1/ref_2) ל־${linksCount(changes.length)}`, changes);
-    this.notify("info", `הכלי השלים ציון ספריא באנגלית (ref_1/ref_2) ל־${linksCount(changes.length)} מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
-  }
-
-  /** Loads every line the export must check (ends of every link, alt_toc lines) and returns the plan. */
-  async prepareExport(): Promise<ExportBundle | null> {
-    if (!(await this.loadLinkLines("בודק את הקישורים לפני הייצוא…"))) return null;
-    if (this.exportPurpose.value === "submission") this.fillSefariaRefs();
-    await this.altToc.loadLines();
-    const files = this.linkState.value.files;
-    return { ...planExport(this.allLinks.value, this.validation(), { layouts: (t) => files.get(t)?.layout, loadedFile: (t) => files.get(t)?.verified === true }), altToc: this.altToc.plan() };
-  }
-
-  /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */
-  async prepareSefariaCsv(plan: ExportPlan): Promise<SefariaCsvFile[] | null> {
-    const dropped = new Set(["export/heading-line", "export/line-out-of-range", "export/line-not-in-db"]);
-    const bad = new Set(plan.warned.filter((w) => w.problems.some((p) => dropped.has(p.code))).map((w) => w.link.id));
-    const links = plan.written.filter((l) => !bad.has(l.id));
-    const headings = new Map<string, BookHeading[]>();
-    const ok = await this.runTask("קורא את כותרות הספרים למראי המקום…", async (opts) => {
-      const keys = new Set(links.flatMap((l) => [this.bookOf(l.source.book)?.key, l.heRef2 ? undefined : this.bookOf(l.target.book)?.key]).filter((k): k is string => !!k));
-      let done = 0;
-      for (const key of keys) {
-        headings.set(key, await this.service.headings(key, opts));
-        opts.onProgress?.(++done, keys.size);
-      }
-      return true;
-    });
-    if (!ok) return null;
-    return planSefariaCsv(links, (ref) => {
-      const b = this.bookOf(ref);
-      return b && headings.get(b.key);
-    });
-  }
-
-  /** `_report.txt` for a plan (and the CSV files, when exporting as CSV). */
-  exportReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): string {
-    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc });
-  }
-
-  saveReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): void {
-    this.saver.save(REPORT_FILE_NAME, this.exportReport(plan, csv), "text/plain;charset=utf-8");
-  }
-
-  async runQualityCheck(): Promise<QaReport | null> {
-    if (!(await this.loadLinkLines("בודק את איכות הקישורים…"))) return null;
-    const report = runQa(this.allLinks.value, this.validation());
-    batch(() => {
-      this.qa.value = report;
-      this.qaRevision.value = this.linkState.value.revision;
-    });
-    return report;
-  }
-
-  saveQaReport(): void {
-    if (this.qa.value) this.saver.save(`בדיקת-קישורים-${new Date().toISOString().slice(0, 10)}.csv`, qaCsv(this.qa.value), "text/csv");
-  }
-
-  /**
-   * Saves the export. One file alone downloads as that file; anything more is one ZIP laid out like
-   * the library — links/, alt_toc/ — with `_report.txt` at its root. `csv` replaces the links files
-   * with Sefaria-layout CSV files.
-   */
-  saveExport(plan: ExportPlan | ExportBundle, csv?: readonly SefariaCsvFile[]): void {
-    const bundle: ExportBundle = "altToc" in plan ? plan : { ...plan, altToc: { files: [], heldBack: [] } };
-    const data = [
-      ...(csv ? csv.map((f) => ({ path: f.name, text: f.text, mime: "text/csv;charset=utf-8" })) : plan.files.map((f) => ({ path: `links/${f.name}`, text: f.text, mime: "application/json" }))),
-      ...bundle.altToc.files.map((f) => ({ path: `alt_toc/${f.name}`, text: f.text, mime: "application/json" })),
-    ];
-    if (!data.length) return;
-    try {
-      assertSafeExportPaths(data);
-      if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
-      else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
-    } catch (err) {
-      return void this.notify("error", (err as Error).message);
-    }
-    this.savedRevision.value = this.linkState.value.revision;
-    const alt = bundle.altToc.files.length;
-    this.notify("success", `יוצאו ${(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length).toLocaleString("he")} קישורים ב־${csv ? csv.length : plan.files.length} קבצים${alt ? `, ומבני כותרות ל־${alt} ספרים` : ""}.`);
-  }
-
   validation(): ValidationContext {
     return {
       lineCount: (ref) => {
@@ -1187,7 +723,7 @@ export class AppStore {
       {
         sources: this.sources.value.map((s) => ({ label: s.info.label, kind: s.info.kind, books: s.books.length })),
         links: this.allLinks.value,
-        rejectedSuggestions: [...this.rejected.value],
+        rejectedSuggestions: [...this.suggestions.rejected.value],
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
         altToc: this.altToc.list.value,
         dbMappings: [...this.dbMappings.value.values()],
@@ -1225,7 +761,7 @@ export class AppStore {
     for (const f of p.libraryFiles) fileChanges.push(fileChange(ls, f.title, { ...f, verified: false }));
     batch(() => {
       this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges, fileChanges);
-      this.rejected.value = new Set(p.rejectedSuggestions);
+      this.suggestions.rejected.value = new Set(p.rejectedSuggestions);
       if (p.dbMappings?.length) this.dbMappings.value = new Map([...this.dbMappings.value, ...p.dbMappings.map((m) => [m.fingerprint, m] as const)]);
       this.savedRevision.value = this.linkState.value.revision;
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
@@ -1285,33 +821,6 @@ export class AppStore {
 
   /* ---------------- notices and tasks ---------------- */
 
-  /* ---------------- links in someone else's layout (JSON, JSON Lines, CSV with other columns) ---------------- */
-
-  /** files waiting for the field-mapping dialog, first one shown */
-  readonly pendingRecords = signal<{ path: string; table: RecordsTable; mapping: RecordsMapping }[]>([]);
-
-  offerRecords(path: string, text: string): void {
-    const table = parseRecords(text, path);
-    if (!table) return void this.notify("error", `"${path}": לא נמצאו בקובץ רשומות קישורים (מערך של אובייקטים, JSON Lines או טבלה עם שורת כותרות).`);
-    if (table.truncated)
-      this.notify("warning", `"${path}" גדול מדי לייבוא מלא: ${[table.truncated.fields && `${table.truncated.fields.toLocaleString("he")} עמודות`, table.truncated.rows && `${table.truncated.rows.toLocaleString("he")} רשומות`].filter(Boolean).join(" ו־")} לא נקראו. פצלו את הקובץ, או השאירו בו רק את העמודות של הקישורים.`);
-    this.pendingRecords.value = [...this.pendingRecords.value, { path, table, mapping: guessRecordsMapping(table) }];
-  }
-
-  /** Imports the first waiting file with the user's mapping, through the ordinary links-file import. */
-  importRecords(mapping: RecordsMapping): void {
-    const [first, ...rest] = this.pendingRecords.value;
-    if (!first) return;
-    const r = recordsToLinksFiles(first.table, mapping, first.path);
-    this.pendingRecords.value = rest;
-    if (r.problems.length) this.notify(r.files.length ? "warning" : "error", `"${first.path}": ${r.problems.length} רשומות לא יובאו.`, r.problems);
-    this.importSheetLinks(first.path, r.files);
-  }
-
-  skipRecords(): void {
-    this.pendingRecords.value = this.pendingRecords.value.slice(1);
-  }
-
   /** diagnostics (see diagnostics.ts): notices, tasks, worker restarts and uncaught errors */
   readonly log = diagnosticsLog();
 
@@ -1365,49 +874,6 @@ export class AppStore {
   private newLinkId(): string {
     return `u:${Date.now().toString(36)}:${(++this.linkSeq).toString(36)}`;
   }
-}
-
-
-/**
- * "These two lines are already linked": both ends, in either direction and of any type — the
- * "same-lines" level of the ONE equality rule (core/links/equality.ts), shared with the worker
- * through linking/merge.ts. Kept under this name for existing callers.
- */
-export { linePairKey };
-
-/** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
-export function rejectionKey(s: Suggestion): string {
-  const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
-  return `${s.engine}|${end(s.source)}${s.anchor ? `@${s.anchor.rawStart}` : ""}>${end(s.target)}`;
-}
-
-/**
- * Every key a rejection of this suggestion is stored and recognised under. A merged (max-link)
- * suggestion also has the key of each raw suggestion it was made of — so a rejection made in a
- * single-engine run still holds — and one without engine or direction, which survives a re-run whose
- * representative record comes from another engine. (Its anchor counts only where one engine gave
- * several links between the same two lines — footnote markers — and the merge kept them apart.)
- */
-export function rejectionKeys(s: Suggestion): string[] {
-  const members = (s as { members?: readonly { suggestion: Suggestion }[] }).members;
-  if (!members?.length) return [rejectionKey(s)];
-  const end = (e: LinkSide) => `${e.book.title}#${e.line}${e.end !== undefined ? `-${e.end}` : ""}`;
-  const pair = (x: Suggestion) => [end(x.source), end(x.target)].sort().join("<>");
-  const own = pair(s);
-  const exact = members.filter((m) => pair(m.suggestion) === own).map((m) => rejectionKey(m.suggestion));
-  const split = s.id.includes("@") && s.anchor ? `@${end(s.source)}:${s.anchor.rawStart}` : "";
-  return [...new Set([rejectionKey(s), ...exact])].concat(`*|${own}${split}`);
-}
-
-/**
- * The file just loaded is the file the project already holds: same fingerprint and record count, and
- * every record the user did not touch is the same record at the same position. The fingerprint alone
- * is a claim a project file makes; the records are checked so a forged snapshot is never "verified".
- */
-function sameLibraryFile(prev: LibraryFile, file: LibraryFile, held: readonly Link[], loaded: readonly Link[]): boolean {
-  if (prev.hash !== file.hash || prev.records !== file.records) return false;
-  const rec = (l: Link) => JSON.stringify(recordToObject(linkToRecord(l)));
-  return held.every((l) => l.status !== "existing" || (l.fileIndex !== undefined && loaded[l.fileIndex] !== undefined && rec(loaded[l.fileIndex]!) === rec(l)));
 }
 
 declare const __APP_VERSION__: string;

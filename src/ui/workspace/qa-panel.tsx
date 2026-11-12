@@ -13,16 +13,16 @@ const SEV_LABEL = { error: "שגיאות", warning: "אזהרות", info: "מי�
 
 export function QaPanel() {
   const store = useStore();
-  const report = store.qa.value;
+  const report = store.quality.report.value;
   const [cat, setCat] = useState<QaCategory | "all">("all");
   const [sev, setSev] = useState<"error" | "warning" | "info" | "all">("all");
   const [shown, setShown] = useState(PAGE);
   // a report goes stale as soon as links change
-  const stale = store.qaRevision.value !== store.linkState.value.revision;
+  const stale = store.quality.revision.value !== store.linkState.value.revision;
 
   const rows = useMemo(() => (report?.issues ?? []).filter((i) => (cat === "all" || i.category === cat) && (sev === "all" || i.problem.severity === sev)), [report, cat, sev]);
 
-  const run = () => void store.runQualityCheck().then(() => (setCat("all"), setShown(PAGE)));
+  const run = () => void store.quality.run().then(() => (setCat("all"), setShown(PAGE)));
 
   if (!report)
     return (
@@ -50,7 +50,7 @@ export function QaPanel() {
           <Icon name="fl_arrow_sort" size={16} />
           {stale ? "בדיקה מחדש (השתנה)" : "בדיקה מחדש"}
         </button>
-        <button class="icon-btn" onClick={() => store.saveQaReport()} title="שמירת הדוח כ־CSV" aria-label="שמירת הדוח">
+        <button class="icon-btn" onClick={() => store.quality.saveReport()} title="שמירת הדוח כ־CSV" aria-label="שמירת הדוח">
           <Icon name="fl_arrow_download" size={18} />
         </button>
       </div>
@@ -73,7 +73,7 @@ export function QaPanel() {
       </div>
       {dups.length > 0 && (cat === "all" || cat === "duplicate") && (
         <div class="bulk">
-          <button class="btn tonal" onClick={() => (store.deleteLinks(dups), void store.runQualityCheck())} title="משאיר את הראשון מכל קבוצה">
+          <button class="btn tonal" onClick={() => (store.deleteLinks(dups), void store.quality.run())} title="משאיר את הראשון מכל קבוצה">
             <Icon name="oz_link_delete" size={18} />
             מחיקת {dups.length.toLocaleString("he")} העתקים כפולים
           </button>

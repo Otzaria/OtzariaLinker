@@ -8,7 +8,8 @@ import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } 
 import { planMaxLink, type MaxLinkPlan, type PlanBook } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource, Saver } from "./services";
-import type { NoticeKind, SideTab, SuggestionRun, SuggestionState } from "./store";
+import type { NoticeKind, SideTab } from "./store";
+import type { SuggestionsState } from "./suggestions";
 
 /*
  * Max-link ("קישור מרבי", stage 8.4) in the state layer: plan a selection (linking/plan.ts), run the
@@ -22,11 +23,9 @@ export interface MaxLinkHost {
   readonly books: ReadonlySignal<Map<string, SourceBook>>;
   readonly sources: ReadonlySignal<OpenedSource[]>;
   readonly linkState: Signal<LinkState>;
-  readonly run: Signal<SuggestionRun | null>;
-  readonly dbLinkKeys: Signal<ReadonlySet<string>>;
-  readonly currentSuggestion: Signal<string | null>;
+  /** the run, its state and the shown suggestion: a max-link run is an ordinary suggestions run */
+  readonly suggestions: Pick<SuggestionsState, "run" | "dbLinkKeys" | "current" | "state">;
   readonly sideTab: Signal<SideTab>;
-  readonly suggestionState: ReadonlySignal<Map<string, SuggestionState>>;
   refOf(bookKey: string): BookRef;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
@@ -40,9 +39,9 @@ export interface MaxLinkRunOptions {
 export class MaxLinkState {
   /** the report of the current run, live: approvals, rejections and undo update it */
   readonly report = computed<MaxLinkReport | null>(() => {
-    const run = this.host.run.value;
+    const run = this.host.suggestions.run.value;
     if (!run?.maxlink) return null;
-    const st = this.host.suggestionState.value;
+    const st = this.host.suggestions.state.value;
     return buildReport(run.maxlink, run.result.suggestions as readonly MergedSuggestion[], (id) => st.get(id));
   });
 
@@ -138,9 +137,9 @@ export class MaxLinkState {
       ...(failed ? [{ code: "maxlink/errors", text: `${failed} שלבים נכשלו; שאר השלבים רצו. הפרטים ב"דוח הקישור המרבי".` }] : []),
     ];
     batch(() => {
-      this.host.dbLinkKeys.value = db;
-      this.host.run.value = { engine: steps[0]!.engine, label: `${scopeLabel}: ${plan.books.length.toLocaleString("he")} ספרים`, result: { suggestions: merged.suggestions, notes, unmatched: [] }, at: Date.now(), maxlink: info };
-      this.host.currentSuggestion.value = merged.suggestions[0]?.id ?? null;
+      this.host.suggestions.dbLinkKeys.value = db;
+      this.host.suggestions.run.value = { engine: steps[0]!.engine, label: `${scopeLabel}: ${plan.books.length.toLocaleString("he")} ספרים`, result: { suggestions: merged.suggestions, notes, unmatched: [] }, at: Date.now(), maxlink: info };
+      this.host.suggestions.current.value = merged.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
     const c = this.report.value!.overall;

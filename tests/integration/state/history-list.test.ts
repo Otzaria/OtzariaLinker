@@ -9,8 +9,8 @@ const rec = (l1: number, l2: number) => ({ line_index_1: l1, heRef_2: `ב ${l2}`
 describe("AppStore — the history list", () => {
   it("labels read as Hebrew, with counts; going to an entry undoes or redoes to it", () => {
     const store = new AppStore({} as BooksService, { save: () => {} }, loadPreferences(null));
-    store.importLinksFile("א_links.json", JSON.stringify([rec(1, 1)]));
-    store.importLinksFile("ג_links.json", JSON.stringify([rec(1, 1), rec(2, 2)]));
+    store.exchange.importLinksFile("א_links.json", JSON.stringify([rec(1, 1)]));
+    store.exchange.importLinksFile("ג_links.json", JSON.stringify([rec(1, 1), rec(2, 2)]));
     const ids = store.allLinks.value.filter((l) => l.source.book.title === "ג").map((l) => l.id);
     store.deleteLinks(ids);
     store.restoreLinks(ids);

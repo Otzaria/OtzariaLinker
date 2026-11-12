@@ -23,7 +23,7 @@
 |---|---|
 | `src/formats/links-json/parse.ts` | פרסור. שומר כל רשומה תקינה ומדווח על כל בעיה עם מספר הרשומה |
 | `src/formats/links-json/convert.ts` | `recordToLink`: רשומה ← קישור. **המקום היחיד** של המרת 1-based ל־0-based |
-| `AppStore.importLinksFile` | שם הקובץ ← ספר המקור; פתרון ספרים לפי שם; פעולה אחת בהיסטוריה |
+| `ExchangeState.importLinksFile` (`src/state/exchange.ts`) | שם הקובץ ← ספר המקור; פתרון ספרים לפי שם; פעולה אחת בהיסטוריה |
 
 - **מה הגנרטור היה עושה:** רשומה אחת שאינה עוברת פענוח מפילה אצלו את **כל** הקובץ. הכלי מדווח על כך
   (`generatorRejectsFile`) וטוען את הרשומות התקינות.
@@ -149,10 +149,10 @@
      נטען שוב מהספרייה בהפעלה הזו, או שהמשתמש מאשר שהעותק עדכני, הספר מוחזק.
 6. סופרת חדשים, ערוכים, נשמרים, נמחקים (מיובאים שסומנו למחיקה), מוחזקים וקבצים.
 
-**ספרי ספריא ו־`ref_*`.** `AppStore.exportPurpose` ("שליחה לספריית אוצריא" כברירת מחדל, או "שימוש פרטי") עובר ל־`ValidationContext.purpose`, ו־`sefariaOwned` מסווג לפי רשימת הספרייה (`AppStore.sefariaTitles`). לפני תכנון ייצוא "לשליחה", `prepareExport` משלים `ref_1`/`ref_2` חסרים מה־heRef של השורה (`fillSefariaRefs`, פעולה אחת בהיסטוריה). הכללים והמדידה: [`LINK_FORMATS.md`](contracts/LINK_FORMATS.md) §1.8, "מדיניות הכלי".
+**ספרי ספריא ו־`ref_*`.** `AppStore.exportPurpose` ("שליחה לספריית אוצריא" כברירת מחדל, או "שימוש פרטי") עובר ל־`ValidationContext.purpose`, ו־`sefariaOwned` מסווג לפי רשימת הספרייה (`AppStore.sefariaTitles`). לפני תכנון ייצוא "לשליחה", `ExchangeState.prepareExport` משלים `ref_1`/`ref_2` חסרים מה־heRef של השורה (`fillSefariaRefs`, פעולה אחת בהיסטוריה). הכללים והמדידה: [`LINK_FORMATS.md`](contracts/LINK_FORMATS.md) §1.8, "מדיניות הכלי".
 
 בדיקת האיכות (`src/linking/qa.ts`) קוראת לאותה `validateExport`, ולכן הבדיקה והייצוא לא יחלקו לעולם.
-לפני שתיהן `AppStore` טוען את השורות של קצוות כל הקישורים, ואת קישורי המסד סביב הקישורים של המשתמש
+לפני שתיהן `AppStore.loadLinkLines` טוען את השורות של קצוות כל הקישורים, ואת קישורי המסד סביב הקישורים של המשתמש
 (`DbLinksState.loadAround`). שורה שלא נטענה מדווחת "לא נבדקה" ולא מנוחשת. קישור של המשתמש שהמסד כבר מכיל
 מקבל אזהרה `export/in-db` (או מידע `export/in-db-other-type`), לפי כלל השוויון של `core/links/equality.ts`.
 
@@ -179,7 +179,7 @@
 
 ### 3.4 מה יורד
 
-`AppStore.saveExport`:
+`ExchangeState.saveExport` (`src/state/exchange.ts`):
 
 - **קובץ אחד** (קובץ קישורים אחד, או קובץ alt_toc אחד, או CSV אחד): הקובץ עצמו.
 - **כמה קבצים:** `links-<YYYY-MM-DD>.zip`, ובו:
@@ -238,7 +238,7 @@ _report.txt
 - `guessRecordsMapping`: שמות נרדפים (אנגלית ועברית); `base: 0` כשיש ערך 0 ואין שליליים.
 - `recordsToLinksFiles` כותב רשומות `_links.json` רגילות לכל ספר מקור: `path_2` = השדה הממופה, או
   `<שם היעד>.txt`; `heRef_2` = השדה הממופה, או שם היעד. משם הן עוברות באותו פרסור ובאותן בדיקות, אבל
-  כקישורים **חדשים** (`AppStore.importSheetLinks`, `provenance: "import"`), לא כקובץ הספרייה (§2).
+  כקישורים **חדשים** (`ExchangeState.importSheetLinks`, `provenance: "import"`), לא כקובץ הספרייה (§2).
 - **גבולות** (סקירת האבטחה A5): שורה שומרת רק את התאים שאינם ריקים, בלי prototype; עד 256 עמודות, 2 מיליון
   רשומות ו־20 מיליון תאים. מה שנחתך מדווח.
 
