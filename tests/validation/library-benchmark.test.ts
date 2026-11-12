@@ -144,6 +144,14 @@ const idOf = (key: string) => Number(key.slice(key.lastIndexOf(":") + 1));
 describe.runIf(DB)("library benchmark: the tool on the books Otzaria already links", () => {
   const before = DB ? fingerprint(DB) : "";
   let registry: SourceRegistry;
+  /**
+   * The same registry without the database's links, for a book whose run is the citations engine
+   * alone. maxlinkJob reads every link at the books it ran on, for the merge's calibration against the
+   * library — which never judges a citation (merge.ts: single-book groups are outside it) — and for a
+   * base book (בראשית: every incoming link) that read is most of the run. One proxy for all such books,
+   * so the citations job's per-registry caches are shared between them.
+   */
+  let citationsOnly: SourceRegistry;
   let books: SourceBook[];
   let byId: Map<number, SourceBook>;
   let sourceId: string;
@@ -154,6 +162,13 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     registry = new SourceRegistry();
     const opened = await registry.open([{ path: "seforim.db", blob: await fileBlob(DB!) }]);
     books = opened.sources[0]!.books;
+    citationsOnly = new Proxy(registry, {
+      get(target, prop) {
+        if (prop === "existingLinks") return async () => [];
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
     sourceId = opened.sources[0]!.info.id;
     byId = new Map(books.map((b) => [idOf(b.key), b]));
     data = loadOracle();
@@ -340,7 +355,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     if (!steps.length) return { ...rec, ms: Date.now() - t0 };
     const { signal, progress } = stepDeadline();
     const ctx: EngineContext = { signal, progress };
-    const res = await maxlinkJob(registry, steps, {}, ctx);
+    const res = await maxlinkJob(steps.some((s) => s.kind === "pair") ? registry : citationsOnly, steps, {}, ctx);
     const byStep = new Map(steps.map((s) => [s.id, s]));
     const items: MergeItem[] = [];
     for (const it of res.items) {
