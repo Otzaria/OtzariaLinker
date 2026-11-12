@@ -1568,13 +1568,17 @@ function abbreviates(letters: string, words: readonly string[]): boolean {
 }
 
 /** "מדרש רבה", "ברבות", "במד"ר" (maybe "פרשה"/"פ'" after it) right before a book of the Tanakh: its midrash rabbah */
-const RABBAH_WORDS: ReadonlySet<string> = new Set(["רבה", "ברבה", "ורבה", "רבות", "ברבות", "וברבות", 'מד"ר', 'במד"ר', 'ובמד"ר', 'מדר"ר', 'במדר"ר', 'ובמדר"ר']);
+const RABBAH_WORDS: ReadonlySet<string> = new Set(["רבות", "ברבות", "וברבות", 'מד"ר', 'במד"ר', 'ובמד"ר', 'מדר"ר', 'במדר"ר', 'ובמדר"ר']);
 const PARSHA_WORDS: ReadonlySet<string> = new Set(["פרשה", "בפרשה", "פ'", "פר'", "פרש'"]);
 
 function rabbahBefore(toks: readonly Tok[], i: number): boolean {
   let at = beforeIndex(toks, i, 1);
   if (at >= 0 && PARSHA_WORDS.has(wordShape(toks[at]!))) at = beforeIndex(toks, at, 1);
-  return at >= 0 && RABBAH_WORDS.has(wordShape(toks[at]!));
+  if (at < 0) return false;
+  const w = wordShape(toks[at]!);
+  // "רבה" alone is also a word ("תהום רבה (בראשית ח:ב)"): only after "מדרש"
+  if (w === "רבה") return toks[at - 1]?.kind === "word" && /^ו?ב?מדרש$/.test(toks[at - 1]!.text);
+  return RABBAH_WORDS.has(w);
 }
 
 /** words that count, right before a title that is also an everyday word ("שני דברים", "כמה שבועות") */
@@ -1583,7 +1587,8 @@ const QUANTIFIERS: ReadonlySet<string> = new Set(["שני", "שתי", "שלשה"
 function quantifierBefore(toks: readonly Tok[], i: number): boolean {
   const at = beforeIndex(toks, i, 1);
   const t = at >= 0 && at === i - 1 ? toks[at] : undefined;
-  return !!t && t.kind === "word" && (QUANTIFIERS.has(t.text) || (!!numeralOf(t) && (t.gershayim || t.geresh)));
+  // words only: a number before the title is most often the last citation's place ("בסנהדרין דף פ' ובזבחים")
+  return !!t && t.kind === "word" && QUANTIFIERS.has(t.text);
 }
 
 /** what numbers count rather than locate: "ח' ימים", "מ"ד שנים" */
