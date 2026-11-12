@@ -33,7 +33,8 @@ describe("maxlinkJob", () => {
   it("runs every planned step and returns one result per step, in the plan's order", async () => {
     const { reg, all, texts } = await setup();
     const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
-    expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "footnotes"]);
+    // the last step: the commentary against רש"י on the same base, for lines that quote רש"י (plan.ts intermediateSteps)
+    expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "footnotes", "dibur-hamatchil"]);
     const progress: [number, number][] = [];
     const res = await maxlinkJob(reg, plan.steps, {}, { progress: (d, n) => progress.push([d, n]) });
     expect(res.items.map((i) => i.stepId)).toEqual(plan.steps.map((s) => s.id));
@@ -51,8 +52,8 @@ describe("maxlinkJob", () => {
     const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all, singleEngines: [] });
     const spy = vi.spyOn(reg, "lines");
     await maxlinkJob(reg, plan.steps, {}, {});
-    expect(plan.steps).toHaveLength(2);
-    expect(spy).toHaveBeenCalledTimes(2); // the commentary and its base, once
+    expect(plan.steps).toHaveLength(3); // headings + DH against the base, DH against רש"י on it
+    expect(spy).toHaveBeenCalledTimes(3); // the commentary, its base and רש"י — each once
   });
 
   it("commentaries on one base read the base once: it is kept from one pair to the next", async () => {
@@ -116,7 +117,7 @@ describe("maxlinkJob — the citations engine (single-book)", () => {
   it("runs once on the selected book, through its registered runner", async () => {
     const { reg, all, byTitle } = await setup();
     const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all });
-    expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "citations"]);
+    expect(plan.steps.map((s) => s.engine)).toEqual(["headings", "dibur-hamatchil", "dibur-hamatchil", "citations"]); // the second DH: against רש"י on the base
     const res = await maxlinkJob(reg, plan.steps, {}, {});
     const cit = res.items.find((i) => i.stepId.startsWith("citations|"))!;
     expect(cit.error).toBeUndefined();

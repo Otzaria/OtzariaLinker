@@ -139,7 +139,7 @@ test("max-link: the report after a run on a folder", async ({ page }) => {
   ]);
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("radio", { name: "קישור מרבי" }).click();
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("6 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
   await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
   await expect(page.locator("details.ml-report")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /אישור כל הוודאיות/ })).toBeEnabled();

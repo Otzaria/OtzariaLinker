@@ -31,10 +31,11 @@ test("max-link: a folder of a commentary and a notes book against the database �
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("radio", { name: "קישור מרבי" }).click();
-  // the folder is chosen by default; the plan: the commentary (two engines), the notes book (footnotes),
-  // and the citations engine once on each of the three books
+  // the folder is chosen by default; the plan: the commentary (two engines, plus dibur-hamatchil against
+  // רש"י on the same base, which the database slice has), the notes book (footnotes), and the citations
+  // engine once on each of the three books
   await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("6 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
   const engines = page.getByRole("group", { name: "השיטות שירוצו" });
   await expect(engines.getByRole("checkbox")).toHaveCount(4);
   await page.locator("summary", { hasText: "למה כל ספר" }).click();
@@ -43,7 +44,7 @@ test("max-link: a folder of a commentary and a notes book against the database �
 
   // untick and tick again: the count follows
   await engines.getByRole("checkbox", { name: /לפי דיבור המתחיל/ }).uncheck();
-  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("5 הרצות");
+  await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("5 הרצות"); // both DH steps go
   await engines.getByRole("checkbox", { name: /לפי דיבור המתחיל/ }).check();
 
   // advanced mode: every planned engine has its settings; an invalid one blocks the run

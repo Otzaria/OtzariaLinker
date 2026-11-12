@@ -160,3 +160,29 @@ describe("planMaxLink — a translation is linked as a translation (compatibilit
     expect(step.kind === "pair" && step.options).toBeUndefined();
   });
 });
+
+describe("planMaxLink — intermediate commentators", () => {
+  const lib = [
+    book("db:1", "מועד קטן", { origin: "sefaria", isBaseBook: true }),
+    book("db:2", 'רש"י על מועד קטן', { bases: ["db:1"] }),
+    book("db:3", "תוספות על מועד קטן", { bases: ["db:1"] }),
+    book("t:1", "קרן אורה על מועד קטן"),
+    book("t:2", "תוספות הרא\"ש על מועד קטן"),
+  ];
+  it("a commentary on a tractate is also read against רש\"י and תוספות on it — dibur-hamatchil only", () => {
+    const s = steps(planPairs({ selected: ["t:1"], library: lib }));
+    expect(s).toContain("dibur-hamatchil:קרן אורה על מועד קטן>רש\"י על מועד קטן");
+    expect(s).toContain("dibur-hamatchil:קרן אורה על מועד קטן>תוספות על מועד קטן");
+    expect(s.filter((x) => x.startsWith("headings:") && x.includes(">תוספות"))).toEqual([]);
+  });
+  it("a commentator is not read against itself, and \"תוספות הרא\"ש\" is not תוספות", () => {
+    const s = steps(planPairs({ selected: ["db:3", "t:2"], library: lib }));
+    expect(s).not.toContain("dibur-hamatchil:תוספות על מועד קטן>תוספות על מועד קטן");
+    expect(s).toContain("dibur-hamatchil:תוספות על מועד קטן>רש\"י על מועד קטן");
+    expect(s).toContain("dibur-hamatchil:תוספות הרא\"ש על מועד קטן>תוספות על מועד קטן");
+  });
+  it("no pairs when dibur-hamatchil is unticked", () => {
+    const s = steps(planPairs({ selected: ["t:1"], library: lib, engines: new Set(["headings"]) }));
+    expect(s.some((x) => x.includes(">רש\"י") || x.includes(">תוספות"))).toBe(false);
+  });
+});

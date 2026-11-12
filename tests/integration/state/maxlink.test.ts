@@ -46,7 +46,7 @@ describe("AppStore — max-link", () => {
     const { store, folder } = await opened();
     const plan = store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS);
     expect(plan.books).toHaveLength(4);
-    expect(plan.perEngine).toEqual({ headings: 1, "dibur-hamatchil": 1, footnotes: 1 });
+    expect(plan.perEngine).toEqual({ headings: 1, "dibur-hamatchil": 2, footnotes: 1 }); // DH twice: the base, and רש"י on it (plan.ts intermediateSteps)
     expect(plan.books.find((b) => b.book.title === "חידושים")!.skipped).toBeTruthy();
     expect(plan.identified).toBe(3);
   });
@@ -56,13 +56,13 @@ describe("AppStore — max-link", () => {
     const scope = { kind: "source", id: folder.info.id } as const;
     expect(await store.maxLink.run(store.maxLink.plan(scope, PAIRS), store.maxLink.scopeLabel(scope))).toBe(true);
     const run = store.suggestions.run.value!;
-    expect(run.maxlink!.steps).toHaveLength(3);
+    expect(run.maxlink!.steps).toHaveLength(4);
     const sugs = run.result.suggestions as MergedSuggestion[];
     // footnotes: 3 markers; the commentary: one per verse (headings and dibur-hamatchil agree or stand alone)
     expect(sugs.filter((s) => s.engines.includes("footnotes"))).toHaveLength(3);
     expect(sugs.filter((s) => s.focus === store.books.value.get(sugs.find((x) => x.engines.includes("headings"))!.focus)!.key).length).toBe(20);
     const rep = store.maxLink.report.value!;
-    expect(rep.overall).toMatchObject({ booksChecked: 4, booksIdentified: 3, steps: 3, links: 23, errors: 0 });
+    expect(rep.overall).toMatchObject({ booksChecked: 4, booksIdentified: 3, steps: 4, links: 23, errors: 0 });
 
     const certain = store.suggestions.pendingAtLeast("certain");
     expect(certain.length).toBe(rep.overall.certain);
