@@ -78,6 +78,14 @@ export interface DhOptions {
   readonly continueItems?: boolean;
   /** drop or demote what does not fit the order of the whole commentary (default true; see "the order of the whole commentary" in the engine) */
   readonly order?: boolean;
+  /**
+   * "Conection Type" of every suggestion, instead of the default pair ("commentary" base → commentary
+   * with an anchor, "source" commentary → base without one). The max-link planner sets
+   * "mishnah_in_talmud" for a Mishnah tractate and its Bavli (linking/plan.ts). A type the generator
+   * would flip or downgrade in the direction a record is written is not used for that record: the
+   * default stays (recordTypes).
+   */
+  readonly declaredType?: string;
 }
 
 const r = (code: string, text: string): Reason => ({ code, text });
@@ -182,8 +190,25 @@ interface Cand {
   readonly lemmaHead: boolean;
 }
 
+/**
+ * The type each record shape is written with: the declared type when the generator stores it as written
+ * in that direction (not flipped, not downgraded to OTHER), else the default of the shape. A type outside
+ * the generator's oriented set (SOURCE_VIEW_TYPES — "mishnah_in_talmud", "reference"…) is always kept.
+ */
+export function recordTypes(commentary: BookRef, base: BookRef, declared?: string): { anchored: string; plain: string } {
+  const keeps = (source: BookRef, target: BookRef, t: string) => {
+    const f = storedForm({ source: { book: source, line: 0 }, target: { book: target, line: 0 }, declaredType: t });
+    return f.knownType && !f.flipped && !f.downgraded;
+  };
+  const t = declared?.trim();
+  return {
+    anchored: t && keeps(base, commentary, t) ? t : "commentary",
+    plain: t && keeps(commentary, base, t) ? t : "source",
+  };
+}
+
 /** Which record shape can carry an anchor on the base words (see DH_ANCHOR_DIRECTION.md). */
-export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | "off" = "auto"): { anchors: boolean; reason: Reason } {
+export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | "off" = "auto", anchoredType = "commentary"): { anchors: boolean; reason: Reason } {
   if (mode === "off") return { anchors: false, reason: r("dh/anchors-off", "עוגנים כובו בהגדרות, ולכן כל הקישורים נכתבים מצד הפירוש.") };
   if (commentary.origin !== "otzaria" || base.origin !== "otzaria") {
     const sefaria = commentary.origin === "sefaria" || base.origin === "sefaria";
@@ -194,12 +219,12 @@ export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | 
         : r("dh/anchors-origin", "אחד הספרים אינו ספר מספריית אוצריא, ולא ידוע אם עוגן ישרוד את הייבוא. הקישורים נכתבים מצד הפירוש ובלי עוגן."),
     };
   }
-  const f = storedForm({ source: { book: base, line: 0 }, target: { book: commentary, line: 0 }, declaredType: "commentary" });
+  const f = storedForm({ source: { book: base, line: 0 }, target: { book: commentary, line: 0 }, declaredType: anchoredType });
   if (f.flipped || f.downgraded || f.skipped)
     return { anchors: false, reason: r("dh/anchors-flip", "במבנה הזה אוצריא הייתה הופכת את כיוון הקישור, והעוגן היה נזרק. הקישורים נכתבים מצד הפירוש ובלי עוגן.") };
   return {
     anchors: true,
-    reason: r("dh/anchors-base", "הקישורים נכתבים מצד ספר הבסיס (כקישור פירוש), עם עוגן על מילות הדיבור המתחיל. הם שייכים לקובץ הקישורים של ספר הבסיס."),
+    reason: r("dh/anchors-base", `הקישורים נכתבים מצד ספר הבסיס (${anchoredType === "commentary" ? "כקישור פירוש" : `כקישור מסוג "${anchoredType}"`}), עם עוגן על מילות הדיבור המתחיל. הם שייכים לקובץ הקישורים של ספר הבסיס.`),
   };
 }
 
@@ -215,7 +240,8 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const useLadder = options.ladder !== false;
   const ladderWide = options.ladderWide === true;
   const inherit = options.inherit !== false;
-  const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto");
+  const types = recordTypes(commentary.book, base.book, options.declaredType);
+  const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored);
   const notes: Reason[] = [policy.reason];
   const routeIntermediates = options.intermediates !== false;
   const continueItems = options.continueItems !== false;
@@ -1145,8 +1171,8 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       warnings,
     };
     return policy.anchors
-      ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), target: cSide, declaredType: "commentary", heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
-      : { ...common, source: cSide, target: baseSide, declaredType: "source", heRef2: heRefOf(base, bPath, baseLine, p.base) };
+      ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), target: cSide, declaredType: types.anchored, heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
+      : { ...common, source: cSide, target: baseSide, declaredType: types.plain, heRef2: heRefOf(base, bPath, baseLine, p.base) };
   });
 
   return { suggestions, notes, unmatched };

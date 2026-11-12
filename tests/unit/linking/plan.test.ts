@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
-import { notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
+import { evidenceFromCounts, LINKED_MIN, linkedFields, notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
 
 const book = (key: string, title: string, more: Partial<PlanBook> = {}): PlanBook => ({ key, title, origin: "otzaria", ...more });
 /** the pair relations alone: the citations engine (single-book) would add a step for every selected book */
@@ -229,5 +229,78 @@ describe("planMaxLink — the links the database already has (PlanBook.linkedBas
   it("the title wins over the links when it resolves", () => {
     const l2 = [...lib, book("t:1", "פירוש על טור", { linkedBases: ["db:3"] })];
     expect(steps(planMaxLink({ selected: ["t:1"], library: l2, singleEngines: [] }))).toEqual(["headings:פירוש על טור>טור", "dibur-hamatchil:פירוש על טור>טור"]);
+  });
+});
+
+describe("planMaxLink — a Mishnah tractate and its Bavli (MISHNAH_IN_TALMUD)", () => {
+  const lib = [
+    book("db:1", "משנה שבת", { origin: "sefaria", isBaseBook: true }),
+    book("db:2", "שבת", { origin: "sefaria", isBaseBook: true }),
+    book("db:3", "תלמוד ירושלמי שבת", { origin: "sefaria", isBaseBook: true }),
+    book("db:4", "משנה פאה", { origin: "sefaria", isBaseBook: true }),
+    book("db:5", "משנה ברורה", { origin: "sefaria", dependence: "commentary" }),
+    book("db:6", "ברורה"),
+    book("db:7", "משנה תורה, הלכות שבת", { origin: "sefaria", isBaseBook: true }),
+  ];
+
+  it("dibur-hamatchil Mishnah → Bavli, written as mishnah_in_talmud, from either side", () => {
+    for (const selected of [["db:1"], ["db:2"]]) {
+      const p = planMaxLink({ selected, library: lib, singleEngines: [] });
+      expect(steps(p)).toEqual(["dibur-hamatchil:משנה שבת>שבת"]);
+      const s = p.steps[0]!;
+      expect(s.kind === "pair" && s.relation.kind).toBe("mishnah-in-talmud");
+      expect(s.kind === "pair" && s.options).toEqual({ declaredType: "mishnah_in_talmud" });
+      expect(s.why).toContain("משנה בתלמוד");
+    }
+    expect(planMaxLink({ selected: ["db:2"], library: lib, singleEngines: [] }).books[0]!.decisions.join(" ")).toContain('המשנה "משנה שבת" מובאת בו');
+  });
+
+  it("never the Yerushalmi, a tractate with no Bavli, a commentary or another work named משנה", () => {
+    for (const k of ["db:3", "db:4", "db:5", "db:7"]) expect(planMaxLink({ selected: [k], library: lib, singleEngines: [] }).steps).toEqual([]);
+  });
+
+  it("two Bavli books of that name: not a guess", () => {
+    const l2 = [...lib, book("t:1", "שבת", { origin: "personal" })];
+    expect(planMaxLink({ selected: ["db:1"], library: l2, singleEngines: [] }).steps.length).toBe(1); // the official library wins over a personal copy
+    const l3 = [...lib, book("db:9", "שבת", { origin: "sefaria" })];
+    expect(planMaxLink({ selected: ["db:1"], library: l3, singleEngines: [] }).steps).toEqual([]);
+  });
+});
+
+describe("planMaxLink — TARGUM and MIDRASH links as evidence (PlanBook.linkedKinds)", () => {
+  const torah = ["בראשית", "שמות", "ויקרא", "במדבר", "דברים"].map((t, i) => book(`db:${i + 1}`, t, { origin: "sefaria", isBaseBook: true }));
+  const lib = [
+    ...torah,
+    book("m:1", "תרגום ותפסיר רסג", { linkedBases: torah.map((b) => b.key), linkedKinds: Object.fromEntries(torah.map((b) => [b.key, "targum" as const])) }),
+    book("db:6", "מדרש אגדה", { origin: "sefaria", isBaseBook: true, linkedBases: torah.map((b) => b.key), linkedKinds: Object.fromEntries(torah.map((b) => [b.key, "midrash" as const])) }),
+    book("m:2", "תפסיר רסג למגילת אסתר", { linkedBases: ["db:7"], linkedKinds: { "db:7": "targum" } }),
+    book("db:7", "אסתר", { origin: "sefaria", isBaseBook: true }),
+  ];
+
+  it("a translation on the five books: headings only, each book through its own section", () => {
+    const p = planMaxLink({ selected: ["m:1"], library: lib, singleEngines: [] });
+    expect(steps(p).sort()).toEqual(torah.map((b) => `headings:תרגום ותפסיר רסג>${b.title}`).sort());
+    expect(p.steps.every((s) => s.kind === "pair" && s.relation.scope?.section === s.target.title && s.relation.dependence === "targum")).toBe(true);
+    expect(p.books[0]!.decisions.join(" ")).toContain("כתרגום");
+  });
+
+  it("a midrash on the five books: headings and dibur-hamatchil, scoped", () => {
+    const p = planMaxLink({ selected: ["db:6"], library: lib, singleEngines: [] });
+    expect(p.steps).toHaveLength(10);
+    expect(p.steps.every((s) => s.kind === "pair" && s.relation.scope && s.relation.dependence === "midrash")).toBe(true);
+  });
+
+  it("a translation shown only by its TARGUM links (no 'תרגום' in the title) still runs headings only", () => {
+    expect(steps(planMaxLink({ selected: ["m:2"], library: lib, singleEngines: [] }))).toEqual(["headings:תפסיר רסג למגילת אסתר>אסתר"]);
+  });
+
+  it("evidenceFromCounts: COMMENTARY at any count, TARGUM / MIDRASH from LINKED_MIN; stored base → dependant", () => {
+    const row = (bookKey: string, c: Partial<Record<"commentaryOut" | "commentaryIn" | "targumOut" | "targumIn" | "midrashOut" | "midrashIn", number>>) => ({
+      bookKey, title: bookKey, origin: "sefaria" as const, out: 0, in: 0, commentaryOut: 0, commentaryIn: 0, targumOut: 0, targumIn: 0, midrashOut: 0, midrashIn: 0, ...c,
+    });
+    const ev = evidenceFromCounts("db:1", [row("a", { commentaryOut: 1 }), row("b", { targumOut: LINKED_MIN }), row("c", { midrashOut: LINKED_MIN - 1 }), row("d", { midrashIn: 400 })]);
+    expect(ev).toEqual([{ dependant: "a", base: "db:1" }, { dependant: "b", base: "db:1", kind: "targum" }, { dependant: "db:1", base: "d", kind: "midrash" }]);
+    expect(linkedFields(ev).get("b")).toEqual({ linkedBases: ["db:1"], linkedKinds: { "db:1": "targum" } });
+    expect(linkedFields([{ dependant: "b", base: "db:1" }, { dependant: "b", base: "db:1", kind: "targum" }]).get("b")!.linkedKinds).toEqual({});
   });
 });

@@ -7,6 +7,7 @@ import { headingLevel } from "../../../../src/core/text/html";
 import { countVisibleChars } from "../../../../src/core/text/offsets";
 import { searchKey, visibleSlice } from "../../../../src/matching/hebrew-tokens";
 import { anchorPolicy, inheritedConfidence, runDiburHamatchilEngine, type DhOptions } from "../../../../src/linking/automatic/dibur-hamatchil";
+import { recordTypes } from "../../../../src/linking/automatic/dibur-hamatchil/engine";
 import type { EngineBook, EngineResult, Suggestion } from "../../../../src/linking/automatic/types";
 
 const ref = (key: string, title: string, origin: BookOrigin = "otzaria"): BookRef => ({ key, title, origin, isBaseBook: false });
@@ -268,6 +269,16 @@ describe("record shape and anchors (docs/research/DH_ANCHOR_DIRECTION.md)", () =
     expect(anchorPolicy(ref("a", "א", "personal"), ref("b", "ב")).anchors).toBe(false);
     expect(anchorPolicy(ref("a", "א", "unknown"), ref("b", "ב")).anchors).toBe(false);
     expect(anchorPolicy(ref("a", "א"), ref("b", "ב")).anchors).toBe(true);
+  });
+
+  it("declaredType: kept when the generator stores it as written, else the default of the record shape", () => {
+    const base = { ...ref("b", "שבת", "sefaria"), isBaseBook: true };
+    const mishnah = { ...ref("m", "משנה שבת", "sefaria"), isBaseBook: true };
+    expect(recordTypes(mishnah, base, "mishnah_in_talmud")).toEqual({ anchored: "mishnah_in_talmud", plain: "mishnah_in_talmud" });
+    expect(recordTypes(ref("c", "פירוש"), base)).toEqual({ anchored: "commentary", plain: "source" });
+    // "commentary" from a non-base book into a base book would be downgraded to OTHER: the plain record stays "source"
+    expect(recordTypes(ref("c", "פירוש"), base, "commentary")).toEqual({ anchored: "commentary", plain: "source" });
+    expect(recordTypes(ref("c", "פירוש"), base, "no-such-type")).toEqual({ anchored: "commentary", plain: "source" });
   });
 
   it("the database heRef is used for heRef_2 when the line has one", () => {

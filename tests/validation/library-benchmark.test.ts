@@ -6,7 +6,7 @@ import { pushTo } from "../../src/core/collections";
 import type { Link } from "../../src/core/links/model";
 import type { EngineContext, EngineId } from "../../src/linking/automatic/types";
 import { mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../src/linking/merge";
-import { planMaxLink, type PlanBook, type PlanStep } from "../../src/linking/plan";
+import { LINKED_MIN, linkedFields, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
 import { SourceRegistry } from "../../src/sources/registry";
 import { maxlinkJob } from "../../src/workers/maxlink-job";
 import { DB, fileBlob, fingerprint, oracle, cleanupTmp } from "./env";
@@ -203,15 +203,23 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     `${MODE}${SHARDS > 1 ? ` shard ${SHARD}/${SHARDS}` : ""}`,
     async () => {
       const t0 = performance.now();
-      // the evidence the app's evidence pass reads per selected book (MaxLinkState.gatherEvidence, the link
-      // summary's COMMENTARY counts — always stored base → commentary), here from the oracle for all books at
-      // once; plus default_commentator, which the source reads at open (SourceBook.linkedBases)
-      const linked = new Map<number, Set<number>>();
-      for (const [type, s, t] of data.rows) if (type === "COMMENTARY" && s !== t) linked.set(t, (linked.get(t) ?? new Set()).add(s));
+      // the evidence the app's evidence pass reads per selected book (MaxLinkState.gatherEvidence →
+      // plan.ts evidenceFromCounts: COMMENTARY links, and TARGUM / MIDRASH ones from LINKED_MIN on — all
+      // stored base → dependant), here from the oracle for all books at once; plus default_commentator,
+      // which the source reads at open (SourceBook.linkedBases)
       const keyOfId = (id: number) => byId.get(id)?.key;
+      const evidence: LinkedEvidence[] = books.flatMap((b) => (b.linkedBases ?? []).map((base) => ({ dependant: b.key, base })));
+      for (const [type, s, t, n] of data.rows) {
+        const base = keyOfId(s);
+        const dependant = keyOfId(t);
+        if (!base || !dependant || s === t) continue;
+        if (type === "COMMENTARY") evidence.push({ dependant, base });
+        else if ((type === "TARGUM" || type === "MIDRASH") && n >= LINKED_MIN) evidence.push({ dependant, base, kind: type === "TARGUM" ? "targum" : "midrash" });
+      }
+      const fields = linkedFields(evidence);
       const library: PlanBook[] = books.map((b) => {
-        const lb = [...new Set([...(b.linkedBases ?? []), ...[...(linked.get(idOf(b.key)) ?? [])].map(keyOfId).filter((k): k is string => !!k)])];
-        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...(lb.length && { linkedBases: lb }) };
+        const f = fields.get(b.key);
+        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...(f && { linkedBases: f.linkedBases }), ...(f && Object.keys(f.linkedKinds).length && { linkedKinds: f.linkedKinds }) };
       });
       // every relation of the library at once: the planner's steps for "all books selected"
       const plan = planMaxLink({ selected: books.map((b) => b.key), library, singleEngines: ["citations"] });

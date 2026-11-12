@@ -5,7 +5,7 @@ import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
 import { buildReport, reportCsv, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
-import { planMaxLink, type MaxLinkPlan, type PlanBook } from "../linking/plan";
+import { evidenceFromCounts, linkedFields, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource, Saver } from "./services";
 import type { NoticeKind, SideTab } from "./store";
@@ -45,10 +45,11 @@ export const EVIDENCE_BOOKS = 200;
 
 export class MaxLinkState {
   /**
-   * The existing-links evidence (linking/plan.ts, PlanBook.linkedBases): commentary key → keys of the
-   * books the database links it to as their commentary. Grows as books are checked; kept for the session.
+   * The existing-links evidence (linking/plan.ts, PlanBook.linkedBases / linkedKinds): dependant key →
+   * the pairs the database links it in as their commentary, translation or midrash. Grows as books are
+   * checked; kept for the session.
    */
-  readonly evidence = signal<ReadonlyMap<string, readonly string[]>>(new Map());
+  readonly evidence = signal<ReadonlyMap<string, readonly LinkedEvidence[]>>(new Map());
   /** books whose link summary was read (or cannot be: not a database) */
   private readonly checked = new Set<string>();
   /** selected books the last evidence pass left unread (over EVIDENCE_BOOKS) */
@@ -95,30 +96,21 @@ export class MaxLinkState {
     const now = todo.slice(0, EVIDENCE_BOOKS);
     this.unchecked.value = todo.length - now.length;
     if (!now.length) return true;
-    const found = new Map<string, Set<string>>();
-    const add = (dep: string, base: string) => {
-      if (dep === base || !books.has(dep) || !books.has(base)) return;
-      const s = found.get(dep) ?? new Set();
-      found.set(dep, s.add(base));
-    };
+    const found: LinkedEvidence[] = [];
     const ok = await this.host.runTask(`בודק אילו ספרים כבר מקושרים במסד כפירוש ובסיס (${now.length.toLocaleString("he")} ספרים)…`, async (opts) => {
       let done = 0;
       for (const k of now) {
         opts.signal?.throwIfAborted();
         const s = await summary(k, opts.signal ? { signal: opts.signal } : {});
         this.checked.add(k);
-        if ("byBook" in s)
-          for (const b of s.byBook) {
-            if (b.commentaryIn) add(k, b.bookKey); // this book is the stored target: a commentary on b
-            if (b.commentaryOut) add(b.bookKey, k);
-          }
+        if ("byBook" in s) for (const e of evidenceFromCounts(k, s.byBook)) if (books.has(e.dependant) && books.has(e.base)) found.push(e);
         opts.onProgress?.(++done, now.length);
       }
       return true;
     });
-    if (found.size) {
+    if (found.length) {
       const next = new Map(this.evidence.value);
-      for (const [dep, bases] of found) next.set(dep, [...new Set([...(next.get(dep) ?? []), ...bases])]);
+      for (const e of found) next.set(e.dependant, [...(next.get(e.dependant) ?? []), e]);
       this.evidence.value = next;
     }
     return ok === true;
@@ -128,12 +120,15 @@ export class MaxLinkState {
   plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>): MaxLinkPlan {
     const evidence = this.evidence.value;
     const library: PlanBook[] = [...this.host.books.value.values()].map((b) => {
-      const linked = [...new Set([...(b.linkedBases ?? []), ...(evidence.get(b.key) ?? [])])];
+      // default_commentator (read at open) is commentary evidence like a COMMENTARY link
+      const own = (b.linkedBases ?? []).map((base): LinkedEvidence => ({ dependant: b.key, base }));
+      const fields = linkedFields([...own, ...(evidence.get(b.key) ?? [])]).get(b.key);
       return {
         ...this.host.refOf(b.key),
         ...(b.bases && { bases: b.bases }),
         ...(b.dependence && { dependence: b.dependence }),
-        ...(linked.length && { linkedBases: linked }),
+        ...(fields && { linkedBases: fields.linkedBases }),
+        ...(fields && Object.keys(fields.linkedKinds).length && { linkedKinds: fields.linkedKinds }),
       };
     });
     return planMaxLink({ selected: this.selection(scope), library, ...(engines && { engines }) });

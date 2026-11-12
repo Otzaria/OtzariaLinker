@@ -1,6 +1,7 @@
 import { pushTo } from "../core/collections";
+import type { DbLinkBookCount } from "../core/links/db-links";
 import type { BookRef } from "../core/links/model";
-import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn } from "../core/links/titles";
+import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
 import { ENGINES, type EngineId } from "./automatic";
 import { resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
@@ -19,7 +20,12 @@ import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
  *      "בית יוסף" with "טור" and "שער הציון" with "משנה ברורה": no declaration, no "X על Y", but
  *      thousands of COMMENTARY links (LIBRARY_BENCHMARK.md §6.1, §7: 99.8% and 100% re-produced).
  *      It also links a commentary on a commentary to the base of its base, when the database does
- *      ("שפתי חכמים" → "רש"י על בראשית" → "בראשית").
+ *      ("שפתי חכמים" → "רש"י על בראשית" → "בראשית"). TARGUM and MIDRASH links are read the same way
+ *      (also always stored base → dependant), with a floor (LINKED_MIN): a translation or a midrash on
+ *      the five books with no book_base_text ("תרגום ותפסיר רסג", "מדרש אגדה") is linked to each
+ *      book through its own section;
+ *   4. the corpus: a Mishnah tractate and the Bavli tractate of the same name ("משנה שבת" ↔ "שבת"),
+ *      which quotes it word for word (MISHNAH_IN_TALMUD; mishnahInTalmud below).
  * A relation runs when either side is selected, so "this book" covers both its base and the open
  * commentaries written on it. Nothing is guessed: no relation → the book is listed with the reason.
  */
@@ -52,10 +58,77 @@ export interface PlanBook extends BookRef {
   readonly dependence?: string;
   /** keys of the books the source's existing links show this one is a commentary on (see the header) */
   readonly linkedBases?: readonly string[];
+  /**
+   * For the linkedBases shown by TARGUM or MIDRASH links rather than COMMENTARY ones: base key → kind.
+   * A base absent here is a commentary base.
+   */
+  readonly linkedKinds?: Readonly<Record<string, LinkedKind>>;
 }
 
-export type RelationKind = "commentary" | "notes";
-export type RelationVia = "base-text" | "title" | "links";
+/** What the existing links say a dependant is, besides a commentary (evidenceFromCounts). */
+export type LinkedKind = "targum" | "midrash";
+
+/** One pair the existing links relate: `dependant` is written on `base` (as a commentary, unless `kind`). */
+export interface LinkedEvidence {
+  readonly dependant: string;
+  readonly base: string;
+  readonly kind?: LinkedKind;
+}
+
+/*
+ * A floor for TARGUM and MIDRASH evidence. Sefaria's MIDRASH layer holds stray single links between
+ * base texts ("בראשית" → "דברים", "משנה שבת" → "ראש השנה"; 1–4 links each), which would make one Torah
+ * book a "midrash" on another. Every pair a translation or a midrash is really written on has hundreds
+ * (the smallest: "תרגום יונתן על עובדיה", 21; "מדרש אגדה" → "ויקרא", 382). COMMENTARY links have no
+ * floor: the library writes them only between a commentary and its base.
+ */
+export const LINKED_MIN = 20;
+
+/**
+ * The relations one book's link summary shows (DbLinkSummary.byBook of `bookKey`): every type here is
+ * stored base → dependant, so "in" means this book is the dependant. Pure; MaxLinkState.gatherEvidence
+ * and the library benchmark both read evidence through it.
+ */
+export function evidenceFromCounts(bookKey: string, byBook: readonly DbLinkBookCount[]): LinkedEvidence[] {
+  const out: LinkedEvidence[] = [];
+  const add = (dependant: string, base: string, kind?: LinkedKind) => {
+    if (dependant !== base) out.push({ dependant, base, ...(kind && { kind }) });
+  };
+  for (const b of byBook) {
+    if (b.commentaryIn) add(bookKey, b.bookKey);
+    if (b.commentaryOut) add(b.bookKey, bookKey);
+    if (b.targumIn >= LINKED_MIN) add(bookKey, b.bookKey, "targum");
+    if (b.targumOut >= LINKED_MIN) add(b.bookKey, bookKey, "targum");
+    if (b.midrashIn >= LINKED_MIN) add(bookKey, b.bookKey, "midrash");
+    if (b.midrashOut >= LINKED_MIN) add(b.bookKey, bookKey, "midrash");
+  }
+  return out;
+}
+
+/** Folds evidence into PlanBook fields: a pair seen as a commentary stays a commentary. */
+export function linkedFields(evidence: readonly LinkedEvidence[]): Map<string, { linkedBases: string[]; linkedKinds: Record<string, LinkedKind> }> {
+  const byDep = new Map<string, Map<string, LinkedKind | "commentary">>();
+  for (const e of evidence) {
+    const m = byDep.get(e.dependant) ?? new Map<string, LinkedKind | "commentary">();
+    if (m.get(e.base) !== "commentary") m.set(e.base, e.kind ?? "commentary");
+    byDep.set(e.dependant, m);
+  }
+  const out = new Map<string, { linkedBases: string[]; linkedKinds: Record<string, LinkedKind> }>();
+  for (const [dep, m] of byDep) {
+    const linkedKinds: Record<string, LinkedKind> = {};
+    for (const [base, kind] of m) if (kind !== "commentary") linkedKinds[base] = kind;
+    out.set(dep, { linkedBases: [...m.keys()], linkedKinds });
+  }
+  return out;
+}
+
+/**
+ * "mishnah-in-talmud": a Mishnah tractate and the Bavli tractate of the same name. Not a commentary:
+ * the Gemara quotes the Mishnah word for word, so only dibur-hamatchil runs, Mishnah → Bavli, and the
+ * suggestions carry the type the database stores them under (MISHNAH_IN_TALMUD).
+ */
+export type RelationKind = "commentary" | "notes" | "mishnah-in-talmud";
+export type RelationVia = "base-text" | "title" | "links" | "corpus";
 
 /**
  * A commentary written on SEVERAL bases is linked to each base only through the part of it that is
@@ -80,6 +153,8 @@ export interface Relation {
   caveats: string[];
   /** set when the dependant is written on several bases (see RelationScope) */
   scope?: RelationScope;
+  /** the existing links show the dependant is a translation / a midrash of the base (PlanBook.linkedKinds) */
+  dependence?: LinkedKind;
 }
 
 /** One unit of work. `pair` steps run an engine on (source → target) in the engine's input direction. */
@@ -165,11 +240,44 @@ function ref(b: BookRef): BookRef {
 /** The relations a book has on its own (as a dependant: one, or one per base), or why it has none. */
 export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | { problem: string } {
   const own = ownRelations(book, byKey, index);
+  const talmud = mishnahInTalmud(book, byKey, index);
   if ("problem" in own) {
     const linked = linkedRelations(book, byKey);
-    return linked.length ? linked : own;
+    return linked.length || talmud.length ? [...linked, ...talmud] : own;
   }
-  return [...own, ...baseOfBase(book, own, byKey)];
+  return [...own, ...baseOfBase(book, own, byKey), ...talmud];
+}
+
+/** A book that could be a tractate on its own: no "X על Y", no dependenceType. */
+const isPlainText = (b: PlanBook): boolean => declaredBaseTitle(b.title) === null && !b.dependence;
+
+/*
+ * MISHNAH_IN_TALMUD (2,390 links in the database, 37 tractates): every Mishnah of a Bavli tractate is
+ * quoted in it word for word, before its Gemara. Both books are base texts, so neither declares the
+ * other; the corpus their titles name does ("משנה שבת" and "שבת" share the base key "שבת", and a bare
+ * name is the Bavli — titles.ts titleCorpus, the rule cf710d6 introduced for "X על ברכות"). Measured
+ * with the library benchmark's what-if (LIBRARY_BENCHMARK.md §7): dibur-hamatchil Mishnah → Bavli
+ * re-produced 72%–81% of the links, its "certain" all correct. The Yerushalmi is not paired: the
+ * database has no MISHNAH_IN_TALMUD link into it.
+ */
+function mishnahInTalmud(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] {
+  if (titleCorpus(book.title) !== "mishnah" || !isPlainText(book)) return [];
+  const hits = (index.exact.get(baseTitleKey(book.title)) ?? [])
+    .map((b) => byKey.get(b.key))
+    .filter((b): b is PlanBook => !!b && b.key !== book.key && titleCorpus(b.title) === "" && isPlainText(b));
+  const official = hits.filter((b) => b.origin !== "personal");
+  const pool = official.length ? official : hits;
+  if (pool.length !== 1) return []; // none, or two books of the Bavli by that name: never a guess
+  const bavli = pool[0]!;
+  return [
+    {
+      kind: "mishnah-in-talmud",
+      dependant: ref(book),
+      base: ref(bavli),
+      via: "corpus",
+      caveats: [`${quote(book.title)} היא משנה, ו־${quote(bavli.title)} היא מסכת הבבלי באותו שם: כל משנה מובאת בגמרא כלשונה.`],
+    },
+  ];
 }
 
 const linkedOpen = (book: PlanBook, byKey: ReadonlyMap<string, PlanBook>): PlanBook[] =>
@@ -188,14 +296,24 @@ function linkedRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>): 
   if (notesBaseKey(book.title) !== null) return [];
   const open = linkedOpen(book, byKey);
   if (!open.length) return [];
-  const why = "לפי הקישורים שכבר יש במסד: הוא מקושר אליו כפירוש.";
+  const kindOf = (base: PlanBook): LinkedKind | undefined => book.linkedKinds?.[base.key];
   const keys = new Set(open.map((b) => b.key));
   const inChain = (b: PlanBook) => basesOf(b).some((k) => keys.has(k)) || open.some((o) => basesOf(o).includes(b.key));
   const chain = open.length === 1 || open.every(inChain);
-  if (chain) return open.map((base) => ({ kind: "commentary" as const, dependant: ref(book), base: ref(base), via: "links" as const, caveats: [why] }));
-  const note = `לפי הקישורים שכבר יש במסד הספר מפרש ${open.length} ספרים. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
-  return open.map((base) => ({ kind: "commentary" as const, dependant: ref(book), base: ref(base), via: "links" as const, caveats: [note], scope: { section: base.title } }));
+  const relation = (base: PlanBook, caveat: string, scope?: RelationScope): Relation => {
+    const dependence = kindOf(base);
+    return { kind: "commentary", dependant: ref(book), base: ref(base), via: "links", caveats: [caveat], ...(scope && { scope }), ...(dependence && { dependence }) };
+  };
+  if (chain) return open.map((base) => relation(base, `לפי הקישורים שכבר יש במסד: הוא מקושר אליו ${AS_TEXT[kindOf(base) ?? "commentary"]}.`));
+  // the five books of the Torah under one translation or midrash ("תרגום ותפסיר רסג", "מדרש אגדה")
+  // divide themselves by a heading per book, like the multi-base books of book_base_text
+  const kinds = new Set(open.map((b) => kindOf(b) ?? "commentary"));
+  const as = kinds.size === 1 ? ` ${AS_TEXT[[...kinds][0]!]}` : "";
+  const note = `לפי הקישורים שכבר יש במסד הספר מקושר ל־${open.length} ספרים${as}. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
+  return open.map((base) => relation(base, note, { section: base.title }));
 }
+
+const AS_TEXT: Readonly<Record<LinkedKind | "commentary", string>> = { commentary: "כפירוש", targum: "כתרגום", midrash: "כמדרש" };
 
 /**
  * A commentary on a commentary is linked to the base of its base too, when the database links it
@@ -208,7 +326,8 @@ function baseOfBase(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap
   const have = new Set(own.map((r) => r.base.key));
   const out: Relation[] = [];
   for (const b of linkedOpen(book, byKey)) {
-    if (have.has(b.key)) continue;
+    // a TARGUM / MIDRASH link to the base of the base says nothing about a commentary on a commentary
+    if (have.has(b.key) || book.linkedKinds?.[b.key]) continue;
     const via = direct.find((r) => basesOf(byKey.get(r.base.key)).includes(b.key));
     if (!via) continue;
     have.add(b.key);
@@ -277,7 +396,8 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
     // a translation is not read by its opening words (stepsFor runs only headings on it)
     if (!book || isTargum(book)) continue;
     for (const own of relations.get(k) ?? []) {
-      if (own.kind !== "commentary" || own.scope || own.dependant.key !== k) continue;
+      // a midrash or a translation (by its links) does not quote רש"י or תוספות
+      if (own.kind !== "commentary" || own.scope || own.dependence || own.dependant.key !== k) continue;
       const self = commentatorOfTitle(own.dependant.title)?.key;
       for (const sib of commentariesOn.get(own.base.key) ?? []) {
         const who = commentatorOfTitle(sib.dependant.title);
@@ -298,7 +418,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
   return out;
 }
 
-const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם", links: "לפי הקישורים שבמסד" };
+const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם", links: "לפי הקישורים שבמסד", corpus: "לפי השמות: משנה ובבלי" };
 
 /*
  * A translation (book.dependenceType "targum", or "תרגום…") linked by headings is declared "targum",
@@ -326,7 +446,18 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
         why: `${d} הוא ספר הערות על ${b} (${VIA_TEXT[rel.via]}). שיטת הערות השוליים מתאימה כל סימן הערה ב־${b} לשורה בספר ההערות שנפתחת באותו סימן.${tail}`,
       },
     ];
-  const asTargum = isTargum(depBook) && targumTypeOk(rel.dependant, rel.base);
+  if (rel.kind === "mishnah-in-talmud")
+    return [
+      {
+        engine: "dibur-hamatchil",
+        source: rel.dependant,
+        target: rel.base,
+        why: `${d} מובאת ב־${b} (${VIA_TEXT[rel.via]}). שיטת דיבור המתחיל מחפשת את מילות הפתיחה של כל משנה בגמרא. הקישורים נכתבים מסוג "משנה בתלמוד" (mishnah_in_talmud), כמו במסד; הגנרטור שומר סוג זה כפי שנכתב, בלי היפוך ובלי הורדה ל"אחר".${tail}`,
+        options: { declaredType: "mishnah_in_talmud" },
+      },
+    ];
+  const targum = isTargum(depBook) || rel.dependence === "targum";
+  const asTargum = targum && targumTypeOk(rel.dependant, rel.base);
   const out: { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>> }[] = [
     {
       engine: "headings",
@@ -336,7 +467,7 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
       ...(asTargum && { options: { declaredType: "targum" } }),
     },
   ];
-  if (!isTargum(depBook))
+  if (!targum)
     out.push({
       engine: "dibur-hamatchil",
       source: rel.dependant,
@@ -402,25 +533,29 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     }
 
   const onBase = new Map<string, Relation[]>();
-  for (const rs of relations.values()) for (const r of rs) pushTo(onBase, r.base.key, r); const books: PlanBookRow[] = selected.map((k) => {
+  for (const rs of relations.values()) for (const r of rs) pushTo(onBase, r.base.key, r);
+  const books: PlanBookRow[] = selected.map((k) => {
     const b = byKey.get(k)!;
     const decisions: string[] = [];
-    const owns = relations.get(k) ?? [];
+    const all = relations.get(k) ?? [];
+    const owns = all.filter((r) => r.kind !== "mishnah-in-talmud");
     const own = owns[0];
     if (own)
       decisions.push(
         own.kind === "notes" ? `ספר הערות על ${quote(own.base.title)} (${VIA_TEXT[own.via]}).` : `כתוב על ${owns.map((r) => quote(r.base.title)).join(", ")} (${VIA_TEXT[own.via]}).`,
         ...own.caveats,
       );
+    for (const r of all) if (r.kind === "mishnah-in-talmud") decisions.push(...r.caveats);
     const onIt = onBase.get(k) ?? [];
     const comm = onIt.filter((r) => r.kind === "commentary");
     const notes = onIt.filter((r) => r.kind === "notes");
     if (comm.length) decisions.push(comm.length === 1 ? `פירוש פתוח אחד כתוב עליו: ${quote(comm[0]!.dependant.title)}.` : `${comm.length} פירושים פתוחים כתובים עליו.`);
     if (notes.length) decisions.push(notes.length === 1 ? `יש לו ספר הערות פתוח: ${quote(notes[0]!.dependant.title)}.` : `יש לו ${notes.length} ספרי הערות פתוחים.`);
-    if (own && own.kind === "commentary" && isTargum(b) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
+    for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
+    if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
     const n = touches.get(k) ?? 0;
     let skipped: string | undefined;
-    if (!n) skipped = own || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;
+    if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;
     return { book: ref(b), decisions, steps: n, ...(skipped !== undefined && { skipped }) };
   });
 
