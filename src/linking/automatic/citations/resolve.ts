@@ -48,10 +48,12 @@ export interface Resolution {
   readonly amudFromBareLetter: boolean;
   /** heRef-like label of the target, for heRef_2 */
   readonly label: string;
-  /** heref / headings: a location; named: a unit cited by name (its alt_toc range) */
-  readonly via: "heref" | "headings" | "named";
+  /** heref / headings: a location; named: a unit cited by name (its alt_toc range); pages: a daf of a book's printed pagination (altdaf.ts) */
+  readonly via: "heref" | "headings" | "named" | "pages";
   /** the book is addressed by daf/amud, so the location's kind was checked */
   readonly daf: boolean;
+  /** pages: the page is listed more than once (a section printed beside it), so where on it is unsure */
+  readonly split?: boolean;
 }
 
 export interface TargetIndex {
@@ -65,6 +67,11 @@ export interface TargetIndex {
    * ויקהל, א, א"), and the location under it; only books whose references name such levels.
    */
   resolveNamed?(key: string, elems: readonly AddrElem[]): Resolution | null;
+  /**
+   * The node at a full path of reference levels ("n7", "d5a", "$<name>" — the keys of heRefKeys), for a
+   * reference inside the book itself (self.ts): the levels are already told, so nothing is guessed here.
+   */
+  resolvePath?(keys: readonly string[]): Resolution | null;
 }
 
 const newNode = (): Node => ({ children: new Map(), first: Number.MAX_SAFE_INTEGER, last: -1 });
@@ -93,9 +100,17 @@ function levelOf(part: string): Level | null {
   return { kind: "name", name: normalize(p) };
 }
 
+/** A node key as a heRef writes it ("n12" → "יב", "d5a" → "ה.", "$הקדמה" → "הקדמה"). */
+const keyLabel = (k: string): string => (k[0] === "n" ? gem(Number(k.slice(1))) : k[0] === "d" ? `${gem(Number(k.slice(1, -1)))}${k.endsWith("a") ? "." : ":"}` : k.slice(1));
+
 const keyOf = (l: Level): string => (l.kind === "n" ? `n${l.n}` : l.kind === "d" ? `d${l.n}${l.amud === 1 ? "a" : "b"}` : `$${l.name}`);
 
 /** The levels of one line's heRef after the book's title, or null when it is not structured. */
+/** The node keys of a line's structured heRef ("n3", "d17a", "$<name>"), or null. */
+export function heRefKeys(heRef: string | null, title: string): string[] | null {
+  return heRefLevels(heRef, title)?.map(keyOf) ?? null;
+}
+
 export function heRefLevels(heRef: string | null, title: string): Level[] | null {
   if (!heRef) return null;
   const h = normTitle(heRef);
@@ -141,6 +156,16 @@ export function buildRefIndex(book: BookRef, lines: readonly RefLine[]): TargetI
     daf: isDaf,
     resolve: (elems, collection, section) => resolveRefs(book, root, isDaf, elems, collection, section),
     resolveNamed: (key, elems) => resolveNamedLevel(book, root, isDaf, key, elems),
+    resolvePath: (keys) => {
+      let node = root;
+      for (const k of keys) {
+        const next = node.children.get(k);
+        if (!next) return null;
+        node = next;
+      }
+      if (node === root) return null;
+      return { book, line: node.first, end: node.last, leaf: node.children.size === 0, wholeDaf: false, amudFromBareLetter: false, label: `${book.title} ${keys.map(keyLabel).join(", ")}`, via: "heref", daf: false };
+    },
   };
 }
 
@@ -181,7 +206,7 @@ const KINDS: Readonly<Record<Collection, ReadonlySet<Kind>>> = {
   sa: new Set(["siman", "seif"]),
   "sa-commentary": new Set(["siman", "sk", "seif"]),
   tur: new Set(["siman"]),
-  other: new Set(["perek", "pasuk", "siman", "seif", "sk", "halacha", "mishna", "os", "mizmor", "chelek"]),
+  other: new Set(["perek", "pasuk", "siman", "seif", "sk", "halacha", "mishna", "os", "mizmor", "chelek", "klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]),
 };
 
 /** The position of each kind in a two-level scheme: "פסוק ד" alone cannot be the first level. */
@@ -272,6 +297,8 @@ const gem = (n: number): string => {
 
 const HEADING_KIND: Readonly<Partial<Record<Kind, string>>> = {
   perek: "perek", pasuk: "pasuk", siman: "siman", seif: "seif", sk: "seifkatan", halacha: "halacha", mishna: "mishna", daf: "daf", os: "os", mizmor: "mizmor", chelek: "chelek",
+  // the headings engine's ids (headings/numbering.ts); a word it does not list is "w:<word>"
+  klal: "klal", shaar: "shaar", maamar: "maamar", teshuva: "teshuva", remez: "w:רמז", piska: "w:פסקה", drush: "w:דרוש",
 };
 
 /** A book with headings (פרק / סימן / דף…) as a target. Lines are the whole book, in order. */

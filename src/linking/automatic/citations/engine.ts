@@ -17,6 +17,10 @@ import { AliasIndex, type AliasTarget, type CatalogBook, type Collection } from 
 import { CitationScanner, type Citation } from "./detect";
 import { NamedUnitIndex, unitKindOf, unitNameKey, type NamedUnit, type NamedUnitSource } from "./named";
 import type { Resolution, TargetIndex } from "./resolve";
+import { resolveInternal } from "./self";
+import { resolveAltDaf, type DafStructure } from "./altdaf";
+import { hebrewTokens } from "../../../matching/hebrew-tokens";
+import { keySimilarity } from "../../../matching/token-match";
 
 /*
  * The CITATIONS engine ("מראי מקומות"): finds references to other books in ONE book's text and links
@@ -113,12 +117,36 @@ const PENALTY = {
    * these), at most "possible"; a halacha after it is a precise place
    */
   rambamCommentaryChapter: 0.1,
+  /**
+   * "לעיל סי' ה", "לקמן כלל ז": a place in the citing book itself (self.ts). The level's kind was told by the
+   * book's own headings and the place lies the way the words point; the database has few such links to
+   * confirm it (§6.8), so it stays "high"
+   */
+  internal: 0.06,
+  /**
+   * "(א, כ"ז)" with no book: the book a heading above names ("ספר בראשית") or the one this book comments
+   * on — told by the context, not the words: at most "high", like "שם"
+   */
+  implicitContext: 0.1,
+  /** the same, from the citation before it a line or more away, or a daf: one in four wrong by hand — "possible" */
+  implicitFar: 0.1,
+  /** "הריב"ש סי' ת"ו": an author's responsa by his name alone (no "בתשו'"): his only work in the library */
+  responsaAuthor: 0.05,
+  /**
+   * a daf of a book's printed pagination (the Zohar): the page by the alt_toc, while the database's links
+   * put about one quote in ten tens of lines away (פנחס, where sections printed beside the page interleave) —
+   * "possible" until the two are reconciled (§6.3ג)
+   */
+  pages: 0.15,
+  pagesSplit: 0.15,
+  /** "שם" more than six lines (up to fifteen) after the citation it completes, with no heading between */
+  ibidFar: 0.05,
 } as const;
 
 export interface Pending {
   readonly citation: Citation;
-  /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was */
-  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean }[];
+  /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was; dibur: the ד"ה's line was found */
+  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
 }
@@ -147,7 +175,7 @@ export class CitationRun {
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
     };
-    this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid }, source.title, units);
+    this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid, self: source }, source.title, units);
   }
 
   static fromCatalog(source: BookRef, catalog: readonly CatalogBook[], options: CitationsOptions = {}, units: readonly NamedUnitSource[] = []): CitationRun {
@@ -164,13 +192,61 @@ export class CitationRun {
     return false;
   }
 
-  /** Step 1: lines of the source book, in order (any chunk size). */
-  scan(lines: readonly { index: number; text: string; heading: number | null }[]): void {
+  /**
+   * Whether resolving against `book` needs its printed pagination (altdaf.ts): a citation of it by daf
+   * ("זוה"ק ח"א פ"ט ע"ב") when its own references are not by daf.
+   */
+  wantsPages(book: BookRef, index: TargetIndex | null): boolean {
+    if (index?.daf) return false;
+    for (const p of this.pending.values()) if (p.citation.candidates.some((c) => c.book.key === book.key) && p.citation.elems.some(isDafElem)) return true;
+    return false;
+  }
+
+  /**
+   * Step 2c (optional): the lines of `book` a ד"ה must be looked for in — a commentator's whole amud
+   * ("תוס' … ד"ה רבי מאיר"). The caller reads them and hands them to refineDibur().
+   */
+  diburSpans(book: BookRef): { line: number; end: number }[] {
+    const out: { line: number; end: number }[] = [];
+    for (const p of this.pending.values()) {
+      if (!p.citation.dh?.length) continue;
+      for (const r of p.resolved) if (r.target.book.key === book.key && r.res.end > r.res.line && r.res.end - r.res.line <= MAX_DIBUR_SPAN) out.push({ line: r.res.line, end: r.res.end });
+    }
+    return out;
+  }
+
+  /**
+   * The commentator's line whose heading starts with the ד"ה's words (the first two or three, each the same
+   * word or one letter off — matching/token-match), within the amud the citation was resolved to. One
+   * such line: the link is to it; none or several: the amud stays.
+   */
+  refineDibur(book: BookRef, lines: readonly { index: number; text: string }[], heRefAt?: (line: number) => string | null): void {
+    const byIndex = new Map(lines.map((l) => [l.index, l.text] as const));
+    for (const p of this.pending.values()) {
+      const dh = p.citation.dh;
+      if (!dh?.length) continue;
+      const want = dh.slice(0, Math.min(3, dh.length));
+      for (const [k, r] of p.resolved.entries()) {
+        if (r.target.book.key !== book.key || r.res.end <= r.res.line || r.dibur) continue;
+        const hits: number[] = [];
+        for (let i = r.res.line; i <= r.res.end; i++) {
+          const text = byIndex.get(i);
+          if (text !== undefined && opensWith(text, want)) hits.push(i);
+        }
+        if (hits.length !== 1) continue;
+        const line = hits[0]!;
+        p.resolved[k] = { ...r, res: { ...r.res, line, end: line, leaf: true, label: `${r.res.label} ד"ה ${dh.slice(0, 3).join(" ")}` }, heRef: heRefAt?.(line) ?? null, dibur: true };
+      }
+    }
+  }
+
+  /** Step 1: lines of the source book, in order (any chunk size). `heRef` (the line's own reference) places its internal references. */
+  scan(lines: readonly { index: number; text: string; heading: number | null; heRef?: string | null }[]): void {
     for (const l of lines) {
       this.lines++;
       if (l.text.includes('class="footnote"')) this.notesLines.add(l.index);
       const before = this.scanner.citations.length;
-      this.scanner.scanLine(l.index, l.text, l.heading);
+      this.scanner.scanLine(l.index, l.text, l.heading, l.heRef);
       for (let k = before; k < this.scanner.citations.length; k++) {
         const c = this.scanner.citations[k]!;
         const cands = this.opts.scope === "classic" ? c.candidates.filter((x) => x.collection !== "other") : c.candidates;
@@ -190,10 +266,28 @@ export class CitationRun {
    * Step 2b: resolves every citation that may mean `index.book`. `heRefAt` gives a target line's
    * reference, if known; `bookUnits` the book's own named units when needsUnits() asked for them.
    */
-  resolveWith(index: TargetIndex | null, book: BookRef, heRefAt?: (line: number) => string | null, bookUnits?: readonly NamedUnit[] | null): void {
+  resolveWith(index: TargetIndex | null, book: BookRef, heRefAt?: (line: number) => string | null, bookUnits?: readonly NamedUnit[] | null, pages?: DafStructure | null): void {
+    // the citing book's own levels, for its internal references: known once the whole book was scanned
+    const depthKinds = book.key === this.source.key ? this.scanner.structure.depthKinds() : [];
     for (const p of this.pending.values()) {
       for (const t of p.citation.candidates) {
         if (t.book.key !== book.key) continue;
+        if (p.citation.internal) {
+          const res = index && book.key === this.source.key ? resolveInternal(p.citation.internal, p.citation.line, p.citation.elems, index, depthKinds) : null;
+          if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
+          else if (!index || index.via === "none") p.unindexed++;
+          continue;
+        }
+        // "בזוה"ק (וירא קג:)", "זוה"ק ח"א פ"ט ע"ב": a daf of the book's printed pagination
+        if (pages && !index?.daf && p.citation.elems.some(isDafElem) && (!p.citation.unit || p.citation.unit.kind === "parsha")) {
+          const u = p.citation.unit;
+          const span = u ? (index?.resolveNamed?.(u.key, []) ?? null) : null;
+          const res = resolveAltDaf(pages, p.citation.elems, u ? { key: u.key, span } : null);
+          if (res) {
+            p.resolved.push({ target: t, res, heRef: null, ...(p.citation.unit && { addressed: true }) });
+            continue;
+          }
+        }
         if (p.citation.unit) {
           const res = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
           if (res) p.resolved.push({ target: t, res: res.r, heRef: res.r.line === res.r.end && heRefAt ? heRefAt(res.r.line) : null, ...(res.fallback && { fallback: true }), ...(res.addressed && { addressed: true }) });
@@ -204,6 +298,9 @@ export class CitationRun {
           p.unindexed++;
           continue;
         }
+        // "[בב"ש שער ג']": a book's own level named by its word ("כלל", "שער") is read by the position of the
+        // number in the book's references — only under a name that IS the book (its title, a canonical form)
+        if (t.tier === "acronym" && p.citation.elems.some((e) => SECTION_KINDS.has(e.kind))) continue;
         const res = index.resolve(p.citation.elems, t.collection, t.section);
         // book_acronym is too noisy to trust without the target's own references: a database name
         // located only by headings ("בתרא" → a commentary's headings) is not a reading
@@ -231,7 +328,8 @@ export class CitationRun {
       const c = p.citation;
       let options = p.resolved;
       // an ibid follows the book its antecedent was linked to
-      if (c.ibidOf !== undefined && chosenBook.has(c.ibidOf)) options = options.filter((o) => o.target.book.key === chosenBook.get(c.ibidOf!));
+      // (one moved to a commentator — "רש"י שם ד"ה" — is in that commentary, not in the antecedent's book)
+      if (c.ibidOf !== undefined && chosenBook.has(c.ibidOf) && !c.commentator) options = options.filter((o) => o.target.book.key === chosenBook.get(c.ibidOf!));
       if (!options.length) {
         const why = p.resolved.length
           ? `"${c.text}": המקום שאליו מפנה ה"שם" לא נמצא בספר של ההפניה הקודמת`
@@ -289,7 +387,7 @@ export class CitationRun {
         score: round(best.score),
         confidence,
         reasons,
-        rules,
+        rules: best.dibur ? [...rules, "citations.dibur-line"] : rules,
         alternatives: scored
           .filter((o) => o !== best)
           .slice(0, this.opts.maxAlternatives)
@@ -336,6 +434,27 @@ export class CitationRun {
   }
 }
 
+const SECTION_KINDS: ReadonlySet<string> = new Set(["klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]);
+
+const isDafElem = (e: AddrElem): boolean => e.kind === "daf" || e.amud !== undefined;
+
+/** an amud of a commentator is a few dozen lines; a longer range is no place to look for a ד"ה in */
+const MAX_DIBUR_SPAN = 200;
+
+/** the line's first words (past a leading "ד"ה", "גמ'", "מתני'") are the heading `want` */
+function opensWith(html: string, want: readonly string[]): boolean {
+  const toks = hebrewTokens(html).slice(0, want.length + 3);
+  for (let s = 0; s <= 2; s++) {
+    if (s && !/^(?:דה|גמ|גמרא|מתני|מתנ|בא|באד|שמ|תוד)$/.test(toks[s - 1]?.key ?? "")) break;
+    if (want.every((w, q) => {
+      const t = toks[s + q];
+      if (!t) return false;
+      return t.key === w || (w.length >= 3 && keySimilarity(t.key, w) >= 0.8);
+    })) return true;
+  }
+  return false;
+}
+
 const tierOrder = (t: AliasTarget): number => ({ title: 0, derived: 1, acronym: 2, secondary: 3 })[t.tier];
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
@@ -350,6 +469,7 @@ const GUARD_LABEL: Readonly<Record<string, string>> = {
   "siman-of-another-book": "סימן של ספר אחר שנזכר לידו",
   "daf-of-another-book": "דף של ספר אחר שנזכר לידו",
   "rambam-topic-unknown": 'פרק אחרי "רמב"ם" בלי שם הלכות שאפשר לזהות',
+  "internal-of-another-book": '"לעיל"/"לקמן" של ספר אחר שנזכר לידו',
 };
 
 /**
@@ -406,6 +526,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.ibid === "book") s -= PENALTY.ibidBook;
   if (c.commentator) s -= PENALTY.commentator;
   if (r.via === "headings") s -= PENALTY.headings;
+  if (r.via === "pages") s -= r.split ? PENALTY.pagesSplit : PENALTY.pages;
   if (COMMON_TITLES.has(t.book.title) && c.ibid === "none" && !c.bracketed && c.elems.length === 1 && !c.elems[0]!.explicit && c.elems[0]!.amud === undefined) s -= PENALTY.commonTitle;
   if (c.elems[0]?.alsoNumber !== undefined && !r.daf) s -= PENALTY.compactOrNumber;
   if (c.numericName) s -= PENALTY.numericName;
@@ -414,8 +535,15 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.elems.some((e) => e.numeral.common && !e.explicit)) s -= PENALTY.commonNumeral;
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
-  if (c.rule === "rambam-topic-initials") s -= PENALTY.rambamInitials;
+  if (c.internal) s -= PENALTY.internal;
+  if (c.rule && /^rambam-(?:topic|named)-(?:initials|abbrev|word)$/.test(c.rule)) s -= PENALTY.rambamInitials;
   if (c.rule === "base-daf") s -= PENALTY.baseDaf;
+  if (c.rule === "implicit-context") s -= PENALTY.implicitContext;
+  if (c.rule === "implicit-previous-far") s -= PENALTY.implicitFar;
+  if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
+  if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
+  // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
+  if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   if (c.ordinal && c.elems.length === 1 && TALMUDIC.has(t.collection)) s -= PENALTY.ordinalChapter;
   if (c.commentator && t.collection === "rambam" && !r.leaf) s -= PENALTY.rambamCommentaryChapter;
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
@@ -443,11 +571,29 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "rambam-topic-full": `שם ההלכות נכתב בלי "הלכות" (או בקיצור "ה'"), ונמצא בשמות ספרי משנה תורה`,
   "rambam-topic-first": "נכתבה רק המילה הראשונה של שם ההלכות, ואין עוד הלכות שמתחילות בה",
   "rambam-topic-initials": "שם ההלכות נכתב בראשי תיבות, ורק הלכות אחת מתאימות להם",
+  "rambam-topic-abbrev": "שם ההלכות נכתב בקיצור של כמה מילים ממנו (\"יו\"ט\", \"מע\"ק\"), ורק הלכות אחת מתאימות לו",
+  "rambam-topic-word": "נכתבה מילה אחת משם ההלכות (\"לולב\"), ורק בשם הלכות אחד היא נמצאת",
+  "rambam-named-full": "\"רמב\"ם\" ושם ההלכות (בלי \"הלכות\") לפני הפרק",
+  "rambam-named-first": "\"רמב\"ם\" והמילה הראשונה של שם ההלכות לפני הפרק",
+  "rambam-named-initials": "\"רמב\"ם\" ושם ההלכות בראשי תיבות לפני הפרק",
+  "rambam-named-abbrev": "\"רמב\"ם\" ושם ההלכות בקיצור לפני הפרק",
+  "rambam-named-word": "\"רמב\"ם\" ומילה משם ההלכות לפני הפרק",
+  "named-level": "אחרי שם הספר נכתב שם של פרשה, שהיא רמה בציוני המקום של הספר (או חלק במבנה הדפים שלו), ואחריה המקום",
+  "author-part": "שם שהמסד נותן לכמה חיבורים של מחבר אחד, וחלק השולחן ערוך שאחריו בוחר אחד מהם",
+  "part-book": "\"ח\"א\", \"ח\"ב\" אחרי שם החיבור: הכרך, שהוא ספר נפרד בספרייה",
   "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
+  "dibur-context": "שם המפרש ו\"ד\"ה\" בלי שם מסכת: הדף נלקח מההפניה שלפניו (או מהמסכת שהחיבור נכתב עליה), והקישור הוא לפירוש על הדף הזה",
+  "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
+  "responsa-named": "שם המחבר ומילה לתשובות (\"בתשו'\", \"שו\"ת\") לפני הסימן: ספר התשובות שלו בספרייה",
+  "responsa-author": "שם המחבר לפני הסימן, וספר התשובות הוא החיבור היחיד שלו בספרייה",
+  "implicit-previous": "נכתב מקום בסוגריים בלי שם ספר, ולכן הוא נקרא בספר של ההפניה שלפניו (כמו \"שם\")",
+  "implicit-previous-far": "נכתב מקום בסוגריים בלי שם ספר, והוא נקרא בספר של ההפניה שלפניו — שאינה באותה שורה, או שהמקום הוא דף",
+  "implicit-context": "נכתב מקום בסוגריים בלי שם ספר, ולכן הוא נקרא בספר שההקשר נותן: הכותרת שמעליו, או הספר שהחיבור נכתב עליו",
 };
 
 const KIND_WORD: Readonly<Record<string, string>> = {
   perek: "פרק", pasuk: "פסוק", siman: "סימן", seif: "סעיף", sk: "סעיף קטן", halacha: "הלכה", mishna: "משנה", daf: "דף", os: "אות", mizmor: "מזמור", chelek: "חלק",
+  klal: "כלל", shaar: "שער", maamar: "מאמר", remez: "רמז", piska: "פסקה", drush: "דרוש", teshuva: "תשובה",
 };
 
 const COLLECTION_WORD: Readonly<Record<Collection, string>> = {
@@ -460,7 +606,9 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   const rules: string[] = [`citations.${c.form}`, `citations.name-${t.tier}`];
   reasons.push({ code: "citations/span", text: `ההפניה בטקסט: "${c.text}"` });
   const tierText = { title: "שם הספר המלא", derived: "צורה מקובלת של שם הספר", acronym: "כינוי של הספר מתוך רשימת הכינויים במסד", secondary: "שם המסכת, שבצירוף מקום של פרק ומשנה מפנה למשנה" }[t.tier];
-  if (c.ibid === "none") reasons.push({ code: `citations/name-${t.tier}`, text: `"${c.name}" — ${tierText}: ${t.book.title}${COLLECTION_WORD[t.collection] && t.collection !== "other" ? ` (${COLLECTION_WORD[t.collection]})` : ""}` });
+  if (c.internal && c.ibid === "none") {
+    reasons.push({ code: "citations/internal", text: `"${c.name}": מקום בספר עצמו, ${c.internal.dir < 0 ? "לפני" : "אחרי"} השורה המצטטת. סוג הרמה (${c.elems.map((e) => KIND_WORD[e.kind] ?? e.kind).join(", ")}) נקבע לפי הכותרות של הספר` });
+  } else if (c.ibid === "none") reasons.push({ code: `citations/name-${t.tier}`, text: `"${c.name}" — ${tierText}: ${t.book.title}${COLLECTION_WORD[t.collection] && t.collection !== "other" ? ` (${COLLECTION_WORD[t.collection]})` : ""}` });
   else {
     rules.push(`citations.ibid-${c.ibid}`);
     reasons.push({ code: `citations/ibid-${c.ibid}`, text: c.ibid === "book" ? `"${c.text}": אותו מקום כמו ההפניה הקודמת ל${t.book.title}` : c.ibid === "full" ? `"שם": אותו מקום כמו ההפניה הקודמת (${t.book.title})` : `"${c.text}": ההפניה הקודמת (${t.book.title}), עם המקום החדש שצוין` });
@@ -473,6 +621,8 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
         ? `המקום (${loc || c.unit?.name}) נמצא לפי ציוני המקום של השורות בספר: ${r.label}`
         : r.via === "named"
           ? `ה${c.unit?.kind === "parsha" ? "פרשה" : "פרק"} נמצא לפי מבנה התוכן החלופי של הספר: ${r.label}`
+          : r.via === "pages"
+            ? `הדף נמצא לפי מבנה הדפים (מבנה התוכן החלופי) של הספר: ${r.label}`
           : `המקום (${loc}) נמצא לפי כותרות הספר: ${r.label}`,
   });
   rules.push(`citations.via-${r.via}`);
@@ -483,6 +633,7 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   }
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
   if (c.ordinal) rules.push("citations.perek-ordinal");
+  if (c.elems.some((e) => e.v4)) rules.push("citations.marker-v4");
   if (c.rule) {
     rules.push(`citations.${c.rule}`);
     const why = RULE_REASON[c.rule];
@@ -532,6 +683,10 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
 
 export interface CitationLibrary {
   readonly catalog: readonly CatalogBook[];
+  /** a book's lines (anchor text), for a ד"ה looked up on a commentator's amud */
+  lines?(book: BookRef, from: number, to: number): readonly { index: number; text: string }[];
+  /** a book's printed pagination (alt_toc "דפים", altdaf.ts), for citations of it by daf */
+  pages?(book: BookRef): DafStructure | null;
   /** named units (alt_toc chapters and parshiyot) of the indexed books, and of any book that has them */
   readonly units?: readonly NamedUnitSource[];
   /** the index of a cited book, or null when it cannot be read */
@@ -546,7 +701,10 @@ export function runCitationsEngine(source: EngineBook, library: CitationLibrary,
   run.scan(source.lines);
   for (const b of run.targets()) {
     const own = run.needsUnits(b) ? (library.units ?? []).find((u) => u.book.key === b.key) : undefined;
-    run.resolveWith(library.index(b), b, library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined, own ? NamedUnitIndex.build([own]).byBook.get(b.key) : null);
+    const index = library.index(b);
+    run.resolveWith(index, b, library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined, own ? NamedUnitIndex.build([own]).byBook.get(b.key) : null, run.wantsPages(b, index) ? (library.pages?.(b) ?? null) : null);
+    const spans = library.lines ? run.diburSpans(b) : [];
+    if (spans.length) run.refineDibur(b, spans.flatMap((x) => library.lines!(b, x.line, x.end)), library.heRefAt ? (l) => library.heRefAt!(b, l) : undefined);
   }
   return run.finish(ctx);
 }
