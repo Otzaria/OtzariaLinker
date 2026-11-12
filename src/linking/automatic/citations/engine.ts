@@ -200,7 +200,7 @@ export class CitationRun {
    */
   needsUnits(book: BookRef): boolean {
     if (this.units.byBook.has(book.key)) return false;
-    for (const p of this.pending.values()) if (p.citation.unit && p.citation.candidates.some((c) => c.book.key === book.key)) return true;
+    for (const p of this.pending.values()) if ((p.citation.unit || chapterByNumber(p.citation)) && p.citation.candidates.some((c) => c.book.key === book.key)) return true;
     return false;
   }
 
@@ -308,6 +308,16 @@ export class CitationRun {
         }
         if (!index || index.via === "none") {
           p.unindexed++;
+          continue;
+        }
+        // "תוס' פ"ק דסנהדרין", "בש"ס פ"ב דכתובות": a chapter alone of a book by daf (a tractate, a commentary on
+        // one) is its Nth chapter in the book's own structure (alt_toc "Chapters") — the whole chapter
+        if (index.daf && chapterByNumber(p.citation)) {
+          const n = p.citation.elems[0]!.n;
+          const chapters = (this.units.byBook.get(book.key) ?? bookUnits ?? []).filter((x) => x.kind === "chapter");
+          // "פרק בתרא": the last chapter
+          const u = n === 0 ? chapters.at(-1) : chapters.find((x) => x.ordinal === n);
+          if (u) p.resolved.push({ target: t, res: { book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, heRef: null });
           continue;
         }
         // "[בב"ש שער ג']": a book's own level named by its word ("כלל", "שער") is read by the position of the
@@ -541,6 +551,18 @@ function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, uni
   return null;
 }
 
+/**
+ * A chapter alone ("פ"ק", "ספ"ב"), in a book by daf, read as the book's Nth chapter: only when the words say the
+ * Gemara or a commentary on it is meant — a commentator moved it ("התו' בפ"ק דר"ה"), or "ש"ס"/"גמ'" stands
+ * before it. Without them the chapter is the Mishna's (detect.ts sends it there).
+ */
+function chapterByNumber(c: Citation): boolean {
+  const e = c.elems[0];
+  // "רשב"א [שבת פ"ח]" after the name is chapter 8 or daf 88 (LINKER reads the daf): only a chapter that cannot be a
+  // number — before the name ("פ"ב דכתובות"), or "ספ"ב"
+  return c.elems.length === 1 && e!.kind === "perek" && e!.alsoNumber === undefined && !c.unit && (c.commentator !== undefined || c.qualifier === "bavli" || !!c.ordinal || !!e!.ordinal);
+}
+
 /** A book's own unit of that name: the same name, or else the only one whose name starts with the cited words ("שלח" → "שלח לך"). */
 function ownUnit(kind: NamedUnit["kind"], name: string, key: string, units: readonly NamedUnit[]): NamedUnit | undefined {
   const same = units.filter((x) => x.kind === kind && (x.name === name || unitNameKey(x.name) === unitNameKey(name) || unitNameKey(x.name) === key));
@@ -583,6 +605,8 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
   if (c.rule === "dibur-here") s -= PENALTY.ibidPartial;
+  // "במג"א סק"א": the siman is the citing line's, told by the context
+  if (c.rule === "sk-here") s -= PENALTY.ibidPartial;
   // the book is told by a word before the name, not by the name: "ברבות [בראשית פי"א]", a glossary of Rashi's words
   if (c.rule === "midrash-rabbah") s -= PENALTY.midrashRabbah;
   if (c.rule === "title-commentator") s -= PENALTY.baseDaf;
@@ -595,6 +619,8 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.qualifier && TALMUDIC.has(c.qualifier) && TALMUDIC.has(t.collection) && t.collection !== c.qualifier && !c.commentator) s -= PENALTY.qualifierMismatch;
   // a unit whose location was found inside it: the location is the citation and the name confirms
   // it — with the book named next to it, as sure as "<tractate> <daf>"
+  // "תוס' פ"ק דסנהדרין": the whole chapter, coarse like a unit cited by name
+  if (!c.unit && r.via === "named") s -= PENALTY.unitRange;
   if (c.unit) {
     if (!addressed) s -= PENALTY.unitRange;
     else if (c.unit.context !== "named") s -= PENALTY.named;
@@ -625,6 +651,10 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
   "dibur-context": "שם המפרש ו\"ד\"ה\" בלי שם מסכת: הדף נלקח מההפניה שלפניו (או מהמסכת שהחיבור נכתב עליה), והקישור הוא לפירוש על הדף הזה",
   "dibur-here": "שם המפרש ו\"ד\"ה\" בלי דף ובלי הפניה לפניו: הדף הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), במסכת שהחיבור נכתב עליה",
+  "commentator-ibid": "שם של מפרש ו\"שם\": דבריו על המקום של ההפניה הקודמת (או על הדף שנכתב אחרי \"שם\"), בפירוש שלו על המסכת או על ספר התנ\"ך שנזכר בה",
+  "sk-ibid": "נכתב ס\"ק בלי סימן, של הספר שההפניה הקודמת אליו כתבה סימן: הסימן ההוא (כמו \"שם\")",
+  "rema-ibid": "\"רמ\"א שם\" וסעיף: הגהת הרמ\"א בשולחן ערוך, בסימן של ההפניה הקודמת (לשולחן ערוך או לפירוש על אחד מחלקיו)",
+  "sk-here": "נכתב ס\"ק בלי סימן, בחיבור על השולחן ערוך: הסימן הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), בפירוש על אותו חלק",
   "named-bare": "שם של פרק בלי המילה \"פרק\", ואחריו בסוגריים דף שנמצא בתוך הפרק הזה",
   "midrash-rabbah": "לפני שם הספר כתוב \"מדרש רבה\" / \"ברבות\" / \"במד\"ר\": ההפניה היא למדרש רבה על הספר הזה, לא לפסוק",
   "title-commentator": "הספר הוא אוצר של מילות מפרש אחד, ולכן המקום הוא בפירוש שלו על הדף או על הפרק",
@@ -681,6 +711,11 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
   if (c.ordinal) rules.push("citations.perek-ordinal");
   if (c.elems.some((e) => e.v4)) rules.push("citations.marker-v4");
+  if (!c.unit && r.via === "named") {
+    // "תוס' פ"ק דסנהדרין": a chapter by number in a book by daf, found by the book's own chapters
+    rules.push("citations.chapter-number");
+    reasons.push({ code: "citations/chapter-number", text: `נכתב פרק במספר, והספר מסודר לפי דפים: הפרק נמצא לפי מבנה הפרקים של הספר עצמו (${r.label})` });
+  }
   if (c.rule) {
     rules.push(`citations.${c.rule}`);
     const why = RULE_REASON[c.rule];

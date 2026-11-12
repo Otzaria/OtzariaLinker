@@ -114,6 +114,13 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["עירובין", "ערובין"],
   ["קידושין", "קדושין"],
   ["גיטין", "גטין"],
+  // plene and Aramaic spellings of the Mishna's and the Yerushalmi's tractates ("בירושלמי (פ"ק דפיאה)", "(עוקצין ג:ח)")
+  ["ביכורים", "בכורים"],
+  ["בכורים", "ביכורים"],
+  ["פאה", "פיאה"],
+  ["כלאים", "כלאיים", "כלאין"],
+  ["עוקצים", "עוקצין"],
+  ["מדרש תהילים", 'שו"ט', "שוחר טוב", 'מדרש שו"ט'],
   ["בראשית רבה", 'ב"ר', 'בר"ר'],
   ["שמות רבה", 'ש"ר', 'שמו"ר'],
   ["ויקרא רבה", 'ו"ר', 'ויק"ר'],
@@ -132,6 +139,9 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["תקוני הזהר", "תיקוני זוהר", "תיקוני הזוהר", "תקוני זוהר", "תקוני הזוהר", "תיקוני הזהר", "תקוני זהר", 'תקו"ז', 'תיקו"ז'],
 ];
 
+/** the Rambam's topics by their old names (the censor's): "ע"ג", "עכו"ם" for עבודה זרה */
+const OLD_TOPICS: Readonly<Record<string, readonly string[]>> = { "עבודה זרה וחוקות הגויים": ["עבודת גלולים", "עבודת כוכבים", "עבודת כוכבים ומזלות"] };
+
 /** titles that are everyday words: "לב' דברים, א'" is "two things", "בשבת כ"ח" may be a date */
 export const COMMON_TITLES: ReadonlySet<string> = new Set([
   "דברים", "שמות", "במדבר", "שופטים", "עזרא", "יונה", "רות", "שבת", "ברכות", "ביצה", "סוכה", "תמיד", "מכות", "נדרים", "חולין", "מנחות", "ערכין", "כריתות", "נזיר", "שבועות", "גיטין", "תענית", "מגילה", "חגיגה", "סוטה", "תמורה", "מעילה", "נדה", "בכורות", "זבחים", "פסחים",
@@ -149,6 +159,8 @@ const SA_NAMES = ["שולחן ערוך", 'שו"ע', "שלחן ערוך", 'ש"ע'
 const SA_COMMENTARY_TITLES = new Set(["משנה ברורה", "מגן אברהם", "שער הציון", "ביאור הלכה", "באר היטב", "טורי זהב", "שפתי כהן"]);
 
 const BAVLI_SET = new Set(BAVLI);
+/** the Mishna's tractates the Bavli has not: "משנה כסף", "משנה לחם" (books of the library) are no tractates */
+const MISHNA_ONLY = new Set(["ברכות", "פאה", "דמאי", "כלאים", "שביעית", "תרומות", "מעשרות", "מעשר שני", "חלה", "ערלה", "ביכורים", "שקלים", "עדיות", "אבות", "מדות", "קינים", "כלים", "אהלות", "נגעים", "פרה", "טהרות", "מקואות", "מכשירין", "זבים", "טבול יום", "ידים", "עוקצים"]);
 const TANAKH_SET = new Set(TANAKH);
 
 /** The collection a title belongs to, from the title's shape (works for every source, also text files). */
@@ -161,7 +173,7 @@ export function collectionOf(title: string): Collection {
   if (t.startsWith("משנה תורה, הלכות ") || t.startsWith("משנה תורה, ")) return "rambam";
   if (t.startsWith("שולחן ערוך, ")) return "sa";
   if (t === "טור") return "tur";
-  if (t.startsWith("משנה ") && t !== "משנה ברורה" && !t.startsWith("משנה תורה") && t.split(" ").length <= 3) return "mishna";
+  if (t.startsWith("משנה ") && (BAVLI_SET.has(t.slice(5)) || MISHNA_ONLY.has(t.slice(5)))) return "mishna";
   if (SA_COMMENTARY_TITLES.has(t) || / על שולחן ערוך/.test(t)) return "sa-commentary";
   return "other";
 }
@@ -229,6 +241,8 @@ export class AliasIndex {
       ix.add(title, { book: c.book, tier: "title", collection: coll });
       const topic = coll === "rambam" ? /^משנה תורה, הלכות (.+)$/.exec(title)?.[1] : undefined;
       if (topic) ix.rambamTopics.push({ topic, target: { book: c.book, tier: "derived", collection: coll } });
+      // the old name of a topic, as printed editions wrote it ("פ"י מהל' ע"ג" — עבודת גלולים)
+      if (topic && Object.hasOwn(OLD_TOPICS, topic)) for (const old of OLD_TOPICS[topic]!) ix.rambamTopics.push({ topic: old, target: { book: c.book, tier: "derived", collection: coll } });
       for (const d of derivedNames(title, coll, byTitle)) ix.add(d.name, { book: c.book, tier: d.secondary ? "secondary" : "derived", collection: coll, ...(d.section && { section: d.section }) });
       for (const a of c.aliases ?? []) {
         const name = normTitle(a);
@@ -427,7 +441,8 @@ export class AliasIndex {
   private addTruncations(title: string, target: AliasTarget): void {
     if (title.includes(" ")) return;
     const key = title.replace(/[ךםןףץ]/g, (c) => FINAL_PLAIN[c]!);
-    for (let n = 3; n <= key.length - 1 && key.length - n <= 3; n++) {
+    // stems of three letters or more, short of the word by one to three ("סנהד'" for סנהדרין, "יבמו'" for יבמות)
+    for (let n = Math.max(3, key.length - 3); n <= key.length - 1; n++) {
       const k = key.slice(0, n);
       const prev = this.truncated.get(k);
       if (prev === null) continue;
@@ -487,7 +502,8 @@ const AUTHOR_NAMES = new Set(['רמב"ם', 'רמב"ן', 'רמ"א', 'רשב"א', 
 
 /** common abbreviations that are never a book's name ("חלק א", "עמוד א", "דיבור המתחיל") */
 // "מ"ע", "ל"ת": מצוות עשה / לא תעשה ("סמ"ג [מ"ע סימן כ"א]"), not מאירת עיניים, whose name is "סמ"ע"
-const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל', 'מ"ע', 'ל"ת', 'מל"ת']);
+// "ירוש'" is the word for the Yerushalmi ("בירוש' פ"ק דסנהד'"), which the database gives to one of its tractates (הוריות)
+const NOT_NAMES = new Set(['ח"א', 'ח"ב', 'ח"ג', 'ח"ד', 'ח"ה', 'ח"ו', 'ע"א', 'ע"ב', 'ד"ה', 'א"כ', 'ר"ל', 'ס"ס', 'ס"ה', 'א"ר', 'ר"א', 'ר"י', 'א"ל', 'מ"ע', 'ל"ת', 'מל"ת', "ירוש'", "ירושל'", "ירושלמי", "גמ'", "בבלי", "תלמוד"]);
 
 /**
  * book_acronym is machine-made and noisy (42K names; "מלכות" for a commentary on הלכות שביתת יום

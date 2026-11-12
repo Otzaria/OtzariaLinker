@@ -313,7 +313,10 @@ describe("citations: a daf as the library writes it (§6.2)", () => {
   it("a ד for \"דף\" glued to the number, before an amud", () => {
     expect(loc(oneT('ואמרו (מנחות דמ"ג ע"ב) ראיה'))).toBe("daf:43b");
     expect(loc(oneT('עיין בגמרא ברכות ד"ז ע"א וכו\''))).toBe("daf:7a");
-    expect(scanT(['ואמרו מנחות דמ"ג ראיה'])).toHaveLength(0);
+    // with no amud too, right after a tractate's name (round 4: "בנדרים דכ"ז", "בגטין דע"ח"), but not after a title
+    // that is also a day ("בשבת דמ"ג")
+    expect(loc(oneT('ואמרו מנחות דמ"ג ראיה'))).toBe("daf:43");
+    expect(scanT(['ואמרו בשבת דמ"ג ראיה'])).toHaveLength(0);
   });
 
   it("an amud after a comma; an amud makes even an everyday word a daf", () => {

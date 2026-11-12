@@ -219,8 +219,11 @@ describe('"שם" in more shapes, and a commentator\'s ד"ה on the daf of the co
     expect(a!.rule).toBe("dibur-context");
     const [, b] = scan(['מקבלין עדים [ב"ק קי"ב ע"ב] ופירש רש"י שם ד"ה שלא בפני']);
     expect(books(b)).toEqual(["rashi-bk"]);
-    // no ד"ה: "תוס' שם" may be anything; no daf near: nothing
-    expect(scan(['[יבמות פ"ז ע"ב] וכתבו בתוס\' שם דלא'])).toHaveLength(1);
+    // no ד"ה: "תוס' שם" is his words on the daf just cited — told only by the context, so "full" (at most
+    // "possible"; round 4, docs/AUTOMATION_ENGINE.md §6.8); no daf near: nothing
+    const [, c] = scan(['[יבמות פ"ז ע"ב] וכתבו בתוס\' שם דלא']);
+    expect(books(c)).toEqual(["tos-yev"]);
+    expect([c!.rule, c!.ibid]).toEqual(["commentator-ibid", "full"]);
     expect(scan(['וכתבו בתוס\' [ד"ה רבי מאיר] דלא'])).toHaveLength(0);
   });
 
