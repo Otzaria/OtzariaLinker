@@ -338,6 +338,7 @@ export class AppStore {
       const t = resolve(l.target.book);
       return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
     });
+    this.exchange.booksOpened();
   }
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */

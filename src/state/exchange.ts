@@ -114,13 +114,41 @@ export class ExchangeState {
     }
     host.linkState.value = commit(s, `ייבוא ${sourceTitle}_links.json (${linksCount(links.length)})`, [...removed, ...addChanges(links)], Date.now(), [], [fileChange(s, sourceTitle, file)]);
     if (removed.length) host.notify("info", `העותק הקודם של קובץ הקישורים של "${sourceTitle}" (${linksCount(removed.length)}) הוחלף בקובץ שנטען.`);
+    // Links files loaded before ANY book (the guided "edit existing links" asks for them first): that a
+    // book is "not found" is not news yet. The books are named once they open, and only those still
+    // missing then (booksOpened; product audit F20).
+    const early = host.booksByTitle.value.size === 0;
+    if (early) {
+      for (const l of links) this.awaitingBooks.add(l.source.book.title).add(l.target.book.title);
+      issues.splice(0, issues.length, ...issues.filter((i) => i.code !== "record/target-not-found"));
+    }
+    const later = early ? " הספרים שהקישורים מצביעים אליהם עוד לא פתוחים; כשתפתחו אותם, הקישורים יתחברו אליהם." : "";
     const errors = issues.filter((i) => i.level === "error");
     const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
     if (parsed.generatorRejectsFile)
       host.notify("error", `"${path}": אוצריא הייתה דוחה את הקובץ הזה כולו כמו שהוא (${new Set(errors.map((e) => e.index)).size} רשומות פגומות). הרשומות התקינות נטענו; בייצוא הקובץ ייכתב מחדש תקין.`, details);
-    else if (issues.length) host.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.`, details);
-    else host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".`);
-    if (sourceRef.origin === "unknown") host.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
+    else if (issues.length) host.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.${later}`, details);
+    else host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".${later}`);
+    if (sourceRef.origin === "unknown" && !early) host.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
+  }
+
+  /** titles that links files loaded before any book named: reported once books open (booksOpened) */
+  private readonly awaitingBooks = new Set<string>();
+
+  /**
+   * Books were opened and the links attached to them (AppStore.attachLinks): of the books that links
+   * files loaded earlier name, say once which are still not open — the warning their import held back.
+   */
+  booksOpened(): void {
+    if (!this.awaitingBooks.size) return;
+    const missing = [...this.awaitingBooks].filter((t) => !this.host.resolveTitle(t));
+    this.awaitingBooks.clear();
+    if (!missing.length) return;
+    this.host.notify(
+      "warning",
+      `${missing.length === 1 ? `הספר "${missing[0]}", שהקישורים שנטענו מצביעים אליו, לא נמצא` : `${missing.length.toLocaleString("he")} ספרים שהקישורים שנטענו מצביעים אליהם לא נמצאו`} בין הספרים שנפתחו. אם אין ספר בשם הזה בדיוק בספרייה, אוצריא תדלג על הקישורים אליו.`,
+      missing.length > 1 ? missing.slice(0, 100) : undefined,
+    );
   }
 
   /** A spreadsheet of links (CSV/TSV): NEW links, one batch per source book (importSheetLinks). */

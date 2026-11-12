@@ -49,3 +49,19 @@ describe("links loaded before their books (F6)", () => {
     expect(store.lines.count(key)).toBe(12);
   });
 });
+
+describe("notices of links loaded before their books (F20)", () => {
+  it("no 'book not found' per record while no book is open; once books open, only the still-missing ones", async () => {
+    const store = new AppStore(registryService(), { save: () => {} }, loadPreferences(null));
+    const withMissing = file("links/ביאור קצר על בראשית_links.json", JSON.stringify([rec(4, 3), { ...rec(6, 5), path_2: "ספר שלא קיים.txt", heRef_2: "ספר שלא קיים" }]));
+    await store.openFiles([withMissing]);
+    const first = store.notices.value.map((n) => [n.text, ...(n.details ?? [])].join(" ")).join("\n");
+    expect(first).not.toContain("לא נמצא");
+    expect(first).toContain("כשתפתחו אותם");
+    await store.openFiles([file("books/בראשית.txt", BASE.join("\n")), file("books/ביאור קצר על בראשית.txt", COMM.join("\n"))]);
+    const after = store.notices.value.filter((n) => n.text.includes("לא נמצא"));
+    expect(after).toHaveLength(1);
+    expect(after[0]!.text).toContain("ספר שלא קיים");
+    expect(after[0]!.text).not.toContain("בראשית\"");
+  });
+});
