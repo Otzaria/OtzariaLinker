@@ -213,7 +213,9 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
     }
     // "סי' ג' וסי' ד'", "כלל ג' ובכלל ב'": a marker with "ו" opens a second place, not a deeper level
     if (elems.length && t.kind === "word" && t.text[0] === "ו" && markerAt(toks, j)) break;
-    if (t.kind === "word" && POSITION_WORDS.has(t.text) && markerAt(toks, j + 1)) {
+    // "רש"י חולין סוף ה.", "תוספות זבחים ריש ז:": also before a daf with its amud
+    const posDaf = () => { const d = readElem(toks, j + 1, lastKind, inside); return !!d && d.elem.amud !== undefined && (d.elem.kind === "daf" || d.elem.amudGlued === true || d.elem.numeral.form !== "bare"); };
+    if (t.kind === "word" && POSITION_WORDS.has(t.text) && (markerAt(toks, j + 1) || (!elems.length && posDaf()))) {
       j++;
       continue;
     }
@@ -225,6 +227,8 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
         continue;
       }
     }
+    // "בתפארת ישראל פט"ז שם": after a level, "שם" is the word, never 340 (LinkerToOtzaria's rule)
+    if (elems.length && t.kind === "word" && t.text === "שם" && !t.gershayim && !t.geresh) break;
     let e = readElem(toks, j, lastKind, inside);
     if (!e) break;
     // "קידושין לט, ב.", "סנהדרין לט, א.": a lone א/ב after a number, with the sentence's period glued to it, is
@@ -261,7 +265,8 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
   }
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
   // "לקמן ה' ע"ב", "במ"ק כ' ע"ב": an amud written out (ע"א / ע"ב) makes even an everyday word a daf
-  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && (e.amud === undefined || !!e.amudGlued));
+  // (after a tractate's name, "ב"מ קח." is a daf: the glued side counts there)
+  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && (e.amud === undefined || (!!e.amudGlued && !dafContext)));
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
   // …or at a ";" between the places of a list in brackets ("(ויקרא כו; דברים כח)")
   const closed = (bracketed || !!opts.enclosed) && (isPunct(toks[to], CLOSE) || isPunct(toks[to], ";"));

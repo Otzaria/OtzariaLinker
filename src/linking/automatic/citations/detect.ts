@@ -261,7 +261,7 @@ export class CitationScanner {
       // references (its parshiyot), then the place under it
       const level = sec ? null : this.namedLevel(toks, i, line, m);
       if (level !== null) return level;
-      const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some((t) => t.collection === "bavli") && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       // …or "ע"ז כ"ו א'": a quoted daf and a lone amud letter
@@ -282,6 +282,13 @@ export class CitationScanner {
       // "ובשו"ת חת"ס או"ח סי' ס"ב": a part of the Shulchan Aruch named alone, right after a work of responsa, is that work's part
       if (m.entry.targets.every((t) => t.collection === "sa") && isSaPartAlone(m.entry.text) && responsaWordBefore(toks, i)) return this.drop("part-of-another-work");
       let cands = this.own(m.entry.targets);
+      // "תוס' חולין ק"ט א'": a name that opens with a commentator's ("תוס'" — the database gives "תוס' חולין" to
+      // תוספות, פסקי תוספות and the Tosefta alike) is that commentator's own commentary when it is among them
+      const opener = wordIn(toks[i], COMMENTATORS);
+      if (opener && m.to > i + 1) {
+        const own = cands.filter((c) => keyOfName(c.book.title.split(" על ")[0]!) === keyOfName(opener));
+        if (own.length) cands = own;
+      }
       let elems = addr.elems;
       // "ובמדרש רבה [ויקרא פכ"ב]", "ברבות [בראשית פי"א]", "ובמד"ר [במדבר פי"ב]": the midrash on that book, not the book
       if (m.entry.targets.every((t) => t.collection === "tanakh") && rabbahBefore(toks, i)) {
@@ -320,10 +327,22 @@ export class CitationScanner {
           ibidOf = this.last.c.seq;
         }
       }
+      // "המג"א [או"ח סימן תלב ס"ק א]": a commentary on that one part of the Shulchan Aruch named right before it — its words
+      let partCommentary: string | undefined;
+      if (cands.length && cands.every((c) => c.collection === "sa")) {
+        const at = beforeIndex(toks, i, 1);
+        const before = at >= 0 ? this.aliases.matchAt(toks, at).find((x) => x.to === at + 1) : undefined;
+        const on = before ? before.entry.targets.filter((t) => t.collection === "sa-commentary" && cands.some((c) => saBaseOf(t.book.title) === normTitle(c.book.title))) : [];
+        if (on.length === 1 && on[0]!.book.key !== this.sourceKey) {
+          cands = [{ ...on[0]!, tier: cands[0]!.tier }];
+          partCommentary = before!.entry.text;
+          rule = rule ?? "commentator-named";
+        }
+      }
       if (!cands.length) return this.drop("self");
       // "ב"ק (דף ט:)": the closing bracket belongs to the span; in "(בראשית א, ב)" neither bracket does
       const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
-      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: ibidOf !== undefined ? "partial" : "none", ...(ibidOf !== undefined && { ibidOf }), form: "forward", numericName: m.entry.numeric, m, ...(rule && { rule }) });
+      return this.emit(toks, line, { from: i, to, candidates: cands, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: ibidOf !== undefined ? "partial" : "none", ...(ibidOf !== undefined && { ibidOf }), form: "forward", numericName: m.entry.numeric, m, ...(rule && { rule }), ...(partCommentary && { commentator: partCommentary, commentators: false }) });
     }
     return null;
   }
@@ -1572,6 +1591,9 @@ const RAMBAM_COMMENTATORS: readonly (readonly [string, string, boolean])[] = [
   ['ראב"ד', 'השגות הראב"ד', false], ["השגות", 'השגות הראב"ד', false],
   ["אור שמח", "אור שמח", false],
 ];
+
+/** a book of the Bavli or a commentary on one ("תוספות על סנהדרין"): a daf may follow its name */
+const onBavli = (t: AliasTarget): boolean => t.collection === "bavli" || (t.book.title.includes(" על ") && collectionOf(t.book.title.slice(t.book.title.indexOf(" על ") + 4)) === "bavli");
 
 /** a two-word name of a Rambam commentator starting at toks[i] ("בכסף משנה", "ולחם משנה"), with ו/ב/ל/ד */
 function rambamCommentatorAt(toks: readonly Tok[], i: number): boolean {

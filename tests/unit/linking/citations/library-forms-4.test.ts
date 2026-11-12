@@ -56,6 +56,14 @@ const CATALOG: CatalogBook[] = [
   book("bb", "בבא בתרא", "sefaria", ['ב"ב']),
   book("m-bb", "משנה בבא בתרא"),
   book("r-az", "משנה תורה, הלכות עבודה זרה וחוקות הגויים"),
+  book("rashi-kid", 'רש"י על קידושין'),
+  book("rashi-bm", 'רש"י על בבא מציעא'),
+  book("hul", "חולין"),
+  book("tos-hul", "תוספות על חולין", "sefaria", ["תוס' חולין"]),
+  book("ptos-hul", "פסקי תוספות על חולין", "sefaria", ["תוס' חולין"]),
+  book("tsfta-hul", "תוספתא חולין", "sefaria", ["תוס' חולין"]),
+  book("tos-san", "תוספות על סנהדרין"),
+  book("tif", "תפארת ישראל", "otzaria"),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -275,6 +283,30 @@ describe("a daf in brackets across the headings of small sections", () => {
     far.scanLine(0, `ומאימתי מונין וכו' (נדה דף כ"ט) תנן`, null);
     far.scanLine(9, `זה נלמד ממימרא דרב הונא (דף כ"ח) שיתבאר`, null);
     expect(far.citations).toHaveLength(1);
+  });
+});
+
+describe("a commentator on the Gemara, as notes write it", () => {
+  it(`"ברש"י קידושין סוף ה.", "רש"י ב"מ קח.": "סוף"/"ריש" before a daf, and an everyday word as a daf with its side`, () => {
+    expect(loc(scan([`עיין ברש"י קידושין סוף ה. שכתב`])[0])).toBe("daf:5a");
+    expect(books(scan([`עיין ברש"י קידושין סוף ה. שכתב`])[0])).toEqual(["rashi-kid"]);
+    expect(books(scan([`עיין רש"י ב"מ קח. שכתב`])[0])).toEqual(["rashi-bm"]);
+    // "סוף" before a word: no place
+    expect(scan([`עיין ברש"י קידושין סוף דבר`])).toHaveLength(0);
+  });
+  it(`"תוס' חולין ק"ט א'": a name that opens with "תוס'" is תוספות when the database gives it to several books`, () => {
+    expect(books(scan([`עיין תוס' חולין ק"ט א' שכתבו`])[0])).toEqual(["tos-hul"]);
+  });
+  it(`"התוס' סנהדרין (נט רע"ב)": "רע"ב" after a commentary on a tractate`, () => {
+    expect(loc(scan([`התוס' סנהדרין (נט רע"ב) כתבו`])[0])).toBe("daf:59b");
+  });
+  it(`"שם" is never the number 340`, () => {
+    expect(loc(scan([`כמ"ש בתפארת ישראל פט"ז שם`])[0])).toBe("perek:16");
+  });
+  it(`"המג"א [או"ח סימן תלב ס"ק א]": a commentary on one part of the Shulchan Aruch, named before the part`, () => {
+    const [c] = scan([`וכן כתב המג"א [או"ח סימן תלב ס"ק א] בשם`]);
+    expect(books(c)).toEqual(["ma"]);
+    expect(loc(c)).toBe("siman:432 sk:1");
   });
 });
 
