@@ -1,7 +1,7 @@
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal } from "@preact/signals";
-import { parseProject, serializeProject } from "../projects/project-format";
-import type { SourceBook } from "../core/books";
+import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
+import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
@@ -12,7 +12,7 @@ import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { embeddedSefariaTitles, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
-import { pairByTitle } from "../linking/batch";
+import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
 import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
@@ -68,6 +68,10 @@ export interface Task {
   done: number;
   total: number;
   cancel: () => void;
+  /** Date.now() when it started: the app bar estimates the time left from it (audit F21) */
+  startedAt: number;
+  /** the progress in the task's own units ("ספר 120 מתוך 300"), when it has any */
+  count?: string;
 }
 
 export type Screen = "home" | "workspace";
@@ -121,7 +125,7 @@ export class AppStore {
   /** unsaved work found from a previous session, until the user restores or dismisses it */
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
-  readonly intent = signal<{ engine?: EngineId; sourceId?: string } | null>(null);
+  readonly intent = signal<{ engine?: EngineId; sourceId?: string; allBooks?: boolean } | null>(null);
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -266,14 +270,38 @@ export class AppStore {
   private chooseRoles(opened: readonly SourceBook[]): void {
     if (this.view.source.peek() && this.view.target.peek()) return;
     const all = [...this.books.peek().values()].map((b) => this.refOf(b.key));
+    // a book already in a reader keeps its place: newly opened books only fill the empty reader, with
+    // the kept book's partner if one is open — never a pair of their own (audit F3: opening the
+    // database after the commentary put Onkelos in place of the commentary)
+    const kept = this.view.source.peek() ?? this.view.target.peek();
+    if (kept) {
+      const partner = this.partnerOf(kept, opened, all);
+      if (partner) (this.view.source.peek() ? this.view.target : this.view.source).value = partner;
+      return;
+    }
     const pair = pairByTitle(opened.map((b) => this.refOf(b.key)), all).find((p) => p.target);
     const notes = opened.find((b) => b.title.startsWith("הערות"));
     const main = notes && opened.find((b) => b !== notes && notes.title.includes(b.title));
     batch(() => {
       if (pair?.target) (this.view.source.value = pair.source.key), (this.view.target.value = pair.target.key);
       else if (notes && main) (this.view.source.value = main.key), (this.view.target.value = notes.key);
-      else if (!this.view.source.peek()) this.view.source.value = opened[0]!.key;
+      else this.view.source.value = opened[0]!.key;
     });
+  }
+
+  /**
+   * The open book that goes opposite `key`: the base its title names ("X על Y"), a newly opened
+   * commentary on it, the book a "הערות…" book annotates, or newly opened notes on it. Null when none.
+   */
+  private partnerOf(key: string, opened: readonly SourceBook[], all: readonly BookRef[]): string | null {
+    const self = this.refOf(key);
+    const own = pairOne(self, titleIndex(all)).target;
+    if (own) return own.key;
+    const dependant = pairByTitle(opened.filter((b) => b.key !== key).map((b) => this.refOf(b.key)), all).find((p) => p.target?.key === key);
+    if (dependant) return dependant.source.key;
+    const fresh = opened.filter((b) => b.key !== key);
+    const notesOn = self.title.startsWith("הערות") ? fresh.find((b) => self.title.includes(b.title)) : fresh.find((b) => b.title.startsWith("הערות") && b.title.includes(self.title));
+    return notesOn?.key ?? null;
   }
 
   async closeSource(id: string): Promise<void> {
@@ -757,11 +785,52 @@ export class AppStore {
 
   /* ---------------- projects, autosave, recovery ---------------- */
 
+  /** The sources the open project was saved with (audit F10); missingSources lists those not open again. */
+  readonly projectSources = signal<ProjectSource[]>([]);
+
+  /**
+   * The project's sources that are not open yet, each with the titles its links still wait for. A
+   * source that recorded its titles is back when they are all open (whatever source holds them — the
+   * links bind by title); an older project's source, by its label.
+   */
+  readonly missingSources = computed<(ProjectSource & { missingTitles: string[] })[]>(() => {
+    const open = this.booksByTitle.value;
+    const labels = new Set(this.sources.value.map((s) => s.info.label));
+    return this.projectSources.value.flatMap((s) => {
+      const missingTitles = (s.titles ?? []).filter((t) => !open.has(t));
+      const missing = s.titles?.length ? missingTitles.length > 0 : !labels.has(s.label);
+      return missing ? [{ ...s, missingTitles }] : [];
+    });
+  });
+
+  /** The user does not want to open the project's sources again: the list goes away. */
+  dismissMissingSources(): void {
+    this.projectSources.value = [];
+  }
+
+  /** What a project records of each open source: its files and the titles its links use (audit F10). */
+  private projectSourcesNow(): ProjectSource[] {
+    const used = new Map<string, Set<string>>();
+    for (const l of this.allLinks.value)
+      for (const side of [l.source, l.target]) {
+        const b = this.bookOf(side.book);
+        if (b) used.set(sourceIdOfBookKey(b.key), (used.get(sourceIdOfBookKey(b.key)) ?? new Set()).add(b.title));
+      }
+    const open = this.sources.value.map((s): ProjectSource => {
+      const files = s.info.kind === "text-files" ? s.books.flatMap((b) => (b.path ? [b.path] : [])).slice(0, 5000) : [];
+      const titles = [...(used.get(s.info.id) ?? [])].slice(0, 5000);
+      return { label: s.info.label, kind: s.info.kind, books: s.books.length, ...(files.length && { files }), ...(titles.length && { titles }) };
+    });
+    // a source still missing from the project this one was opened from stays in it: saving before reopening must not forget it
+    const labels = new Set(open.map((s) => s.label));
+    return [...open, ...this.missingSources.value.filter((s) => !labels.has(s.label)).map(({ missingTitles: _m, ...s }) => s)];
+  }
+
   projectText(): string {
     const titleOf = (k: string | null) => (k ? this.refOf(k).title : null);
     return serializeProject(
       {
-        sources: this.sources.value.map((s) => ({ label: s.info.label, kind: s.info.kind, books: s.books.length })),
+        sources: this.projectSourcesNow(),
         links: this.allLinks.value,
         rejectedSuggestions: [...this.suggestions.rejected.value],
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
@@ -807,12 +876,12 @@ export class AppStore {
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
+      this.projectSources.value = p.sources;
       this.screen.value = "workspace";
     });
-    const open = new Set(this.sources.value.map((s) => s.info.label));
-    const missing = p.sources.filter((s) => !open.has(s.label)).map((s) => s.label);
-    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.`);
-    if (missing.length) this.notify("info", `כדי לראות את הקישורים על הטקסט, פתחו שוב את המקורות: ${missing.join(", ")}. הקישורים יתחברו לספרים לפי השם.`);
+    const missing = this.missingSources.value.length;
+    // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את המקור של הפרויקט" : `את ${missing.toLocaleString("he")} המקורות של הפרויקט`} — הרשימה ב"מקורות וספרים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
     if (snapshots.length)
@@ -889,12 +958,14 @@ export class AppStore {
     this.notices.value = this.notices.value.filter((n) => n.id !== id);
   }
 
-  async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>): Promise<T | null> {
+  /** Runs a long task with a cancel and progress; `count` turns the progress into the task's own units (audit F21). */
+  async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null> {
     const ac = new AbortController();
     const logged = logTask(this.log, label);
-    this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort() };
+    const startedAt = Date.now();
+    this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort(), startedAt };
     try {
-      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort(), startedAt, ...(count && total > 0 && { count: count(done, total) }) }) });
       logged.ok();
       return result;
     } catch (err) {

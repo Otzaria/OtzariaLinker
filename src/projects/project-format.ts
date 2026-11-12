@@ -34,6 +34,14 @@ export interface ProjectSource {
   label: string;
   kind: string;
   books: number;
+  /**
+   * Optional (4.0, audit F10): the files of a text source (paths relative to the chosen folder), so
+   * reopening the project can say which files to choose again. Absent for a database: its label is
+   * the file name.
+   */
+  files?: string[];
+  /** Optional (4.0, audit F10): the titles of this source's books that the project's links use. */
+  titles?: string[];
 }
 
 interface StoredBook {
@@ -133,7 +141,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
   }
   return {
     savedAt: typeof f.savedAt === "string" ? f.savedAt : "",
-    sources: Array.isArray(f.sources) ? f.sources.filter((s) => s && typeof s.label === "string") : [],
+    sources: Array.isArray(f.sources) ? f.sources.filter((s) => s && typeof s.label === "string").map(rebuildSource) : [],
     links,
     rejectedSuggestions: Array.isArray(f.rejectedSuggestions) ? f.rejectedSuggestions.filter((x) => typeof x === "string") : [],
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
@@ -142,6 +150,14 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     libraryFiles: rebuildLibraryFiles(f.libraryFiles),
     skipped: skipped + altToc.skipped,
   };
+}
+
+/** A stored source rebuilt from checked fields only (untrusted input). */
+function rebuildSource(s: ProjectSource): ProjectSource {
+  const strings = (x: unknown): string[] | undefined => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string").slice(0, 5000) : undefined);
+  const files = strings(s.files);
+  const titles = strings(s.titles);
+  return { label: s.label, kind: typeof s.kind === "string" ? s.kind : "", books: typeof s.books === "number" ? s.books : 0, ...(files?.length && { files }), ...(titles?.length && { titles }) };
 }
 
 /* ---- library-file fingerprints: rebuilt from checked fields (untrusted input) ---- */

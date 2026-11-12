@@ -13,6 +13,7 @@ import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
+import { ReopenSources } from "./reopen-sources";
 
 /*
  * One book, read lazily. The book is split into chunks of CHUNK lines; a chunk is a placeholder
@@ -56,6 +57,8 @@ export function Reader({ side }: { side: Side }) {
           </div>
           {store.books.value.size ? (
             <BookList query={query} onPick={(_s, key) => (store.showBook(side, key), setChoosing(false))} />
+          ) : side === "source" && store.missingSources.value.length ? (
+            <ReopenSources />
           ) : (
             <div class="empty">
               <Icon name="oz_book_open_medium_lines" size={40} />

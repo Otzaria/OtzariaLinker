@@ -3,13 +3,14 @@ import { batch, computed, signal, type ReadonlySignal, type Signal } from "@prea
 import type { SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
-import { buildReport, reportCsv, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
+import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
 import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource, Saver } from "./services";
 import type { NoticeKind, SideTab } from "./store";
 import type { SuggestionsState } from "./suggestions";
+import { countOf } from "./task-progress";
 
 /*
  * Max-link ("קישור מרבי", stage 8.4) in the state layer: plan a selection (linking/plan.ts), run the
@@ -28,7 +29,7 @@ export interface MaxLinkHost {
   readonly sideTab: Signal<SideTab>;
   refOf(bookKey: string): BookRef;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
-  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null>;
 }
 
 export interface MaxLinkRunOptions {
@@ -125,7 +126,7 @@ export class MaxLinkState {
         .slice(0, Math.max(0, EVIDENCE_BOOKS - now.length));
       for (const k of next) await read(k, now.length + next.length);
       return true;
-    });
+    }, (d, t) => countOf("ספר", d, t));
     if (found.length) {
       const next = new Map(this.evidence.value);
       for (const e of found) next.set(e.dependant, [...(next.get(e.dependant) ?? []), e]);
@@ -162,8 +163,12 @@ export class MaxLinkState {
     }
     const books = new Set(steps.map((s) => s.source.key)).size;
     const t0 = Date.now();
-    const res = await this.host.runTask(`קישור מרבי: ${steps.length.toLocaleString("he")} שלבים ב־${books.toLocaleString("he")} ספרים…`, (opts) =>
-      run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }) }, opts),
+    // the worker counts a unit per step and per book whose existing links it reads at the end
+    const units = steps.length + books;
+    const res = await this.host.runTask(
+      `קישור מרבי: ${steps.length.toLocaleString("he")} שלבים ב־${books.toLocaleString("he")} ספרים…`,
+      (opts) => run(steps, { ...(options.engineOptions && { engineOptions: options.engineOptions }) }, opts),
+      (d) => countOf("שלב", Math.floor(d / MAXLINK_PROGRESS_UNIT) + 1, units),
     );
     if (!res) return false;
 

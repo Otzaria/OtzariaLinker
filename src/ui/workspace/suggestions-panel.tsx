@@ -6,6 +6,7 @@ import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
@@ -145,7 +146,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
             המקור שבו נמצאים הפירושים
             <select value={batchSource} onChange={(e) => setBatchSource(e.currentTarget.value)}>
               {sources.map((x) => (
-                <option key={x.info.id} value={x.info.id}>{x.info.label} ({x.books.length} ספרים)</option>
+                <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length} ספרים)</option>
               ))}
             </select>
             <span class="muted">כל ספר מקושר לספר שבשמו ("… על בראשית" ← בראשית), מבין כל הספרים הפתוחים.</span>
@@ -236,6 +237,8 @@ function TableView() {
     [run, conf, state, st],
   );
   useEffect(() => setSel(new Set()), [conf, state, run]);
+  // the lines of the shown rows, for the start of each line's text (audit F17)
+  useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
 
   return (
@@ -301,6 +304,10 @@ function TableView() {
 function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: SuggestionState; checked: boolean; onCheck: (on: boolean) => void }) {
   const store = useStore();
   const end = (l: number, e?: number) => (e !== undefined && e > l ? `${l + 1}–${e + 1}` : `${l + 1}`);
+  store.lines.tick.value; // re-render when the previews load
+  // read from the user's book (audit F18), with the start of the target line's text (audit F17)
+  const v = store.suggestions.display(s);
+  const snippet = store.suggestions.snippet(v.to);
   return (
     <tr
       class={`st-${state}`}
@@ -310,10 +317,13 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       title={s.reasons.map((r) => r.text).join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${s.source.line + 1}: ${s.heRef2}`} />
+        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
       </td>
-      <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{s.source.book.title} </span>}{end(s.source.line, s.source.end)}</td>
-      <td>{s.heRef2}</td>
+      <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
+      <td>
+        <div>{v.toLabel}</div>
+        {snippet && <div class="snippet muted">{snippet}</div>}
+      </td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}

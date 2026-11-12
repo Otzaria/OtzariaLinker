@@ -5,6 +5,7 @@ import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { sourceNameText } from "../shell/file-name";
 import { EngineOptions } from "./engine-options";
 import "./maxlink.css";
 
@@ -28,7 +29,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   // a guided task names the source to link (the folder against the Otzaria database, a personal database)
   const asked = store.intent.value?.sourceId;
   const askedSource = asked && sources.some((s) => s.info.id === asked) ? asked : undefined;
-  const [kind, setKind] = useState<ScopeKind>(() => (askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
+  const [kind, setKind] = useState<ScopeKind>(() => (store.intent.value?.allBooks ? "all" : askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
   const [sourceId, setSourceId] = useState<string>(() => askedSource ?? sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
   const [off, setOff] = useState<ReadonlySet<EngineId>>(new Set());
   const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
@@ -88,7 +89,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           המקור
           <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
             {sources.map((x) => (
-              <option key={x.info.id} value={x.info.id}>{x.info.label} ({x.books.length.toLocaleString("he")} ספרים)</option>
+              <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length.toLocaleString("he")} ספרים)</option>
             ))}
           </select>
         </label>

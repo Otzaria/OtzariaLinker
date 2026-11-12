@@ -1,4 +1,5 @@
 import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
+import { remainingText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
@@ -13,6 +14,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const { prefs } = store;
   const ls = store.linkState.value;
   const task = store.task.value;
+  const eta = task ? remainingText(task.startedAt, task.done, task.total, Date.now()) : null;
   const inWorkspace = store.screen.value === "workspace";
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
 
@@ -57,8 +59,11 @@ export function AppBar({ onExport }: { onExport: () => void }) {
 
       {task && (
         <div class="task" role="status">
-          <span>{task.label}</span>
+          <span class="task-label" title={task.label}>{task.label}</span>
           {task.total > 0 && <progress max={task.total} value={task.done} />}
+          {/* the task's own count and the time left, once an estimate means something (audit F21) */}
+          {task.count && <span class="task-count">{task.count}</span>}
+          {eta && <span class="task-eta">· {eta}</span>}
           <button class="btn text" onClick={task.cancel}>ביטול</button>
         </div>
       )}

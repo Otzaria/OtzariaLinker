@@ -115,3 +115,14 @@ test("a folder, the Otzaria database and a second folder: grouped books, a link 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+test("a Hebrew database file name reads in order, extension last (audit F19)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }).click();
+  await (await chooser).setFiles({ ...DB, name: "אישי-פירושים.db" });
+  // one left-to-right unit, like the file manager shows it: never "db.אישי-פירושים"
+  const label = page.locator(".source-row").getByText("אישי-פירושים.db");
+  await expect(label).toHaveAttribute("dir", "ltr");
+});

@@ -14,6 +14,8 @@ export interface ParseIssue {
   level: IssueLevel;
   code: string;
   message: string;
+  /** the technical cause (a parser's own words), for a details expander — never the main text (audit F14) */
+  detail?: string;
 }
 
 export interface ParseResult {
@@ -27,7 +29,7 @@ export interface ParseResult {
 
 export function parseLinksJson(text: string): ParseResult {
   const issues: ParseIssue[] = [];
-  const file = (level: IssueLevel, code: string, message: string) => issues.push({ index: -1, level, code, message });
+  const file = (level: IssueLevel, code: string, message: string, detail?: string) => issues.push({ index: -1, level, code, message, ...(detail && { detail }) });
   let pipelineRejectsBytes = false;
 
   if (text.startsWith("﻿")) {
@@ -52,14 +54,16 @@ export function parseLinksJson(text: string): ParseResult {
   try {
     data = JSON.parse(text.replace(/^﻿/, ""));
   } catch (e) {
-    file("error", "file/not-json", `הקובץ אינו JSON תקין (${(e as Error).message}). הגנרטור ידלג על כל הקובץ.`);
+    // plain words first; the parser's message ("Unexpected end of JSON input") is only the detail
+    file("error", "file/not-json", "הקובץ פגום: הוא נקטע או שאינו קובץ קישורים, ולכן אוצריא לא תקרא ממנו אף קישור.", `JSON.parse: ${(e as Error).message}`);
     return { records: [], issues, generatorRejectsFile: true, pipelineRejectsBytes: true };
   }
   if (!Array.isArray(data)) {
     const looksLikeDictaMap = data !== null && typeof data === "object";
     file("error", "file/not-array", looksLikeDictaMap
-      ? "הקובץ הוא אובייקט ולא מערך רשומות (כנראה מפת Dicta). הגנרטור מזהה את המבנה הזה ומדלג על כל הקובץ."
-      : "הקובץ אינו מערך של רשומות קישור. הגנרטור ידלג על כל הקובץ.");
+      ? "זה לא קובץ קישורים של אוצריא (כנראה מפה של Dicta), ולכן אוצריא מדלגת על כולו."
+      : "זה לא קובץ קישורים: אין בו רשימת קישורים, ולכן אוצריא תדלג על כולו.",
+      looksLikeDictaMap ? "JSON object, not an array of records" : "JSON value is not an array of records");
     return { records: [], issues, generatorRejectsFile: true, pipelineRejectsBytes: true };
   }
 

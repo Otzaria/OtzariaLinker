@@ -101,6 +101,38 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
   });
 });
 
+describe("AppStore — which book goes in which reader", () => {
+  const title = (store: AppStore, side: "source" | "target") => {
+    const k = store.view[side].value;
+    return k ? store.refOf(k).title : null;
+  };
+
+  it("the commentary opened first stays in its reader; the database only fills the empty one (audit F3)", async () => {
+    const { store } = makeStore();
+    await store.openFiles([COMMENTARY]);
+    expect(title(store, "source")).toBe("פירוש על בראשית");
+    await store.openFiles([DB]); // the database has its own pair (Onkelos → Bereshit): it must not replace the commentary
+    expect(title(store, "source")).toBe("פירוש על בראשית");
+    expect(title(store, "target")).toBe("בראשית");
+  });
+
+  it("a base opened first keeps its reader; a commentary on it fills the other", async () => {
+    const { store } = makeStore();
+    await store.openFiles([{ path: "בראשית.txt", blob: new Blob([strToU8("<h1>בראשית</h1>\nבראשית ברא")]) }]);
+    await store.openFiles([COMMENTARY]);
+    expect(title(store, "source")).toBe("בראשית");
+    expect(title(store, "target")).toBe("פירוש על בראשית");
+  });
+
+  it("with both readers chosen, opening more books changes neither", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB, COMMENTARY]);
+    const before = [store.view.source.value, store.view.target.value];
+    await store.openFiles([BIUR]);
+    expect([store.view.source.value, store.view.target.value]).toEqual(before);
+  });
+});
+
 describe("AppStore — automatic suggestions", () => {
   it("run → approve all certain (one undo step) → undo returns them to pending → reject is remembered", async () => {
     const { store } = makeStore();
@@ -130,6 +162,47 @@ describe("AppStore — automatic suggestions", () => {
   });
 });
 
+describe("AppStore — the suggestion table reads like the user's choice", () => {
+  it("rows with the same place name differ by the start of the target line (audit F17)", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB, BIUR]);
+    const biur = [...store.books.value.values()].find((b) => b.title === "ביאור על בראשית")!;
+    const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    expect(await store.suggestions.runEngine("headings", biur.key, bereshit.key)).toBe(true);
+    const list = store.suggestions.run.value!.result.suggestions.slice(0, 5);
+    expect(store.suggestions.snippet(list[0]!.target)).toBeUndefined(); // not loaded yet
+    await store.suggestions.loadPreviews(list);
+    const snippets = list.map((s) => store.suggestions.snippet(store.suggestions.display(s).to));
+    expect(snippets.every((x) => !!x && x.length > 0)).toBe(true);
+    expect(new Set(snippets).size).toBe(list.length);
+    expect(snippets.some((x) => /[&<]/.test(x!))).toBe(false); // plain text: no tags or entities ("&thinsp;")
+  });
+
+  it("a dibur hamatchil run stored base → commentary still reads from the commentary the user chose (audit F18)", async () => {
+    const { store } = makeStore();
+    const verses = ["בראשית ברא אלהים את השמים ואת הארץ.", "והארץ היתה תהו ובהו וחשך על פני תהום.", "ויאמר אלהים יהי אור ויהי אור.", "וירא אלהים את האור כי טוב."];
+    const dh = ["בראשית ברא", "תהו ובהו", "יהי אור", "כי טוב"];
+    const nl = String.fromCharCode(10);
+    // a base that is not a Sefaria book, so nothing but the direction is under test
+    const base = { path: "ספר הבסיס.txt", blob: new Blob([strToU8(["<h1>ספר הבסיס</h1>", "<h2>פרק א</h2>", ...verses].join(nl))]) };
+    const comm = { path: "ביאור על ספר הבסיס.txt", blob: new Blob([strToU8(["<h1>ביאור על ספר הבסיס</h1>", "<h2>פרק א</h2>", ...dh.map((d, i) => `${d} - ביאור: הסבר קצר על שורה ${i + 1}.`)].join(nl))]) };
+    await store.openFiles([base, comm]);
+    const c = [...store.books.value.values()].find((b) => b.title === "ביאור על ספר הבסיס")!;
+    const b = [...store.books.value.values()].find((x) => x.title === "ספר הבסיס")!;
+    expect(await store.suggestions.runEngine("dibur-hamatchil", c.key, b.key)).toBe(true);
+    const list = store.suggestions.run.value!.result.suggestions;
+    const stored = list.find((s) => s.source.book.key === b.key)!;
+    expect(stored).toBeTruthy(); // the engine stores an anchored link from the base
+    await store.suggestions.loadPreviews([stored]);
+    const v = store.suggestions.display(stored);
+    expect(v.reversed).toBe(true);
+    expect(v.from.book.key).toBe(c.key);
+    expect(v.to.book.key).toBe(b.key);
+    expect(v.toLabel).toMatch(/^ספר הבסיס /);
+    expect(store.suggestions.snippet(v.to)).toBe(verses[stored.source.line - 2]!.split(" ").slice(0, 7).join(" ") + (verses[stored.source.line - 2]!.split(" ").length > 7 ? "…" : ""));
+  });
+});
+
 describe("AppStore — projects and autosave", () => {
   it("save → open in a new session binds links to the books by title", async () => {
     const a = makeStore();
@@ -154,6 +227,52 @@ describe("AppStore — projects and autosave", () => {
     expect(b.store.linksOfBook(comm2.key)).toHaveLength(1);
     const plan = (await b.store.exchange.prepareExport())!;
     expect(plan.counts).toMatchObject({ new: 1, heldBack: 0 });
+  });
+
+  it("a project reopened without its sources lists them by name until they are open again (audit F10)", async () => {
+    const a = makeStore();
+    await a.store.openFiles([DB, COMMENTARY]);
+    const comm = [...a.store.books.value.values()].find((b) => b.title === "פירוש על בראשית")!;
+    const ber = [...a.store.books.value.values()].find((b) => b.title === "בראשית")!;
+    await a.store.lines.load(ber.key, 0, 5);
+    await a.store.lines.load(comm.key, 0, 2);
+    a.store.pickLine("source", comm.key, 1);
+    a.store.pickLine("target", ber.key, 2);
+    a.store.createFromDraft();
+    const text = a.store.projectText();
+    const stored = JSON.parse(text).sources;
+    expect(stored).toEqual([
+      { label: "seforim.db", kind: "otzaria-db", books: a.store.sources.value[0]!.books.length, titles: ["בראשית"] },
+      { label: "פירוש על בראשית.txt", kind: "text-files", books: 1, files: ["פירוש על בראשית.txt"], titles: ["פירוש על בראשית"] },
+    ]);
+
+    const b = makeStore();
+    b.store.openProject("work.otzlinker.json", text);
+    expect(b.store.missingSources.value.map((s) => [s.label, s.missingTitles])).toEqual([
+      ["seforim.db", ["בראשית"]],
+      ["פירוש על בראשית.txt", ["פירוש על בראשית"]],
+    ]);
+    // the success notice points at the list, and does not fade into nothing on its own
+    expect(b.store.notices.value.at(-1)!.text).toContain("מקורות וספרים");
+    // saving before reopening keeps the sources the project still waits for
+    expect(JSON.parse(b.store.projectText()).sources).toEqual(stored);
+
+    await b.store.openFiles([COMMENTARY]);
+    expect(b.store.missingSources.value.map((s) => s.label)).toEqual(["seforim.db"]);
+    await b.store.openFiles([DB]);
+    expect(b.store.missingSources.value).toEqual([]);
+  });
+
+  it("an old project's sources (labels only) are missing until a source with that label opens; hiding clears the list", async () => {
+    const b = makeStore();
+    const old = { format: "otzaria-linker-project", version: 1, savedAt: "", app: "3", sources: [{ label: "seforim.db", kind: "otzaria-db", books: 9, files: [3, "x"], titles: "bad" }], links: [], rejectedSuggestions: [], view: { source: null, target: null } };
+    b.store.openProject("old.otzlinker.json", JSON.stringify(old));
+    expect(b.store.missingSources.value).toEqual([{ label: "seforim.db", kind: "otzaria-db", books: 9, files: ["x"], missingTitles: [] }]);
+    b.store.dismissMissingSources();
+    expect(b.store.missingSources.value).toEqual([]);
+    b.store.openProject("old.otzlinker.json", JSON.stringify(old));
+    await b.store.openFiles([DB]);
+    expect(b.store.missingSources.value).toEqual([]);
   });
 
   it("autosave writes after a change and offers recovery in a new session", async () => {

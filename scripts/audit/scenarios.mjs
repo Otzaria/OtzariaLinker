@@ -10,7 +10,7 @@ async function idle(p, timeout = 120_000) {
   await p.locator(".app-bar .task").waitFor({ state: "detached", timeout }).catch(() => {});
 }
 /** The export dialog: what it says, why links are held back, and the download (private purpose if needed). */
-export async function exportFlow(s, p, name, { tryPrivate = true } = {}) {
+export async function exportFlow(s, p, name, { tryPrivate = true, keepOpen = false } = {}) {
   const exp = p.locator(".app-bar .export");
   if (await exp.isDisabled()) {
     s.note("כפתור 'ייצוא' מושבת: אין קישורים בפרויקט");
@@ -51,6 +51,14 @@ export async function exportFlow(s, p, name, { tryPrivate = true } = {}) {
       out.path = await d.path();
       s.note(`הורד: ${out.file}`);
       if (out.file.endsWith(".json")) s.note(`תוכן: ${readFileSync(out.path, "utf8").slice(0, 300)}`);
+    }
+    // since the F13 fix the dialog stays open on "what now?" after the download
+    if (await dialog.getByRole("heading", { name: "מה עכשיו?" }).isVisible().catch(() => false)) {
+      await s.shot(`${name}-next`);
+      out.next = (await dialog.innerText()).replace(/\s+/g, " ").slice(0, 900);
+      s.note(`אחרי ההורדה: ${out.next}`);
+      if (!keepOpen) await s.click(dialog.getByRole("button", { name: "סגירה" }), "'סגירה'");
+      else out.open = true;
     }
   } else {
     s.note("ייצוא — כפתור ההורדה נשאר מושבת");
@@ -232,8 +240,19 @@ s2.title = "פירוש TXT מול מסד אוצריא";
 
 export async function s3(s, { IN }) {
   const p = await s.open();
-  s.decide("אין משימה '4 ספרים': איזו לבחור? (ספר ופירוש / ספר והערות / עבודה ידנית / ישר 'קבצים')");
-  await s.pick(p.locator(".drop-strip").getByRole("button", { name: "קבצים" }), ["בראשית", "ביאור חדש על בראשית", "ספר דוגמה", "הערות על ספר דוגמה"].map((t) => `${IN}/s3/${t}.txt`), "במסך הפתיחה, בצד: 'קבצים' ← ארבעת הקבצים");
+  const files = ["בראשית", "ביאור חדש על בראשית", "ספר דוגמה", "הערות על ספר דוגמה"].map((t) => `${IN}/s3/${t}.txt`);
+  if (await task(p, "כמה ספרים יחד").count()) {
+    // since the F15 fix: a task for several books
+    await s.shot("home");
+    await s.click(task(p, "כמה ספרים יחד"), "'כמה ספרים יחד'");
+    await s.pick(sheetBtn(p, "הספרים: קבצים"), files, "שלב 1: 'קבצים' ← ארבעת הקבצים");
+    await wait(p, 1000);
+    await s.shot("start-sheet");
+    await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  } else {
+    s.decide("אין משימה '4 ספרים': איזו לבחור? (ספר ופירוש / ספר והערות / עבודה ידנית / ישר 'קבצים')");
+    await s.pick(p.locator(".drop-strip").getByRole("button", { name: "קבצים" }), files, "במסך הפתיחה, בצד: 'קבצים' ← ארבעת הקבצים");
+  }
   await idle(p);
   await wait(p, 1000);
   await s.shot("workspace");
@@ -296,14 +315,23 @@ s5.title = "מסד אוצריא ומסד אישי יחד";
 
 export async function s6(s, { IN }) {
   const p = await s.open();
-  s.decide("אין משימה 'לראות קישורים שבמסד': מה לבחור? (עריכת קישורים קיימים מבקשת קובצי json)");
-  await s.pick(p.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }), [OTZ(IN)], "במסך הפתיחה, בצד: 'מסד נתונים' ← seforim.db");
+  if (await task(p, "הקישורים שכבר במסד").count()) {
+    // since the F15 fix: a task for the links a database already has
+    await s.click(task(p, "הקישורים שכבר במסד"), "'הקישורים שכבר במסד'");
+    await s.pick(sheetBtn(p, "המסד: מסד נתונים"), [OTZ(IN)], "שלב 1: 'מסד נתונים' ← seforim.db");
+    await wait(p, 1000);
+    await s.shot("start-sheet");
+    await s.click(sheetBtn(p, "התחלה"), "'התחלה'");
+  } else {
+    s.decide("אין משימה 'לראות קישורים שבמסד': מה לבחור? (עריכת קישורים קיימים מבקשת קובצי json)");
+    await s.pick(p.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }), [OTZ(IN)], "במסך הפתיחה, בצד: 'מסד נתונים' ← seforim.db");
+  }
   await idle(p);
   await wait(p, 1500);
   await s.shot("workspace");
   await setBook(s, p, 'רש"י על בראשית', "source", "'מקור' ליד 'רש\"י על בראשית'");
   s.decide("איפה רואים את הקישורים שכבר במסד? (לשונית 'קישורים' ← 'קישורים מהמסד')");
-  await s.click(p.getByRole("tab", { name: /^קישורים/ }), "לשונית 'קישורים'");
+  await s.click(p.getByRole("tab", { name: /^קישורים/ }).first(), "לשונית 'קישורים'");
   await s.shot("links-tab");
   await s.click(p.getByRole("tab", { name: /קישורים מהמסד/ }), "'קישורים מהמסד'");
   await idle(p);
@@ -443,7 +471,16 @@ export async function s10(s, { IN }) {
   s.note(`אחרי פתיחה: ${(await q.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 700)}`);
   const books = await q.locator(".book-list li").count();
   s.note(`ספרים ברשימה אחרי פתיחת הפרויקט: ${books}`);
-  if (!books) {
+  // since the F10 fix the workspace lists the project's sources, each with its own picker
+  const reopen = q.getByRole("region", { name: "מקורות לפתוח מחדש" });
+  if (!books && (await reopen.isVisible().catch(() => false))) {
+    s.note(`מקורות לפתוח מחדש: ${(await reopen.innerText()).replace(/\s+/g, " ").slice(0, 500)}`);
+    await s.pick(reopen.getByRole("button", { name: /^פתיחה מחדש:/ }).first(), FOUR.map((t) => `${IN}/s3/${t}.txt`), "הלחצן ליד המקור ברשימה ← ארבעת הספרים");
+    await idle(q);
+    await wait(q, 1500);
+    await s.shot("reopened-books");
+    s.note(`אחרי פתיחת הספרים: ${(await q.locator("main").innerText()).replace(/\s+/g, " ").slice(0, 500)}`);
+  } else if (!books) {
     s.repeat("צריך לפתוח שוב את ארבעת הספרים");
     const group = q.getByRole("group", { name: "סוג המקור להוספה" });
     if (!(await group.isVisible().catch(() => false))) await s.click(q.getByRole("button", { name: "הוספת מקור" }), "'הוספת מקור'");
@@ -526,9 +563,14 @@ s11.title = "בדיקת קישורים ותיקון שגיאות";
 export async function s12(s, { IN }) {
   const p = await s.open();
   await buildAndSave(s, p, IN, `${IN}/../out/s12`);
-  const out = await exportFlow(s, p, "export");
+  const out = await exportFlow(s, p, "export", { keepOpen: true });
   let report = "";
-  if (out.path && out.file.endsWith(".zip")) {
+  if (out.open) {
+    const dl = p.waitForEvent("download", { timeout: 20_000 });
+    await s.click(p.getByRole("dialog").getByRole("button", { name: /הורדת הדוח/ }), "'הורדת הדוח'");
+    report = readFileSync(await (await dl).path(), "utf8");
+    await s.click(p.getByRole("dialog").getByRole("button", { name: "סגירה" }), "'סגירה'");
+  } else if (out.path && out.file.endsWith(".zip")) {
     const z = unzipSync(new Uint8Array(readFileSync(out.path)));
     s.note(`ZIP: ${Object.keys(z).join(", ")}`);
     report = z["_report.txt"] ? strFromU8(z["_report.txt"]) : "";

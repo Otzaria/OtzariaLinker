@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
 import type { ExportBundle } from "../../state/exchange";
+import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { DbCopyFiles } from "./db-copy-files";
@@ -19,6 +20,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const [failed, setFailed] = useState(false);
   const [format, setFormat] = useState<"json" | "sefaria-csv">("json");
   const [csv, setCsv] = useState<SefariaCsvFile[] | null>(null);
+  /** what was downloaded: the dialog stays open on "what now?" (audit F13) */
+  const [saved, setSaved] = useState<string | null>(null);
   const advanced = store.prefs.advanced.value;
 
   const replan = () => void store.exchange.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
@@ -43,6 +46,25 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           <Icon name="oz_link_download" size={24} />
           <h2 id="export-title">ייצוא קובצי קישורים</h2>
         </header>
+        {saved && plan ? (
+          <>
+            <div class="body">
+              <p class="saved-note">
+                <Icon name="fl_checkmark_circle" size={18} />
+                <span>{saved}</span>
+              </p>
+              <h3 style="margin:0">מה עכשיו?</h3>
+              <NextSteps routes={store.exchange.nextSteps(plan, asCsv ? csv ?? undefined : undefined)} open />
+            </div>
+            <footer>
+              <button class="btn text" style="margin-inline-end:auto" onClick={() => store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)}>
+                <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
+              </button>
+              <button class="btn filled" onClick={() => ref.current?.close()}>סגירה</button>
+            </footer>
+          </>
+        ) : (
+        <>
         <div class="body">
           {!plan && !failed && <p>בודק את כל הקישורים מול הספרים…</p>}
           {failed && <p>הבדיקה לא הושלמה, ולכן לא ייצאתי כלום.</p>}
@@ -68,7 +90,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   title={`ספרי ספריא נקבעים לפי ${store.sefariaTitles.value.label}`}
                 >
                   <option value="submission">שליחה לספריית אוצריא (מומלץ): כללי הסנכרון של הספרייה מחייבים</option>
-                  <option value="private">שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה</option>
+                  <option value="private">{advanced ? "שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה" : "שימוש פרטי: ציון ספריא חסר או טווח בספר ספריא — רק אזהרה"}</option>
                 </select>
               </label>
               {advanced && (
@@ -179,6 +201,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 </details>
               )}
               {outputs === 0 && !(asCsv && !csv) && <p>אין מה לייצא: אין קישורים או מבני כותרות שנוצרו או יובאו (קישורים מתוך מסד אינם נכתבים לקובץ).</p>}
+              {!(asCsv && !csv) && (
+                <details class="next-steps-box">
+                  <summary>מה עושים עם הקבצים? (לספרייה, לאוצריא שלכם, למסד אישי)</summary>
+                  <NextSteps routes={store.exchange.nextSteps(plan, asCsv ? csv ?? undefined : undefined)} />
+                </details>
+              )}
             </>
           )}
         </div>
@@ -192,16 +220,43 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             class="btn filled"
             disabled={!plan || outputs === 0 || (asCsv && !csv)}
             onClick={() => {
-              if (plan) store.exchange.saveExport(plan, asCsv ? csv ?? undefined : undefined);
-              ref.current?.close();
+              if (!plan) return;
+              store.exchange.saveExport(plan, asCsv ? csv ?? undefined : undefined);
+              setSaved(outputs > 1 ? `ירד קובץ ZIP עם ${outputs.toLocaleString("he")} קבצים ודוח הייצוא.` : "הקובץ ירד.");
             }}
           >
             <Icon name="fl_arrow_download" size={18} />
             {outputs > 1 ? "הורדת ZIP" : "הורדת הקובץ"}
           </button>
         </footer>
+        </>
+        )}
       </div>
     </dialog>
+  );
+}
+
+/** Folder and file names in a Hebrew step ("links/", "_links.json") as LTR units: "links/" never reads "/links". */
+function withPaths(text: string) {
+  return text.split(/([A-Za-z_][\w.-]*\/|‎?_links\.json)/).map((part, i) => (i % 2 ? <bdi key={i} dir="ltr">{part}</bdi> : part));
+}
+
+/** The ways back to Otzaria (formats/report/next-steps.ts): one expander per route, the first open when asked. */
+function NextSteps({ routes, open }: { routes: ReturnType<AppStore["exchange"]["nextSteps"]>; open?: boolean }) {
+  return (
+    <div class="next-steps">
+      {routes.map((r, i) => (
+        <details key={r.id} open={open && i === 0} data-route={r.id}>
+          <summary>{r.title}</summary>
+          <ol>
+            {r.steps.map((s, n) => (
+              <li key={n}>{withPaths(s)}</li>
+            ))}
+          </ol>
+          {r.note && <p class="muted">{r.note}</p>}
+        </details>
+      ))}
+    </div>
   );
 }
 

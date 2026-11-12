@@ -1,7 +1,7 @@
 import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection-type";
 import type { BookRef } from "../core/links/model";
 import { runEngine, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
-import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
+import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
 import { partSection, partsOf, sectionFor, type Section } from "../linking/sections";
@@ -34,7 +34,7 @@ export interface MaxLinkJobOptions {
 }
 
 /** units of progress per step: engines report their own progress inside a step */
-const UNIT = 1000;
+const UNIT = MAXLINK_PROGRESS_UNIT;
 
 /**
  * A pair step. When the dependant is written on several bases (Relation.scope), only the part of it

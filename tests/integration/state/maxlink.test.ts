@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import type { EngineId } from "../../../src/linking/automatic";
+import { effect } from "@preact/signals";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
@@ -78,6 +79,26 @@ describe("AppStore — max-link", () => {
     store.maxLink.saveReport();
     expect(saved.at(-1)!.name).toMatch(/^קישור-מרבי-.*\.csv$/);
     expect(String(saved.at(-1)!.data)).toContain("ביאור על בראשית");
+  });
+
+  it("the running task counts steps of the plan, with a cancel (audit F21)", async () => {
+    const { store, folder } = await opened();
+    const scope = { kind: "source", id: folder.info.id } as const;
+    const plan = store.maxLink.plan(scope, PAIRS);
+    const books = new Set(plan.steps.map((s) => s.source.key)).size;
+    const seen: string[] = [];
+    const stop = effect(() => {
+      const t = store.task.value;
+      if (t?.count) seen.push(t.count);
+      if (t) expect(typeof t.cancel).toBe("function");
+    });
+    expect(await store.maxLink.run(plan, store.maxLink.scopeLabel(scope))).toBe(true);
+    stop();
+    const of = plan.steps.length + books;
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((c) => new RegExp(`^שלב [\\d,]+ מתוך ${of}$`).test(c))).toBe(true);
+    expect(seen.at(-1)).toBe(`שלב ${of} מתוך ${of}`);
+    expect(store.task.value).toBeNull();
   });
 
   it("suggestions the database already has show as 'already exists' (Onkelos on Bereshit)", async () => {
