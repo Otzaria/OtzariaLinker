@@ -8,7 +8,9 @@ import { rawOffsetFromVisible, visibleUnits } from "../core/text/offsets";
  * Moving links to a new edition of a book (stage 11). Given the line mapping old → new
  * (matching/line-diff.ts), every project link with an end in the old book gets a plan:
  *   certain — every end it has in that book landed on an identical line;
- *   review  — an end landed on an EDITED line, or a range end had to be shortened: the user decides;
+ *   review  — an end landed on an EDITED line, on a line that MOVED out of order (identical text found
+ *             once in each edition — matching/line-diff.ts findMoves), or a range end had to be
+ *             shortened: the user decides;
  *   lost    — an end's line no longer exists: never moved automatically.
  * Word anchors are carried only to an identical line, or re-found when their words occur exactly
  * once in the edited line; otherwise the anchor is dropped and the item goes to review.
@@ -36,6 +38,8 @@ export interface RelinkInput {
   oldBook: BookRef;
   newBook: BookRef;
   mapping: Pick<LineMapping, "to" | "fate">;
+  /** lines the monotone alignment left unmatched but found elsewhere with identical text: [old, new] */
+  moves?: readonly (readonly [number, number])[];
   /** anchor texts of the old and new edition, for the lines anchors sit on (may be partial) */
   oldLine?: (i: number) => string | undefined;
   newLine?: (i: number) => string | undefined;
@@ -44,6 +48,7 @@ export interface RelinkInput {
 
 export function planRelink(input: RelinkInput): RelinkPlan {
   const items: RelinkItem[] = [];
+  const moves = new Map(input.moves ?? []);
   let untouched = 0;
   for (const link of input.links) {
     if (link.provenance === "db" || link.status === "deleted") continue;
@@ -53,39 +58,47 @@ export function planRelink(input: RelinkInput): RelinkPlan {
       untouched++;
       continue;
     }
-    items.push(planOne(link, s, t, input));
+    items.push(planOne(link, s, t, input, moves));
   }
   const counts = { certain: 0, review: 0, lost: 0 };
   for (const i of items) counts[i.verdict]++;
   return { items, counts, untouched };
 }
 
-function planOne(link: Link, inSource: boolean, inTarget: boolean, input: RelinkInput): RelinkItem {
+function planOne(link: Link, inSource: boolean, inTarget: boolean, input: RelinkInput, moves: ReadonlyMap<number, number>): RelinkItem {
   const reasons: string[] = [];
   let verdict: RelinkVerdict = "certain";
   const worse = (v: RelinkVerdict) => {
     if (v === "lost" || (v === "review" && verdict === "certain")) verdict = v;
   };
   const moveSide = (side: LinkSide, label: string): LinkSide | null => {
-    const to = input.mapping.to[side.line] ?? -1;
+    // an unmatched line found elsewhere unchanged: carried, but never silently (its context changed)
+    const relocated = (i: number) => {
+      const t = input.mapping.to[i] ?? -1;
+      return t >= 0 ? t : (moves.get(i) ?? -1);
+    };
+    const to = relocated(side.line);
     const fate: LineFate = input.mapping.fate[side.line] ?? "deleted";
     if (to < 0) {
       reasons.push(`שורה ${side.line + 1} ב${label} נמחקה במהדורה החדשה.`);
       worse("lost");
       return null;
     }
-    if (fate === "changed") {
+    if ((input.mapping.to[side.line] ?? -1) < 0) {
+      reasons.push(`שורה ${side.line + 1} ב${label} הועברה למקום אחר במהדורה החדשה (עכשיו שורה ${to + 1}, טקסט זהה).`);
+      worse("review");
+    } else if (fate === "changed") {
       reasons.push(`שורה ${side.line + 1} ב${label} נערכה במהדורה החדשה (עכשיו שורה ${to + 1}).`);
       worse("review");
     } else if (to !== side.line) reasons.push(`שורה ${side.line + 1} ב${label} זזה לשורה ${to + 1}.`);
     let end: number | undefined;
     if (side.end !== undefined) {
-      const e = input.mapping.to[side.end] ?? -1;
+      const e = relocated(side.end);
       if (e > to) end = e;
       else {
         // the range's last line is gone: shorten to the last surviving line of the range
         for (let i = side.end - 1; i > side.line; i--) {
-          const m = input.mapping.to[i] ?? -1;
+          const m = relocated(i);
           if (m > to) {
             end = m;
             break;

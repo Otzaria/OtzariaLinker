@@ -621,7 +621,8 @@ export class AppStore {
     const anchored = this.allLinks.value.filter((l) => l.anchor && this.sameBook(l.source.book, oldKey));
     for (const l of anchored) {
       await this.lines.load(oldKey, l.source.line, l.source.line);
-      const to = diff.to[l.source.line] ?? -1;
+      const aligned = diff.to[l.source.line] ?? -1;
+      const to = aligned >= 0 ? aligned : (diff.moves.find(([o]) => o === l.source.line)?.[1] ?? -1);
       if (to >= 0) await this.lines.load(newKey, to, to);
     }
     const plan = planRelink({
@@ -629,6 +630,7 @@ export class AppStore {
       oldBook: oldRef,
       newBook: this.refOf(newKey),
       mapping: { to: Int32Array.from(diff.to), fate: diff.fate },
+      moves: diff.moves,
       oldLine: (i) => this.lines.peek(oldKey, i)?.anchorText,
       newLine: (i) => this.lines.peek(newKey, i)?.anchorText,
       isOld: (ref) => this.sameBook(ref, oldKey),

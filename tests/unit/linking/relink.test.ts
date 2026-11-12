@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { diffLines } from "../../../src/matching/line-diff";
+import { diffLines, findMoves } from "../../../src/matching/line-diff";
 import { planRelink } from "../../../src/linking/relink";
 
 const OLD: BookRef = { key: "s1:old", title: "ספר", origin: "otzaria" };
@@ -44,5 +44,31 @@ describe("planRelink", () => {
   it("an anchor on an edited line is re-found when its words occur exactly once", () => {
     const a = byId.get("anch")!.moved!.anchor!;
     expect(newLines[5]!.slice(a.rawStart, a.rawEnd)).toBe("הספר");
+  });
+});
+
+describe("planRelink: a line moved out of order", () => {
+  // old line 1 moved to the end; the monotone alignment leaves it unmatched, findMoves pairs it back
+  const old = Array.from({ length: 8 }, (_, i) => `שורה ${i} עם טקסט ייחודי מספר ${i}`);
+  const neu = [...old.slice(0, 1), ...old.slice(2), old[1]!];
+  const mapping = diffLines(old, neu);
+  const moves = findMoves(old, neu, mapping.to);
+  const word = old[1]!.indexOf("טקסט");
+  const links = [mk("moved", 1, { anchor: { rawStart: word, rawEnd: word + 4 } }), mk("kept", 3)];
+  const plan = (withMoves: boolean) =>
+    new Map(planRelink({ links, oldBook: OLD, newBook: NEW, mapping, ...(withMoves && { moves }), oldLine: (i) => old[i], newLine: (i) => neu[i], isOld: (b) => b.key === OLD.key }).items.map((i) => [i.link.id, i]));
+
+  it("is carried to its new place for review — never certain (its context changed), never lost", () => {
+    expect(mapping.to[1]).toBe(-1);
+    const item = plan(true).get("moved")!;
+    expect(item.verdict).toBe("review");
+    expect(item.moved!.source.line).toBe(7);
+    expect(item.reasons.join(" ")).toContain("הועברה");
+    // identical text: the anchor travels as is
+    expect(neu[7]!.slice(item.moved!.anchor!.rawStart, item.moved!.anchor!.rawEnd)).toBe("טקסט");
+    expect(plan(true).get("kept")!.verdict).toBe("certain");
+  });
+  it("without the moves it is lost, as before", () => {
+    expect(plan(false).get("moved")!.verdict).toBe("lost");
   });
 });
