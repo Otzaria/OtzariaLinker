@@ -215,7 +215,15 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     const el = targetElement(chosen.alignment);
     const suspect = beyond ?? (el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined);
     let score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
-    if (suspect || outsideSection) score = Math.min(score, belowHigh);
+    /*
+     * The line's own heading is a NAME the base does not have, below the place that was found ("דף ב. ›
+     * רבינו חננאל", "… › שאילתות פרשת צו"): an anthology's source under the daf it was gathered for, and the
+     * sugya often goes on past that amud. The whole amud is the parent's place, not the line's: in קובץ
+     * שיטות קמאי (5 tractates) 1,094 of the 7,859 certain the database judged were elsewhere.
+     */
+    const last = P[P.length - 1];
+    const unplacedName = P.length > 1 && last!.kind === "name" && chosen.alignment.events.some((e) => e.code === "skip-commentary" && e.c === last);
+    if (suspect || outsideSection || unplacedName) score = Math.min(score, belowHigh);
     // the line's own quote, when it marks one, must not sit in the neighbouring stretch instead (./quote.ts)
     let quoteAt: number | null = null;
     if (score >= opts.thresholds.high) {
@@ -236,6 +244,10 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     if (suspect) {
       warnings.push(numberingWarning(suspect));
       rules.push("headings.numbering-suspect");
+    }
+    if (unplacedName) {
+      warnings.push({ code: "heading/unplaced-name", text: `הכותרת של השורה ("${last!.label}") אינה בספר הבסיס, ולכן השורה קושרה לכל המקום שמעליה (${describe(chosen.path)}), והביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.unplaced-name");
     }
     if (quoteAt !== null) {
       warnings.push({ code: "heading/quote-elsewhere", text: `הדיבור המתחיל של השורה לא נמצא במקום הזה, אבל נמצא סמוך אליו בספר הבסיס (שורה ${base.lines[quoteAt]!.index + 1}); ייתכן שגבולות הקטעים בשני הספרים שונים, ולכן הביטחון הוגבל ל"אפשרית"` });

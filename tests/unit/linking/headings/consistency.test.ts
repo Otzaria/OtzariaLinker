@@ -121,6 +121,28 @@ describe("headings guard — a base that marks its pages inside its lines (the Z
   });
 });
 
+describe("headings guard — a line under a name the base does not have (קובץ שיטות קמאי)", () => {
+  const base = book("b:pes", "פסחים", ["<h1>פסחים</h1>", "<h2>דף ב.</h2>", "אור לארבעה עשר", "בודקין את החמץ", "<h2>דף ב:</h2>", "גמרא"]);
+
+  it("the daf of an anthology's source is the parent's place, not the line's: possible", () => {
+    const kovetz = book("c:k", "קובץ שיטות קמאי", ["<h1>קובץ שיטות קמאי</h1>", "<h2>דף ב.</h2>", "<h3>רבינו חננאל</h3>", "פירוש של רבינו חננאל", "<h2>דף ב:</h2>", "פירוש בלי כותרת"]);
+    const r = runHeadingsEngine(kovetz, base);
+    const s = at(r, 3);
+    expect(s.target).toMatchObject({ line: 2, end: 3 });
+    expect(s.confidence).toBe("possible");
+    expect(s.rules).toContain("headings.unplaced-name");
+    // a line right under the daf keeps its confidence
+    expect(at(r, 5).confidence).toBe("certain");
+  });
+
+  it("a named grouping ABOVE the numbered levels (\"דרושים נאים › פרק ו\") is not this", () => {
+    const tanakh = book("b:gen", "בראשית", ["<h1>בראשית</h1>", "<h2>פרק ו</h2>", "(א) ויהי כי החל", "(ב) ויראו בני האלהים"]);
+    const c = book("c:c", "פירוש", ["<h1>פירוש</h1>", "<h2>דרושים נאים</h2>", "<h3>פרק ו</h3>", "<h4>פסוק ב</h4>", "פירוש"]);
+    const s = at(runHeadingsEngine(c, tanakh), 4);
+    expect(s.rules).not.toContain("headings.unplaced-name");
+  });
+});
+
 describe("headings guard — numbers the base does not have (ראב\"ד על ספרא)", () => {
   // the base's section numbers its 8 rules "(א)…(ח)"; the commentary counts its own paragraphs פסקה א…יב
   const base = book("b:sifra", "ספרא", [
