@@ -8,6 +8,8 @@
  *   node scripts/audit/run-audit.mjs <inputs-dir> [scenario numbers…]
  *
  * Inputs: py scripts/audit/make_inputs.py <inputs-dir>.
+ * AUDIT_OUT=<dir> writes the screenshots and results there instead of docs/reviews (a re-run that must
+ * not replace the audit's own evidence).
  */
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -16,7 +18,8 @@ import { chromium } from "@playwright/test";
 
 export const ROOT = resolve(import.meta.dirname, "..", "..");
 export const DIST = pathToFileURL(join(ROOT, "dist", "OtzariaLinker.html")).href;
-export const SHOTS = join(ROOT, "docs", "reviews", "shots");
+export const OUT = process.env.AUDIT_OUT ? resolve(process.env.AUDIT_OUT) : join(ROOT, "docs", "reviews");
+export const SHOTS = join(OUT, "shots");
 export const MINI_DB = join(ROOT, "tests", "fixtures", "db", "seforim-v7-mini.db");
 
 /** Terms a regular user should not meet on screen. */
