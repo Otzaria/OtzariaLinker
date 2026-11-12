@@ -234,6 +234,15 @@ export interface Relation {
   dependence?: LinkedKind;
   /** set when the dependant is linked to this base through the commentary it explains (RelationThrough) */
   through?: readonly RelationThrough[];
+  /**
+   * Only dibur-hamatchil runs (siblingRelations), because the base's headings are not the dependant's:
+   *   "intermediate" — the base is an intermediate commentator on the dependant's own base (רש"י,
+   *     תוספות…, by its title): every line is searched in it, and a line that does not name it is left
+   *     for review (addressedOnly "cap"). Headings would link each line to the commentator's whole daf;
+   *   "text" — the base is a text of its own (book.isBaseBook: "ספרא" for "מלבי"ם על ויקרא"), divided
+   *     by its own sections, not by the verses the dependant follows.
+   */
+  dhOnly?: "intermediate" | "text";
 }
 
 /** One unit of work. `pair` steps run an engine on (source → target) in the engine's input direction. */
@@ -377,6 +386,7 @@ function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: Reado
     const on = hits[0]!;
     have.add(x.key);
     const onN = counts[on.base.key] ?? 0;
+    const dhOnly = commentatorOfTitle(x.title) !== null ? "intermediate" : x.isBaseBook ? "text" : undefined;
     out.push({
       kind: "commentary",
       dependant: ref(book),
@@ -384,6 +394,7 @@ function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: Reado
       via: "links",
       caveats: [`${quote(x.title)} כתוב גם הוא על ${quote(on.base.title)}, והמסד מקשר את הספר אליו ${n.toLocaleString("he")} פעמים (אל ${quote(on.base.title)}: ${onN.toLocaleString("he")}).`],
       ...(on.scope && { scope: on.scope }),
+      ...(dhOnly && { dhOnly }),
     });
   }
   return out;
@@ -616,7 +627,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
     if (!book || isTargum(book)) continue;
     for (const own of relations.get(k) ?? []) {
       // a midrash or a translation (by its links) does not quote רש"י or תוספות
-      if (own.kind !== "commentary" || own.scope || own.through || own.dependence || own.dependant.key !== k) continue;
+      if (own.kind !== "commentary" || own.scope || own.through || own.dependence || own.dhOnly || own.dependant.key !== k) continue;
       const self = commentatorOfTitle(own.dependant.title)?.key;
       for (const sib of commentariesOn.get(own.base.key) ?? []) {
         const who = commentatorOfTitle(sib.dependant.title);
@@ -674,6 +685,25 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
         target: rel.base,
         why: `${d} מובאת ב־${b} (${VIA_TEXT[rel.via]}). שיטת דיבור המתחיל מחפשת את מילות הפתיחה של כל משנה בגמרא. הקישורים נכתבים מסוג "משנה בתלמוד" (mishnah_in_talmud), כמו במסד; הגנרטור שומר סוג זה כפי שנכתב, בלי היפוך ובלי הורדה ל"אחר".${tail}`,
         options: { declaredType: "mishnah_in_talmud" },
+      },
+    ];
+  if (rel.dhOnly === "intermediate")
+    return [
+      {
+        engine: "dibur-hamatchil",
+        source: rel.dependant,
+        target: rel.base,
+        why: `${d} מפרש גם את ${b} (${VIA_TEXT[rel.via]}). שיטת דיבור המתחיל מחפשת כל שורה בדברי ${b}; שורה שאינה מזכירה אותו בשמו נשארת לבדיקה.${tail}`,
+        options: { addressedOnly: "cap" },
+      },
+    ];
+  if (rel.dhOnly === "text")
+    return [
+      {
+        engine: "dibur-hamatchil",
+        source: rel.dependant,
+        target: rel.base,
+        why: `${d} מפרש גם את ${b} (${VIA_TEXT[rel.via]}). ${b} מחולק לפי הפרקים שלו, לא לפי הפסוקים שהפירוש הולך אחריהם, ולכן רק שיטת דיבור המתחיל מחפשת את מילות הפתיחה בטקסט שלו.${tail}`,
       },
     ];
   const targum = isTargum(depBook) || rel.dependence === "targum";

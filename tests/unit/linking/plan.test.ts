@@ -362,8 +362,27 @@ describe("planMaxLink — the existing links beside the declaration and the titl
     expect(steps(planPairs({ selected: ["db:3"], library: uncounted })).some((s) => s.includes('>פסקי הרא"ש'))).toBe(false);
   });
 
-  it('a midrash on the same base counts by its MIDRASH links ("מלבי"ם על ויקרא" ← "ספרא")', () => {
-    expect(steps(planPairs({ selected: ["db:6"], library: lib }))).toEqual(expect.arrayContaining(['headings:מלבי"ם על ויקרא>ספרא', 'dibur-hamatchil:מלבי"ם על ויקרא>ספרא', 'headings:מלבי"ם על ויקרא>ויקרא']));
+  it('a midrash on the same base counts by its MIDRASH links; a text of its own gets dibur-hamatchil only ("מלבי"ם על ויקרא" ← "ספרא")', () => {
+    const s = steps(planPairs({ selected: ["db:6"], library: lib }));
+    expect(s).toEqual(expect.arrayContaining(['dibur-hamatchil:מלבי"ם על ויקרא>ספרא', 'headings:מלבי"ם על ויקרא>ויקרא']));
+    expect(s).not.toContain('headings:מלבי"ם על ויקרא>ספרא');
+  });
+
+  it("an intermediate commentator as the sibling: dibur-hamatchil only, the lines that do not name it left for review", () => {
+    const talmud = [
+      book("k:1", "כתובות", { origin: "sefaria", isBaseBook: true }),
+      book("k:2", "תוספות על כתובות", { origin: "sefaria", bases: ["k:1"] }),
+      book("k:3", 'רש"י על כתובות', { origin: "sefaria", bases: ["k:1"] }),
+      book("k:4", 'מהרש"א - חידושי הלכות על מסכת כתובות', { origin: "sefaria", bases: ["k:1"], linkedBases: ["k:1", "k:2"], linkedCounts: { "k:1": 629, "k:2": 645 }, linkedComplete: true }),
+    ];
+    const p = planPairs({ selected: ["k:4"], library: talmud });
+    const toTos = p.steps.filter((x): x is Pair => x.kind === "pair" && x.target.key === "k:2");
+    expect(toTos.map((x) => x.engine)).toEqual(["dibur-hamatchil"]);
+    expect(toTos[0]!.options).toEqual({ addressedOnly: "cap" });
+    expect(toTos[0]!.relation.dhOnly).toBe("intermediate");
+    // רש"י, with no links counted, keeps the planner's usual step to the other commentators
+    const toRashi = p.steps.find((x): x is Pair => x.kind === "pair" && x.target.key === "k:3")!;
+    expect(toRashi.options).toEqual({ addressedOnly: true });
   });
 
   it("a sibling written on this book is its commentary, not its base", () => {
@@ -385,13 +404,14 @@ describe("planMaxLink — the existing links beside the declaration and the titl
   it("in a book on several bases, the sibling is read in the part of the base it is written on", () => {
     const p = planPairs({ selected: ["tn:5"], library: torah });
     const r = pairs(p).filter((s) => s.target.key === "tn:3" || s.target.key === "tn:4");
-    expect(r.map((s) => `${s.engine}>${s.target.title}@${s.relation.scope?.section}`).sort()).toEqual(['dibur-hamatchil>רש"י על בראשית@בראשית', 'dibur-hamatchil>רש"י על שמות@שמות', 'headings>רש"י על בראשית@בראשית', 'headings>רש"י על שמות@שמות']);
+    // רש"י is an intermediate commentator: dibur-hamatchil only (Relation.dhOnly)
+    expect(r.map((s) => `${s.engine}>${s.target.title}@${s.relation.scope?.section}`).sort()).toEqual(['dibur-hamatchil>רש"י על בראשית@בראשית', 'dibur-hamatchil>רש"י על שמות@שמות']);
   });
 
   it('a sibling written on two parts of the book has no one part to read ("יריעות שלמה" ← "מזרחי")', () => {
     const s = steps(planPairs({ selected: ["tn:6"], library: torah }));
     expect(s.some((x) => x.endsWith(">מזרחי"))).toBe(false);
-    expect(s).toContain('headings:יריעות שלמה על התורה>רש"י על בראשית');
+    expect(s).toContain('dibur-hamatchil:יריעות שלמה על התורה>רש"י על בראשית');
   });
 
   it('the base of its base, in the part of the commentary it explains ("שפתי חכמים" → "בראשית")', () => {

@@ -78,8 +78,12 @@ export interface DhOptions {
    * without it every unlabeled line was searched in the commentator's words and matched wherever both
    * quote the same verse or Gemara (library benchmark, 2026-11-12: ~87K suggestions in pairs the
    * database never links, "אבן עזרא על תהילים" → "רש"י על תהילים", "רש"י על חולין" → "ריטב"א על חולין").
+   * "cap": every line is searched, but one that does not name the commentator is left for review
+   * (possible at most, dh/not-addressed-cap): for a pair the database already links (plan.ts
+   * siblingRelations), where a book on רש"י names it on few lines ("גור אריה", "מזרחי") and a book on the
+   * Gemara names it on the lines that are about it (מהרש"א, מהר"ם שיף).
    */
-  readonly addressedOnly?: boolean;
+  readonly addressedOnly?: boolean | "cap";
   /**
    * a paragraph without a ד"ה of its own (no bold opening) after a ד"ה line of the same section belongs
    * to that ד"ה's place, in a book whose ד"ה lines are bold and whose sections hold few of them
@@ -254,7 +258,6 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto", types.anchored);
   const notes: Reason[] = [policy.reason];
   const routeIntermediates = options.intermediates !== false;
-  const addressedOnly = options.addressedOnly === true;
   const continueItems = options.continueItems !== false;
   /** the intermediate commentator the base book is (רש"י על …, תוספות על …), else null */
   const baseIs: Commentator | null = commentatorOfTitle(base.book.title);
@@ -276,6 +279,9 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const tableOf = (p: number): StepTable => (bTables[p] ??= stepTable(bTokens[p]!, bProfiles[p]!));
   const cExtract = new Map<number, ExtractedDh>();
   for (const l of commentary.lines) cExtract.set(l.index, extractDh(l, maxWords));
+  const addressedOnly = options.addressedOnly === true;
+  /** addressedOnly "cap": the commentary lines that do not name the base's commentator (capped to possible) */
+  const unaddressed = options.addressedOnly === "cap" && baseIs ? new Set<number>() : null;
   /*
    * Item paragraphs (continueItems): a book whose ד"ה lines open with bold, and whose sections hold few
    * of them — the median section (with any) has at most 3 — writes one ד"ה per item and continues it in
@@ -1031,6 +1037,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       itemHead = null;
       continue;
     }
+    if (unaddressed && !active) unaddressed.add(line.index);
     const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
     if (marked) {
       crossedHeading = false;
@@ -1165,6 +1172,12 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    let confidence = p.confidence;
+    if (unaddressed?.has(p.cLine) && (confidence === "certain" || confidence === "high")) {
+      confidence = "possible";
+      rules.push("dh/not-addressed-cap");
+      warnings.push(r("dh/not-addressed-cap", `השורה אינה מזכירה את ${baseIs!.name}, ולכן לא ברור שהיא מפרשת את דבריו ולא את הטקסט; לבדיקה.`));
+    }
     let anchor: RawAnchor | undefined;
     if (policy.anchors && p.words) {
       if (baseLine && NOTE_RE.test(baseLine.text))
@@ -1185,7 +1198,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       id: `dibur-hamatchil:${commentary.book.key}#${p.cLine}>${base.book.key}#${p.base}`,
       engine: "dibur-hamatchil" as const,
       score: p.score,
-      confidence: p.confidence,
+      confidence,
       reasons,
       rules,
       alternatives,
