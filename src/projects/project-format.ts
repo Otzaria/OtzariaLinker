@@ -18,6 +18,18 @@ import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
 export const PROJECT_FORMAT = "otzaria-linker-project";
 export const PROJECT_VERSION = 1;
 
+/**
+ * The fingerprint of a library links file the project holds (security review A3). A project only
+ * CLAIMS it: a file restored from a project is unverified until the library's file is loaded again
+ * and matches (store.importLinksFile) or the user confirms it in the export dialog.
+ */
+export interface ProjectLibraryFile {
+  title: string;
+  records: number;
+  hash: string;
+  layout?: { indent: string; spaced?: boolean; finalNewline: boolean; escapeNonAscii: "lower" | "upper" | false };
+}
+
 export interface ProjectSource {
   label: string;
   kind: string;
@@ -51,6 +63,8 @@ export interface ProjectFile {
    * someone else's schema were mapped, by schema fingerprint, so reopening one skips the wizard.
    */
   dbMappings?: SavedDbMapping[];
+  /** Optional (2.0): the library links files the project holds, by fingerprint (ProjectLibraryFile). */
+  libraryFiles?: ProjectLibraryFile[];
 }
 
 export interface ProjectData {
@@ -62,6 +76,7 @@ export interface ProjectData {
   /** alternative TOC structures of the project (absent in files saved before they existed) */
   altToc?: AltTocBook[];
   dbMappings?: SavedDbMapping[];
+  libraryFiles?: ProjectLibraryFile[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -83,6 +98,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date()):
     view: p.view,
     ...(p.altToc?.length && { altToc: p.altToc }),
     ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
+    ...(p.libraryFiles?.length && { libraryFiles: p.libraryFiles.map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })) }),
   };
   return JSON.stringify(file);
 }
@@ -94,7 +110,7 @@ export class ProjectError extends Error {
 }
 
 /** Parses and validates a project file; `bind` turns a stored book back into a BookRef of this session. */
-export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; savedAt: string; skipped: number } {
+export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; libraryFiles: ProjectLibraryFile[]; savedAt: string; skipped: number } {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -123,8 +139,25 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     view: { source: typeof f.view?.source === "string" ? f.view.source : null, target: typeof f.view?.target === "string" ? f.view.target : null },
     altToc: altToc.books,
     dbMappings: parseSavedDbMappings(f.dbMappings),
+    libraryFiles: rebuildLibraryFiles(f.libraryFiles),
     skipped: skipped + altToc.skipped,
   };
+}
+
+/* ---- library-file fingerprints: rebuilt from checked fields (untrusted input) ---- */
+function rebuildLibraryFiles(raw: unknown): ProjectLibraryFile[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Map<string, ProjectLibraryFile>();
+  for (const x of raw as Record<string, unknown>[]) {
+    if (!x || typeof x !== "object" || !str(x.title) || !x.title || out.has(x.title) || !isInt(x.records) || !str(x.hash) || x.hash.length > 64) continue;
+    const l = x.layout as Record<string, unknown> | undefined;
+    const layout =
+      l && typeof l === "object" && str(l.indent) && /^[ \t]{0,16}$/.test(l.indent) && typeof l.finalNewline === "boolean" && (l.escapeNonAscii === false || l.escapeNonAscii === "lower" || l.escapeNonAscii === "upper")
+        ? { indent: l.indent, finalNewline: l.finalNewline, escapeNonAscii: l.escapeNonAscii as "lower" | "upper" | false, ...(l.spaced === true && { spaced: true }) }
+        : undefined;
+    out.set(x.title, { title: x.title, records: x.records, hash: x.hash, ...(layout && { layout }) });
+  }
+  return [...out.values()];
 }
 
 /* ---- alt_toc: rebuilt field by field, like links (untrusted input) ---- */
@@ -195,7 +228,7 @@ function copyData(o: Record<string, unknown>): Record<string, unknown> {
 }
 
 const STATUSES = new Set(["new", "edited", "existing", "deleted"]);
-const PROVENANCES = new Set(["file", "user", "auto", "db-copy"]);
+const PROVENANCES = new Set(["file", "user", "auto", "db-copy", "import"]);
 const isInt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
 const isSide = (s: unknown): s is StoredSide => {
   const v = s as StoredSide;

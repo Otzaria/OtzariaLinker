@@ -53,8 +53,11 @@ export type LinkStatus = "new" | "edited" | "existing" | "deleted";
  * "db-copy" is a project link the user copied from a database link ("העתקה לפרויקט",
  * src/core/links/from-db.ts): an ordinary, editable, exportable link whose record was RECONSTRUCTED,
  * so the export insists that its book's links file is loaded first (validate.ts).
+ * "import" is a NEW link read from a spreadsheet or a records file (CSV, JSON in another layout): it
+ * goes through the links-file parser, but it is not the library's file — it is validated like any
+ * new link and never stands in for the book's library file (security review A1).
  */
-export type Provenance = "file" | "db" | "user" | "auto" | "db-copy";
+export type Provenance = "file" | "db" | "user" | "auto" | "db-copy" | "import";
 
 export interface Link {
   readonly id: string;

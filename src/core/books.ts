@@ -27,6 +27,11 @@ export interface SourceBook {
   bases?: string[];
   /** book.dependenceType as stored: "commentary", "targum", "midrash", "guides" (schema 2+) */
   dependence?: string;
+  /**
+   * book_has_links.hasSourceLinks of an Otzaria database: the book has links of its own in the
+   * database, so the library may hold a links file for it (the export then asks for that file).
+   */
+  hasSourceLinks?: boolean;
 }
 
 export interface SourceLine {

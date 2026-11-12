@@ -1,5 +1,6 @@
 import type { AltTocBook } from "../core/alt-toc/model";
 import type { Link } from "../core/links/model";
+import type { JsonLayout } from "../formats/links-json/layout";
 
 /*
  * The project's links with undo/redo (stage 14). Pure and immutable: every operation returns a new
@@ -23,12 +24,43 @@ export interface AltTocChange {
   readonly after?: AltTocBook;
 }
 
+/**
+ * A book's links file from the LIBRARY that the project holds (security review A1–A3). Its records are
+ * the project's "file" links; the export writes the book's file back as this file plus the user's
+ * changes, and it REPLACES the library's file. Part of the undoable state: undoing an import also
+ * forgets that the file was loaded.
+ */
+export interface LibraryFile {
+  readonly title: string;
+  /** records the file had when loaded */
+  readonly records: number;
+  /** fingerprint of the file's bytes (fileFingerprint) — recognises the same file when it is loaded again */
+  readonly hash: string;
+  /**
+   * true: loaded from the library in THIS session. false: restored from a saved project — a snapshot
+   * that may be old or forged, so the export holds the book until the file is loaded again or the
+   * user confirms it (export/file-unverified).
+   */
+  readonly verified: boolean;
+  /** the file's text layout, reused when it is written back (minimal library diff) */
+  readonly layout?: JsonLayout;
+}
+
+/** A change of one book's library-file record (keyed by title); absent = no file loaded. */
+export interface FileChange {
+  readonly title: string;
+  readonly before?: LibraryFile;
+  readonly after?: LibraryFile;
+}
+
 export interface Command {
   /** Hebrew, shown in the history list and in the undo tooltip ("יצירת קישור", "ייבוא 120 קישורים") */
   readonly label: string;
   readonly changes: readonly Change[];
   /** alt_toc changes of the same action (alt_toc editing is undoable like links) */
   readonly altToc?: readonly AltTocChange[];
+  /** library-file records the same action loaded, replaced or forgot */
+  readonly files?: readonly FileChange[];
   readonly at: number;
 }
 
@@ -36,6 +68,8 @@ export interface LinkState {
   readonly links: ReadonlyMap<string, Link>;
   /** alternative TOC structures of the project, by book title */
   readonly altToc: ReadonlyMap<string, AltTocBook>;
+  /** the library links files the project holds, by book title */
+  readonly files: ReadonlyMap<string, LibraryFile>;
   readonly undo: readonly Command[];
   readonly redo: readonly Command[];
   /** bumps on every change; autosave and "unsaved changes" compare against it */
@@ -44,7 +78,7 @@ export interface LinkState {
 
 export const HISTORY_LIMIT = 500;
 
-export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), undo: [], redo: [], revision: 0 });
+export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), files: new Map(), undo: [], redo: [], revision: 0 });
 
 function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change[], dir: "after" | "before"): Map<string, Link> {
   const next = new Map(links);
@@ -56,7 +90,7 @@ function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change
   return next;
 }
 
-function applyAltToc(books: ReadonlyMap<string, AltTocBook>, changes: readonly AltTocChange[] | undefined, dir: "after" | "before"): ReadonlyMap<string, AltTocBook> {
+function applyKeyed<T>(books: ReadonlyMap<string, T>, changes: readonly { title: string; before?: T; after?: T }[] | undefined, dir: "after" | "before"): ReadonlyMap<string, T> {
   if (!changes?.length) return books;
   const next = new Map(books);
   for (const c of changes) {
@@ -68,14 +102,16 @@ function applyAltToc(books: ReadonlyMap<string, AltTocBook>, changes: readonly A
 }
 
 /** Applies a new user action. Empty or no-op changes are dropped and do not create a history entry. */
-export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now(), altToc: readonly AltTocChange[] = []): LinkState {
+export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now(), altToc: readonly AltTocChange[] = [], files: readonly FileChange[] = []): LinkState {
   const real = changes.filter((c) => c.before !== c.after);
   const realAlt = altToc.filter((c) => c.before !== c.after);
-  if (!real.length && !realAlt.length) return s;
-  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), at };
+  const realFiles = files.filter((c) => c.before !== c.after);
+  if (!real.length && !realAlt.length && !realFiles.length) return s;
+  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), ...(realFiles.length && { files: realFiles }), at };
   return {
     links: applyChanges(s.links, real, "after"),
-    altToc: applyAltToc(s.altToc, realAlt, "after"),
+    altToc: applyKeyed(s.altToc, realAlt, "after"),
+    files: applyKeyed(s.files, realFiles, "after"),
     undo: [...s.undo, cmd].slice(-HISTORY_LIMIT),
     redo: [],
     revision: s.revision + 1,
@@ -85,19 +121,43 @@ export function commit(s: LinkState, label: string, changes: readonly Change[], 
 export function undo(s: LinkState): LinkState {
   const cmd = s.undo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyAltToc(s.altToc, cmd.altToc, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyKeyed(s.altToc, cmd.altToc, "before"), files: applyKeyed(s.files, cmd.files, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
 }
 
 export function redo(s: LinkState): LinkState {
   const cmd = s.redo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyAltToc(s.altToc, cmd.altToc, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
 }
 
 /** Setting (or, with null, dropping) one book's structures, as a change. */
 export function altTocChange(s: LinkState, title: string, after: AltTocBook | null): AltTocChange {
   const before = s.altToc.get(title);
   return { title, ...(before && { before }), ...(after && { after }) };
+}
+
+/** Setting (or, with null, forgetting) one book's library-file record, as a change. */
+export function fileChange(s: LinkState, title: string, after: LibraryFile | null): FileChange {
+  const before = s.files.get(title);
+  return { title, ...(before && { before }), ...(after && { after }) };
+}
+
+/**
+ * A fingerprint of a file's text: 53-bit cyrb53 over UTF-16 code units, as hex, with the length.
+ * Not a security hash — it only recognises the same file when it is loaded again; trust comes from
+ * comparing the records themselves (store.importLinksFile).
+ */
+export function fileFingerprint(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return `${text.length.toString(36)}-${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16)}`;
 }
 
 /* ---- the link operations users perform, expressed as Changes ---- */
@@ -145,7 +205,7 @@ export const historyPosition = (s: LinkState): number => s.undo.length;
 /** Every action the history holds, oldest first: the applied ones, then the undone ones in redo order. */
 export function timeline(s: LinkState): HistoryEntry[] {
   const all = [...s.undo, ...[...s.redo].reverse()];
-  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0), position: i + 1, applied: i < s.undo.length }));
+  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0) + (c.files?.length ?? 0), position: i + 1, applied: i < s.undo.length }));
 }
 
 /** Undoes or redoes, one action at a time, until `position` actions are applied. */

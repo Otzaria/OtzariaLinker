@@ -36,13 +36,29 @@ export interface ValidationContext {
   line(book: BookRef, index: number): LineFacts | undefined;
   lineCount(book: BookRef): number | undefined;
   /**
-   * Whether the project holds a book's links file (imported), the user confirmed the library has
-   * none ("confirmed-new"), or neither ("missing"). Absent = unknown: the db-copy rule is skipped.
+   * Whether the project holds a book's links file loaded from the library in this session
+   * ("imported"), only a snapshot of it restored from a saved project ("unverified"), the user
+   * confirmed the export may write the book's file without it ("confirmed-new"), or none of these
+   * ("missing"). Absent = unknown: the file rules are skipped.
    */
-  linksFile?(sourceTitle: string): "imported" | "confirmed-new" | "missing";
+  linksFile?(sourceTitle: string): LinksFileState;
+  /**
+   * The open library database says this book has links of its own (book_has_links.hasSourceLinks),
+   * so the library may hold a links file for it. Absent or false = not known.
+   */
+  libraryMayHaveFile?(sourceTitle: string): boolean;
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
 }
+
+export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "missing";
+
+/*
+ * Problems that are about the book's WHOLE links file, not one link: the file would replace the
+ * library's file wrongly. Every link of that book is held back — also untouched imports and in expert
+ * mode — or the written file would silently drop the library's other records (security review A1–A4).
+ */
+export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held"]);
 
 export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const out: Problem[] = [];
@@ -61,7 +77,16 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
       add("error", "export/db-copy-no-file", `הקישור הועתק מהמסד, וקובץ הקישורים של "${s.book.title}" לא נטען לפרויקט. קובץ שייוצא יחליף את כל הקובץ שבספרייה וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
     add("info", "export/db-copy", "הקישור הועתק מהמסד ושוחזר ממנו: heRef_2, הסוג המקורי והקובץ שבו ישב אינם שמורים במסד. בדקו אותם לפני הייצוא.");
   }
-  const match = link.provenance === "user" || link.provenance === "auto" ? ctx.existing?.(link) : null;
+  // The book's file is a snapshot from a saved project, not the library's current file: writing it
+  // would replace the library's file with what may be an old (or forged) copy (security review A3).
+  const fileState = link.provenance !== "db" ? ctx.linksFile?.(s.book.title) : undefined;
+  if (fileState === "unverified")
+    add("error", "export/file-unverified", `קובץ הקישורים של "${s.book.title}" נשמר בפרויקט ולא נטען מהספרייה בהפעלה הזו. ייתכן שהוא ישן, והייצוא היה מחליף בו את הקובץ העדכני שבספרייה. טענו שוב את "${s.book.title}_links.json" מהספרייה, או אשרו במפורש שהעותק שבפרויקט הוא העדכני.`);
+  // A new link of a book whose library file is not loaded, when the database says the book has links
+  // of its own: the exported file would REPLACE that file and drop its records (compatibility review).
+  if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && ctx.libraryMayHaveFile?.(s.book.title))
+    add("error", "export/library-file-not-loaded", `במסד יש קישורים של "${s.book.title}", ולכן כנראה יש לו קובץ קישורים בספרייה. קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
+  const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
   if (match === "same-link")
     add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");
   else if (match === "same-lines") add("info", "export/in-db-other-type", "במסד כבר יש קישור בין שתי השורות האלה, בסוג אחר או בכיוון אחר.");
@@ -155,6 +180,8 @@ function sefariaChecks(link: Link, add: Add) {
 export function validateExport(links: readonly Link[], ctx: ValidationContext, keyOf: (l: Link) => string): Map<string, Problem[]> {
   const out = new Map<string, Problem[]>();
   const seen = new Map<string, string>();
+  // the file-level rule: one link that holds its book's file back holds every link of that book
+  const heldFiles = new Map<string, Problem>();
   for (const l of links) {
     const problems = validateLink(l, ctx);
     const key = keyOf(l);
@@ -163,6 +190,15 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext, k
       problems.push({ code: "export/duplicate", severity: "warning", message: "קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד." });
     else seen.set(key, l.id);
     out.set(l.id, problems);
+    const fileLevel = problems.find((p) => FILE_LEVEL_CODES.has(p.code));
+    if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);
   }
+  if (heldFiles.size)
+    for (const l of links) {
+      const why = heldFiles.get(l.source.book.title);
+      const problems = out.get(l.id)!;
+      if (why && !problems.some((p) => FILE_LEVEL_CODES.has(p.code)))
+        problems.push({ code: "export/file-held", severity: "error", message: `כל קובץ הקישורים של "${l.source.book.title}" מוחזק, ולכן גם הקישור הזה: ${why.message}` });
+    }
   return out;
 }
