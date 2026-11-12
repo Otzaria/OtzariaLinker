@@ -333,7 +333,7 @@ export function relationsOf(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>
     const linked = linkedRelations(book, byKey);
     return linked.length || talmud.length ? [...linked, ...talmud] : own;
   }
-  const fixed = unlinkedTitleBase(book, own, byKey) ?? own;
+  const fixed = unlinkedTitleBase(book, own, byKey) ?? moreBaseTexts(book, own, byKey, index) ?? own;
   const all = [...fixed, ...siblingRelations(book, fixed, byKey, index)];
   return [...all, ...baseOfBase(book, all, byKey), ...talmud];
 }
@@ -398,6 +398,36 @@ function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: Reado
     });
   }
   return out;
+}
+
+/** A share of the book's counted links that makes another base text one of its bases (moreBaseTexts). */
+const SERIES_SHARE = 0.25;
+
+/*
+ * A declaration that names one book of several the book is written on: "פרדס יוסף" is declared on
+ * "בראשית", and covers the whole Torah — its parts "בראשית", "שמות", "ויקרא"… — and the library links it
+ * to "שמות" 1,061 times, "בראשית" 916, "ויקרא" 881. Unscoped, its שמות part was read against בראשית (636
+ * certain links the database does not have, library benchmark run 3). When the existing links show
+ * other BASE TEXTS (isBaseBook), each with at least EVIDENCE_MIN links and a quarter of the book's
+ * counted links, and none written on the declared base (a commentary on it is a sibling), the book is
+ * written on all of them: each base through its own part, as book_base_text with several bases.
+ */
+function moreBaseTexts(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] | null {
+  const counts = book.linkedCounts;
+  if (!counts || own.length !== 1) return null;
+  const r = own[0]!;
+  if (r.kind !== "commentary" || r.scope || r.through || r.dependence || !byKey.get(r.base.key)?.isBaseBook) return null;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const more = linkedOpen(book, byKey).filter((x) => {
+    const n = counts[x.key] ?? 0;
+    return x.key !== r.base.key && x.isBaseBook && !book.linkedKinds?.[x.key] && n >= EVIDENCE_MIN && n >= SERIES_SHARE * total && !writtenOn(x, r.base.key, index) && !basesOf(x).includes(book.key);
+  });
+  if (!more.length) return null;
+  const note = `לפי המסד הספר כתוב על ${quote(r.base.title)}, אבל הקישורים שבמסד מראים שהוא כתוב גם על ${more.map((x) => `${quote(x.title)} (${counts[x.key]!.toLocaleString("he")})`).join(", ")}. כל בסיס מקושר רק דרך החלק בספר שהכותרת שלו היא שם הבסיס.`;
+  return [
+    { ...r, caveats: [...r.caveats, note], scope: { section: r.base.title } },
+    ...more.map((x): Relation => ({ kind: "commentary", dependant: ref(book), base: ref(x), via: "links", caveats: [note], scope: { section: x.title } })),
+  ];
 }
 
 /*

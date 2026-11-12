@@ -467,6 +467,26 @@ describe("planMaxLink — the existing links beside the declaration and the titl
     expect(planPairs({ selected: ["y:2"], library: uncounted }).steps.length).toBe(2);
   });
 
+  it('a declaration that names one book of a series: every book the links show, each in its part ("פרדס יוסף")', () => {
+    const torah5 = [
+      book("p:1", "בראשית", { origin: "sefaria", isBaseBook: true }),
+      book("p:2", "שמות", { origin: "sefaria", isBaseBook: true }),
+      book("p:3", "ויקרא", { origin: "sefaria", isBaseBook: true }),
+      book("p:4", "תהילים", { origin: "sefaria", isBaseBook: true }),
+      book("p:5", "פרדס יוסף", { origin: "sefaria", bases: ["p:1"], linkedBases: ["p:1", "p:2", "p:3", "p:4"], linkedCounts: { "p:1": 916, "p:2": 1061, "p:3": 881, "p:4": 150 }, linkedComplete: true }),
+    ];
+    const p = planPairs({ selected: ["p:5"], library: torah5 });
+    const rel = (k: string) => p.steps.find((x): x is Pair => x.kind === "pair" && x.target.key === k && x.engine === "headings")?.relation;
+    expect(rel("p:1")?.scope).toEqual({ section: "בראשית" });
+    expect(rel("p:2")?.scope).toEqual({ section: "שמות" });
+    expect(rel("p:3")?.scope).toEqual({ section: "ויקרא" });
+    // a book quoted now and then (under a quarter of the links) is not a base
+    expect(rel("p:4")).toBeUndefined();
+    // nor when the declared base is the only one the links show
+    const one = torah5.map((b) => (b.key === "p:5" ? { ...b, linkedBases: ["p:1", "p:4"], linkedCounts: { "p:1": 916, "p:4": 150 } } : b));
+    expect(planPairs({ selected: ["p:5"], library: one }).steps.every((x) => x.kind !== "pair" || !x.relation.scope)).toBe(true);
+  });
+
   it("evidenceToFollow: the strongly linked bases whose own base only their links tell", () => {
     const books = new Map(lib.map((b) => [b.key, b] as const));
     const ev = [
