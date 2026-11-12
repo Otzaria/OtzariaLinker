@@ -27,6 +27,15 @@ describe("parseLinksJson — file level", () => {
     expect(parseLinksJson("[{").generatorRejectsFile).toBe(true);
     expect(codes('{"3":[{"start":1,"end":2,"refs":[]}]}')).toContain("file/not-array");
   });
+  it("says it in plain words; the parser's own message is only the detail (audit F14)", () => {
+    const [issue] = parseLinksJson("[{").issues.filter((i) => i.code === "file/not-json");
+    expect(issue!.message).toBe("הקובץ פגום: הוא נקטע או שאינו קובץ קישורים, ולכן אוצריא לא תקרא ממנו אף קישור.");
+    expect(issue!.message).not.toMatch(/JSON|הגנרטור|[A-Za-z]{4,}/);
+    expect(issue!.detail).toMatch(/^JSON\.parse: /);
+    const [map] = parseLinksJson('{"3":[]}').issues.filter((i) => i.code === "file/not-array");
+    expect(map!.message).not.toContain("הגנרטור");
+    expect(map!.detail).toBeTruthy();
+  });
 });
 
 describe("parseLinksJson — records", () => {

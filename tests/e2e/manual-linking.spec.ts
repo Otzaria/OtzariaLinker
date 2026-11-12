@@ -52,6 +52,15 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
   await expect(builder.locator(".stored-as")).toContainText("בראשית"); // shows how Otzaria will store it
+  // simple mode names the fields in plain Hebrew; the file's field names only in advanced mode (audit F14)
+  await expect(builder).toContainText("שם המקום ביעד");
+  await expect(builder).toContainText("ציון ספריא של היעד (באנגלית)");
+  await expect(builder).not.toContainText("heRef_2");
+  await expect(builder).not.toContainText("ref_2 —");
+  const advanced = page.locator(".app-bar").getByRole("checkbox", { name: /מצב מתקדם/ });
+  await advanced.check({ force: true });
+  await expect(builder).toContainText("שם המקום ביעד (heRef_2)");
+  await advanced.uncheck({ force: true });
   await shot(page, "3-builder");
   await page.keyboard.press("Control+Enter");
 

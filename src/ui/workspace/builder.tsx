@@ -86,7 +86,8 @@ export function Builder() {
       )}
 
       <label class="field">
-        שם המקום ביעד (heRef_2)
+        {/* the file's field names only in advanced mode (audit F14) */}
+        {advanced ? "שם המקום ביעד (heRef_2)" : "שם המקום ביעד"}
         <input type="text" value={draft?.heRef2 ?? ""} placeholder="ייקבע לפי שורת היעד" onInput={(e) => (store.draftHeRef.value = e.currentTarget.value)} disabled={!t} />
         {store.draftHeRef.value !== null && t && (
           <button class="adv-link" onClick={() => (store.draftHeRef.value = null)}>חזרה לשם האוטומטי</button>
@@ -95,13 +96,13 @@ export function Builder() {
 
       {srcSefaria && (
         <label class="field">
-          ref_1 — ציון ספריא באנגלית של המקור
+          {advanced ? "ref_1 — ציון ספריא באנגלית של המקור" : "ציון ספריא של המקור (באנגלית)"}
           <input type="text" dir="ltr" placeholder={autoRef1 ?? "Genesis 1:1"} title={autoRef1 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} />
         </label>
       )}
       {tgtSefaria && (
         <label class="field">
-          ref_2 — ציון ספריא באנגלית של היעד
+          {advanced ? "ref_2 — ציון ספריא באנגלית של היעד" : "ציון ספריא של היעד (באנגלית)"}
           <input type="text" dir="ltr" placeholder={autoRef2 ?? "Genesis 1:1"} title={autoRef2 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef2.value} onInput={(e) => (store.draftRef2.value = e.currentTarget.value)} />
         </label>
       )}

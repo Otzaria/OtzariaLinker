@@ -90,7 +90,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   title={`ספרי ספריא נקבעים לפי ${store.sefariaTitles.value.label}`}
                 >
                   <option value="submission">שליחה לספריית אוצריא (מומלץ): כללי הסנכרון של הספרייה מחייבים</option>
-                  <option value="private">שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה</option>
+                  <option value="private">{advanced ? "שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה" : "שימוש פרטי: ציון ספריא חסר או טווח בספר ספריא — רק אזהרה"}</option>
                 </select>
               </label>
               {advanced && (
