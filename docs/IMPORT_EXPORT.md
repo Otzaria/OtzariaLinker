@@ -122,7 +122,7 @@
 `planExport(links, ctx)` מחשבת **לפני** שנכתב משהו:
 
 1. מסננת קישורים מחוקים וקישורי מסד.
-2. מריצה `validateExport` (`src/core/links/validate.ts`): הכללים לכל קישור, ועוד כפילויות לפי `storedKey`
+2. מריצה `validateExport` (`src/core/links/validate.ts`): הכללים לכל קישור, ועוד כפילויות לפי כלל השוויון האחד (`storedLinkIdentity` ב־`src/core/links/equality.ts`: הצדדים כפי שיישמרו, לפי שם הספר, והסוג השמור)
    (שני קישורים שהגנרטור ישמור כקישור אחד).
 3. **מחזיקה בצד כל קישור חדש או ערוך עם שגיאה** (`heldBack`), עם הסיבות. **בעיה של הקובץ כולו**
    (`FILE_LEVEL_CODES`: `export/unsafe-title`, `export/file-unverified`, `export/library-file-not-loaded`,

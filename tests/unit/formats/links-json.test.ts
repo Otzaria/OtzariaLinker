@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { storedForm, storedKey } from "../../../src/core/links/stored-form";
+import { storedLinkIdentity } from "../../../src/core/links/equality";
+import { storedForm } from "../../../src/core/links/stored-form";
 import { linkToRecord, recordToLink } from "../../../src/formats/links-json/convert";
 import { findDuplicateKey, parseLinksJson } from "../../../src/formats/links-json/parse";
 import { serializeLinksJson } from "../../../src/formats/links-json/serialize";
@@ -120,6 +121,6 @@ describe("storedForm — generator orientation rules", () => {
   it("the same stored link from either file direction has one key (dedup on the stored shape)", () => {
     const fromRashi = { source: { book: rashi, line: 7 }, target: { book: bereshit, line: 3 }, declaredType: "source" };
     const fromBereshit = { source: { book: bereshit, line: 3 }, target: { book: rashi, line: 7 }, declaredType: "commentary" };
-    expect(storedKey(fromRashi)).toBe(storedKey(fromBereshit));
+    expect(storedLinkIdentity(fromRashi)).toBe(storedLinkIdentity(fromBereshit));
   });
 });

@@ -1,5 +1,5 @@
 import { SOURCE_VIEW_TYPES } from "./connection-type";
-import type { LinkMatch } from "./equality";
+import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
 import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn, unsafeFileTitle } from "./titles";
@@ -233,19 +233,23 @@ function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
     add("error", "sefaria/pending-anchor-hash", "עוגן חדש עם ref_1 דורש anchor_src_hash, שרק הסנכרון של הספרייה מחשב. הסירו את העוגן או השאירו אותו לתהליך הספרייה.");
 }
 
-/** Problems of a whole export: per-link problems plus links that collapse into one in the database. */
-export function validateExport(links: readonly Link[], ctx: ValidationContext, keyOf: (l: Link) => string): Map<string, Problem[]> {
+/**
+ * Problems of a whole export: per-link problems plus links that collapse into one in the database —
+ * by the one equality rule (equality.ts storedLinkIdentity: stored ends by TITLE and stored type), so
+ * two editions of a book open together (a text file and the database) are one book here too.
+ */
+export function validateExport(links: readonly Link[], ctx: ValidationContext): Map<string, Problem[]> {
   const out = new Map<string, Problem[]>();
   const seen = new Map<string, string>();
   // the file-level rule: one link that holds its book's file back holds every link of that book
   const heldFiles = new Map<string, Problem>();
   for (const l of links) {
     const problems = validateLink(l, ctx);
-    const key = keyOf(l);
-    const first = seen.get(key);
+    const key = storedLinkIdentity(l);
+    const first = key === null ? undefined : seen.get(key);
     if (first !== undefined)
       problems.push({ code: "export/duplicate", severity: "warning", message: "קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד." });
-    else seen.set(key, l.id);
+    else if (key !== null) seen.set(key, l.id);
     out.set(l.id, problems);
     const fileLevel = problems.find((p) => FILE_LEVEL_CODES.has(p.code));
     if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);

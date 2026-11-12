@@ -1,5 +1,4 @@
 import type { Link } from "../core/links/model";
-import { storedKey } from "../core/links/stored-form";
 import { validateExport, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
 /*
@@ -91,7 +90,7 @@ export interface QaReport {
 
 export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport {
   const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
-  const problems = validateExport(live, ctx, storedKey);
+  const problems = validateExport(live, ctx);
   const issues: QaIssue[] = [];
   let clean = 0;
   for (const l of live) {

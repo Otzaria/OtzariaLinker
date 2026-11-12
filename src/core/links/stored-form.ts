@@ -59,12 +59,3 @@ export function storedForm(link: Pick<Link, "source" | "target" | "declaredType"
   };
 }
 
-/**
- * Identity of a link AS STORED: the generator keys links by (sourceLineId, targetLineId, type), so
- * two records that differ only in direction-of-file or in the declared spelling collapse into one.
- * Duplicate detection must use this, not the file shape.
- */
-export function storedKey(link: Pick<Link, "source" | "target" | "declaredType">): string {
-  const f = storedForm(link);
-  return `${f.storedSource.book.key}#${f.storedSource.line}>${f.storedTarget.book.key}#${f.storedTarget.line}:${f.stored}`;
-}

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { storedKey } from "../../../src/core/links/stored-form";
 import { validateExport, validateLink, type LineFacts, type ValidationContext } from "../../../src/core/links/validate";
 
 const book = (title: string, extra: Partial<BookRef> = {}): BookRef => ({ key: `k:${title}`, title, origin: "otzaria", isBaseBook: false, ...extra });
@@ -94,9 +93,18 @@ describe("validateExport", () => {
     const dep = book("פירוש על בסיס");
     const a = link({ id: "a", source: { book: dep, line: 3 }, target: { book: base, line: 4 }, declaredType: "source" });
     const b = link({ id: "b", source: { book: base, line: 4 }, target: { book: dep, line: 3 }, declaredType: "commentary" });
-    const res = validateExport([a, b], ctx, storedKey);
+    const res = validateExport([a, b], ctx);
     expect(res.get("a")!.map((p) => p.code)).not.toContain("export/duplicate");
     expect(res.get("b")!.map((p) => p.code)).toContain("export/duplicate");
+  });
+
+  it("two editions of one book open together (a text file and the database) are one book: same title, one stored link", () => {
+    const base = book("בסיס", { isBaseBook: true });
+    const dep = book("פירוש על בסיס");
+    const depText = { ...dep, key: "text:פירוש על בסיס" };
+    const a = link({ id: "a", source: { book: dep, line: 3 }, target: { book: base, line: 4 }, declaredType: "source" });
+    const b = link({ id: "b", source: { book: depText, line: 3 }, target: { book: base, line: 4 }, declaredType: "source" });
+    expect(validateExport([a, b], ctx).get("b")!.map((p) => p.code)).toContain("export/duplicate");
   });
 });
 
@@ -120,7 +128,7 @@ describe("'הערות על X' — the real outcome (compatibility review B5, Gen
     const merged = link({ id: "f1", provenance: "file", status: "existing", target: { book: C, line: 2 } });
     const anchoredSameLine = link({ id: "n1", target: { book: C, line: 3 }, anchor: { rawStart: 3 } });
     const anchoredOtherLine = link({ id: "n2", source: { book: A, line: 4 }, target: { book: C, line: 4 }, anchor: { rawStart: 3 } });
-    const out = validateExport([merged, anchoredSameLine, anchoredOtherLine], ctx, storedKey);
+    const out = validateExport([merged, anchoredSameLine, anchoredOtherLine], ctx);
     expect(out.get("n1")!.map((p) => p.code)).toContain("export/companion-merge-broken");
     expect(out.get("n2")!.map((p) => p.code)).not.toContain("export/companion-merge-broken");
   });

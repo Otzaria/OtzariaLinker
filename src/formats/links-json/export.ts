@@ -2,7 +2,6 @@ import { zipSync, strToU8 } from "fflate";
 import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
 import { unsafeFileTitle } from "../../core/links/titles";
-import { storedKey } from "../../core/links/stored-form";
 import { FILE_LEVEL_CODES, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
@@ -47,7 +46,7 @@ export interface ExportOptions {
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
   const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
-  const problems = validateExport(live, ctx, storedKey);
+  const problems = validateExport(live, ctx);
   const written: Link[] = [];
   const heldBack: ExportPlan["heldBack"] = [];
   const warned: ExportPlan["warned"] = [];
