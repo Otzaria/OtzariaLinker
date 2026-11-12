@@ -42,6 +42,13 @@ export interface ProjectSource {
   files?: string[];
   /** Optional (4.0, audit F10): the titles of this source's books that the project's links use. */
   titles?: string[];
+  /**
+   * Optional (4.0, without a version bump: older readers ignore it): the user's own answer to "are these
+   * the library's books" for this source — the switch "ספרי ספריית אוצריא" (product audit F2), which
+   * decides the Sefaria rules for its books. Absent: the user did not set it, and the source's own
+   * detection stands when it is opened again.
+   */
+  library?: boolean;
 }
 
 interface StoredBook {
@@ -157,7 +164,14 @@ function rebuildSource(s: ProjectSource): ProjectSource {
   const strings = (x: unknown): string[] | undefined => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string").slice(0, 5000) : undefined);
   const files = strings(s.files);
   const titles = strings(s.titles);
-  return { label: s.label, kind: typeof s.kind === "string" ? s.kind : "", books: typeof s.books === "number" ? s.books : 0, ...(files?.length && { files }), ...(titles?.length && { titles }) };
+  return {
+    label: s.label,
+    kind: typeof s.kind === "string" ? s.kind : "",
+    books: typeof s.books === "number" ? s.books : 0,
+    ...(files?.length && { files }),
+    ...(titles?.length && { titles }),
+    ...(typeof s.library === "boolean" && { library: s.library }),
+  };
 }
 
 /* ---- library-file fingerprints: rebuilt from checked fields (untrusted input) ---- */

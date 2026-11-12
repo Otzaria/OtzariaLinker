@@ -828,8 +828,28 @@ export class AppStore {
 
   /** Whether an open source holds the library's own books (the official database, a library checkout, or the user says so). */
   isLibrarySource(sourceId: string): boolean {
-    return this.libraryOverrides.value.get(sourceId) ?? this.sources.value.find((s) => s.info.id === sourceId)?.info.library ?? false;
+    return this.libraryChoice(sourceId) ?? this.sources.value.find((s) => s.info.id === sourceId)?.info.library ?? false;
   }
+
+  /**
+   * What the user said about a source: in this session, else in the project it was saved in (the
+   * source opened again matches the saved one by its files, or by its name and kind). Undefined: never said.
+   */
+  private libraryChoice(sourceId: string): boolean | undefined {
+    const set = this.libraryOverrides.value.get(sourceId);
+    if (set !== undefined) return set;
+    const saved = this.projectLibraryChoices.value;
+    if (!saved.length) return undefined;
+    const s = this.sources.value.find((x) => x.info.id === sourceId);
+    if (!s) return undefined;
+    const files = s.info.kind === "text-files" ? new Set(s.books.flatMap((b) => (b.path ? [b.path] : []))) : null;
+    const same = (p: ProjectSource) =>
+      p.kind === s.info.kind && (files && p.files?.length ? p.files.length === files.size && p.files.every((f) => files.has(f)) : p.label === s.info.label);
+    return saved.find(same)?.library;
+  }
+
+  /** The saved project's sources the user had marked (ProjectSource.library), applied when they are open again. */
+  private readonly projectLibraryChoices = signal<ProjectSource[]>([]);
 
   /** The user's switch "ספרי ספריית אוצריא" for one source (product audit F2): decides the Sefaria rules for its books. */
   setLibrarySource(sourceId: string, library: boolean): void {
@@ -928,7 +948,8 @@ export class AppStore {
     const open = this.sources.value.map((s): ProjectSource => {
       const files = s.info.kind === "text-files" ? s.books.flatMap((b) => (b.path ? [b.path] : [])).slice(0, 5000) : [];
       const titles = [...(used.get(s.info.id) ?? [])].slice(0, 5000);
-      return { label: s.info.label, kind: s.info.kind, books: s.books.length, ...(files.length && { files }), ...(titles.length && { titles }) };
+      const library = this.libraryChoice(s.info.id);
+      return { label: s.info.label, kind: s.info.kind, books: s.books.length, ...(files.length && { files }), ...(titles.length && { titles }), ...(library !== undefined && { library }) };
     });
     // a source still missing from the project this one was opened from stays in it: saving before reopening must not forget it
     const labels = new Set(open.map((s) => s.label));
@@ -986,6 +1007,8 @@ export class AppStore {
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
+      // the switch "ספרי ספריית אוצריא" as the user left it, for each source when it is open again
+      this.projectLibraryChoices.value = p.sources.filter((s) => s.library !== undefined);
       if (this.screen.peek() !== "guided") this.screen.value = "workspace";
     });
     const missing = this.missingSources.value.length;
