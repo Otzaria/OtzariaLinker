@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalize, skeleton, stem, stripNikud } from "../../../src/core/text/hebrew";
-import { levenshtein, phraseSimilarity, wordSimilarity } from "../../../src/matching/similarity";
+import { approximateOccurrence, levenshtein, phraseSimilarity, wordSimilarity } from "../../../src/matching/similarity";
 
 describe("השוואת טקסט עברי (legacy §10)", () => {
   it("הסרת ניקוד", () => expect(stripNikud("שְׁמַע")).toBe("שמע"));
@@ -43,5 +43,16 @@ describe("השוואת טקסט עברי (legacy §10)", () => {
       stem(5);
       phraseSimilarity({}, []);
     }).not.toThrow();
+  });
+});
+
+describe("approximateOccurrence (Sellers: edit distance to the closest substring)", () => {
+  it("finds a pattern inside a text with its distance and end", () => {
+    expect(approximateOccurrence("רפוייארעא", "לרפוייארעאבמועד", 3)).toEqual({ dist: 0, end: 10 });
+    // a different prefix letter and a missing yod: 2 edits
+    expect(approximateOccurrence("מרפויארעא", "קאלרפוייארעא", 3)?.dist).toBe(2);
+  });
+  it("is null above the bound (negative: unrelated letters)", () => {
+    expect(approximateOccurrence("משקיןביתהשלחין", "ואיןעושיןעוגיותלגפנים", 4)).toBeNull();
   });
 });
