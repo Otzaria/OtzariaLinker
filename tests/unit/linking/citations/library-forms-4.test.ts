@@ -244,6 +244,11 @@ describe("a chapter by number in a book by daf", () => {
     expect(out[0]!.target.book.key).toBe("ber");
     expect(out[0]!.target.line).toBe(17);
   });
+  it(`"תוס' ברכות פ"ב" after the name is chapter 2 or daf 82: no chapter guessed`, () => {
+    expect(run(`אבל תוס' ברכות פ"ב כתבו`).filter((s) => s.target.book.key === "tos-ber" && s.target.line === 17)).toHaveLength(0);
+    // "ספ"ב" can only be a chapter's end
+    expect(run(`אבל תוס' ברכות ספ"ב כתבו`)[0]!.target.line).toBe(17);
+  });
   it('"פ"ב דברכות" with no word for the Gemara stays the Mishna\'s chapter', () => {
     const out = run('והכי מוכח פ"ב דברכות גבי הא');
     expect(out.map((s) => s.target.book.key)).toEqual(["m-ber"]);

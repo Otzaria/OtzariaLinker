@@ -555,7 +555,10 @@ function resolveUnit(c: Citation, t: AliasTarget, index: TargetIndex | null, uni
  * before it. Without them the chapter is the Mishna's (detect.ts sends it there).
  */
 function chapterByNumber(c: Citation): boolean {
-  return c.elems.length === 1 && c.elems[0]!.kind === "perek" && !c.unit && (c.commentator !== undefined || c.qualifier === "bavli");
+  const e = c.elems[0];
+  // "רשב"א [שבת פ"ח]" after the name is chapter 8 or daf 88 (LINKER reads the daf): only a chapter that cannot be a
+  // number — before the name ("פ"ב דכתובות"), or "ספ"ב"
+  return c.elems.length === 1 && e!.kind === "perek" && e!.alsoNumber === undefined && !c.unit && (c.commentator !== undefined || c.qualifier === "bavli");
 }
 
 /** A book's own unit of that name: the same name, or else the only one whose name starts with the cited words ("שלח" → "שלח לך"). */
@@ -705,6 +708,11 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   if (c.qualifier) rules.push(`citations.qualifier-${c.qualifier}`);
   if (c.ordinal) rules.push("citations.perek-ordinal");
   if (c.elems.some((e) => e.v4)) rules.push("citations.marker-v4");
+  if (!c.unit && r.via === "named") {
+    // "תוס' פ"ק דסנהדרין": a chapter by number in a book by daf, found by the book's own chapters
+    rules.push("citations.chapter-number");
+    reasons.push({ code: "citations/chapter-number", text: `נכתב פרק במספר, והספר מסודר לפי דפים: הפרק נמצא לפי מבנה הפרקים של הספר עצמו (${r.label})` });
+  }
   if (c.rule) {
     rules.push(`citations.${c.rule}`);
     const why = RULE_REASON[c.rule];
