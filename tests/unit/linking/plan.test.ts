@@ -452,6 +452,21 @@ describe("planMaxLink — the existing links beside the declaration and the titl
     expect(steps(planPairs({ selected: ["z:3"], library: linkedToo }))[0]).toBe("headings:ביאור הגרא על תקוני הזהר>תקוני הזהר");
   });
 
+  it('a base book is not a commentary on another by a stray link ("שמות" → "יחזקאל", 1 COMMENTARY link)', () => {
+    const tanakh = [
+      book("y:1", "שמות", { origin: "sefaria", isBaseBook: true }),
+      book("y:2", "יחזקאל", { origin: "sefaria", isBaseBook: true, linkedBases: ["y:1"], linkedCounts: { "y:1": 1 }, linkedComplete: true }),
+      book("y:3", "חידושים על שמות בלי שם", { origin: "sefaria", linkedBases: ["y:1"], linkedCounts: { "y:1": 1 }, linkedComplete: true }),
+    ];
+    expect(planPairs({ selected: ["y:2"], library: tanakh }).steps).toEqual([]);
+    const many = tanakh.map((b) => (b.key === "y:2" ? { ...b, linkedCounts: { "y:1": LINKED_MIN } } : b));
+    expect(planPairs({ selected: ["y:2"], library: many }).steps.length).toBe(2);
+    // a book that is not a base text keeps its single link, as before; so does an uncounted one
+    expect(planPairs({ selected: ["y:3"], library: tanakh }).steps.length).toBe(2);
+    const uncounted = tanakh.map((b) => (b.key === "y:2" ? { ...b, linkedCounts: undefined } : b));
+    expect(planPairs({ selected: ["y:2"], library: uncounted }).steps.length).toBe(2);
+  });
+
   it("evidenceToFollow: the strongly linked bases whose own base only their links tell", () => {
     const books = new Map(lib.map((b) => [b.key, b] as const));
     const ev = [

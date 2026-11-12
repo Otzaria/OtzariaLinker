@@ -460,8 +460,18 @@ function mishnahInTalmud(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, i
   ];
 }
 
+/*
+ * A base text is not a commentary on another base text by a stray link: the commentary layer holds
+ * single COMMENTARY links between base books too, like the MIDRASH layer (LINKED_MIN) — "שמות" →
+ * "יחזקאל" 1, "דברים" → "ישעיהו" 1, "פרקי דרבי אליעזר" → "ספרי זוטא" 1 — and each made the whole book a
+ * commentary (library benchmark run 3: 2,429 certain/high suggestions the database has no link for, none
+ * confirmed). So a base book (isBaseBook) needs LINKED_MIN counted links, as TARGUM and MIDRASH do.
+ */
 const linkedOpen = (book: PlanBook, byKey: ReadonlyMap<string, PlanBook>): PlanBook[] =>
-  [...new Set(book.linkedBases ?? [])].filter((k) => k !== book.key).map((k) => byKey.get(k)).filter((b): b is PlanBook => !!b);
+  [...new Set(book.linkedBases ?? [])]
+    .filter((k) => k !== book.key && !(book.isBaseBook && (book.linkedCounts?.[k] ?? LINKED_MIN) < LINKED_MIN))
+    .map((k) => byKey.get(k))
+    .filter((b): b is PlanBook => !!b);
 
 /** The base keys a book is written on: declared, or shown by the links. */
 const basesOf = (b: PlanBook | undefined): readonly string[] => [...(b?.bases ?? []), ...(b?.linkedBases ?? [])];
