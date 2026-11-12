@@ -57,6 +57,25 @@ describe("heading numbering", () => {
     expect(untaggedHeading("הלכות שבת", "lenient")).toBeNull();
   });
 
+  it("untagged headings: bold, bracketed, glued ס\"ק, abbreviations and the new kinds", () => {
+    const kinds = (s: string) => untaggedHeading(s, "lenient")?.map((e) => `${e.kind}${e.n}`) ?? null;
+    expect(kinds("<b>סעיף ג</b>")).toEqual(["seif3"]);
+    expect(kinds("(סימן ה)")).toEqual(["siman5"]);
+    expect(kinds("[סעי' ג]")).toEqual(["seif3"]);
+    expect(kinds('סימן ה סק"ב')).toEqual(["siman5", "seifkatan2"]);
+    expect(kinds('סקי"ב')).toEqual(["seifkatan12"]);
+    expect(kinds("סימן ה.")).toEqual(["siman5"]);
+    expect(kinds("הערה ג")).toEqual(["note3"]);
+    expect(kinds("שורש ד")).toEqual(["shoresh4"]);
+    expect(kinds("תיקון ע")).toEqual(["tikun70"]);
+    expect(kinds("דרוש ב")).toEqual(["drush2"]);
+    // text, not headings: a sentence that starts like one, a word that starts like a glued ס"ק, a bare numeral in brackets
+    expect(kinds("סימן ה אמר רבי")).toBeNull();
+    expect(kinds("סקל")).toBeNull();
+    expect(kinds("(יב)")).toBeNull();
+    expect(kinds("(סימן ה) ועוד")).toBeNull();
+  });
+
   it("inline markers: '(יב) …' at the start of a line", () => {
     expect(inlineMarker("(יב) וַיֹּאמֶר", "lenient")).toBe(12);
     expect(inlineMarker("<b>(ג)</b> טקסט", "lenient")).toBe(3);
