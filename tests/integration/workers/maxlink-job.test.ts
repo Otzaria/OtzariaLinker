@@ -181,6 +181,16 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
     expect(through.notes[0]!.text).toContain("דרך");
   });
 
+  it("a citation inside the intermediate (REFERENCE, LINKER) is not where its line stands on the base", async () => {
+    const far = { ...BOOKS, "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון", "סעיף שני", "סעיף שלישי", "שורה", "שורה", "שורה", "שורה", "סימן אחר"]) };
+    const cited = [...links, { id: "l3", source: { book: mid, line: 3 }, target: { book: base, line: 9 }, declaredType: "reference" }];
+    const reg = { lines: async (key: string) => far[key]!, existingLinks: async (key: string) => cited.filter((l) => l.source.book.key === key || l.target.book.key === key) } as unknown as SourceRegistry;
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    // line 3 is still carried to the base's line 4 (its COMMENTARY link), not dropped as spread over 4..9
+    expect(res.items[1]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`)).toEqual(["3>4", "5>2"]);
+  });
+
   it("an intermediate place with no link to the base carries nothing", async () => {
     links.pop();
     const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });

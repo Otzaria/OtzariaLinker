@@ -1,3 +1,4 @@
+import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection-type";
 import type { BookRef } from "../core/links/model";
 import { runEngine, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import type { MaxLinkJobResult, StepResult } from "../linking/maxlink-report";
@@ -289,10 +290,17 @@ async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { ki
 /** at most this many base lines between the first and the last a place in the intermediate is linked to */
 const THROUGH_SPAN = 3;
 
-/** Line of book `a` → the [from, to] line ranges of book `b` the source's existing links join it to. */
+/**
+ * Line of book `a` → the [from, to] line ranges of book `b` the source's existing links join it to: the
+ * structural ones (COMMENTARY, TARGUM… — SOURCE_VIEW_TYPES), when there are any. A citation inside the
+ * intermediate is not where its line stands on the base: the מגן אברהם's REFERENCE/LINKER links to other
+ * סימנים of the שולחן ערוך spread 1,479 of its lines over more than THROUGH_SPAN lines, and 5,057 lines of
+ * מחצית השקל that the composition places exactly were not carried.
+ */
 async function linkedLines(registry: SourceRegistry, a: string, b: string): Promise<Map<number, [number, number][]>> {
-  const out = new Map<number, [number, number][]>();
-  const add = (aSide: { line: number; end?: number }, bSide: { line: number; end?: number }) => {
+  const structural = new Map<number, [number, number][]>();
+  const any = new Map<number, [number, number][]>();
+  const add = (out: Map<number, [number, number][]>, aSide: { line: number; end?: number }, bSide: { line: number; end?: number }) => {
     for (let x = aSide.line; x <= (aSide.end ?? aSide.line); x++) {
       const list = out.get(x) ?? [];
       list.push([bSide.line, bSide.end ?? bSide.line]);
@@ -301,13 +309,15 @@ async function linkedLines(registry: SourceRegistry, a: string, b: string): Prom
   };
   try {
     for (const l of await registry.existingLinks(a, 0, Number.MAX_SAFE_INTEGER)) {
-      if (l.source.book.key === a && l.target.book.key === b) add(l.source, l.target);
-      else if (l.target.book.key === a && l.source.book.key === b) add(l.target, l.source);
+      const sides = l.source.book.key === a && l.target.book.key === b ? ([l.source, l.target] as const) : l.target.book.key === a && l.source.book.key === b ? ([l.target, l.source] as const) : null;
+      if (!sides) continue;
+      add(any, sides[0], sides[1]);
+      if (SOURCE_VIEW_TYPES.has(parseConnectionType(l.declaredType).type)) add(structural, sides[0], sides[1]);
     }
   } catch {
     /* a source without links: nothing to carry */
   }
-  return out;
+  return structural.size ? structural : any;
 }
 
 async function load(registry: SourceRegistry, book: BookRef): Promise<EngineBook> {
