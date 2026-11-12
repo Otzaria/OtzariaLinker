@@ -52,6 +52,9 @@ const CATALOG: CatalogBook[] = [
   book("bech", "בכורות"),
   book("ket", "כתובות"),
   book("tos-bech", "תוספות על בכורות"),
+  book("ned", "נדרים"),
+  book("bb", "בבא בתרא", "sefaria", ['ב"ב']),
+  book("m-bb", "משנה בבא בתרא"),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -230,7 +233,30 @@ describe("a commentator and \"שם\"", () => {
   });
 });
 
+describe("a daf as Chassidic and later books write it", () => {
+  it(`"בנדרים דכ"ז": a ד glued to the daf after a tractate's name, with no amud`, () => {
+    expect(loc(scan([`ועיין בנדרים דכ"ז שאמרו`])[0])).toBe("daf:27");
+    // no tractate before it: no place
+    expect(scan([`וכתב דכ"ז שאמרו`])).toHaveLength(0);
+  });
+  it(`"סע"א", "רע"ב" (the end / start of an amud) after a daf; elsewhere "סע"א" stays no amud`, () => {
+    expect(loc(scan([`ועיין ע"ז ד סע"ב שאמרו`])[0])).toBe("daf:4b");
+    expect(loc(scan([`פרק ב' דבבא בתרא (די"ט סע"א) אמרו`])[0])).toBe("perek:2 daf:19a");
+    expect(scan([`ועיין או"ח ר"ז סע"א`]).flatMap((c) => c.elems.map((e) => e.kind))).not.toContain("daf");
+  });
+  it(`"ובגמרא (פרק חמישי דב"ב)": a word for the Gemara keeps the chapter out of the Mishna`, () => {
+    expect(books(scan([`ובגמרא (פרק חמישי דב"ב) אמרו`])[0])).toEqual(["bb"]);
+    expect(books(scan([`ובמשנה (פרק חמישי דב"ב) אמרו`])[0])).toContain("m-bb");
+  });
+});
+
 describe("commentators on the Tanakh", () => {
+  it(`"רש"י (שם פסוק יט)": his words on another verse of the chapter just cited`, () => {
+    const cs = scan([`כתיב (דברים כ"ט, י"ח) כי בשרירות, ועיין רש"י (שם פסוק יט) שכתב`]);
+    expect(cs.map(books)).toEqual([["deut"], ["rashi-deut"]]);
+    expect(loc(cs[1])).toBe("?:29 pasuk:19");
+    expect(cs[1]!.ibid).toBe("partial");
+  });
   it(`"והמלבי"ם [תהלים עח, נ]": a commentator by one word moves the verse to his commentary`, () => {
     expect(books(scan([`וכן כתב הגר"א והמלבי"ם [תהלים עח, נ], ואיוב`])[0])).toEqual(["malbim-ps"]);
   });

@@ -145,11 +145,21 @@ function compactAt(t: Tok | undefined, prev: Kind | null): { kind: Kind; n: numb
 /** a chapter's end ("ספ"ב", "ספ"ק"): a chapter of at most 30 */
 const chapterEnd = (x: { kind: Kind; n: number } | null): { kind: Kind; n: number } | null => (x && x.n <= 30 ? x : null);
 
-/** "ע"א" / "ע"ב" (one word), "עמוד א", "עמ' ב" at toks[i] → [amud, tokens]. */
-function amudAt(toks: readonly Tok[], i: number): [1 | 2, number] | null {
+/**
+ * The address being read is after a tractate's name (parseAddress's `dafLetter`): "דכ"ז" with no amud is daf 27, and
+ * "סע"א" is the end of amud א. Set for the duration of one parseAddress call.
+ */
+let dafContext = false;
+
+/**
+ * "ע"א" / "ע"ב" (one word), "עמוד א", "עמ' ב" at toks[i] → [amud, tokens]. `edge`: also "סע"א"/"רע"ב" (סוף / ריש
+ * עמוד) — only where a daf is sure (after "דף X", or a tractate's name): elsewhere "סע"א" is "סעיף א".
+ */
+function amudAt(toks: readonly Tok[], i: number, edge = false): [1 | 2, number] | null {
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
   if (t.gershayim && !t.geresh && t.text.length === 2 && t.text[0] === "ע" && (t.text[1] === "א" || t.text[1] === "ב")) return [t.text[1] === "א" ? 1 : 2, 1];
+  if (edge && t.gershayim && !t.geresh && t.text.length === 3 && t.gershayimAt === 2 && /^[סר]ע[אב]$/.test(t.text)) return [t.text[2] === "א" ? 1 : 2, 1];
   const s = shape(t);
   if (s === "עמוד" || s === "עמ'") {
     const n = toks[i + 1];
@@ -167,6 +177,16 @@ const CLOSE = ")]}";
  * only evidence is one bare numeral outside brackets (a word like "שמות ה'" or "בראשית ברא").
  */
 export function parseAddress(toks: readonly Tok[], i: number, opts: { enclosed?: boolean; after?: Kind; dafLetter?: boolean } = {}): Address | null {
+  const outer = dafContext;
+  dafContext = !!opts.dafLetter;
+  try {
+    return parseAddressIn(toks, i, opts);
+  } finally {
+    dafContext = outer;
+  }
+}
+
+function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: boolean; after?: Kind; dafLetter?: boolean }): Address | null {
   let j = i;
   let bracketed = false;
   if (isPunct(toks[j], OPEN)) {
@@ -275,7 +295,7 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null, inBrackets
   // and "ס"ק" is a marker word, not seif 100
   // likewise "פ"ח:" (a "." or ":" glued after it)
   const gluedSide = isPunct(toks[j + 1], ".:") && toks[j + 1]!.glued && !(toks[j + 2]?.glued && numeralOf(toks[j + 2]));
-  const compact = ((amudAt(toks, j + 1) || gluedSide) && numeralOf(t)) || markerAt(toks, j) ? null : compactAt(t, prev);
+  const compact = ((amudAt(toks, j + 1, dafContext) || gluedSide) && numeralOf(t)) || markerAt(toks, j) ? null : compactAt(t, prev);
   if (compact) {
     const numeral: Numeral = { n: compact.n, form: "gershayim", common: false };
     return withRange(toks, j + 1, { kind: compact.kind, n: compact.n, explicit: true, numeral, compact: true, ...(compact.kind === "chelek" && { v4: true }) });
@@ -304,7 +324,8 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null, inBrackets
   // "מנחות דמ"ג ע"ב", "ברכות די"ז ע"א", "ד"ז ע"א", "ביומא דנ"ד א'": a ד for "דף" glued to the number, before an amud
   // (written out, or a lone א/ב)
   const dalet = dafWithDalet(t);
-  if (dalet && (amudAt(toks, j + 1) || amudLetter(toks, j + 1))) return readDaf(toks, j, dalet, true);
+  // …and after a tractate's name, with no amud: "בנדרים דכ"ז", "בגטין דע"ח"
+  if (dalet && (amudAt(toks, j + 1, true) || amudLetter(toks, j + 1) || dafContext)) return readDaf(toks, j, dalet, true);
   // "(ברא' יה א)", "(מ"א יה כא)": inside brackets, 15 and 16 the plain way even with no quote marks (an everyday
   // word otherwise: the divine name)
   const num = numeralOf(t) ?? (inBrackets ? oldStyleNumeral(t, true) : null);
@@ -318,7 +339,7 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null, inBrackets
     const separator = glueNext && numeralOf(glueNext) && (glueNext.glued || (after!.text === ":" && num.form !== "bare" && num.form !== "digits"));
     if (!separator) return readDaf(toks, j, num, false);
   }
-  if (amudAt(toks, j + 1) || commaAmud(toks, j + 1)) return readDaf(toks, j, num, false);
+  if (amudAt(toks, j + 1, dafContext) || commaAmud(toks, j + 1)) return readDaf(toks, j, num, false);
   return withRange(toks, j + 1, { kind: "?", n: num.n, explicit: false, numeral: num });
 }
 
@@ -346,7 +367,7 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
   } else {
     // "ברכות ל"ג, ע"א"
     if (commaAmud(toks, next)) next++;
-    const a = amudAt(toks, next);
+    const a = amudAt(toks, next, marker || dafContext);
     if (a) {
       amud = a[0];
       next += a[1];

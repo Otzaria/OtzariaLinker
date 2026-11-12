@@ -259,7 +259,7 @@ export class CitationScanner {
       // references (its parshiyot), then the place under it
       const level = sec ? null : this.namedLevel(toks, i, line, m);
       if (level !== null) return level;
-      const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some((t) => t.collection === "bavli") });
+      const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some((t) => t.collection === "bavli") && !m.entry.targets.some((t) => t.book.title === "שבת") });
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       // …or "ע"ז כ"ו א'": a quoted daf and a lone amud letter
@@ -555,7 +555,7 @@ export class CitationScanner {
     j = topic ? topic.to : m!.to;
     const elems: AddrElem[] = [{ kind: "perek", n: head.n, explicit: true, numeral: { n: head.n, form: "gershayim", common: false } }, ...(pre && topic ? pre.elems : [])];
     let to = j;
-    const rest = parseAddress(toks, j, { after: "perek" });
+    const rest = parseAddress(toks, j, { after: "perek", dafLetter: !topic && !!m?.entry.targets.some((x) => x.collection === "bavli") });
     if (rest && !rest.elems.some((e) => e.kind === "perek") && !(pre && topic)) {
       elems.push(...rest.elems);
       to = rest.to;
@@ -564,6 +564,8 @@ export class CitationScanner {
     let cands = this.own(topic ? [topic.target] : m!.entry.targets);
     // "בפ"ק דיבמו'": a name only the Bavli has (a truncation, a nickname) — a chapter is the Mishna's as well
     if (!topic && cands.length && cands.every((x) => x.collection === "bavli")) cands = [...cands, ...this.siblings(cands, "mishna").map((x) => ({ ...x, tier: "secondary" as const }))];
+    // "ובגמרא (פרק חמישי דב"ב)", "בש"ס פ"ב דכתובות": the Gemara's chapter, not the Mishna's
+    if (!topic && qualifierBefore(toks, i) === "bavli" && cands.some((x) => x.collection === "bavli")) cands = cands.filter((x) => x.collection === "bavli");
     if (!cands.length) return this.drop("self");
     const name = topic ? topic.target.book.title : m!.entry.text;
     return this.emit(toks, line, { from: i, to, candidates: cands, name, elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, ...(m && !topic && { m }), ...(topic && { rule: `rambam-topic-${topic.how}` }), ...(head.ordinal && { ordinal: true }) });
@@ -605,7 +607,7 @@ export class CitationScanner {
     if (glued) {
       afterBook = glued;
       k = glued.to;
-      addr = parseAddress(toks, k, { after: "perek" });
+      addr = parseAddress(toks, k, { after: "perek", dafLetter: glued.entry.targets.some((x) => x.collection === "bavli") });
     } else if (opensAt(toks, k)) {
       const inside = this.aliases.matchAt(toks, k + 1).find((m) => m.prefix === "");
       const a = inside ? parseAddress(toks, inside.to, { enclosed: true }) : parseAddress(toks, k);
@@ -912,9 +914,11 @@ export class CitationScanner {
     let wrote = false;
     const addr = parseAddress(toks, k, { enclosed: open });
     if (addr) {
-      // "תוס' שם ס"ה ע"ב": a daf of the same tractate; any other place is not read here
-      if (!bavli || addr.elems.length !== 1 || !isDaf(addr.elems[0]!)) return null;
-      elems = addr.elems;
+      // "תוס' שם ס"ה ע"ב": a daf of the same tractate; "רש"י [שם פסוק יג]", "והרמב"ן (שם פסוק א)": a verse of the
+      // chapter just cited; any other place is not read here
+      const merged = bavli ? (addr.elems.length === 1 && isDaf(addr.elems[0]!) ? [...addr.elems] : null) : addr.elems.length === 1 && addr.elems[0]!.kind === "pasuk" && last.elems.length === 2 ? mergeIbid(last.elems, addr.elems) : null;
+      if (!merged) return null;
+      elems = merged;
       to = addr.to;
       wrote = true;
     } else if (bavli ? !(last.elems.length === 1 && isDaf(last.elems[0]!)) : !(last.elems.length === 2 && last.elems.every((e) => e.kind === "?" || e.kind === "perek" || e.kind === "pasuk"))) return null;
