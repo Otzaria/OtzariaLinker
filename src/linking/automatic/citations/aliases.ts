@@ -139,6 +139,9 @@ const SPELLINGS: readonly (readonly string[])[] = [
   ["תקוני הזהר", "תיקוני זוהר", "תיקוני הזוהר", "תקוני זוהר", "תקוני הזוהר", "תיקוני הזהר", "תקוני זהר", 'תקו"ז', 'תיקו"ז'],
 ];
 
+/** the Rambam's topics by their old names (the censor's): "ע"ג", "עכו"ם" for עבודה זרה */
+const OLD_TOPICS: Readonly<Record<string, readonly string[]>> = { "עבודה זרה וחוקות הגויים": ["עבודת גלולים", "עבודת כוכבים", "עבודת כוכבים ומזלות"] };
+
 /** titles that are everyday words: "לב' דברים, א'" is "two things", "בשבת כ"ח" may be a date */
 export const COMMON_TITLES: ReadonlySet<string> = new Set([
   "דברים", "שמות", "במדבר", "שופטים", "עזרא", "יונה", "רות", "שבת", "ברכות", "ביצה", "סוכה", "תמיד", "מכות", "נדרים", "חולין", "מנחות", "ערכין", "כריתות", "נזיר", "שבועות", "גיטין", "תענית", "מגילה", "חגיגה", "סוטה", "תמורה", "מעילה", "נדה", "בכורות", "זבחים", "פסחים",
@@ -238,6 +241,8 @@ export class AliasIndex {
       ix.add(title, { book: c.book, tier: "title", collection: coll });
       const topic = coll === "rambam" ? /^משנה תורה, הלכות (.+)$/.exec(title)?.[1] : undefined;
       if (topic) ix.rambamTopics.push({ topic, target: { book: c.book, tier: "derived", collection: coll } });
+      // the old name of a topic, as printed editions wrote it ("פ"י מהל' ע"ג" — עבודת גלולים)
+      if (topic && Object.hasOwn(OLD_TOPICS, topic)) for (const old of OLD_TOPICS[topic]!) ix.rambamTopics.push({ topic: old, target: { book: c.book, tier: "derived", collection: coll } });
       for (const d of derivedNames(title, coll, byTitle)) ix.add(d.name, { book: c.book, tier: d.secondary ? "secondary" : "derived", collection: coll, ...(d.section && { section: d.section }) });
       for (const a of c.aliases ?? []) {
         const name = normTitle(a);

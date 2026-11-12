@@ -55,6 +55,7 @@ const CATALOG: CatalogBook[] = [
   book("ned", "נדרים"),
   book("bb", "בבא בתרא", "sefaria", ['ב"ב']),
   book("m-bb", "משנה בבא בתרא"),
+  book("r-az", "משנה תורה, הלכות עבודה זרה וחוקות הגויים"),
 ];
 
 function scan(lines: (string | [string, string])[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -161,6 +162,15 @@ describe("the Rambam and its commentaries", () => {
     expect(loc(c)).toBe("perek:5 halacha:6");
     // "וכ"מ" is "וכן משמע": the Rambam itself
     expect(books(scan(["וכ\"מ פ\"ה מהל' ק\"פ הלכה ו'"])[0])).toEqual(["r-pesach"]);
+  });
+});
+
+describe("the Rambam's topics by their old names", () => {
+  it(`"בפרק י' מהל' ע"ג", "פ"ב מהל' עכו"ם": עבודה זרה וחוקות הגויים`, () => {
+    expect(books(scan([`וגם פוסק בפרק י' מהל' ע"ג דברים ככתבן`])[0])).toEqual(["r-az"]);
+    expect(books(scan([`כמבואר בפ"ב מהל' עבודת כוכבים`])[0])).toEqual(["r-az"]);
+    // "פ"ב דע"ז" is still the tractate
+    expect(books(scan([`כמבואר בפ"ב דע"ז`])[0])).not.toContain("r-az");
   });
 });
 
