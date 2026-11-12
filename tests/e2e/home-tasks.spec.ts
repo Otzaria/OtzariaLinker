@@ -15,8 +15,8 @@ const DB = { name: "seforim.db", mimeType: "application/octet-stream", buffer: r
 test("'several books together' plans max-link over all the open books", async ({ page }) => {
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "כמה ספרים יחד" }).click();
+  // the card starts the guided flow now (guided-flow.spec.ts); the task's sheet is still its route
+  await page.goto(`${distUrl}#/start/several`);
   const sheet = page.getByRole("dialog", { name: "כמה ספרים יחד" });
   await expect(sheet).toBeVisible();
   const chooser = page.waitForEvent("filechooser");
