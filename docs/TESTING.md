@@ -131,6 +131,8 @@ npx vitest run tests/integration/linking/dibur-hamatchil/real-db.local.test.ts
 | `OTZARIA_EXTRA_DBS` | קבצים נוספים, מופרדים ב־`;` (מסדים זרים, מסדי האפליקציה, PDF) |
 | `VALIDATION_OUT` | לא חובה: תיקייה שאליה כל בדיקה כותבת את תוצאותיה כ־JSON (מהן נבנה הדוח) |
 | `PYTHON` | לא חובה: המפרש של האורקל (ברירת המחדל `py -3 -I` ב־Windows, `python3 -I` בשאר) |
+| `VALIDATE_ENGINES` | לא חובה, בדיקה 5: רשימת מנועים (`headings,dibur-hamatchil`) |
+| `VALIDATE_PAIRS_STRIDE` | לא חובה, בדיקה 5: מדגם **נפרד** של זוגות (למשל `104729`: 19 זוגות שאינם במדגם הראשי), לבדיקת כיוונון על זוגות שלא כוונן עליהם |
 
 **האורקל** (`scripts/validation/db_oracle.py`) הוא קורא עצמאי: `sqlite3` של פייתון ו־libzstd (חבילת
 `zstandard`), במצב `mode=ro`. הבדיקות משוות אליו את מה שהקורא העצל של הכלי מחזיר. הפלט שלו נכתב

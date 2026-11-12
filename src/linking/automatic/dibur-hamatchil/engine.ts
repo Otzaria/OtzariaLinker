@@ -20,6 +20,7 @@ import { storedForm } from "../../../core/links/stored-form";
 import { skeleton, stem } from "../../../core/text/hebrew";
 import { headingLevel, stripTags } from "../../../core/text/html";
 import { hebrewTokens, visibleSlice, type HebToken } from "../../../matching/hebrew-tokens";
+import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, stepTable, type StepProfile, type StepTable } from "../../../matching/token-match";
 import { idfFactors, STOP_WORDS, wordWeight } from "../../../matching/word-weights";
 import {
   confidenceOf,
@@ -52,6 +53,12 @@ export interface DhOptions {
   readonly singleWordMaxOpeningRatio?: number;
   /** relax the search step by step for a line that marks its ד"ה explicitly (default true) */
   readonly ladder?: boolean;
+  /**
+   * also search the neighbouring sections (rungs C and D of the ladder). Default false: measured on
+   * 51 commentary–base pairs of the real database (REAL_DATA_REPORT.md §7), a ד"ה found only outside
+   * its own section was right 154 times in 797, and never in the held-out sample.
+   */
+  readonly ladderWide?: boolean;
   /** בא"ד / שם lines take the previous line's place (default true) */
   readonly inherit?: boolean;
 }
@@ -71,6 +78,18 @@ const RUNG_TEXT: Readonly<Record<Rung, string>> = {
   C: "נמצא רק אחרי הקלה בחיפוש (שלב ג: גם בקטעים הסמוכים)",
   D: "נמצא רק אחרי הקלה בחיפוש (שלב ד: בסף התאמה נמוך)",
 };
+
+/** First index of `arr` whose element is not `below` (`below` holds for a prefix of `arr`). */
+function lowerBound(arr: readonly number[], below: (v: number) => boolean): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (below(arr[mid]!)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 
 const BOLD_LINE_RE = /^\s*(?:[([][^)\]<]{0,8}[)\]]\s*)?<(b|strong)\b/i;
 const NOTE_RE = /class\s*=\s*["']?footnote/i;
@@ -136,6 +155,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const thresholds = options.thresholds ?? DEFAULT_THRESHOLDS;
   const maxRatio = options.singleWordMaxOpeningRatio ?? 0.008;
   const useLadder = options.ladder !== false;
+  const ladderWide = options.ladderWide === true;
   const inherit = options.inherit !== false;
   const policy = anchorPolicy(commentary.book, base.book, options.anchors ?? "auto");
   const notes: Reason[] = [policy.reason];
@@ -150,6 +170,11 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const t = hebrewTokens(l.text);
     return t.slice(leadingMarkerTokens(l.text, t)); // a verse number "(יז)" is not a word of the text
   });
+  // step profiles of the base words (search.ts bestRun: the cheap test before matchStep), one profiler per run
+  const stepProfile = stepProfiler();
+  const bProfiles: StepProfile[][] = bTokens.map((t) => t.map((x) => stepProfile(x.key)));
+  const bTables: (StepTable | undefined)[] = [];
+  const tableOf = (p: number): StepTable => (bTables[p] ??= stepTable(bTokens[p]!, bProfiles[p]!));
   const cExtract = new Map<number, ExtractedDh>();
   for (const l of commentary.lines) cExtract.set(l.index, extractDh(l, maxWords));
 
@@ -158,6 +183,63 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const weightStatic = (k: string) => wordWeight(k);
 
   const contentPositions = bLines.map((_, i) => i).filter((i) => !bHeading[i] && bTokens[i]!.length);
+
+  /*
+   * Where each word of the base occurs, by vocabulary entry (token-match.ts StepVocabulary):
+   * position × TOKEN_SLOTS + token index, ascending. The first words of a ד"ה are looked up here —
+   * only the base words a step could start at, inside the window — instead of trying them against
+   * every word of every line of the window, which was most of the engine's time (profiles of
+   * "שער הציון ← משנה ברורה" and "אור פנימי", 2026-11-11). bestRun gets exactly the starts it
+   * would have found itself (a superset of them, checked again by matchStep).
+   */
+  const TOKEN_SLOTS = 1 << 20;
+  const vocab = new StepVocabulary(stepProfile);
+  const postings: number[][] = [];
+  // the initials of each word and the next (an acronym of the ד"ה is spelled there); the next word may
+  // be the next line's first, when a run may continue there
+  const initials = new Map<string, number[]>();
+  for (const p of contentPositions) {
+    const toks = bTokens[p]!;
+    const nextLine = bLines[p + 1]?.index === bLines[p]!.index + 1 && !bHeading[p + 1] ? bTokens[p + 1]![0] : undefined;
+    toks.forEach((t, i) => {
+      const at = p * TOKEN_SLOTS + i;
+      const e = vocab.add(t);
+      (postings[e] ??= []).push(at);
+      for (const k of initialsKeys(t, toks[i + 1] ?? nextLine)) {
+        const list = initials.get(k);
+        if (list) list.push(at);
+        else initials.set(k, [at]);
+      }
+    });
+  }
+  /** For each of the first `n` words of `src`: base position → token indexes where a step may start, positions pFrom..pTo. */
+  const startsIn = (src: readonly HebToken[], n: number, pFrom: number, pTo: number): Map<number, number[]>[] =>
+    src.slice(0, n).map((x, s0) => {
+      const byPos = new Map<number, number[]>();
+      const lo = pFrom * TOKEN_SLOTS;
+      const hi = (pTo + 1) * TOKEN_SLOTS;
+      const lists = vocab.compatible(x, src[s0 + 1]).map((e) => postings[e]);
+      const spelled = acronymInitials(x);
+      for (const k of spelled) lists.push(initials.get(k));
+      // only an acronym can reach one word twice (by its entry and by its initials)
+      const seen = spelled.length ? new Set<number>() : null;
+      for (const list of lists) {
+        if (!list) continue;
+        for (let i = lowerBound(list, (v) => v < lo); i < list.length && list[i]! < hi; i++) {
+          if (seen) {
+            if (seen.has(list[i]!)) continue;
+            seen.add(list[i]!);
+          }
+          const p = Math.floor(list[i]! / TOKEN_SLOTS);
+          const at = list[i]! - p * TOKEN_SLOTS;
+          const ts = byPos.get(p);
+          if (ts) ts.push(at);
+          else byPos.set(p, [at]);
+        }
+      }
+      for (const ts of byPos.values()) if (ts.length > 1) ts.sort((a, b) => a - b);
+      return byPos;
+    });
   const startsWithDh =
     options.targetStartsWithDh ?? (contentPositions.length > 0 && contentPositions.filter((i) => BOLD_LINE_RE.test(bLines[i]!.text)).length / contentPositions.length >= 0.6);
   const strict: SearchSpec = { ...STRICT_SPEC, requireTargetStart: startsWithDh };
@@ -216,21 +298,63 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     if (w) return { from: Math.max(first, Math.min(w.from, w.to)), to: Math.min(last, Math.max(w.from, w.to)), kind: "caller" };
     return defaultWindows(cLine);
   };
-  const positionsIn = (from: number, to: number): number[] => {
-    let lo = 0;
-    let hi = bLines.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (bLines[mid]!.index < from) lo = mid + 1;
-      else hi = mid;
+  /*
+   * Lines a ד"ה can land on (contentPositions, ascending) by base line index. A window is a SPAN of
+   * that array, found by binary search — never a scan of the window: with the whole book as the
+   * window (no matching headings) a scan per phase and per rung cost O(base) for every commentary
+   * line, and "שער הציון ← משנה ברורה" (18,680 × 18,119 lines) spent minutes on it alone.
+   */
+  const positionsIn = (from: number, to: number, among: readonly number[] = contentPositions): readonly number[] =>
+    among.slice(lowerBound(among, (p) => bLines[p]!.index < from), lowerBound(among, (p) => bLines[p]!.index <= to));
+  /**
+   * Positions holding one of the first `n` words of the ד"ה (or a word with the same stem skeleton),
+   * ascending — the candidates of a wide window. The same for every phase and every rung of a line,
+   * so it is computed once per ד"ה.
+   */
+  const hitsCache = new WeakMap<readonly HebToken[], Map<number, number[]>>();
+  const hitsOf = (src: readonly HebToken[], n: number): readonly number[] => {
+    let byN = hitsCache.get(src);
+    if (!byN) hitsCache.set(src, (byN = new Map()));
+    let out = byN.get(n);
+    if (!out) {
+      const ix = keyIndex ?? buildIndex();
+      const hits = new Set<number>();
+      for (const t of src.slice(0, n)) {
+        for (const p of ix.get(t.key) ?? []) hits.add(p);
+        for (const p of ix.get(`~${indexKey(t.key)}`) ?? []) hits.add(p);
+      }
+      out = [...hits].sort((a, b) => a - b);
+      byN.set(n, out);
     }
-    const out: number[] = [];
-    for (let p = lo; p < bLines.length && bLines[p]!.index <= to; p++) if (!bHeading[p] && bTokens[p]!.length) out.push(p);
     return out;
   };
 
+  /*
+   * Runs already measured for the current commentary line. A line is searched by up to three phases
+   * (near the previous match, a little further, the whole window) and, when nothing is found, by the
+   * ladder rungs A–D; the phases overlap and rung C/D re-search rung B's window with B's spec (D only
+   * lowers the bar, which bestRun does not see). Without this every phase and rung measured the same
+   * base lines again. Keyed by base position, the spec (minus `multiplier`) and whether the next base
+   * line was joined on; cleared for every commentary line.
+   */
+  const specIds = new Map<string, number>();
+  const specId = (spec: SearchSpec): number => {
+    const k = `${spec.maxStartIdx}|${spec.shallowLimit}|${spec.deepMinRun}|${spec.requireTargetStart}|${spec.useIdf}|${spec.fuzzy}`;
+    let id = specIds.get(k);
+    if (id === undefined) specIds.set(k, (id = specIds.size));
+    return id;
+  };
+  type RunCache = Map<number, Run | null>;
+  const cachedRun = (cache: RunCache, key: number, measure: () => Run | null): Run | null => {
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const run = measure();
+    cache.set(key, run);
+    return run;
+  };
+
   // ── one search pass over a window ─────────────────────────────────────────────────────────
-  const searchPass = (ex: ExtractedDh, window: SearchWindow, prev: number | null, spec: SearchSpec): Cand[] => {
+  const searchPass = (ex: ExtractedDh, window: SearchWindow, prev: number | null, spec: SearchSpec, runs: RunCache, startsCache: Map<string, Map<number, number[]>[]>): Cand[] => {
     const src = ex.dh;
     const w = spec.useIdf ? weightIdf : weightStatic;
     const srcW = src.map((t) => w(t.key));
@@ -239,6 +363,17 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const windowWeight = forWeight.slice(0, maxWords).reduce((s, t) => s + w(t.key), 0);
     const threshold = dynamicMinThreshold(expected, forWeight.length, ex.explicit, spec.multiplier);
     const fullCredit = srcW.reduce((s, x) => s + x, 0);
+    const sid = specId(spec) * 2;
+    // where the first words of the ד"ה may start a run in this window — the same for every phase and spec
+    const pFrom = contentPositions[lowerBound(contentPositions, (p) => bLines[p]!.index < window.from)] ?? bLines.length;
+    const pTo = contentPositions[lowerBound(contentPositions, (p) => bLines[p]!.index <= window.to) - 1] ?? -1;
+    const startsKey = `${spec.maxStartIdx}:${pFrom}-${pTo}`;
+    let starts = startsCache.get(startsKey);
+    if (!starts) startsCache.set(startsKey, (starts = startsIn(src, Math.min(spec.maxStartIdx, src.length), pFrom, pTo)));
+    const startsHere = starts;
+    const none: readonly number[] = [];
+    const contSpec: SearchSpec = { ...spec, maxStartIdx: 2, shallowLimit: Number.MAX_SAFE_INTEGER, deepMinRun: 0, requireTargetStart: false };
+    const contSid = specId(contSpec) * 2 + 1;
 
     const phases: [number, number][] = [];
     if (prev !== null) {
@@ -257,22 +392,15 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     };
     for (const [from, to] of phases) {
       let positions = positionsIn(from, to);
-      if (positions.length > 400) {
-        const ix = keyIndex ?? buildIndex();
-        const hits = new Set<number>();
-        for (const t of src.slice(0, spec.maxStartIdx + 1)) {
-          for (const p of ix.get(t.key) ?? []) hits.add(p);
-          for (const p of ix.get(`~${indexKey(t.key)}`) ?? []) hits.add(p);
-        }
-        positions = positions.filter((p) => hits.has(p));
-      }
+      if (positions.length > 400) positions = positionsIn(from, to, hitsOf(src, spec.maxStartIdx + 1));
       for (const p of positions) {
         if (found.has(p)) continue;
+        // no word of the line can start a run, so bestRun would find none (and no verbatim hit either)
+        if (!startsHere.some((m) => m.has(p))) continue;
         const line = bLines[p]!;
         const tg = bTokens[p]!;
         const next = bLines[p + 1];
         const joinNext = next && next.index === line.index + 1 && next.index <= window.to && !bHeading[p + 1] && bTokens[p + 1]!.length;
-        const target = joinNext ? tg.concat(bTokens[p + 1]!) : tg;
 
         let run: Run | null = null;
         let exact = false;
@@ -283,7 +411,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
             run = { score: fullCredit, simSum: src.length, srcStart: 0, srcUsed: src.length, tgtStart: at, tgtEnd: at + src.length, steps: src.length, kinds: new Set(["exact"]) };
           }
         }
-        run ??= bestRun(src, srcW, target, w, spec, tg.length);
+        run ??= cachedRun(runs, (p * 64 + sid) * 2 + (joinNext ? 1 : 0), () => bestRun(src, srcW, tg, w, spec, tg.length, (s0) => startsHere[s0]!.get(p) ?? none, joinNext ? bTokens[p + 1]! : undefined));
         if (!run || run.score < threshold) continue;
         // a common short phrase must not match alone
         const used = src.slice(run.srcStart, run.srcStart + run.srcUsed);
@@ -294,11 +422,12 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
         let contLine: number | null = null;
         if (ex.continuation.length >= 2) {
           const cw = ex.continuation.map((t) => w(t.key));
-          const contSpec: SearchSpec = { ...spec, maxStartIdx: 2, shallowLimit: Number.MAX_SAFE_INTEGER, deepMinRun: 0, requireTargetStart: false };
+          const contProfiles = ex.continuation.map((t) => stepProfile(t.key));
+          const buf: number[] = [];
           let bestCont: { score: number; line: number } | null = null;
           for (let q = p; q < Math.min(bLines.length, p + 11) && bLines[q]!.index <= window.to; q++) {
             if (bHeading[q] || !bTokens[q]!.length) continue;
-            const cr = bestRun(ex.continuation, cw, bTokens[q]!, w, contSpec);
+            const cr = cachedRun(runs, (q * 64 + contSid) * 2, () => bestRun(ex.continuation, cw, bTokens[q]!, w, contSpec, bTokens[q]!.length, (s0) => startsOf(ex.continuation[s0]!, contProfiles[s0]!, tableOf(q), bTokens[q]!.length, buf)));
             if (cr && cr.steps >= 2 && cr.score >= 0.4 && (!bestCont || cr.score > bestCont.score)) bestCont = { score: cr.score, line: bLines[q]!.index };
           }
           if (bestCont) {
@@ -326,7 +455,9 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       let hit = -1;
       let at = -1;
       let hits = 0;
-      for (const p of positionsIn(window.from, window.to)) {
+      // a qualifying occurrence holds the anchor's first word verbatim: only lines indexed under it
+      const holders = (keyIndex ?? buildIndex()).get(anchor[0]!.key) ?? [];
+      for (const p of positionsIn(window.from, window.to, holders)) {
         const a = qualifyingOccurrence(anchor, bTokens[p]!, { ...strict, shallowLimit: Number.MAX_SAFE_INTEGER });
         if (a < 0) continue;
         if (++hits > 1) break;
@@ -360,14 +491,17 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const window = windowFor(cLine.index);
     const prevIn = prev !== null && prev >= window.from && prev <= window.to ? prev : null;
     let rung: Rung | null = null;
-    let cands = searchPass(ex, window, prevIn, strict);
+    const runs: RunCache = new Map();
+    const startsCache = new Map<string, Map<number, number[]>[]>();
+    let cands = searchPass(ex, window, prevIn, strict, runs, startsCache);
     if (!cands.length && ex.explicit && useLadder) {
       const A: SearchSpec = { ...strict, requireTargetStart: false, deepMinRun: 2 };
       const B: SearchSpec = { ...A, useIdf: false };
       const D: SearchSpec = { ...B, multiplier: 0.4 };
       const wide = widen(window, base);
-      for (const [rg, spec, win] of [["A", A, window], ["B", B, window], ["C", B, wide], ["D", D, wide]] as const) {
-        cands = searchPass(ex, win, prevIn, spec);
+      const rungs = [["A", A, window], ["B", B, window], ["C", B, wide], ["D", D, wide]] as const;
+      for (const [rg, spec, win] of ladderWide ? rungs : rungs.slice(0, 2)) {
+        cands = searchPass(ex, win, prevIn, spec, runs, startsCache);
         if (cands.length) {
           rung = rg;
           break;
@@ -394,6 +528,12 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const alternatives = rivals.map((c) => ({ line: c.line, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit, rung }) }));
     alternatives.sort((a, b) => b.score - a.score);
     const confidence = confidenceOf(score, alternatives[0]?.score ?? null, thresholds);
+    // A weak match BEFORE the previous line's place is mostly wrong: the commentary moves forward, and
+    // a weak backward hit is usually an earlier occurrence of common words. Measured (51 real pairs):
+    // "possible"/"ambiguous" backward matches were right 212 times in 1,080. Strong ones stay
+    // (certain 112/122), with their "dh/backward" warning.
+    if (prevIn !== null && win.line < prevIn && (confidence === "possible" || confidence === "ambiguous"))
+      return [r("dh/backward-weak", `נמצאה התאמה חלשה רק לפני המקום של השורה הקודמת (שורה ${win.line + 1} בספר הבסיס, והקודמת בשורה ${prevIn + 1}); התאמה כזו שגויה ברוב המקרים, ולכן לא הוצעה`)];
 
     const reasons: Reason[] = [BOUNDARY_REASON[ex.boundary]!];
     const rules = [`dh/extract-${ex.boundary}`, `dh/window-${window.kind}`];

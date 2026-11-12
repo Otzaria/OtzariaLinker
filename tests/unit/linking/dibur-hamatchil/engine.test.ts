@@ -179,22 +179,29 @@ describe("the flexibility ladder (A–D)", () => {
     expect(codesOf(run(["<b>מלאכה שבתות פרחי.</b> פי׳"], base), 0)).toContain("dh/rung-B");
   });
 
-  it("C: the ד\"ה is just outside the window, in the neighbouring section", () => {
+  it("C (ladderWide): the ד\"ה is just outside the window, in the neighbouring section", () => {
     const base = Array.from({ length: 12 }, (_, i) => (i === 6 ? "ויקח משה את המטה" : `שורה ${"אבגדהוזחטיכל"[i]} סתם`));
-    const r = run(["<b>ויקח משה את המטה.</b> פי׳"], base, { windows: () => ({ from: 0, to: 1 }) });
+    const r = run(["<b>ויקח משה את המטה.</b> פי׳"], base, { windows: () => ({ from: 0, to: 1 }), ladderWide: true });
     expect(codesOf(r, 0)).toContain("dh/rung-C");
     expect(baseSide(r.suggestions[0]!).line).toBe(6);
   });
 
-  it("D: only a lowered bar accepts a one-word partial match", () => {
+  it("by default the neighbouring sections are not searched (rungs C/D were mostly wrong on real books)", () => {
+    const base = Array.from({ length: 12 }, (_, i) => (i === 6 ? "ויקח משה את המטה" : `שורה ${"אבגדהוזחטיכל"[i]} סתם`));
+    const r = run(["<b>ויקח משה את המטה.</b> פי׳"], base, { windows: () => ({ from: 0, to: 1 }) });
+    expect(r.suggestions).toEqual([]);
+    expect(codesOf(r, 0)).toContain("dh/not-found");
+  });
+
+  it("D (ladderWide): only a lowered bar accepts a one-word partial match", () => {
     const base = ["מגדלות נהרות שמשון", "ימים"];
-    expect(codesOf(run(["<b>מגדלות פרח כוכב.</b> פי׳"], base), 0)).toContain("dh/rung-D");
+    expect(codesOf(run(["<b>מגדלות פרח כוכב.</b> פי׳"], base, { ladderWide: true }), 0)).toContain("dh/rung-D");
   });
 
   it("a ladder hit costs confidence: the same match scores lower than a strict one", () => {
     const strict = run(["<b>ויקח משה את המטה.</b> פי׳"], ["ויקח משה את המטה", "אחר"]).suggestions[0]!.score;
     const base = Array.from({ length: 12 }, (_, i) => (i === 6 ? "ויקח משה את המטה" : `שורה ${"אבגדהוזחטיכל"[i]} סתם`));
-    const laddered = run(["<b>ויקח משה את המטה.</b> פי׳"], base, { windows: () => ({ from: 0, to: 1 }) }).suggestions[0]!.score;
+    const laddered = run(["<b>ויקח משה את המטה.</b> פי׳"], base, { windows: () => ({ from: 0, to: 1 }), ladderWide: true }).suggestions[0]!.score;
     expect(laddered).toBeLessThan(strict);
   });
 
@@ -341,5 +348,24 @@ describe("property: search normalization never changes the text the engine outpu
       ),
       { numRuns: 150 },
     );
+  });
+});
+
+describe("a weak match before the previous line's place", () => {
+  const base = ["ויאמר משה אל אהרן קח מחתה", "שורה בינונית סתם", "שורה שלישית סתם", "שורה רביעית סתם", "ויקח אהרן את המחתה ויתן עליה אש", "סוף דבר"];
+
+  it("is not suggested: on real books such matches were right 212 times in 1,080", () => {
+    const r = run(["<b>ויקח אהרן את המחתה.</b> פי׳", "<b>קח מחתה ועשה.</b> פי׳"], base);
+    expect(byLine(r, 0)).toBeDefined();
+    expect(byLine(r, 1)).toBeUndefined();
+    expect(codesOf(r, 1)).toContain("dh/backward-weak");
+  });
+
+  it("a strong backward match stays, with its warning", () => {
+    const r = run(["<b>ויקח אהרן את המחתה.</b> פי׳", "<b>ויאמר משה.</b> פי׳"], base);
+    const s = byLine(r, 1)!;
+    expect(baseSide(s).line).toBe(0);
+    expect(s.confidence).toBe("high");
+    expect(s.warnings.map((w) => w.code)).toContain("dh/backward");
   });
 });

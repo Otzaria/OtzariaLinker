@@ -66,6 +66,14 @@ export interface Run {
  * Best contiguous run of `src` inside `tgt`. Start positions on the target side are limited to
  * `startLimit` (the length of the first line when `tgt` is two lines joined), so a run may
  * CONTINUE into the second line but never start there.
+ *
+ * `starts` (optional, the same result either way): for each s0, the target positions (ascending)
+ * where a step from src[s0] may start — a superset of those where matchStep would step (token-match.ts
+ * `mayStep`, `StepVocabulary`). Only those are tried: otherwise every word of the line is tried
+ * against each of the first words of the ד"ה, and almost no pair has a step.
+ *
+ * `joinWith` (optional): the next line's tokens, as if `tgt.concat(joinWith)` were passed — joined
+ * only when a start is found, since runs may continue there but never start there.
  */
 export function bestRun(
   src: readonly HebToken[],
@@ -74,12 +82,19 @@ export function bestRun(
   tgtWeight: (key: string) => number,
   spec: SearchSpec,
   startLimit = tgt.length,
+  starts?: (s0: number) => readonly number[],
+  joinWith?: readonly HebToken[],
 ): Run | null {
+  const first = tgt;
+  let joined: readonly HebToken[] | null = joinWith ? null : tgt;
   const maxS = Math.min(spec.maxStartIdx, src.length);
   const maxT = spec.requireTargetStart ? Math.min(1, startLimit) : startLimit;
   let best: Run | null = null;
+  let all: number[] | null = null;
   for (let s0 = 0; s0 < maxS; s0++) {
-    for (let t0 = 0; t0 < maxT; t0++) {
+    for (const t0 of starts ? starts(s0) : (all ??= Array.from({ length: maxT }, (_, k) => k))) {
+      if (t0 >= maxT) break;
+      tgt = joined ??= first.concat(joinWith!);
       let st = matchStep(src, s0, tgt, t0, spec.fuzzy);
       if (!st) continue;
       let i = s0;

@@ -13,6 +13,8 @@ import {
   type Suggestion,
 } from "../types";
 import { align, type AlignContext, type AlignEvent, type Alignment } from "./align";
+import { assessNumbering, numberingNote, numberingWarning, targetElement } from "./consistency";
+import { QuoteChecker } from "./quote";
 import { dafElement, kindThe, kindWord, type NumberingMode, type PathElement } from "./numbering";
 import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "./structure";
 
@@ -127,6 +129,11 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   // inline markers on commentary lines
   const useMarkers = decideMarkers(cs, bs, units, opts.inlineMarkers, match, notes);
   structuralNotes(cs, bs, units, notes);
+  // structural consistency (./consistency.ts): commentary levels whose numbers are not the base's
+  const numbering = assessNumbering(cs, units, match);
+  for (const s of numbering.suspect.values()) notes.push(numberingNote(s));
+  const belowHigh = opts.thresholds.high - 0.001;
+  const quotes = new QuoteChecker(base, (p) => bs.lines[p]!.skip !== "heading");
 
   const total = commentary.lines.length;
   let skipped = 0;
@@ -143,7 +150,14 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/no-position", text: "השורה אינה נמצאת תחת אף כותרת, ולכן אין לה מיקום מבני" }] });
       continue;
     }
-    const cands = match(P);
+    const all = match(P);
+    // A line's place must lie inside its section's place: when the section path (P without its last
+    // element) is found exactly and unambiguously, candidates outside it are set aside (מכילתא דרשב"י:
+    // "פרק ג › פסוק א" matched "הוספה › פרק ג › (א)" fully while "פרק ג" is the main פרק ג).
+    const section = sectionOf(P, match, opts.thresholds.ambiguityMargin);
+    const inside = section ? all.filter((c) => c.start >= section.start && c.end <= section.end) : all;
+    const outsideSection = section !== null && inside.length === 0;
+    const cands = inside.length ? inside : all;
     const best0 = cands[0];
     if (!best0) {
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/not-found", text: `בספר הבסיס לא נמצא מקום המתאים ל־${describe(P)}` }] });
@@ -163,9 +177,35 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
         orderTie = true;
       }
     }
-    const score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
+    const el = targetElement(chosen.alignment);
+    const suspect = el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined;
+    let score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
+    if (suspect || outsideSection) score = Math.min(score, belowHigh);
+    // the line's own quote, when it marks one, must not sit in the neighbouring stretch instead (./quote.ts)
+    let quoteAt: number | null = null;
+    if (score >= opts.thresholds.high) {
+      const phrase = QuoteChecker.phrase(commentary.lines[p]!.text);
+      const q = phrase ? quotes.check(phrase, chosen.start, chosen.end) : null;
+      if (q?.verdict === "contradicted") {
+        quoteAt = q.at!;
+        score = Math.min(score, belowHigh);
+      }
+    }
     const confidence: Confidence = confidenceOf(score, runnerUp, opts.thresholds);
     const { reasons, warnings, rules } = explain(chosen, base);
+    if (section && inside.length && inside.length < all.length) rules.push("headings.inside-section");
+    if (outsideSection) {
+      warnings.push({ code: "heading/outside-section", text: `המקום שנמצא אינו בתוך המקום של הקטע שהשורה שייכת אליו (${describe(section.path)}), ולכן הביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.outside-section");
+    }
+    if (suspect) {
+      warnings.push(numberingWarning(suspect));
+      rules.push("headings.numbering-suspect");
+    }
+    if (quoteAt !== null) {
+      warnings.push({ code: "heading/quote-elsewhere", text: `הדיבור המתחיל של השורה לא נמצא במקום הזה, אבל נמצא סמוך אליו בספר הבסיס (שורה ${base.lines[quoteAt]!.index + 1}); ייתכן שגבולות הקטעים בשני הספרים שונים, ולכן הביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.quote-elsewhere");
+    }
     if (orderTie) {
       warnings.push({ code: "heading/order-tiebreak", text: `נמצאו ${tied.length} מקומות מתאימים בספר הבסיס; נבחר הראשון שאחרי הקישור הקודם, לפי סדר הספר` });
       rules.push("headings.order-tiebreak");
@@ -202,6 +242,17 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   if (skipped) notes.push({ code: "heading/skipped-lines", text: `${skipped} שורות בפירוש דולגו: כותרות, שורות ריקות או שורות עם פחות משתי אותיות עבריות` });
   if (partial) notes.push({ code: "heading/partial-matches", text: `${partial} שורות קושרו רק לרמה גבוהה יותר (למשל לפרק כולו), כי הרמה העמוקה שלהן לא נמצאה בספר הבסיס` });
   return done();
+}
+
+/** The base place of the line's section (its path without the last element), when exact and unambiguous. */
+function sectionOf(P: readonly PathElement[], match: (P: readonly PathElement[]) => Scored[], margin: number): Scored | null {
+  if (P.length < 2) return null;
+  const cands = match(P.slice(0, -1));
+  const top = cands[0];
+  if (!top || top.alignment.missing) return null;
+  const rival = cands[1];
+  if (rival && top.score - rival.score < margin) return null;
+  return top;
 }
 
 function abortedResult(notes: Reason[], done: () => EngineResult): EngineResult {
