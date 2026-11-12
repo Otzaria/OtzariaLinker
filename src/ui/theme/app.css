@@ -47,7 +47,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
 .app-bar .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-lg); margin-inline-end: 12px; background: none; border: 0; cursor: pointer; padding: 4px; border-radius: var(--radius); color: var(--on-surface); }
 .app-bar .brand .icon { color: var(--primary); }
 .app-bar .sep { width: 1px; align-self: stretch; margin: 6px 6px; background: var(--outline-variant); }
-.app-bar .task { display: flex; align-items: center; gap: 8px; margin-inline-start: 12px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.app-bar .task { display: flex; align-items: center; gap: 8px; margin-inline-start: 12px; font-size: var(--fs-sm); color: var(--on-surface-variant); min-width: 0; }
+.app-bar .task-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-bar .task-count, .app-bar .task-eta { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.app-bar .task .btn { flex-shrink: 0; }
 progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .menu { position: relative; }
 .menu-pop { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-end: 0; z-index: 30; min-width: 240px; background: var(--surface-container); border: 1px solid var(--outline-variant); border-radius: var(--radius); box-shadow: var(--elev-3); padding: 6px; display: grid; gap: 2px; }

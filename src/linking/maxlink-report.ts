@@ -10,6 +10,9 @@ import type { PlanBookRow, PlanStep } from "./plan";
  */
 
 /** What the worker returns for one step (workers/maxlink-job.ts). */
+/** Units of max-link progress per step (and per book whose existing links are read at the end): engines report inside a step. */
+export const MAXLINK_PROGRESS_UNIT = 1000;
+
 export interface StepResult {
   stepId: string;
   /** the engine's result, without the per-line `unmatched` list (only its size crosses the worker) */

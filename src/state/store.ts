@@ -68,6 +68,10 @@ export interface Task {
   done: number;
   total: number;
   cancel: () => void;
+  /** Date.now() when it started: the app bar estimates the time left from it (audit F21) */
+  startedAt: number;
+  /** the progress in the task's own units ("ספר 120 מתוך 300"), when it has any */
+  count?: string;
 }
 
 export type Screen = "home" | "workspace";
@@ -954,12 +958,14 @@ export class AppStore {
     this.notices.value = this.notices.value.filter((n) => n.id !== id);
   }
 
-  async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>): Promise<T | null> {
+  /** Runs a long task with a cancel and progress; `count` turns the progress into the task's own units (audit F21). */
+  async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null> {
     const ac = new AbortController();
     const logged = logTask(this.log, label);
-    this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort() };
+    const startedAt = Date.now();
+    this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort(), startedAt };
     try {
-      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort() }) });
+      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort(), startedAt, ...(count && total > 0 && { count: count(done, total) }) }) });
       logged.ok();
       return result;
     } catch (err) {
