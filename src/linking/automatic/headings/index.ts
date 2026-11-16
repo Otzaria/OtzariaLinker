@@ -182,6 +182,7 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
   const total = commentary.lines.length;
   let skipped = 0;
   let partial = 0;
+  let numberOnlyLines = 0;
   let prevStart: number | null = null;
   yield;
   for (let p = 0; p < total; p++) {
@@ -236,6 +237,21 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
         runnerUp = null;
         orderTie = true;
       }
+    }
+    /*
+     * A tie in which every candidate is placed by ONE number and nothing else of the line's path (its
+     * sections are names or kinds the base does not have, skipped), and that number is a bare "(N)" of the
+     * base, not a unit of the commentary's own kind: "פסקה מג" of ספרי, "מזמור ל" of מדרש תהילים, "חלק ג"
+     * (the year) of שפת אמת, each matched to verse מג / ל / ג of every chapter of the base. The number is
+     * the commentary's own count, not an address; such ties agreed with the library's links in 0.9%
+     * (AUTOMATION_ENGINE.md §2, "מספר בלבד"). Not a suggestion: unmatched, counted in a note. A tie on
+     * the base's own kind ("סימן א" in two חלקים) is two real places, and stays a choice ("ambiguous").
+     */
+    if (tied.length > 1 && !orderTie && best0.score >= opts.thresholds.possible && tied.every(numberOnly)) {
+      numberOnlyLines++;
+      const num = matchedOf(best0.alignment)[0]!.c!;
+      unmatched.push({ line: srcIndex, reasons: [{ code: "heading/number-only", text: `רק המספר ${toGematria(num.n!)} של "${describe(P)}" נמצא בספר הבסיס, ב־${tied.length} מקומות שאין ביניהם הבדל אחר (${tied.slice(0, 3).map((c) => describe(c.path)).join("; ")}${tied.length > 3 ? "…" : ""}); מספר בלבד אינו מקום, ולכן השורה לא קושרה` }] });
+      continue;
     }
     const el = targetElement(chosen.alignment);
     const suspect = beyond ?? (el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined);
@@ -326,6 +342,7 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
   }
   ctx.progress?.(total, total);
   if (skipped) notes.push({ code: "heading/skipped-lines", text: `${skipped} שורות בפירוש דולגו: כותרות, שורות ריקות או שורות עם פחות משתי אותיות עבריות` });
+  if (numberOnlyLines) notes.push({ code: "heading/number-only", text: `${numberOnlyLines} שורות לא קושרו: רק מספר אחד שלהן נמצא בספר הבסיס, בכמה מקומות שאין ביניהם הבדל אחר (מספור של הפירוש עצמו, כמו "פסקה" או "חלק", מול מספרי פסוקים או סעיפים בכל פרק)` });
   if (partial) notes.push({ code: "heading/partial-matches", text: `${partial} שורות קושרו רק לרמה גבוהה יותר (למשל לפרק כולו), כי הרמה העמוקה שלהן לא נמצאה בספר הבסיס` });
   return done();
 }
@@ -339,6 +356,20 @@ function sectionOf(P: readonly PathElement[], match: (P: readonly PathElement[])
   const rival = cands[1];
   if (rival && top.score - rival.score < margin) return null;
   return top;
+}
+
+/** the events that matched something of both paths (not skips, not the missing tail) */
+function matchedOf(a: Alignment): AlignEvent[] {
+  return a.events.filter((e) => e.code !== "skip-commentary" && e.code !== "skip-base" && e.code !== "missing");
+}
+
+/**
+ * The candidate rests on one number of the line's path and on nothing else — no name, no daf, no second
+ * number — and that number met a bare "(N)" of the base (align.ts "inline-number"), not a unit of its kind.
+ */
+function numberOnly(c: Scored): boolean {
+  const m = matchedOf(c.alignment);
+  return m.length === 1 && m[0]!.code === "inline-number";
 }
 
 function abortedResult(notes: Reason[], done: () => EngineResult): EngineResult {
