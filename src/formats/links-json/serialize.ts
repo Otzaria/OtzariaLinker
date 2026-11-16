@@ -1,4 +1,4 @@
-import { stringifyInLayout, type JsonLayout } from "./layout";
+import { joinElements, stringifyElement, stringifyInLayout, type JsonLayout } from "./layout";
 import { CANONICAL_ORDER, CONNECTION_TYPE_KEY, type LinksRecord } from "./record";
 
 /*
@@ -61,7 +61,13 @@ function typeValue(r: LinksRecord): string | null | undefined {
   return r.typeNull ? null : "";
 }
 
-/** `layout`: the imported file's own layout (layout.ts), so an unchanged file comes back byte-identical. */
+/**
+ * `layout`: the imported file's own layout (layout.ts), so an unchanged file comes back byte-identical.
+ * A record with `verbatim` text (an untouched imported record whose spelling the writer would not
+ * reproduce — convert.ts) is written as those bytes.
+ */
 export function serializeLinksJson(records: readonly LinksRecord[], layout?: JsonLayout): string {
-  return stringifyInLayout(records.map(recordToObject), layout);
+  // one stringify for the whole file is much cheaper than one per record, and gives the same text
+  if (!records.some((r) => r.verbatim !== undefined)) return stringifyInLayout(records.map(recordToObject), layout);
+  return joinElements(records.map((r) => r.verbatim ?? stringifyElement(recordToObject(r), layout)), layout);
 }

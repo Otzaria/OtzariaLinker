@@ -86,6 +86,13 @@ export interface Link {
   readonly targetPath?: string;
   /** position of the record in its imported links file — keeps the file's order on export */
   readonly fileIndex?: number;
+  /**
+   * The record's exact text in its imported file, kept only when the writer's own output would spell
+   * it differently (`126.0`, `"line_index_1": 0`, an odd indentation…). Written back instead of the
+   * re-serialized record while the link still means exactly that record (formats/links-json/convert.ts),
+   * so an untouched file comes back byte-identical (review C9).
+   */
+  readonly fileText?: string;
 }
 
 export const isRange = (s: LinkSide): boolean => s.end !== undefined && s.end > s.line;

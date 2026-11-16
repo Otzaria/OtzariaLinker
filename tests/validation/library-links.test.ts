@@ -245,14 +245,22 @@ export function roundTripKind(original: Uint8Array, exported: string): string {
     if (o.endsWith("\n")) kinds.push("final-newline");
     return [...kinds, ...(kinds.length ? [] : ["layout"])].join("+");
   }
-  // same values, other key order?
-  const sorted = (x: unknown): unknown => (Array.isArray(x) ? x.map(sorted) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, sorted(v)])) : x);
   let back: unknown = null;
   try {
     back = JSON.parse(exported);
   } catch {
     /* empty */
   }
+  // same values in the same key order: only the spelling differs. JSON.parse makes 126.0 === 126, so
+  // this must be told apart BEFORE the key-order check, which used to swallow it (review C9)
+  if (JSON.stringify(data) === JSON.stringify(back)) {
+    const floats = (s: string) => (s.match(/:\s*-?\d+\.\d+/g) ?? []).length;
+    if (floats(o) !== floats(exported)) kinds.push("number-format");
+    if (/\\u[0-9a-fA-F]{4}/.test(o) !== /\\u[0-9a-fA-F]{4}/.test(exported)) kinds.push("unicode-escapes");
+    return [...kinds, ...(kinds.length ? [] : ["layout"])].join("+");
+  }
+  // same values, other key order?
+  const sorted = (x: unknown): unknown => (Array.isArray(x) ? x.map(sorted) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, sorted(v)])) : x);
   if (JSON.stringify(sorted(data)) === JSON.stringify(sorted(back))) return [...kinds, "key-order"].join("+");
   // records the parser cannot decode are not exported: a loss only if the generator would read them
   if (Array.isArray(back) && back.length < data.length) return [...kinds, "undecodable-records-dropped"].join("+");
