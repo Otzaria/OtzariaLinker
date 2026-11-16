@@ -16,7 +16,7 @@ import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-re
 import { nextSteps, type NextStepsRoute } from "../formats/report/next-steps";
 import { planSefariaCsv, sefariaCsvOmissions, type SefariaCsvFile } from "../formats/sefaria-csv/write";
 import type { AltTocState } from "./alt-toc";
-import { addChanges, commit, fileChange, fileFingerprint, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
+import { addChanges, booksCount, commit, fileChange, fileFingerprint, filesCount, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { BooksService, CallOptions, Saver } from "./services";
 import type { NoticeKind } from "./store";
@@ -365,7 +365,7 @@ export class ExchangeState {
     }
     host.savedRevision.value = host.linkState.value.revision;
     const alt = bundle.altToc.files.length;
-    host.notify("success", `יוצאו ${(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length).toLocaleString("he")} קישורים ב־${csv ? csv.length : plan.files.length} קבצים${alt ? `, ומבני כותרות ל־${alt} ספרים` : ""}.`);
+    host.notify("success", `יוצאו ${linksCount(csv ? csv.reduce((n, f) => n + f.rows, 0) : plan.written.length)} ב־${filesCount(csv ? csv.length : plan.files.length)}${alt ? `, ומבני כותרות ל־${booksCount(alt)}` : ""}.`);
   }
 
   private commit(label: string, changes: Change[]): void {
