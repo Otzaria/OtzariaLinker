@@ -222,6 +222,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .problems li.info { background: var(--surface-container); color: var(--on-surface-variant); }
 .stored-as { margin: 0; display: flex; gap: 6px; align-items: start; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .adv-link { justify-self: start; font-size: var(--fs-sm); color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.link-btn { font: inherit; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 
 /* links list */
 .tabs { display: flex; gap: 0; padding: 0 4px; overflow-x: auto; scrollbar-width: thin; border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }

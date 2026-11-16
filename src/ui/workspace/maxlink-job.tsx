@@ -1,4 +1,5 @@
 import { jobTotals, STATUS_TEXT, type JobBook, type JobBookStatus } from "../../linking/batch-job";
+import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import "./maxlink.css";
@@ -13,6 +14,26 @@ const SHOWN = 200;
 const ORDER: readonly JobBookStatus[] = ["failed", "pending", "done", "no-match", "unchanged", "not-planned"];
 const n = (x: number) => x.toLocaleString("he");
 
+/** "רץ", "מושהה", "נעצר", "הסתיים" — or null when there is no job. */
+export function jobStateText(ml: AppStore["maxLink"]): string | null {
+  const job = ml.job.value;
+  if (!job) return null;
+  return ml.running.value ? "רץ" : job.state === "paused" ? "מושהה" : job.state === "cancelled" ? "נעצר" : "הסתיים";
+}
+
+/**
+ * The job card comes forward above the suggestions by itself only when there is something to do with
+ * it (V5 UX audit U15, the owner's choice A): it runs, it waits with books left (paused, stopped, from
+ * an earlier session), or books failed. A finished job is in "דוח העבודה".
+ */
+export function jobWantsAttention(ml: AppStore["maxLink"]): boolean {
+  const job = ml.job.value;
+  if (!job) return false;
+  if (ml.running.value || ml.jobRestored.value) return true;
+  const t = jobTotals(job);
+  return t.byStatus.pending > 0 || t.byStatus.failed > 0;
+}
+
 export function MaxLinkJobView() {
   const store = useStore();
   const ml = store.maxLink;
@@ -25,7 +46,7 @@ export function MaxLinkJobView() {
   const missing = running ? [] : ml.missingTitles();
   const pending = t.byStatus.pending;
   const failed = t.byStatus.failed;
-  const state = running ? "רץ" : job.state === "paused" ? "מושהה" : job.state === "cancelled" ? "נעצר" : "הסתיים";
+  const state = jobStateText(ml)!;
   const rows = [...job.books].sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
   return (
     <section class="ml-job" aria-label="עבודת הקישור המרבי">

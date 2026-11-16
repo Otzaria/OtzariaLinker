@@ -90,7 +90,7 @@ test("a folder, the Otzaria database and a second folder: grouped books, a link 
   await expect(why.locator("li").filter({ has: page.locator("b", { hasText: "ביאור על בראשית" }) })).toContainText("בראשית");
   await expect(why.locator("li").filter({ has: page.locator("b", { hasText: "הערות לספר דוגמה" }) })).toContainText("ספר הערות על");
   await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
-  await expect(page.locator("details.ml-report")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: /^דוח העבודה/ })).toBeVisible({ timeout: 60_000 });
   const approve = page.getByRole("button", { name: /אישור כל הוודאיות/ });
   await expect(approve).toBeEnabled();
   await approve.click();
