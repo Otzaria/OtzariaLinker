@@ -16,7 +16,7 @@ import { add, emptyTally, goldOf, judge, LEVELS, pct, precision, type Judged, ty
  *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db npx vitest run tests/integration/linking/citations/real-db.local.test.ts
  * Optional: CITATIONS_REPORT=<file.json> writes every judged suggestion; CITATIONS_ONLY=<title>[;<title>…] runs only those books;
  * CITATIONS_SHARD=k/n runs every n-th book (to run shards in parallel; no thresholds are checked then);
- * CITATIONS_SAMPLE=heldout / heldout2 / dev3 / heldout3 runs another sample (HELDOUT, HELDOUT2, DEV3, HELDOUT3) instead; CITATIONS_GOLD=<file.jsonl> appends every LINKER link with its words and whether it was found; CITATIONS_SAMPLE=titles runs just the
+ * CITATIONS_SAMPLE=heldout / heldout2 / dev3 / heldout3 / dev4 / heldout4 runs another sample (HELDOUT, HELDOUT2, DEV3, HELDOUT3, DEV4, HELDOUT4) instead; CITATIONS_GOLD=<file.jsonl> appends every LINKER link with its words and whether it was found; CITATIONS_SAMPLE=titles runs just the
  * books CITATIONS_ONLY names (no thresholds checked).
  *
  * The sample: 17 category groups, from each the 3 books with the smallest sha1(book id) among those with
@@ -295,6 +295,91 @@ const HELDOUT3: readonly { group: string; title: string }[] = [
 ];
 
 /**
+ * The samples of the named-citation round of 16.11 (cite6, docs/AUTOMATION_ENGINE.md §6.3ו), chosen on the database of
+ * 2026-11-16 BEFORE any work, with the same criteria (200–6000 lines, at least 20 LINKER links to other books, 3 a
+ * top-level category), without the books of every sample above and without `מיקרופדיה תלמודית`: DEV4
+ * (CITATIONS_SAMPLE=dev4, sha1("cite6-dev-2026-11-16:" + book id)) was read while working; HELDOUT4
+ * (CITATIONS_SAMPLE=heldout4, sha1("cite6-heldout-2026-11-16:" + book id), without DEV4) was only measured, before and after.
+ */
+const DEV4: readonly { group: string; title: string }[] = [
+  { group: "הלכה", title: "הר המוריה על משנה תורה, הלכות מעילה" },
+  { group: "הלכה", title: "גבורת יהונתן" },
+  { group: "הלכה", title: "הלכה למשה" },
+  { group: "חסידות", title: "מחשבות חרוץ" },
+  { group: "חסידות", title: "מגן אבות חלק א" },
+  { group: "חסידות", title: "דברי אמת" },
+  { group: "מדרש", title: "מדרש ילמדנו מתוך ילקוט תלמוד תורה" },
+  { group: "מדרש", title: "מתנות כהונה על במדבר רבה" },
+  { group: "מדרש", title: "מדרש תהילים" },
+  { group: "מחשבת ישראל", title: "פרשת דרכים" },
+  { group: "מחשבת ישראל", title: "נפש החיים" },
+  { group: "מחשבת ישראל", title: "מדרש האתמרי" },
+  { group: "משנה", title: "יכין יומא" },
+  { group: "משנה", title: "מלאכת שלמה על משנה אבות" },
+  { group: "משנה", title: "עיקר תוספות יום טוב על משנה שבת" },
+  { group: "ספרות עזר", title: "ספר הרכבה" },
+  { group: "ספרות עזר", title: "שדי חמד פאת השדה מערכות ב-ד" },
+  { group: "ספרות עזר", title: "שדי חמד פאת השדה מערכת ה" },
+  { group: "ספרי מוסר", title: "בירת מגדל עוז" },
+  { group: "ספרי מוסר", title: "סוד קיומנו או המחנך" },
+  { group: "ספרי מוסר", title: "אהבת דוד" },
+  { group: "קבלה", title: "ספר חיי העולם הבא" },
+  { group: "קבלה", title: "האידרות - אדרא רבא, אדרא זוטא, אדרא דמשכנא" },
+  { group: "קבלה", title: "שומר אמונים" },
+  { group: "שו״ת", title: "שות תעלומות לב חלק ד" },
+  { group: "שו״ת", title: "שות אות לטובה" },
+  { group: "שו״ת", title: "שות תעלומות לב חלק ב" },
+  { group: "תלמוד בבלי", title: "מהרש\"א - חדושי הלכות על חולין" },
+  { group: "תלמוד בבלי", title: "הגהות יעב\"ץ על בכורות" },
+  { group: "תלמוד בבלי", title: "מהר\"ם על סוכה" },
+  { group: "תלמוד ירושלמי", title: "קרבן העדה על תלמוד ירושלמי שקלים" },
+  { group: "תלמוד ירושלמי", title: "קרבן העדה על תלמוד ירושלמי סנהדרין" },
+  { group: "תלמוד ירושלמי", title: "מראה הפנים על תלמוד ירושלמי כתובות" },
+  { group: "תנ״ך", title: "ייטב לב דברים" },
+  { group: "תנ״ך", title: "שרח - ליקוטים מפי רסג והוספות" },
+  { group: "תנ״ך", title: "מצודת ציון על ירמיהו" },
+];
+
+const HELDOUT4: readonly { group: string; title: string }[] = [
+  { group: "הלכה", title: "יד מלך" },
+  { group: "הלכה", title: "קונטרס אחרון על שולחן ערוך הרב" },
+  { group: "הלכה", title: "מגיד משנה על משנה תורה, הלכות שביתת יום טוב" },
+  { group: "חסידות", title: "אמרי צדיקים" },
+  { group: "חסידות", title: "בני יששכר" },
+  { group: "חסידות", title: "הכשרת האברכים" },
+  { group: "מדרש", title: "ידי משה על בראשית רבה" },
+  { group: "מדרש", title: "מתנות כהונה על קהלת רבה" },
+  { group: "מדרש", title: "חידושי הרד״ל על במדבר רבה" },
+  { group: "מחשבת ישראל", title: "נתיבות עולם" },
+  { group: "מחשבת ישראל", title: "עקידת יצחק על חמש מגילות" },
+  { group: "מחשבת ישראל", title: "גבורות השם" },
+  { group: "משנה", title: "מלאכת שלמה על משנה אהלות" },
+  { group: "משנה", title: "מלאכת שלמה על משנה מדות" },
+  { group: "משנה", title: "יכין עוקצים" },
+  { group: "ספרות עזר", title: "קונטרס פליטת ספרים" },
+  { group: "ספרות עזר", title: "הגהות שארית ציון" },
+  { group: "ספרות עזר", title: "טובת מראה" },
+  { group: "ספרי מוסר", title: "יסוד ושורש העבודה" },
+  { group: "ספרי מוסר", title: "משלי יעקב" },
+  { group: "ספרי מוסר", title: "בלבבי משכן אבנה - ט" },
+  { group: "קבלה", title: "נבואת הילד (עם פירוש אברהם הלוי)" },
+  { group: "קבלה", title: "פרדס רמונים" },
+  { group: "קבלה", title: "שער הגלגולים" },
+  { group: "שו״ת", title: "מעיל צדקה" },
+  { group: "שו״ת", title: "בנין ציון" },
+  { group: "שו״ת", title: "שו\"ת מהרי\"ל" },
+  { group: "תלמוד בבלי", title: "רבינו חננאל על מסכת שבועות" },
+  { group: "תלמוד בבלי", title: "בית אהרן על כתובות" },
+  { group: "תלמוד בבלי", title: "רש\"ש על ברכות" },
+  { group: "תלמוד ירושלמי", title: "פני משה על תלמוד ירושלמי מעשר שני" },
+  { group: "תלמוד ירושלמי", title: "מראה הפנים על תלמוד ירושלמי יומא" },
+  { group: "תלמוד ירושלמי", title: "פני משה על תלמוד ירושלמי ברכות" },
+  { group: "תנ״ך", title: "באר יצחק עהת" },
+  { group: "תנ״ך", title: "ברכת משה (שפירא)" },
+  { group: "תנ״ך", title: "מצודת ציון על יהושע" },
+];
+
+/**
  * Floors the full sample must keep (measured 2026-11-12, after the recall round: certain 85.3% strict /
  * 99.9% judged, high 72.3% / 99.8%; recall 93.1%. After the V4 round the first table — the forms the floors
  * were set on — is certain 85.3% / 99.9%, high 72.1% / 99.9%, recall 94.5%; the new forms and the internal
@@ -329,7 +414,7 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
     const misses: { book: string; line: number; target: string; heRef: string; span: string; at?: [number, number]; words?: string }[] = [];
     const timings: string[] = [];
     const perBook: { group: string; book: string; ms: number; linker: number; found: number; suggestions: number }[] = [];
-    const named = { heldout: HELDOUT, heldout2: HELDOUT2, dev3: DEV3, heldout3: HELDOUT3 } as Record<string, readonly { group: string; title: string }[]>;
+    const named = { heldout: HELDOUT, heldout2: HELDOUT2, dev3: DEV3, heldout3: HELDOUT3, dev4: DEV4, heldout4: HELDOUT4 } as Record<string, readonly { group: string; title: string }[]>;
     const heldout = process.env.CITATIONS_SAMPLE === "titles" || !!named[process.env.CITATIONS_SAMPLE ?? ""];
     // CITATIONS_SAMPLE=titles: the books CITATIONS_ONLY names, whatever sample they are in (a big book of the library benchmark)
     const titles = process.env.CITATIONS_SAMPLE === "titles" ? (only ?? "").split(";").filter(Boolean).map((title) => ({ group: "-", title })) : null;
@@ -459,12 +544,12 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
 });
 
 /**
- * The forms added in V4 and V5 (docs/AUTOMATION_ENGINE.md §6.3), by the rule a suggestion carries. They are
+ * The forms added in V4, V5 and cite6 (docs/AUTOMATION_ENGINE.md §6.3), by the rule a suggestion carries. They are
  * tallied apart from the forms the floors were set on: LINKER barely links most of them (a place in
  * brackets with no book, responsa by their author, the Zohar's pages…), so their strict precision says
  * little — they are hand-checked instead, and must agree with the database where it has an opinion.
  */
-const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid", "commentator-ibid", "rambam-topic-known", "rambam-hilchot", "context-daf", "chapter-name-other", "sk-siman-before"];
+const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid", "commentator-ibid", "rambam-topic-known", "rambam-hilchot", "context-daf", "chapter-name-other", "sk-siman-before", "dalet-four", "tur-seif", "part-siman", "rabbah-parsha", "yalkut-remez", "yalkut-parsha", "commentator-after-base"];
 function newForm(rules: readonly string[]): string | null {
   for (const f of NEW_FORMS) if (rules.some((r) => r.startsWith(`citations.${f}`))) return f;
   return null;
