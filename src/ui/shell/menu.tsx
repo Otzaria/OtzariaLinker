@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon, type IconName } from "../icons/icon";
 
 const ITEM = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
@@ -22,7 +22,9 @@ export function Menu({ icon, label, badge, badgeLabel, children }: { icon: IconN
     setOpen(false);
     if (inside || !document.activeElement || document.activeElement === document.body) trigger.current?.focus();
   };
-  useEffect(() => {
+  // a layout effect: focus and the Escape listener are in place in the same commit that shows the menu,
+  // so a key pressed right after it opens is not lost (it flaked in CI: Escape before the effect ran)
+  useLayoutEffect(() => {
     if (!open) return;
     // keyboard: focus moves into the menu; arrows move between items (UX review #6)
     // (the first one shown: the settings menu starts with an item that exists only on a phone)

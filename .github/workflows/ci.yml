@@ -25,6 +25,13 @@ jobs:
       - name: Install browsers for E2E
         run: npx playwright install --with-deps chrome msedge firefox
       - run: npx playwright test
+      - name: Upload the E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: test-results/
+          retention-days: 14
       - name: Build is reproducible
         run: |
           sha1=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)

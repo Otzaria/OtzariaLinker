@@ -100,7 +100,7 @@ test("keyboard only: the guided flow from the home card to the download", async 
   await tabTo(page, /^הבא: הספרים שנמצאו$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/books$/);
-  expect((await focused(page))?.name).toBe("הספרים שנמצאו");
+  await expect.poll(async () => (await focused(page))?.name).toBe("הספרים שנמצאו");
   await tabTo(page, /^הבא: מסד אוצריא$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/db$/);
@@ -148,7 +148,7 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   await (await chooser).setFiles([DB, COMMENTARY_FILE]);
   await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
   // focus starts at the workspace, not at the top of the page
-  expect((await focused(page))?.name).toBe("סביבת העבודה");
+  await expect.poll(async () => (await focused(page))?.name).toBe("סביבת העבודה");
 
   // the book buttons say which book
   await tabTo(page, /^מקור: ביאור על בראשית$/);
