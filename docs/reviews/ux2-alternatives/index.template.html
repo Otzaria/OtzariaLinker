@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>חלופות עיצוב V5</title>
+<!--
+  Design alternatives of the V5 UX audit (docs/reviews/UX_AUDIT_V5.md), for the owner to choose.
+  Every picture is the real built app (dist/OtzariaLinker.html) in the state the audit found; an
+  alternative is the same app with a few CSS rules or a DOM touch injected
+  (scripts/audit/ux-v5-alternatives.mjs) — nothing of it is in the app's source yet.
+  Icons: Otzaria Icons (GPL-3.0), copied from src/ui/icons/icon-data.ts. Offline: no network.
+  Generated from index.template.html by scripts/audit/build-alternatives-page.mjs.
+-->
+<style>
+  :root { --bg: #fbf6f0; --surface: #fffaf5; --surface-2: #f3e9de; --text: #2c1b02; --muted: #6d5b47; --line: #dccbb7; --primary: #7a4f0e; --on-primary: #fff; --accent: #fde7c4; --ok: #2f6b3a; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #1c140c; --surface: #261b11; --surface-2: #32251a; --text: #f3e6d6; --muted: #c2ad95; --line: #4a3a2a; --primary: #f0bf73; --on-primary: #2c1b02; --accent: #4a3517; --ok: #9fd3a7; color-scheme: dark; } }
+  :root[data-theme="dark"] { --bg: #1c140c; --surface: #261b11; --surface-2: #32251a; --text: #f3e6d6; --muted: #c2ad95; --line: #4a3a2a; --primary: #f0bf73; --on-primary: #2c1b02; --accent: #4a3517; --ok: #9fd3a7; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 "Segoe UI", "Noto Sans Hebrew", system-ui, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; }
+  h2 { font-size: 21px; margin: 0; display: flex; gap: 10px; align-items: center; }
+  h3 { font-size: 16px; margin: 0; }
+  svg.i { width: 26px; height: 26px; fill: var(--primary); flex: none; }
+  .lede { color: var(--muted); margin: 0 0 18px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 24px; }
+  nav.toc a { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text); text-decoration: none; font-size: 14px; }
+  section.screen { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 28px; display: grid; gap: 14px; }
+  .why { margin: 0; }
+  .why b { color: var(--primary); }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+  figure { margin: 0; display: grid; gap: 8px; align-content: start; padding: 10px; border-radius: 12px; background: var(--surface-2); border: 2px solid transparent; }
+  figure.applied { border-color: var(--ok); }
+  figure:has(input:checked) { border-color: var(--primary); }
+  figure img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; display: block; }
+  figcaption { display: grid; gap: 4px; font-size: 14px; }
+  figcaption .tag { justify-self: start; font-size: 12px; font-weight: 700; padding: 0 8px; border-radius: 999px; background: var(--accent); }
+  figcaption ul { margin: 0; padding-inline-start: 18px; }
+  .pro::marker { content: "+  "; color: var(--ok); }
+  .con::marker { content: "−  "; color: #b3261e; }
+  label.pick { display: flex; gap: 8px; align-items: center; font-weight: 600; cursor: pointer; }
+  .rec { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--accent); font-size: 14px; }
+  footer.choose { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button { font: inherit; padding: 6px 16px; border-radius: 8px; border: 0; background: var(--primary); color: var(--on-primary); cursor: pointer; }
+  textarea { width: 100%; min-height: 56px; max-height: 120px; font: 13px/1.5 ui-monospace, Consolas, monospace; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; }
+  dialog img { max-width: 96vw; max-height: 92vh; display: block; border-radius: 8px; }
+  dialog::backdrop { background: rgb(0 0 0 / 0.7); }
+  @media (max-width: 720px) { .opts { grid-template-columns: 1fr; } main { padding: 16px 16px 64px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{icon:oz_links}} חלופות עיצוב — ביקורת V5</h1>
+  <p class="lede">שבעה מסכים שהביקורת מצאה בהם בעיה של פריסה, צפיפות או הצגה, שאין לה תיקון אחד ברור. לכל מסך: מה נמצא, איך זה נראה עכשיו, ושתיים־שלוש חלופות. כל תמונה היא הכלי הבנוי עצמו, באותו מצב; חלופה היא אותו כלי עם כמה כללי CSS שהוזרקו — עוד לא בקוד. מה שכבר תוקן בלי צורך בהחלטה מסומן במסגרת ירוקה ("הוחל"). הממצאים המלאים: <code>docs/reviews/UX_AUDIT_V5.md</code>. ההחלטות של ADR 0005 (ארבעה טורים כברירת מחדל, תבניות, חום במצב כהה) נשמרות בכל החלופות.</p>
+  <nav class="toc" aria-label="המסכים">
+    <a href="#ws1024">1. סביבת העבודה ב־1024</a><a href="#sug">2. ההצעות אחרי קישור מרבי</a><a href="#rows">3. שורות טבלת הקישורים</a><a href="#run">4. ההרצה בזרימה המודרכת</a><a href="#rel">5. מקור ↔ יעד</a><a href="#notices">6. ההודעות</a><a href="#bar">7. הסרגל העליון ב־820</a>
+  </nav>
+
+  <section class="screen" id="ws1024" data-q="ws1024">
+    <h2>{{icon:oz_bookshelf}} 1. סביבת העבודה בחלון של <bdi dir="ltr">1024×768</bdi></h2>
+    <p class="why">פתיחה ראשונה בחלון צר מ־1200 כבר מתחילה בתבנית "שני טקסטים וחלונית צד". אבל <b>חלון שהוקטן אחרי הפתיחה</b> (או פריסה שנשמרה במחשב גדול) נשאר בארבעה טורים: מקורות 150px, החלונית 210px — שמות הספרים נחתכים לאות אחת ("ב… ⇔ ב…"), טבלת ההצעות גולשת הצידה (+37px), וכפתור הדחייה נעלם מחוץ לחלונית.</p>
+    <div class="opts">
+      <figure><img src="img/ws1024-before.webp" alt="ארבעה טורים ב־1024" loading="lazy" /><figcaption><span class="tag">עכשיו</span>ארבעה טורים אחרי הקטנת החלון.</figcaption></figure>
+      <figure><img src="img/ws1024-a.webp" alt="שני טקסטים וחלונית צד" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="ws1024" value="A" /> חלופה א: מעבר אוטומטי לתבנית בשינוי רוחב</label><ul><li class="pro">התבנית כבר קיימת ונבדקה; רק מחילים אותה גם כשהחלון קטן מ־1200 תוך כדי עבודה</li><li class="pro">הספרים עוברים ללשונית "ספרים" בחלונית</li><li class="con">משנה פריסה בלי שהמשתמש ביקש — לכן רק אם לא בחר תבנית בעצמו בהפעלה הזו</li></ul></figcaption></figure>
+      <figure><img src="img/ws1024-b.webp" alt="מקורות כפס סמלים" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="ws1024" value="B" /> חלופה ב: המקורות כפס סמלים צר (48px)</label><ul><li class="pro">נשארים ארבעה טורים (ADR 0005 §2); החלונית מקבלת 300px</li><li class="pro">לחיצה על סמל פותחת את רשימת הספרים מעל הקורא</li><li class="con">רכיב חדש (פס ופאנל צף) — יותר עבודה מחלופה א</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א (זול, עקבי עם מה שקורה בפתיחה), ואפשר ב בהמשך גם למסכים גדולים.</p>
+  </section>
+
+  <section class="screen" id="sug" data-q="sug">
+    <h2>{{icon:oz_link_search}} 2. ההצעות אחרי קישור מרבי</h2>
+    <p class="why">אחרי קישור מרבי, לפני ההצעה הראשונה יש <b>ארבעה סיכומים</b>: שורת הכותרת (2,000 הצעות · 2,000 ממתינות), הערה על איחוד ("4,000 הצעות מ־800 שלבים אוחדו…"), כרטיס העבודה (הסתיים · לפי שיטה · כפתורים) ודוח הקישור המרבי הפתוח (12 מונים, לפי ספר, לפי שיטה). ב־1440 טבלת ההצעות מתחילה מתחת לקו המסך; ב־820 החלונית התחתונה מלאה בסיכומים.</p>
+    <div class="opts">
+      <figure><img src="img/sug-before.webp" alt="ההצעות עכשיו" loading="lazy" /><figcaption><span class="tag">עכשיו</span>200 ספרים מול המסד, אחרי ההרצה.</figcaption></figure>
+      <figure><img src="img/sug-a.webp" alt="סיכום בשורה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="sug" value="A" /> חלופה א: סיכום בשורה אחת, "דוח העבודה ▸" נפתח לפי בקשה</label><ul><li class="pro">הטבלה עולה לראש החלונית; המספרים החשובים נשארים בכותרת</li><li class="pro">כרטיס העבודה חוזר לבד כשיש מה להמשיך (מושהה, נכשלו)</li><li class="con">הדוח המפורט רחוק בלחיצה אחת</li></ul></figcaption></figure>
+      <figure><img src="img/sug-b.webp" alt="חלונית רחבה לסקירה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="sug" value="B" /> חלופה ב: כמו א, ולשונית "הצעות" מרחיבה את החלונית ל־40% בזמן סקירה</label><ul><li class="pro">עמודות "אל" ו"ודאות" בלי שבירת שורות; פחות גלילה</li><li class="con">הקוראים מצטמצמים בזמן הסקירה; צריך כלל ברור מתי חוזרים</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א. ב — רק אם בבדיקה עם משתמשים יתברר שסוקרים הרבה בטבלה ולא בכרטיס.</p>
+  </section>
+
+  <section class="screen" id="rows" data-q="rows">
+    <h2>{{icon:oz_links}} 3. שורות טבלת הקישורים</h2>
+    <p class="why">כל קישור הוא שורה אחת של 60px. <b>הוחל:</b> השמות כבר לא נכתבים זה על זה, ומספר השורה לא נחתך (היה "ביאור חדש על בראשיתאאשית4…"). אבל בחלונית של 300px עדיין נשאר "ביאור חד… 4 ⇔ בר… (3)", ושורת "פירוש" שמתחת כמעט ריקה.</p>
+    <div class="opts">
+      <figure class="applied"><img src="img/rows-before.webp" alt="שורה אחת אחרי התיקון" loading="lazy" /><figcaption><span class="tag">הוחל</span>שורה אחת, השם מתקצר ומספר השורה נשאר.</figcaption></figure>
+      <figure><img src="img/rows-a.webp" alt="שתי שורות" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="rows" value="A" /> חלופה א: המקור בשורה הראשונה, "← היעד" בשנייה</label><ul><li class="pro">שני השמות כמעט מלאים באותו גובה שורה (64px)</li><li class="con">הסוג והשיטה עוברים לרמז (title) או לסינון</li></ul></figcaption></figure>
+      <figure><img src="img/rows-b.webp" alt="חלונית רחבה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="rows" value="B" /> חלופה ב: לשונית "קישורים" מרחיבה את החלונית (420px+)</label><ul><li class="pro">"ביאור חדש על בראשית 4 ⇔ בראשית א, א (3)" בשורה אחת</li><li class="con">אותו מחיר כמו 2ב: הקוראים צרים יותר בזמן עבודה על הטבלה</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א.</p>
+  </section>
+
+  <section class="screen" id="run" data-q="run">
+    <h2>{{icon:oz_search_in_folder}} 4. ההרצה בזרימה המודרכת</h2>
+    <p class="why">בזמן קישור מרבי בזרימה המודרכת יש <b>שלושה פסי התקדמות</b> לאותה עבודה: בסרגל העליון (עם "ביטול"), בכרטיס השלב ("ספר 17 מתוך 200") ובכרטיס העבודה שבתוכו ("מתוך 200 ספרים", עם "השהיה" ו"עצירה"). "ביטול" ו"עצירה" עושים אותו דבר בשתי מילים.</p>
+    <div class="opts">
+      <figure><img src="img/run-before.webp" alt="ההרצה עכשיו" loading="lazy" /><figcaption><span class="tag">עכשיו</span>200 ספרים, אחרי שתי שניות.</figcaption></figure>
+      <figure><img src="img/run-a.webp" alt="רק כרטיס העבודה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="run" value="A" /> חלופה א: רק כרטיס העבודה</label><ul><li class="pro">פס אחד, מילה אחת לעצירה ("עצירה"), וההשהיה במקומה</li><li class="con">הזמן הנותר (שיש היום בכרטיס השלב) צריך לעבור לכרטיס העבודה</li></ul></figcaption></figure>
+      <figure><img src="img/run-b.webp" alt="כרטיס פשוט ופרטים" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="run" value="B" /> חלופה ב: פס אחד עם זמן נותר; "השהיה" ו"עצירה"; לפי שיטה ולפי ספר תחת "פרטים"</label><ul><li class="pro">הכי פשוט למי שלא קרא את המדריך</li><li class="con">מי שרוצה לראות התקדמות לפי שיטה צריך לפתוח "פרטים"</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: ב בזרימה המודרכת; בסביבת העבודה כרטיס העבודה נשאר כמו שהוא.</p>
+  </section>
+
+  <section class="screen" id="rel" data-q="rel">
+    <h2>{{icon:oz_link}} 5. איזו שורה במקור הולכת עם איזו שורה ביעד</h2>
+    <p class="why">לחיצה על קישור בטבלה (או בבדיקה, או ב"לא ייוצאו, ולמה") גוללת לשני צדדיו ומהבהבת שנייה אחת — ואז <b>שום דבר על המסך לא אומר מה הולך עם מה</b>. <b>הוחל:</b> שני הצדדים נשארים מסומנים בצבעי המקור והיעד, כמו בהצעה. מה שעוד חסר: מהטקסט עצמו אין דרך להגיע מהשורה לקישורים שלה — המספרים שליד השורה ("1", "2") לא לחיצים.</p>
+    <div class="opts">
+      <figure><img src="img/rel-before.webp" alt="לפני: רק הבהוב" loading="lazy" /><figcaption><span class="tag">לפני</span>שנייה אחרי הלחיצה: אין סימון.</figcaption></figure>
+      <figure class="applied"><img src="img/rel-after.webp" alt="אחרי: שני הצדדים מסומנים" loading="lazy" /><figcaption><span class="tag">הוחל</span>מקור (כתום) ויעד (ירוק) נשארים מסומנים עד הבחירה הבאה.</figcaption></figure>
+      <figure><img src="img/rel-a.webp" alt="המספר שליד השורה פותח את הקישורים שלה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="rel" value="A" /> חלופה א: לחיצה על המספר שליד השורה פותחת את הקישורים שלה</label><ul><li class="pro">מהטקסט לקישור בלחיצה אחת, עם תחילת שורת היעד</li><li class="pro">לחיצה על קישור ברשימה = מעבר ושני הצדדים מסומנים</li><li class="con">רכיב צף חדש; צריך גישה מהמקלדת</li></ul></figcaption></figure>
+      <figure><img src="img/rel-b.webp" alt="קו בין שני הצדדים" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="rel" value="B" /> חלופה ב: הזוג מצויר כיחידה — מסגרת לשני הצדדים וקו מקווקו בין הקוראים</label><ul><li class="pro">רואים את הקשר בלי לקרוא מספרים</li><li class="con">הקו נשבר כשאחד הקוראים גולל או כשהפאנלים בסדר אחר (תבניות, גרירה)</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א (ב יפה, אבל שביר מול פריסה גמישה).</p>
+  </section>
+
+  <section class="screen" id="notices" data-q="notices">
+    <h2>{{icon:fl_warning}} 6. ההודעות</h2>
+    <p class="why">עד שלוש הודעות בפינה, 440px, עד 6 שורות כל אחת. אחרי פתיחת תיקיית קישורים וספרים הן מכסות את רשימת הספרים ואת תחתית הקורא; שגיאה נשארת עד שסוגרים. בזרימה המודרכת הן כיסו את "חזרה" — <b>הוחל:</b> שם הן עולות מעל הכפתורים.</p>
+    <div class="opts">
+      <figure><img src="img/notices-before.webp" alt="ההודעות עכשיו" loading="lazy" /><figcaption><span class="tag">עכשיו</span>אחרי פתיחת ספרים וקובץ קישורים, 1024.</figcaption></figure>
+      <figure><img src="img/notices-a.webp" alt="הודעה אחת בשורה" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="notices" value="A" /> חלופה א: הודעה אחרונה בלבד, בשורה אחת; השאר תחת "עוד N"</label><ul><li class="pro">מכסה גובה של שורה אחת</li><li class="con">הודעה ארוכה נקראת רק בפתיחה (לחיצה או ריחוף)</li></ul></figcaption></figure>
+      <figure><img src="img/notices-b.webp" alt="מונה הודעות בסרגל" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="notices" value="B" /> חלופה ב: רק שגיאות צפות; השאר במונה "N הודעות" בסרגל העליון</label><ul><li class="pro">שום דבר לא מכסה את הטקסט בזמן עבודה</li><li class="con">"נפתחו 200 ספרים" לא נראה מעצמו — אישור שמשתמשים מצפים לו</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א.</p>
+  </section>
+
+  <section class="screen" id="bar" data-q="bar">
+    <h2>{{icon:fl_settings}} 7. הסרגל העליון בחלון של 820 (טאבלט לאורך)</h2>
+    <p class="why">ב־820 הסרגל נכנס בשורה אחת — עד שמופיע "חזרה להדרכה" (או משימה רצה): אז "ייצוא" יורד לשורה שנייה לבד, והסרגל תופס 100px.</p>
+    <div class="opts">
+      <figure><img src="img/bar820-before.webp" alt="הסרגל עכשיו" loading="lazy" /><figcaption><span class="tag">עכשיו</span>820×1180.</figcaption></figure>
+      <figure><img src="img/bar820-a.webp" alt="בלי שם הכלי" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="bar" value="A" /> חלופה א: מתחת ל־900px הסמל בלי "מנהל הקישורים"</label><ul><li class="pro">שינוי של שורת CSS; כבר כך מתחת ל־600px</li><li class="con">פחות מקום מפנה מ־ב</li></ul></figcaption></figure>
+      <figure><img src="img/bar820-b.webp" alt="תפריט עוד" loading="lazy" /><figcaption><label class="pick"><input type="radio" name="bar" value="B" /> חלופה ב: ביטול, ביצוע חוזר, רשימת הפעולות ופריסה בתפריט "⋮"</label><ul><li class="pro">מקום ל"חזרה להדרכה" ולמשימה הרצה</li><li class="con">ביטול בשתי לחיצות (Ctrl+Z נשאר)</li></ul></figcaption></figure>
+    </div>
+    <p class="rec">המלצה: א.</p>
+  </section>
+
+  <footer class="choose">
+    <button type="button" id="copy">העתקת הבחירות</button>
+    <span class="lede" style="margin:0">הבחירות נשמרות בדפדפן הזה. הטקסט שנוצר נשלח כתשובה.</span>
+    <textarea id="out" readonly aria-label="הבחירות"></textarea>
+  </footer>
+</main>
+<dialog id="zoom"><img alt="" /></dialog>
+<script>
+  const KEY = "ux2-alternatives";
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch { return {}; } };
+  const write = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} };
+  const state = read();
+  for (const r of document.querySelectorAll('input[type=radio]')) {
+    if (state[r.name] === r.value) r.checked = true;
+    r.addEventListener("change", () => { state[r.name] = r.value; write(state); summary(); });
+  }
+  function summary() {
+    const lines = [...document.querySelectorAll("section.screen")].map((s) => `${s.querySelector("h2").textContent.trim()}: ${state[s.dataset.q] ? "חלופה " + (state[s.dataset.q] === "A" ? "א" : "ב") : "להשאיר / לא הוחלט"}`);
+    document.getElementById("out").value = lines.join("\n");
+  }
+  summary();
+  document.getElementById("copy").addEventListener("click", async () => { summary(); try { await navigator.clipboard.writeText(document.getElementById("out").value); } catch { document.getElementById("out").select(); } });
+  const zoom = document.getElementById("zoom");
+  for (const img of document.querySelectorAll("figure img")) img.addEventListener("click", () => { zoom.querySelector("img").src = img.src; zoom.querySelector("img").alt = img.alt; zoom.showModal(); });
+  zoom.addEventListener("click", () => zoom.close());
+</script>
+</body>
+</html>
