@@ -71,7 +71,7 @@ test("a long engine: the reader is answered while it runs, and a cancel stops it
       sources: { value: unknown[] };
       task: { value: { cancel(): void; done: number } | null };
       notices: { value: { text: string }[] };
-      suggestions: { runEngine(e: string, s: string, t: string): Promise<boolean> };
+      suggestions: { runEngine(e: string, s: string, t: string): Promise<boolean>; run: { value: { partial?: boolean; result: { suggestions: unknown[] } } | null } };
       lines: { load(k: string, f: number, t: number): Promise<void>; peek(k: string, i: number): { text: string } | undefined };
     };
     const store = (globalThis as unknown as { __linker: Store }).__linker;
@@ -94,6 +94,7 @@ test("a long engine: the reader is answered while it runs, and a cancel stops it
       running,
       linesMs,
       ran,
+      partial: store.suggestions.run.value?.partial ?? false,
       line: store.lines.peek(b, 15_005)?.text ?? null,
       sources: store.sources.value.length,
       restarted: store.notices.value.some((n) => n.text.includes("הופעל מחדש")),
@@ -101,7 +102,9 @@ test("a long engine: the reader is answered while it runs, and a cancel stops it
   });
   expect(r.running).toBe(true);
   expect(r.linesMs).toBeLessThan(2_000);
-  expect(r.ran).toBe(false); // cancelled
+  // cancelled: what the engine found until then is the run, marked partial (keepPartial), never "complete"
+  expect(r.ran).toBe(true);
+  expect(r.partial).toBe(true);
   expect(r.line).not.toBeNull();
   expect(r.restarted).toBe(false);
   expect(r.sources).toBe(1);
