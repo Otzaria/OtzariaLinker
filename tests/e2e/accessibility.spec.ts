@@ -162,7 +162,8 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   expect((await focused(page))?.name).toMatch(/^דחיית ההצעה לשורה/);
 
   // the links list (the tab before, with the arrow): a row shows its two ends with Enter
-  await tabTo(page, /^הצעות/, { back: true, max: 120 });
+  // the tab itself: Firefox also stops on the scrollable tabpanel, which is named after it
+  await tabTo(page, /^הצעות/, { back: true, max: 120, role: "tab" });
   await page.keyboard.press("ArrowRight");
   expect(await focused(page)).toMatchObject({ role: "tab", name: expect.stringMatching(/^קישורים \d+$/) });
   await tabTo(page, /^חדש ביאור על בראשית/);

@@ -139,9 +139,11 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
         const el = scroller.current?.querySelector<HTMLElement>(`.ln[data-i="${focus.line}"]`);
         if (!el) return;
         el.scrollIntoView({ block: "center" });
-        el.classList.remove("flash");
+        // one flashed line at a time: an earlier jump's class would otherwise stay on its line for good
+        for (const old of scroller.current?.querySelectorAll(".ln.flash") ?? []) old.classList.remove("flash");
         void el.offsetWidth;
         el.classList.add("flash");
+        el.addEventListener("animationend", () => el.classList.remove("flash"), { once: true });
       }),
     );
   }, [focus?.seq]);

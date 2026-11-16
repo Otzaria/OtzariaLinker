@@ -57,7 +57,7 @@ export async function focused(page: Page): Promise<Focused | null> {
  * Presses Tab (or Shift+Tab) until the focused element's name matches, as a keyboard-only user would.
  * Fails after `max` presses. Every stop on the way must show a focus indicator.
  */
-export async function tabTo(page: Page, name: RegExp, { max = 80, back = false }: { max?: number; back?: boolean } = {}): Promise<Focused> {
+export async function tabTo(page: Page, name: RegExp, { max = 80, back = false, role }: { max?: number; back?: boolean; role?: string } = {}): Promise<Focused> {
   const seen: string[] = [];
   for (let i = 0; i < max; i++) {
     await page.keyboard.press(back ? "Shift+Tab" : "Tab");
@@ -65,7 +65,7 @@ export async function tabTo(page: Page, name: RegExp, { max = 80, back = false }
     if (!f) continue;
     seen.push(f.name);
     expect(f.indicator, `no visible focus on <${f.tag}> "${f.name}"`).toBe(true);
-    if (name.test(f.name)) return f;
+    if (name.test(f.name) && (role === undefined || f.role === role)) return f;
   }
   throw new Error(`Tab never reached ${name}; stops: ${seen.join(" | ")}`);
 }
