@@ -127,5 +127,5 @@ test("a Hebrew database file name reads in order, extension last (audit F19)", a
   await (await chooser).setFiles({ ...DB, name: "אישי-פירושים.db" });
   // one left-to-right unit, like the file manager shows it: never "db.אישי-פירושים"
   const label = page.locator(".source-row").getByText("אישי-פירושים.db");
-  await expect(label).toHaveAttribute("dir", "ltr");
+  await expect(label).toHaveAttribute("dir", "ltr", { timeout: 30_000 }); // the database loads first; under parallel load this takes > 5 s
 });
