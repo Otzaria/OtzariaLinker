@@ -67,6 +67,8 @@ import {
  *   BENCH_ONLY      "<title>;<title>": run only these books, cached or not (into runs-~only-<k>of<n>.jsonl,
  *                   which is read after the other files and so replaces their records)
  *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
+ *   BENCH_SPANS     all (default): a suggestion's citedSpan counts as its other end; citations: only a
+ *                   citation's — a structural range collapsed on a Sefaria side is judged by its written line
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
  *                   there), the oracle's population (oracle-*.json) and the reports
@@ -84,6 +86,8 @@ const [SHARD, SHARDS] = (process.env.BENCH_SHARD ?? "0/1").split("/").map(Number
 const BUDGET_MS = Number(process.env.BENCH_BUDGET_MIN ?? 1e9) * 60_000;
 const STEP_MS = Number(process.env.BENCH_STEP_S ?? 600) * 1000;
 const DIR = resolve(process.env.BENCH_DIR ?? ".bench");
+/** BENCH_SPANS=citations: a structural range collapsed on a Sefaria side counts only at the line it writes (§0.6) */
+const SPANS = process.env.BENCH_SPANS === "citations" ? "citations" : "all";
 /** hand-check and miss examples are kept for one book in SAMPLE_EVERY (by rank), to keep the cache small */
 const SAMPLE_EVERY = 4;
 const PER_BUCKET = 2;
@@ -436,7 +440,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       text = new Map((await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => [l.index, l.anchorText] as const));
     // a merged suggestion's id is "mx:…"; the citation's words are in its raw member's id
     const spanIdOf = (s: MergedSuggestion) => s.members.find((m) => m.suggestion.engine === "citations" && /@\d+-\d+>/.test(m.suggestion.id))?.suggestion.id ?? s.id;
-    const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText);
+    const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, SPANS);
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
     if (keep) {
