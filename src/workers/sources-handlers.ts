@@ -17,7 +17,6 @@ const jobCtx = (ctx: CallContext) => ({ signal: ctx.signal, progress: (d: number
 export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> {
   return {
     ping: () => selfCheck(),
-    alive: () => true as const,
     open: (ctx, files) => registry.open(files, ctx.signal),
     openMapped: (ctx, token, mapping) => registry.openMapped(token, mapping, jobCtx(ctx)),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),

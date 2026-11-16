@@ -7,49 +7,21 @@ import { StoreContext } from "../ui/context";
 import { applyTheme } from "../ui/theme/theme";
 import "../ui/theme/tokens.css";
 import "../ui/theme/app.css";
-import { RpcClient, type Port } from "../workers/rpc";
 import { booksService } from "./books-service";
 import { hashLocation } from "./hash-location";
 import { Router } from "../state/router";
 import { idbStore } from "./idb-store";
-import type { SourcesApi } from "../workers/sources-api";
+import { WorkerHost, type HostedWorker } from "./worker-host";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
 
 /*
  * Composition root: the only place that knows about every layer. It creates the worker, adapts it
  * to the state layer's BooksService, provides a browser download Saver, and renders the UI.
  */
-/*
- * The worker host: one sources worker, replaced when it crashes or when it does not answer a
- * liveness probe a few seconds after a cancel (a cancelled job that keeps running would otherwise
- * block every later request). Replacing it loses the open sources, never the project's links.
- */
-let worker!: Worker;
-let rpc!: RpcClient<SourcesApi>;
-let onLost: (reason: string) => void = () => {};
-function startWorker() {
-  worker = new SourcesWorker();
-  rpc = new RpcClient<SourcesApi>(worker as unknown as Port);
-  worker.onerror = (e) => (e.preventDefault(), restartWorker("מנוע הקריאה קרס (ייתכן שקובץ פגום)."));
-}
-function restartWorker(reason: string) {
-  worker.terminate();
-  rpc.failAll("worker/restarted", reason);
-  startWorker();
-  onLost(reason);
-}
-function watchdog() {
-  const timer = setTimeout(() => restartWorker("הפעולה שבוטלה לא נעצרה, ולכן מנוע הקריאה הופעל מחדש."), 4000);
-  void rpc.call("alive", []).then(() => clearTimeout(timer), () => {});
-}
-startWorker();
+// the sources worker and its watchdog (worker-host.ts): replaced when it crashes or stays stuck in a cancelled call
+const host = new WorkerHost(() => new SourcesWorker() as unknown as HostedWorker);
 
-const call = <K extends keyof SourcesApi & string>(op: K, args: Parameters<SourcesApi[K]>, opts?: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => {
-  opts?.signal?.addEventListener("abort", watchdog, { once: true });
-  return rpc.call(op, args, opts);
-};
-
-const service = booksService(call);
+const service = booksService(host.call);
 
 const saver: Saver = {
   save(name, data, mime) {
@@ -63,7 +35,7 @@ const saver: Saver = {
 };
 
 const store = new AppStore(service, saver);
-onLost = (reason) => store.workerLost(reason);
+host.onLost = (reason) => store.workerLost(reason);
 const kv = idbStore();
 store.startAutosave(kv);
 // how far a guided flow got (state/guided-flow.ts): a reload or a closed tab can continue it
@@ -79,7 +51,7 @@ effect(() => {
 effect(() => document.documentElement.style.setProperty("--font-scale", String(store.prefs.fontScale.value)));
 
 // a self-check the offline E2E test reads: proves the SQLite reader and zstd start in this environment
-void rpc.call("ping", []).then(
+void host.call("ping", []).then(
   (r) => (document.documentElement.dataset.engine = `${r.sqlite} · ${r.zstd}`),
   (e: Error) => (document.documentElement.dataset.engine = `שגיאה: ${e.message}`),
 );

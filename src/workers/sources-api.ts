@@ -17,8 +17,6 @@ export interface SourcesApi {
   [op: string]: (...args: never[]) => unknown;
   /** the self-check (self-check.ts): what the lazy SQLite reader and the zstd decoder read from tiny probes */
   ping(): { sqlite: string; zstd: string };
-  /** cheap liveness probe for the watchdog */
-  alive(): true;
   open(files: InputFile[]): OpenResult;
   /** opens a database from OpenResult.needsMapping through the user's mapping (may scan: progress, cancel) */
   openMapped(token: string, mapping: DbMapping): OpenedSource;
