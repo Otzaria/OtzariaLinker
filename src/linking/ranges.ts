@@ -106,8 +106,11 @@ export interface FillOptions {
 }
 
 /**
- * Range completion (v3 `autoFillBook`): every link of the book on this side gets the range "until one
- * line before the next link's start", the last until the end of the book; a heading end steps back.
+ * Range completion (v3 `autoFillBook`): every link of the book on this side gets the module's range,
+ * exactly what `suggestEnd` gives — until one line before the next marker (a link's start or a
+ * heading), the last until the end of the book. v3 used only link starts, so a range ran across
+ * chapter headings; here it stops at the chapter. A range that already swallows the next link's start
+ * and has no room left is removed (the link becomes a single line) rather than left overlapping.
  * Only real changes are returned. A book whose length is unknown (a "shadow" book that came from a
  * links file, with no text) is never touched: the ranges imported with it could only be lost.
  */
@@ -115,14 +118,18 @@ export function fillRanges(links: Iterable<Link>, book: RangeBook, side: RangeSi
   if (book.lineCount <= 0) return { edits: [], skippedNoText: true };
   const onlyRanged = options.onlyRanged !== false;
   const mine = [...links].filter((l) => live(l) && l.provenance !== "db" && book.owns(sideOf(l, side).book));
-  const starts = [...new Set(mine.map((l) => sideOf(l, side).line))].sort((a, b) => a - b);
+  // the project's own links and the headings; database links are not this book's ranges to keep apart
+  const markers = rangeMarkers(mine, book, side, "auto");
   const edits: RangeEdit[] = [];
   for (const l of mine) {
     const s = sideOf(l, side);
     if (onlyRanged && s.end === undefined) continue;
-    const next = nextAfter(starts, s.line);
-    const want = backFromHeading(next !== null ? next - 1 : book.lineCount - 1, s.line, book.headings);
-    if (want <= s.line || want === s.end) continue;
+    const want = suggestEnd(s.line, markers, book);
+    if (want <= s.line) {
+      if (s.end !== undefined) edits.push({ link: l, side, before: s.end, after: undefined });
+      continue;
+    }
+    if (want === s.end) continue;
     edits.push({ link: l, side, before: s.end, after: want });
   }
   return { edits, skippedNoText: false };

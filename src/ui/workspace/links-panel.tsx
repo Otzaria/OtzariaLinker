@@ -120,7 +120,7 @@ function ProjectLinksPanel() {
 
 /**
  * Range completion (v3 F-084/F-105): every link of a book on one side runs until one line before the
- * next link (the last one to the end of the book). One undoable step; the rule is linking/ranges.ts.
+ * next link or heading (the last one to the end of the book). One undoable step; the rule is linking/ranges.ts.
  */
 function FillRanges() {
   const store = useStore();
@@ -134,7 +134,7 @@ function FillRanges() {
     <details class="held" style="margin:6px 6px 0">
       <summary>השלמת טווחים</summary>
       <div class="builder" style="padding:6px 0 0">
-        <span class="muted">כל טווח נמשך עד שורה אחת לפני תחילת הקישור הבא, והאחרון עד סוף הספר. שורת כותרת אינה סוף טווח. אפשר לבטל ב־Ctrl+Z.</span>
+        <span class="muted">כל טווח נמשך עד שורה אחת לפני הקישור הבא או הכותרת הבאה, והאחרון עד סוף הספר. אפשר לבטל ב־Ctrl+Z.</span>
         <label class="field">
           הספר
           <select value={key} onChange={(e) => setBookKey(e.currentTarget.value)}>
