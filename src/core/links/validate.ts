@@ -1,4 +1,4 @@
-import { canonicalTypeString, SOURCE_VIEW_TYPES } from "./connection-type";
+import { APP_DEPENDENT_TYPES, canonicalTypeString, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
 import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
@@ -68,6 +68,18 @@ export interface ValidationContext {
   sefariaTitle?(book: BookRef): boolean;
   /** "submission" (default): rules of the library's sync are errors; "private": warnings (B1). */
   purpose?: "submission" | "private";
+  /**
+   * Where Otzaria's PERSONAL import finds the book (private use): "personal" — one of the user's text
+   * books, which goes into a personal-books folder; "other" — a book of the official library (database or
+   * library checkout) or of a personal database, which Otzaria attaches as a library of its own.
+   * Undefined: not known (the book is not open). Decides the import's reversal (appReverses).
+   */
+  personalImportSide?(book: BookRef): "personal" | "other" | undefined;
+  /**
+   * An open source of the official library (its database or a library checkout) has ANOTHER book with this
+   * book's title — this one is the user's own (a text file, a personal database). Absent or false: not known.
+   */
+  libraryHasTitle?(book: BookRef): boolean;
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
 }
@@ -129,6 +141,32 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // Sefaria priority-list books are base books (isBaseBook), so the generator does not fix it.
   if (!f.skipped && !f.flipped && SOURCE_VIEW_TYPES.has(f.stored) && titleDeclaresDependencyOn(f.storedSource.book.title, f.storedTarget.book.title))
     add("warning", "export/reversed-dependency", `הקישור יישמר הפוך: "${f.storedTarget.book.title}" יופיע כמפרש של "${f.storedSource.book.title}". בקישור מפירוש אל הספר שעליו נכתב בחרו את הסוג "מקור".`, 'Conection Type "source"');
+  if (ctx.purpose === "private" && !f.skipped && f.declared !== "SOURCE") {
+    const app = appReverses(link, ctx);
+    if (app !== undefined && app !== f.flipped) {
+      const [base, dependant] = app ? [t.book.title, s.book.title] : [s.book.title, t.book.title];
+      add(
+        "warning",
+        "export/private-reversed",
+        `באוצריא שלכם (ייבוא אישי) הקישור יוצג הפוך מהספרייה: "${base}" יהיה הבסיס, ו"${dependant}" יופיע בפאנל המפרשים שלו. ייבוא אישי הופך קישור מסוג פירוש (וכל סוג שמוצג בפאנל המפרשים) רק כשהוא יוצא מספר אישי (קובץ טקסט שלכם) אל ספר שאינו אישי (הספרייה הרשמית או מסד אישי), ואחרת שומר אותו כמו שהוא. אם זה לא מה שרציתם, בחרו סוג שמוצג בפאנל הקישורים (למשל "עיון").`,
+        app ? "user_content_importer.dart: flip = isDependentTextLink && source.isUserBook && !target.isUserBook" : "user_content_importer.dart: no flip (source is not a personal book)",
+      );
+    }
+  }
+  // Otzaria's personal import finds a book by its exact title, first among the personal books and in the
+  // library, then in the attached personal databases (user_content_importer.dart:713-749,
+  // user_link_ref_resolver.dart:139-166): a title in both personal books and the library rejects the
+  // whole file; a personal database's book named like a library book is never reached — the record
+  // binds to the library's book (checked through the app's code: scripts/live-test/dart, "title clashes").
+  if (ctx.purpose === "private" && ctx.libraryHasTitle)
+    for (const side of [s, t]) {
+      if (!ctx.libraryHasTitle(side.book)) continue;
+      const where = ctx.personalImportSide?.(side.book);
+      if (where === "personal")
+        add("error", "export/private-title-in-library", `בספרייה הרשמית של אוצריא יש ספר בשם "${side.book.title}", ו"${side.book.title}" שפתחתם הוא ספר שלכם. כשספר באותו שם נמצא גם בספרים האישיים וגם בספרייה, ייבוא אישי באוצריא דוחה את כל קובץ הקישורים. תנו לספר שלכם שם אחר.`, "user_link_ref_resolver.dart: AmbiguousUserLinkBookException");
+      else if (where === "other")
+        add("warning", "export/private-title-in-library", `בספרייה הרשמית של אוצריא יש ספר בשם "${side.book.title}", ו"${side.book.title}" שפתחתם הוא ספר ממסד אישי. ייבוא אישי באוצריא מחפש קודם בספרייה, ולכן הקישור יתחבר לספר שבספרייה, במספרי השורות של הספר שלכם. תנו לספר במסד שלכם שם אחר.`, "user_content_importer.dart: personal and official books before attached databases");
+    }
   if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
 
   // The generator accepts an empty heRef_2, but the library's weekly sync rejects a blank one
@@ -290,6 +328,21 @@ export function asExported(link: Link, problems: readonly Problem[]): Problem[] 
 export const PRIVATE_TO_BASE = "export/private-source-to-base";
 
 /**
+ * Whether Otzaria's personal import stores this record reversed (user_content_importer.dart:806-860,
+ * otzaria upstream/dev): a dependent type (link_types.dart dependentTextTypes; "linker" is read as
+ * commentary) from one of the user's personal books into a book that is not one. Undefined when a side's
+ * place in the app is not known.
+ */
+export function appReverses(link: Pick<Link, "source" | "target" | "declaredType">, ctx: Pick<ValidationContext, "personalImportSide">): boolean | undefined {
+  const { type } = parseConnectionType(link.declaredType);
+  if (!APP_DEPENDENT_TYPES.has(type === "LINKER" ? "COMMENTARY" : type)) return false;
+  const src = ctx.personalImportSide?.(link.source.book);
+  const tgt = ctx.personalImportSide?.(link.target.book);
+  if (src === undefined || tgt === undefined) return undefined;
+  return src === "personal" && tgt === "other";
+}
+
+/**
  * The record a private export writes for a "source" link: base → commentary, "commentary", in the base's
  * file — the orientation the library stores it in. Null when the rule does not apply. The anchor is on the
  * commentary's words, and a record's anchor is on its source line: it is not carried (the library drops it
@@ -312,14 +365,22 @@ export function privateSourceRecord(link: Link): Link | null {
   };
 }
 
-function privateSourceChecks(links: readonly Link[], out: Map<string, Problem[]>, heldFiles: ReadonlyMap<string, Problem>): void {
+function privateSourceChecks(links: readonly Link[], out: Map<string, Problem[]>, heldFiles: ReadonlyMap<string, Problem>, ctx: ValidationContext): void {
   for (const l of links) {
     const moved = privateSourceRecord(l);
     if (!moved) continue;
     const base = moved.source.book.title;
     const dependant = l.source.book.title;
     const unsafe = unsafeFileTitle(base);
-    const cannot = unsafe ? `אי אפשר לכתוב קובץ קישורים בשם "${base}" (${unsafe})` : heldFiles.has(base) ? `קובץ הקישורים של "${base}" לא ייוצא הפעם (הסיבה ליד הקישורים שלו)` : null;
+    // a personal base with a commentary that is not personal: the import would reverse the moved record
+    const reversed = appReverses(moved, ctx) === true;
+    const cannot = unsafe
+      ? `אי אפשר לכתוב קובץ קישורים בשם "${base}" (${unsafe})`
+      : heldFiles.has(base)
+        ? `קובץ הקישורים של "${base}" לא ייוצא הפעם (הסיבה ליד הקישורים שלו)`
+        : reversed
+          ? `"${base}" הוא ספר אישי ו"${dependant}" אינו, ובקובץ של "${base}" ייבוא אישי היה הופך את הפירוש ומציג את "${base}" כפירוש של "${dependant}"`
+          : null;
     out.get(l.id)?.push(
       cannot
         ? {
@@ -375,7 +436,7 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
       message: `רשומה מקובץ הקישורים שבספרייה (שורה ${l.source.line + 1}, אל "${l.target.book.title}") נערכה ויש בה שגיאה, ולכן היא לא תיכתב. קובץ שייכתב בלעדיה יחליף את הקובץ שבספרייה, והרשומה תימחק ממנו. תקנו את הרשומה, בטלו את העריכה (Ctrl+Z), או מחקו אותה במפורש.`,
     });
   }
-  if (ctx.purpose === "private") privateSourceChecks(links, out, heldFiles);
+  if (ctx.purpose === "private") privateSourceChecks(links, out, heldFiles, ctx);
   if (heldFiles.size)
     for (const l of links) {
       const why = heldFiles.get(l.source.book.title);
