@@ -128,7 +128,7 @@ export class LineStore {
    */
   private readonly facts = new Map<string, Map<number, LineFacts>>();
 
-  constructor(service: BooksService) {
+  constructor(private readonly service: BooksService) {
     const bump = () => (this.tick.value = this.tick.peek() + 1);
     this.lines = new ChunkCache(async (b, f, t) => {
       const got = await service.lines(b, f, t);
@@ -156,6 +156,33 @@ export class LineStore {
     if (wanted(s)) void this.lines.ensure(bookKey, c);
     else if (s!.status === "ready") this.lines.touch(bookKey, c);
     return s?.status === "ready" ? s.items[index - c * CHUNK] : undefined;
+  }
+
+  /** the end searches running, by book: one at a time */
+  private readonly learning = new Map<string, Promise<number | undefined>>();
+
+  /**
+   * Learns the number of lines of a book that does not say it up front (a text book) without reading it
+   * all into the views: a few one-line reads double until one is past the end, then the end is searched
+   * (lastLineAfter). For a saved project's check that a book did not change (V5 P1-10). Undefined on failure.
+   */
+  learnCount(bookKey: string): Promise<number | undefined> {
+    const known = this.counts.get(bookKey);
+    if (known !== undefined) return Promise.resolve(known);
+    let run = this.learning.get(bookKey);
+    if (!run) {
+      run = (async () => {
+        let hi = CHUNK;
+        while ((await this.service.lines(bookKey, hi, hi)).length) hi *= 2;
+        const n = await lastLineAfter(this.service, bookKey, hi);
+        this.counts.set(bookKey, n);
+        this.tick.value = this.tick.peek() + 1;
+        return n;
+      })().catch(() => undefined);
+      this.learning.set(bookKey, run);
+      void run.then(() => this.learning.delete(bookKey));
+    }
+    return run;
   }
 
   /** Number of lines, once the end of the book has been read (undefined before). */

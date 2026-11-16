@@ -405,6 +405,7 @@ export class AppStore {
       return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
     });
     this.exchange.booksOpened();
+    this.noticeChangedBooks();
   }
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
@@ -821,6 +822,8 @@ export class AppStore {
       this.lines.beginCheck();
       // database links around the project's own links: validation reports "already in the database"
       await this.dbLinks.loadAround(this.allLinks.value);
+      // the length of each book the saved project recorded, so a changed book is said (export/book-changed)
+      await Promise.all([...this.projectBookLines.value.keys()].map((t) => this.resolveTitle(t)).flatMap((ref) => (ref && this.lineCountOf(ref) === undefined ? [this.lines.learnCount(this.bookOf(ref)!.key)] : [])));
       let done = 0;
       for (const [key, lines] of need) await this.lines.loadFacts(key, lines, { signal: opts.signal, onChunk: () => opts.onProgress?.(++done, total) });
       return true;
@@ -936,10 +939,101 @@ export class AppStore {
       purpose: this.exportPurpose.value,
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),
+      bookChanged: (ref) => {
+        const saved = this.projectBookLines.value.get(ref.title);
+        if (saved === undefined) return undefined;
+        const now = this.lineCountOf(ref);
+        return now !== undefined && now !== saved ? { saved, now } : undefined;
+      },
     };
   }
 
   /* ---------------- projects, autosave, recovery ---------------- */
+
+  /**
+   * How many lines each book had when the open project was saved (ProjectFile.bookLines, V5 P1-10). A book
+   * open now with another count has changed, and the links on it may point at other lines: the check
+   * and the export warn (export/book-changed) until the user says the links were checked (acceptBookChange).
+   */
+  readonly projectBookLines = signal<ReadonlyMap<string, number>>(new Map());
+  /** the changed books already announced in a notice, so it is said once per project */
+  private readonly changedNoticed = new Set<string>();
+  /** books whose unknown length was asked for (LineStore.learnCount), so it is asked once */
+  private readonly countAsked = new Set<string>();
+
+  /** The number of lines of the open book a ref names, when known (databases up front, text files once read). */
+  private lineCountOf(ref: BookRef): number | undefined {
+    const b = this.bookOf(ref);
+    return b && (b.lineCount ?? this.lines.count(b.key));
+  }
+
+  /**
+   * Says once which books of the project changed since it was saved (they may have moved its links). A
+   * text book does not know its length until read: it is learned in the background, then said.
+   */
+  private noticeChangedBooks(): void {
+    const changed: string[] = [];
+    const learn: Promise<unknown>[] = [];
+    for (const [title, saved] of this.projectBookLines.value) {
+      if (this.changedNoticed.has(title)) continue;
+      const ref = this.resolveTitle(title);
+      const now = ref ? this.lineCountOf(ref) : undefined;
+      if (ref && now === undefined && !this.countAsked.has(ref.key)) {
+        this.countAsked.add(ref.key);
+        learn.push(this.lines.learnCount(ref.key));
+      }
+      if (now === undefined || now === saved) continue;
+      this.changedNoticed.add(title);
+      changed.push(`"${title}": היו ${saved.toLocaleString("he")} שורות, עכשיו ${now.toLocaleString("he")}`);
+    }
+    if (learn.length) void Promise.all(learn).then(() => this.noticeChangedBooks());
+    if (!changed.length) return;
+    this.notify(
+      "warning",
+      `${changed.length === 1 ? "ספר אחד השתנה" : `${changed.length.toLocaleString("he")} ספרים השתנו`} מאז שהפרויקט נשמר, והקישורים עליהם שמורים לפי מספר שורה: ייתכן שחלקם מצביעים עכשיו על שורות אחרות. הבדיקה מסמנת אותם ("הספר השתנה"). אם יש לכם את המהדורה הקודמת, העבירו את הקישורים ב"השוואת מהדורות".`,
+      changed,
+    );
+  }
+
+  /**
+   * The user checked the links of books that changed since the project was saved: their present line
+   * count becomes the project's (saved with it), and the warning goes. Marks the project changed.
+   */
+  acceptBookChange(titles: readonly string[]): void {
+    const next = new Map(this.projectBookLines.value);
+    let changed = false;
+    for (const t of titles) {
+      const ref = this.resolveTitle(t);
+      const now = ref ? this.lineCountOf(ref) : undefined;
+      if (now === undefined || next.get(t) === undefined || next.get(t) === now) continue;
+      next.set(t, now);
+      changed = true;
+    }
+    if (!changed) return;
+    this.projectBookLines.value = next;
+    this.linkState.value = touch(this.linkState.value);
+  }
+
+  /** The line counts the project saves: as saved before for a book the user did not accept as changed, else as open now. */
+  private bookLinesNow(): { title: string; lines: number }[] {
+    const saved = this.projectBookLines.value;
+    const out = new Map<string, number>();
+    for (const l of this.allLinks.value) {
+      if (l.provenance === "db") continue;
+      for (const side of [l.source, l.target]) {
+        const t = side.book.title;
+        if (out.has(t)) continue;
+        const n = saved.get(t) ?? this.lineCountOf(side.book);
+        if (n !== undefined) out.set(t, n);
+        else {
+          // a text book does not know its length until read: learned now, saved with the next autosave
+          const b = this.bookOf(side.book);
+          if (b && !this.countAsked.has(b.key)) (this.countAsked.add(b.key), void this.lines.learnCount(b.key));
+        }
+      }
+    }
+    return [...out].map(([title, lines]) => ({ title, lines }));
+  }
 
   /** The sources the open project was saved with (audit F10); missingSources lists those not open again. */
   readonly projectSources = signal<ProjectSource[]>([]);
@@ -995,6 +1089,7 @@ export class AppStore {
         dbMappings: [...this.dbMappings.value.values()],
         // a confirmation is for this session only (C4): "no file in the library" is not a copy of a file at all
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
+        bookLines: this.bookLinesNow(),
       },
       APP_VERSION,
       undefined,
@@ -1042,6 +1137,8 @@ export class AppStore {
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
+      this.projectBookLines.value = new Map(p.bookLines.map((b) => [b.title, b.lines] as const));
+      this.changedNoticed.clear();
       // the switch "ספרי ספריית אוצריא" as the user left it, for each source when it is open again
       this.projectLibraryChoices.value = p.sources.filter((s) => s.library !== undefined);
       if (this.screen.peek() !== "guided") this.screen.value = "workspace";
@@ -1050,6 +1147,7 @@ export class AppStore {
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
     this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את המקור של הפרויקט" : `את ${missing.toLocaleString("he")} המקורות של הפרויקט`} — הרשימה ב"מקורות וספרים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
+    this.noticeChangedBooks();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
     if (snapshots.length)
       this.notify("info", `בפרויקט יש עותק של קובצי הקישורים של ${snapshots.length === 1 ? `"${snapshots[0]}"` : `${snapshots.length} ספרים`} מהספרייה. לפני ייצוא שלהם טענו אותם שוב מהספרייה (הכלי יוודא שהם לא השתנו), או אשרו בחלון הייצוא שהעותק העדכני.`, snapshots.length > 1 ? snapshots.slice(0, 50) : undefined);
@@ -1204,11 +1302,19 @@ function unboundRef(ref: BookRef): BookRef {
   return ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
 }
 
-/** Paths inside their common top folder, when they all have one ("ביאורים/א.txt" → "א.txt"); else as they are. */
-function underRoot(paths: readonly string[]): string[] {
-  const roots = new Set(paths.map((p) => (p.includes("/") ? p.slice(0, p.indexOf("/")) : "")));
-  return roots.size === 1 && !roots.has("") ? paths.map((p) => p.slice(p.indexOf("/") + 1)) : [...paths];
+/** at most this many unanswered recovery offers are kept (each is a whole project) */
+const MAX_RECOVERY_OFFERS = 3;
+
+/** links, alt_toc books and rejections a saved project text holds; 0 when it is not one */
+function recoverableCount(text: string): number {
+  try {
+    const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[]; rejectedSuggestions?: unknown[] };
+    return (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0) + (saved.rejectedSuggestions?.length ?? 0);
+  } catch {
+    return 0;
+  }
 }
+
 /** The unanswered offers kept aside: a list of project texts (an older version kept one text). */
 function keptOffers(kept: string | null | undefined): string[] {
   if (!kept) return [];
@@ -1221,16 +1327,8 @@ function keptOffers(kept: string | null | undefined): string[] {
   return [kept];
 }
 
-/** links, alt_toc books and rejections a saved project text holds; 0 when it is not one */
-function recoverableCount(text: string): number {
-  try {
-    const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[]; rejectedSuggestions?: unknown[] };
-    return (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0) + (saved.rejectedSuggestions?.length ?? 0);
-  } catch {
-    return 0;
-  }
+/** Paths inside their common top folder, when they all have one ("ביאורים/א.txt" → "א.txt"); else as they are. */
+function underRoot(paths: readonly string[]): string[] {
+  const roots = new Set(paths.map((p) => (p.includes("/") ? p.slice(0, p.indexOf("/")) : "")));
+  return roots.size === 1 && !roots.has("") ? paths.map((p) => p.slice(p.indexOf("/") + 1)) : [...paths];
 }
-
-/** at most this many unanswered recovery offers are kept (each is a whole project) */
-const MAX_RECOVERY_OFFERS = 3;
-

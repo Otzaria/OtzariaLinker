@@ -126,6 +126,11 @@ export function QaPanel() {
                     לשימוש פרטי
                   </button>
                 )}
+                {qaAction(i.problem, purpose) === "accept-edition" && (
+                  <button class="btn text small" title="בדקתם את הקישורים על הטקסט החדש והם נכונים: מספר השורות הנוכחי של הספר יישמר בפרויקט, והאזהרה תוסר" onClick={() => remedy(() => store.acceptBookChange([i.link.source.book.title, i.link.target.book.title]))}>
+                    הקישורים נבדקו
+                  </button>
+                )}
                 {qaAction(i.problem, purpose) === "drop-anchor" && (
                   <button class="btn text small" title="הסרת העוגן על המילים; הקישור עצמו נשאר" onClick={() => remedy(() => store.dropAnchors([i.link.id]))}>
                     הסרת העוגן

@@ -70,6 +70,11 @@ export interface ValidationContext {
   purpose?: "submission" | "private";
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
+  /**
+   * The open book has a different number of lines than when the saved project was made (V5 P1-10): its
+   * text changed, and links by line number may now point at other lines. Absent/undefined = not known.
+   */
+  bookChanged?(book: BookRef): { saved: number; now: number } | undefined;
 }
 
 export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "missing";
@@ -151,6 +156,15 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   if (t.book.origin === "otzaria" && t.book.title !== normalizeTitle(t.book.title))
     add("error", "export/title-not-normalized", `שם הספר "${t.book.title}" כתוב עם מירכאות או רווחים שאוצריא מנרמלת (למשל "→״). במסד הוא נקרא "${normalizeTitle(t.book.title)}", והקישור לא יימצא.`);
 
+  for (const b of s.book.title === t.book.title ? [s.book] : [s.book, t.book]) {
+    const changed = ctx.bookChanged?.(b);
+    if (changed)
+      add(
+        "warning",
+        "export/book-changed",
+        `הספר "${b.title}" השתנה מאז שהפרויקט נשמר: היו בו ${changed.saved.toLocaleString("he")} שורות, ועכשיו ${changed.now.toLocaleString("he")}. הקישור נשמר לפי מספר שורה, ולכן ייתכן שהוא מצביע עכשיו על שורה אחרת. אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים ("השוואת מהדורות"); אחרת בדקו את הקישור על הטקסט.`,
+      );
+  }
   sideChecks("ספר המקור", link.source, ctx, add);
   sideChecks("ספר היעד", link.target, ctx, add);
   anchorChecks(link, f.flipped, ctx, add);

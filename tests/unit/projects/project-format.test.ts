@@ -117,3 +117,23 @@ describe("project file — the source's library switch (audit F2)", () => {
     expect(parseProject(odd, bind).sources[0]).not.toHaveProperty("library");
   });
 });
+
+describe("project file — the books' line counts (V5 P1-10)", () => {
+  const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ ...b, key: `unresolved:${b.title}` });
+  const base = { sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null } };
+
+  it("round-trips as an optional field of version 1; an older project has none", () => {
+    const text = serializeProject({ ...base, bookLines: [{ title: B.title, lines: 1533 }] }, "4.0.0");
+    expect(parseProject(text, bind).bookLines).toEqual([{ title: B.title, lines: 1533 }]);
+    expect(JSON.parse(serializeProject(base, "4.0.0"))).not.toHaveProperty("bookLines");
+    expect(parseProject(serializeProject(base, "4.0.0"), bind).bookLines).toEqual([]);
+  });
+
+  it("is untrusted input: entries that are not a title and a whole count are dropped, a repeated title is kept once", () => {
+    const raw = JSON.parse(serializeProject(base, "4.0.0"));
+    raw.bookLines = [{ title: "א", lines: 3 }, { title: "א", lines: 9 }, { title: "", lines: 1 }, { title: "ב", lines: -1 }, { title: "ג", lines: 1.5 }, { title: 7, lines: 2 }, null, "x", { title: "__proto__", lines: 4 }];
+    expect(parseProject(JSON.stringify(raw), bind).bookLines).toEqual([{ title: "א", lines: 3 }, { title: "__proto__", lines: 4 }]);
+    raw.bookLines = { title: "א", lines: 3 };
+    expect(parseProject(JSON.stringify(raw), bind).bookLines).toEqual([]);
+  });
+});

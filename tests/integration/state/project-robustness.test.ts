@@ -9,8 +9,8 @@ import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
 
 /*
- * V5 P1-10: a saved project reopened after the world moved — the folder was renamed, a source is
- * missing, the app died in the middle of a run. What the user sees, and that every
+ * V5 P1-10: a saved project reopened after the world moved — a book's text changed, the folder was
+ * renamed, a source is missing, the app died in the middle of a run. What the user sees, and that every
  * manual decision (approvals, rejections, edits) survives.
  */
 function makeStore() {
@@ -48,6 +48,55 @@ const decisions = (store: AppStore, ids: { approved: string[]; rejected: string[
   approved: ids.approved.filter((id) => store.suggestions.state.value.get(id) === "approved").length,
   rejected: ids.rejected.filter((id) => store.suggestions.state.value.get(id) === "rejected").length,
   edited: store.allLinks.value.find((l) => l.id === `auto:${ids.approved[0]}`)?.declaredType,
+});
+
+describe("reopened after a book's text changed", () => {
+  it("says which book changed, the check and the export warn on its links, and \"checked\" clears it", async () => {
+    const a = await workedOn();
+    // the autosave writes the project a moment after each change; a text book's length is learned by then
+    a.store.projectText();
+    await tick();
+    a.store.saveProject();
+    const project = String(a.saved.at(-1)!.data);
+    expect(JSON.parse(project).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length }]));
+
+    // the commentary was edited: a line was added at the top, so every line number after it moved by one
+    const b = makeStore();
+    await b.store.openFiles([DB]);
+    await b.store.openFiles([text("ביאורים/ביאור על בראשית.txt", ["<h1>ביאור על בראשית</h1>", "הקדמה חדשה", ...BIUR_LINES.slice(1)])]);
+    b.store.openProject("p.otzlinker.json", project);
+    const qa = (await b.store.quality.run())!;
+    const changed = qa.issues.filter((i) => i.problem.code === "export/book-changed");
+    // before: nothing was said — the links were silently one line off
+    expect(new Set(changed.map((i) => i.link.id)).size).toBe(6);
+    expect(changed[0]!.problem.message).toContain(`היו בו ${BIUR_LINES.length}`);
+    expect(changed[0]!.category).toBe("edition");
+    expect(b.store.notices.value.some((n) => n.kind === "warning" && n.text.includes("השתנה מאז שהפרויקט נשמר"))).toBe(true);
+    const plan = (await b.store.exchange.prepareExport())!;
+    // shifted by one line, the links now fall on the verse headings — held back; each one says the book changed
+    expect([...plan.warned, ...plan.heldBack].filter((w) => w.problems.some((p) => p.code === "export/book-changed"))).toHaveLength(6);
+    expect(plan.heldBack.length).toBeGreaterThan(0);
+    // the decisions are all there
+    expect(b.store.allLinks.value).toHaveLength(6);
+    expect(b.store.linkState.value.rejected.size).toBeGreaterThanOrEqual(3);
+    expect(b.store.allLinks.value.find((l) => l.id === `auto:${a.approved[0]}`)!.declaredType).toBe("reference");
+    // the user checked them: the warning goes, and the new count is what the project saves
+    b.store.acceptBookChange(["ביאור על בראשית"]);
+    expect(b.store.dirty.value).toBe(true);
+    expect((await b.store.quality.run())!.issues.some((i) => i.problem.code === "export/book-changed")).toBe(false);
+    expect(JSON.parse(b.store.projectText()).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length + 1 }]));
+  });
+
+  it("saving before the changed book was checked keeps the old count: the warning is not lost by a save", async () => {
+    const a = await workedOn();
+    a.store.projectText();
+    await tick();
+    const b = makeStore();
+    await b.store.openFiles([DB]);
+    await b.store.openFiles([text("ביאורים/ביאור על בראשית.txt", [...BIUR_LINES, "שורה נוספת"])]);
+    b.store.openProject("p.otzlinker.json", a.store.projectText());
+    expect(JSON.parse(b.store.projectText()).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length }]));
+  });
 });
 
 describe("reopened from a moved or renamed folder", () => {

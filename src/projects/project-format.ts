@@ -81,6 +81,17 @@ export interface ProjectFile {
   dbMappings?: SavedDbMapping[];
   /** Optional (4.0): the library links files the project holds, by fingerprint (ProjectLibraryFile). */
   libraryFiles?: ProjectLibraryFile[];
+  /**
+   * Optional (4.0, without a version bump: older readers ignore it): how many lines each book the links
+   * use had when the project was saved. Links name lines by number, so a book that was edited since (a
+   * library update, a fixed text file) may have moved them: reopening compares, and says so (V5 P1-10).
+   */
+  bookLines?: ProjectBookLines[];
+}
+
+export interface ProjectBookLines {
+  title: string;
+  lines: number;
 }
 
 export interface ProjectData {
@@ -93,6 +104,7 @@ export interface ProjectData {
   altToc?: AltTocBook[];
   dbMappings?: SavedDbMapping[];
   libraryFiles?: ProjectLibraryFile[];
+  bookLines?: ProjectBookLines[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -122,6 +134,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date(), 
     ...(p.altToc?.length && { altToc: p.altToc }),
     ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
     ...(p.libraryFiles?.length && { libraryFiles: p.libraryFiles.map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })) }),
+    ...(p.bookLines?.length && { bookLines: p.bookLines.map((b) => ({ title: b.title, lines: b.lines })) }),
   };
   const text = JSON.stringify(file);
   if (!cache) return text;
@@ -143,7 +156,7 @@ export class ProjectError extends Error {
 }
 
 /** Parses and validates a project file; `bind` turns a stored book back into a BookRef of this session. */
-export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; libraryFiles: ProjectLibraryFile[]; savedAt: string; skipped: number } {
+export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; libraryFiles: ProjectLibraryFile[]; bookLines: ProjectBookLines[]; savedAt: string; skipped: number } {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -173,6 +186,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     altToc: altToc.books,
     dbMappings: parseSavedDbMappings(f.dbMappings),
     libraryFiles: rebuildLibraryFiles(f.libraryFiles),
+    bookLines: rebuildBookLines(f.bookLines),
     skipped: skipped + altToc.skipped,
   };
 }
@@ -190,6 +204,15 @@ function rebuildSource(s: ProjectSource): ProjectSource {
     ...(titles?.length && { titles }),
     ...(typeof s.library === "boolean" && { library: s.library }),
   };
+}
+
+/* ---- line counts of the books: rebuilt from checked fields (untrusted input) ---- */
+function rebuildBookLines(raw: unknown): ProjectBookLines[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Map<string, ProjectBookLines>();
+  for (const x of raw as Record<string, unknown>[])
+    if (x && typeof x === "object" && str(x.title) && x.title && !out.has(x.title) && isInt(x.lines)) out.set(x.title, { title: x.title, lines: x.lines });
+  return [...out.values()];
 }
 
 /* ---- library-file fingerprints: rebuilt from checked fields (untrusted input) ---- */
