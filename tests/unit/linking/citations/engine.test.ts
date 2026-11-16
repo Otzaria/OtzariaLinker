@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../../src/core/links/model";
 import { countVisibleChars } from "../../../../src/core/text/offsets";
-import { buildHeadingsIndex, buildRefIndex, runCitationsEngine, type CitationLibrary, type RefLine } from "../../../../src/linking/automatic/citations";
+import { buildHeadingsIndex, buildRefIndex, CitationRun, runCitationsEngine, type CitationLibrary, type RefLine } from "../../../../src/linking/automatic/citations";
 import type { EngineBook } from "../../../../src/linking/automatic";
 
 const ref = (key: string, title: string, origin: BookRef["origin"] = "sefaria"): BookRef => ({ key, title, origin });
@@ -173,3 +173,31 @@ describe("a glossary of a commentator's words (COMMENTATOR_GLOSSARIES)", () => {
 });
 
 const CONF = (s: { score: number }) => s.score;
+
+describe("a cancelled run keeps what it resolved", () => {
+  // the library benchmark's time cap on מיקרופדיה תלמודית (v7): the signal turned aborted during the resolution, and
+  // finish() returned nothing at all — 0 of the ~85K suggestions the run had found
+  it("finish() after a cancel mid-resolution ranks the citations of the books already read, with a note", () => {
+    const lib = library();
+    const run = CitationRun.fromCatalog(ref("src", "חיבור כלשהו", "otzaria"), lib.catalog);
+    run.scan(source(["<h2>פרק</h2>", "כמו שנאמר (בראשית ב, ג) ועוד", 'ובברכות דף ג ע"א אמרו'], "otzaria").lines);
+    const [first, second] = run.targets();
+    expect([first!.key, second!.key]).toEqual(["ber", "gen"]);
+    run.resolveWith(lib.index(first!), first!, (l) => lib.heRefAt!(first!, l));
+    // the cancel comes before the second book is read
+    const r = run.finish({ signal: AbortSignal.abort() });
+    expect(r.suggestions.map((s) => `${s.target.book.key}:${s.heRef2}`)).toEqual(["ber:ברכות ג."]);
+    expect(r.suggestions[0]!.confidence).toBe(runCitationsEngine(source(["<h2>פרק</h2>", "כמו שנאמר (בראשית ב, ג) ועוד", 'ובברכות דף ג ע"א אמרו']), lib).suggestions.find((s) => s.target.book.key === "ber")!.confidence);
+    expect(r.notes.map((n) => n.code)).toContain("engine/aborted");
+    // the unread book's citation is not reported as "not found"
+    expect(r.unmatched).toEqual([]);
+  });
+  it("an aborted signal with every book read loses nothing", () => {
+    const lib = library();
+    const lines = source(["<h2>פרק</h2>", "כמו שנאמר (בראשית ב, ג) ועוד", 'ובברכות דף ג ע"א אמרו']).lines;
+    const run = CitationRun.fromCatalog(ref("src", "חיבור כלשהו", "otzaria"), lib.catalog);
+    run.scan(lines);
+    for (const b of run.targets()) run.resolveWith(lib.index(b), b, (l) => lib.heRefAt!(b, l));
+    expect(run.finish({ signal: AbortSignal.abort() }).suggestions).toHaveLength(2);
+  });
+});

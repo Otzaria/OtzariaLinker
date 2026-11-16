@@ -42,12 +42,15 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
   const { aliases, units } = await aliasesOf(registry);
   const run = new CitationRun(source, aliases, options as CitationsOptions, units);
   let last = Date.now();
+  // a cancel (or the benchmark's time cap) stops the scan and the resolution, never throws: finish() still ranks
+  // the citations of the books already read, with an "engine/aborted" note — partial results survive (as the
+  // other engines return theirs)
+  const aborted = () => ctx.signal?.aborted === true;
   const tick = async () => {
     if (Date.now() - last > YIELD_MS) {
       await new Promise((r) => setTimeout(r, 0));
       last = Date.now();
     }
-    ctx.signal?.throwIfAborted();
   };
   let scanned = 0;
   for await (const chunk of registry.scan(source.key, CHUNK)) {
@@ -56,9 +59,11 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
     const total = Math.max(scanned, chunk.total ?? 0);
     ctx.progress?.(Math.round((scanned / total) * 500), 1000);
     await tick();
+    if (aborted()) break;
   }
   const targets = run.targets();
   for (const [i, book] of targets.entries()) {
+    if (aborted()) break;
     const { index, heRefs } = await loadIndex(registry, book);
     const own = run.needsUnits(book) ? await ownUnits(registry, book) : null;
     const pages = run.wantsPages(book, index) ? await pagesOf(registry, book) : null;
