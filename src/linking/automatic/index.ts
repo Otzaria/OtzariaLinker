@@ -1,8 +1,9 @@
 import type { CitationsOptions } from "./citations";
-import { runDiburHamatchilEngine, type DhOptions } from "./dibur-hamatchil";
+import { diburHamatchilSteps, type DhOptions } from "./dibur-hamatchil";
 import { runFootnotesEngine, type FootnotesOptions } from "./footnotes";
-import { runHeadingsEngine, type HeadingsOptions } from "./headings";
+import { headingsSteps, type HeadingsOptions } from "./headings";
 import { runPatternEngine, type PatternOptions } from "./pattern";
+import { runSliced, runToEnd, type EngineSteps } from "./steps";
 import type { EngineBook, EngineContext, EngineId, EngineResult } from "./types";
 
 /*
@@ -68,12 +69,30 @@ export const ENGINES: readonly EngineInfo[] = [
   },
 ];
 
+/** Runs an engine to the end, in this thread (tests, tools; the worker uses runEngineSliced). */
 export function runEngine(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): EngineResult {
+  return runToEnd(engineSteps(id, source, target, options, ctx));
+}
+
+/**
+ * Runs an engine in slices, giving the thread back between them (steps.ts): in the worker, a cancel
+ * then reaches `ctx.signal` while the engine runs, and other requests are answered meanwhile.
+ */
+export function runEngineSliced(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): Promise<EngineResult> {
+  return runSliced(engineSteps(id, source, target, options, ctx));
+}
+
+/**
+ * An engine as steps. Dibur-hamatchil and headings yield before every line (they run for seconds to
+ * minutes on large pairs: 35 s for שער הציון ← משנה ברורה); footnotes and pattern are single linear
+ * passes over the lines (milliseconds to a second) and run as one step.
+ */
+export function* engineSteps(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): EngineSteps<EngineResult> {
   switch (id) {
     case "headings":
-      return runHeadingsEngine(source, target, options as HeadingsOptions, ctx);
+      return yield* headingsSteps(source, target, options as HeadingsOptions, ctx);
     case "dibur-hamatchil":
-      return runDiburHamatchilEngine(source, target, options as DhOptions, ctx);
+      return yield* diburHamatchilSteps(source, target, options as DhOptions, ctx);
     case "footnotes":
       return runFootnotesEngine(source, target, options as FootnotesOptions, ctx);
     case "pattern":
@@ -87,3 +106,4 @@ export function runEngine(id: EngineId, source: EngineBook, target: EngineBook, 
 }
 
 export * from "./types";
+export { runSliced, runToEnd, SLICE_MS, type EngineSteps } from "./steps";

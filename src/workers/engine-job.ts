@@ -1,9 +1,12 @@
 import type { BookRef } from "../core/links/model";
-import { runEngine, type EngineBook, type EngineContext, type EngineId, type EngineResult } from "../linking/automatic";
+import { runEngineSliced, type EngineBook, type EngineContext, type EngineId, type EngineResult } from "../linking/automatic";
 import { diffLines, findMoves, type LineFate, type LineMapping } from "../matching/line-diff";
 import type { SourceRegistry } from "../sources/registry";
 
-/** Reads both whole books from the registry and runs an engine on them (in the worker). */
+/**
+ * Reads both whole books from the registry and runs an engine on them (in the worker), in slices: a
+ * cancel stops it at its next line instead of after the whole run (review C3).
+ */
 export async function engineJob(registry: SourceRegistry, engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
   const load = async (book: BookRef): Promise<EngineBook> => ({
     book,
@@ -13,7 +16,7 @@ export async function engineJob(registry: SourceRegistry, engine: EngineId, sour
   const s = await load(source);
   const t = await load(target);
   ctx.signal?.throwIfAborted();
-  return runEngine(engine, s, t, options, ctx);
+  return runEngineSliced(engine, s, t, options, ctx);
 }
 
 export interface BatchItem {
@@ -53,11 +56,16 @@ export interface BookDiff {
   stats: LineMapping["stats"];
 }
 
-/** Aligns the lines of two editions of a book (both read here, in the worker). */
-export async function diffJob(registry: SourceRegistry, oldKey: string, newKey: string): Promise<BookDiff> {
+/**
+ * Aligns the lines of two editions of a book (both read here, in the worker). The alignment itself is
+ * one synchronous step (bounded: diffLines' maxCells); a cancel is honoured before it (review M6).
+ */
+export async function diffJob(registry: SourceRegistry, oldKey: string, newKey: string, ctx: EngineContext = {}): Promise<BookDiff> {
   const text = async (key: string) => (await registry.lines(key, 0, Number.MAX_SAFE_INTEGER)).map((l) => l.anchorText);
   const oldLines = await text(oldKey);
+  ctx.signal?.throwIfAborted();
   const newLines = await text(newKey);
+  ctx.signal?.throwIfAborted();
   const m = diffLines(oldLines, newLines);
   return { to: [...m.to], fate: [...m.fate], similarity: Array.from(m.similarity, (v) => Math.round(v * 1000) / 1000), moves: findMoves(oldLines, newLines, m.to), newLength: newLines.length, stats: m.stats };
 }
