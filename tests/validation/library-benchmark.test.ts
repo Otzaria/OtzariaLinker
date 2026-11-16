@@ -116,6 +116,9 @@ interface BookRecord {
   counters: Counters;
   /** "<type>|<owner>" → encoded ids of the database links this run regenerated */
   matched: Record<string, string>;
+  /** the same two, counted by the line a cut Sefaria-side range writes (BENCH_SPANS=citations) — kept by every run
+   *  so one run reports both measures (§0.6); the report reads them with BENCH_SPANS=citations */
+  written?: { counters: Counters; matched: Record<string, string> };
   /** suggestions the database does not have (unconfirmed) or contradicts (wrong), for the hand check */
   fresh?: Sample[];
   /** database links at this book this run did not regenerate */
@@ -364,6 +367,8 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       for (const line of readFileSync(join(DIR, f), "utf8").split("\n"))
         if (line.trim()) {
           const r = JSON.parse(line) as BookRecord;
+          // the written-line measure, when the run kept it (§0.6)
+          if (SPANS === "citations" && r.written) Object.assign(r, r.written);
           // a book run twice (a stopped step re-run with more time): the run with fewer stopped steps wins
           const old = out.get(r.id);
           if (!old || r.stopped.length <= old.stopped.length) out.set(r.id, r);
@@ -443,6 +448,11 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, SPANS);
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
+    if (SPANS === "all") {
+      const w = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, "citations");
+      rec.written = { counters: count(w.scored), matched: {} };
+      for (const [k, ids] of w.matched) rec.written.matched[k] = encodeIds(ids);
+    }
     if (keep) {
       const otherLine = async (bookId: number, line: number) => (await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText;
       // new or contradicted suggestions: PER_BUCKET per (group, confidence, pair type), by rank
