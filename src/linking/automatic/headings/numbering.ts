@@ -7,9 +7,21 @@ import { stripTags } from "../../../core/text/html";
  *
  * A heading such as "פרק ג", "סי' קכג", "דף ב:", "דף ב ע״א", "פרק א משנה ב", "הלכות שבת" or a bare
  * "יב" becomes one or more PathElements. Numbers follow docs/research/REUSE_MATRIX.md §5.1:
- * structural headings (with a kind word) read numerals LENIENTLY (summed: יה, ער, רחצ are accepted),
- * while a bare numeral with no kind word must look like a numeral (geresh/gershayim, Arabic digits,
- * or letters in non-increasing order), so ordinary words ("שבת" = 702) are never read as numbers.
+ * structural headings (with a kind word) read numerals LENIENTLY — but lenient means the spellings
+ * books really use for a number, not any word whose letters add up to one (review C5: "פרק בא לו" was
+ * chapter 3, "פרק במה מדליקין" 47, "פרק אחד עשר" 13, "משנה שבת פרק א" משנה 702):
+ *   • יה / יו for טו / טז, anywhere;
+ *   • the canonical letters in another order (ער, רחצ, שדמ, חי, טל, תגל) only when the number ends the
+ *     heading (or a separator, a bracket or an amud follows) — "פרק גן עדן", "ספר עזרת נשים" are names;
+ *   • any other sum (בא = 3, במה = 47, כל = 50) is a word: the heading is read as a name.
+ * Numbers in words ("פרק אחד עשר", 5,369 entries in 277 books) stay names too, on purpose: read as 11 they
+ * matched פרק יא of every base of a multi-base Rambam commentary, and max-link on רדב"ז / ביאור חדש
+ * מספיק got more ambiguous suggestions and fewer certain ones (measured for review C5).
+ * Read off every table-of-contents entry of the library: after a kind word, a reordered spelling that
+ * ends the heading is mostly a real number ("סימן חי", "סימן ערה", "דף טל:"); followed by words, and
+ * any other sum, it is mostly a name ("ספר עזרת נשים", "משנה תורה", "פרק שנים עשר").
+ * A bare numeral with no kind word must look like a numeral (geresh/gershayim, Arabic digits, or
+ * letters in non-increasing order), so ordinary words ("שבת" = 702) are never read as numbers.
  *
  * Ideas (not code) from the auto-linker plugin's daf/amud handling and Otzariya_Link_Maker's
  * DafTracker (both outside the Otzaria org — REUSE_MATRIX §2.7, §2.10).
@@ -118,10 +130,12 @@ export interface ParsedNumber {
 }
 
 /**
- * One numeral token. `mode` lenient = summed letters (REUSE §5.1); strict = canonical round trip.
- * `bare` = no kind word precedes it, so it must LOOK like a numeral (quotes, digits or descending letters).
+ * One numeral token. `mode` strict = canonical round trip; lenient also takes the other spellings of
+ * the same number (file comment): יה / יו anywhere, the canonical letters reordered only when `alone`
+ * (nothing but a separator follows the number). `bare` = no kind word precedes it, so it must LOOK like
+ * a numeral (quotes, digits or descending letters).
  */
-export function parseNumeral(token: string, mode: NumberingMode, bare: boolean): ParsedNumber | null {
+export function parseNumeral(token: string, mode: NumberingMode, bare: boolean, alone = true): ParsedNumber | null {
   let t = token.trim();
   let trail: "" | "." | ":" = "";
   const tm = /([.:])[,;]?$/.exec(t);
@@ -140,9 +154,24 @@ export function parseNumeral(token: string, mode: NumberingMode, bare: boolean):
   if (quoted && !/^[א-ת]+'$|^[א-ת]+"[א-ת]$/.test(t)) return null;
   const n = fromGematria(letters);
   if (n == null || n <= 0 || n > 2000) return null;
-  if (mode === "strict" && toGematria(n) !== letters.replace(/[ךםןףץ]/g, (c) => FINAL_TO_PLAIN[c]!)) return null;
+  const plain = letters.replace(/[ךםןףץ]/g, (c) => FINAL_TO_PLAIN[c]!);
+  const canonical = toGematria(n);
+  if (plain !== canonical) {
+    if (mode === "strict") return null;
+    const spelling = otherSpelling(plain, canonical);
+    if (!spelling || (spelling === "reordered" && !alone && !trail)) return null;
+  }
   if (bare && !quoted && !nonIncreasing(letters)) return null;
   return { n, trail };
+}
+
+/** How a non-canonical spelling relates to the canonical one: "15-16" (יה / יו), "reordered", or null. */
+function otherSpelling(plain: string, canonical: string): "15-16" | "reordered" | null {
+  for (const [c, alt] of [["טו", "יה"], ["טז", "יו"]] as const)
+    if (canonical.endsWith(c) && plain === canonical.slice(0, -2) + alt) return "15-16";
+  // thousands carry a geresh in the canonical form, so no reordering of letters can match it
+  const sorted = (s: string) => [...s].sort().join("");
+  return !canonical.includes("׳") && sorted(plain) === sorted(canonical) ? "reordered" : null;
 }
 
 const FINAL_TO_PLAIN: Readonly<Record<string, string>> = { ך: "כ", ם: "מ", ן: "נ", ף: "פ", ץ: "צ" };
@@ -182,6 +211,10 @@ interface Parsed {
 }
 
 const SEPARATOR_RE = /^[-–—:,.]/;
+
+/** Nothing but a separator, a bracket or an amud follows: the token before `k` ends the numbering. */
+const standsAlone = (tokens: readonly string[], k: number): boolean =>
+  tokens[k] === undefined || SEPARATOR_RE.test(tokens[k]!) || /^[[(]/.test(tokens[k]!) || readAmud(tokens, k) !== null;
 /** a seif katan glued to its number: the quote must be there ("סק"א", "סקי"ב"), so "סקל" is a word */
 const GLUED_SK_RE = /^סק(?:"([א-ת]{1,3}'?)|([א-ת]{1,2}"[א-ת]))[.,:;]?$/;
 
@@ -211,7 +244,8 @@ function parseTokens(text: string, mode: NumberingMode): Parsed {
       i += 1;
       continue;
     }
-    const kindNum = kind && tokens[i + width] !== undefined ? parseNumeral(tokens[i + width]!, mode, false) : null;
+    const at = i + width;
+    const kindNum = kind && tokens[at] !== undefined ? parseNumeral(tokens[at]!, mode, false, standsAlone(tokens, at + 1)) : null;
     if (kind && kindNum) {
       const num = kindNum;
       i += width + 1;

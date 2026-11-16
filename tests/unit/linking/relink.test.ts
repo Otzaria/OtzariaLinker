@@ -45,6 +45,16 @@ describe("planRelink", () => {
     const a = byId.get("anch")!.moved!.anchor!;
     expect(newLines[5]!.slice(a.rawStart, a.rawEnd)).toBe("הספר");
   });
+  it("a re-found anchor drops the old line's contentHash", () => {
+    const start = oldLines[4]!.indexOf("הספר");
+    const p = planRelink({
+      links: [mk("hash", 4, { anchor: { rawStart: start, rawEnd: start + 4, contentHash: "old-line" } })],
+      oldBook: OLD, newBook: NEW, mapping, oldLine: (i) => oldLines[i], newLine: (i) => newLines[i], isOld: (b) => b.key === OLD.key,
+    });
+    const a = p.items[0]!.moved!.anchor!;
+    expect(newLines[5]!.slice(a.rawStart, a.rawEnd)).toBe("הספר");
+    expect(a.contentHash).toBeUndefined();
+  });
 });
 
 describe("planRelink: a line moved out of order", () => {
@@ -70,5 +80,75 @@ describe("planRelink: a line moved out of order", () => {
   });
   it("without the moves it is lost, as before", () => {
     expect(plan(false).get("moved")!.verdict).toBe("lost");
+  });
+});
+
+describe("planRelink: ranges (review C6)", () => {
+  // 40 unique lines; `edit` builds the new edition from the old one
+  const old = Array.from({ length: 40 }, (_, i) => `שורה ${i} עם טקסט ייחודי מספר ${i}`);
+  const run = (neu: string[], ...links: Link[]) => {
+    const mapping = diffLines(old, neu);
+    const moves = findMoves(old, neu, mapping.to);
+    return new Map(planRelink({ links, oldBook: OLD, newBook: NEW, mapping, moves, oldLine: (i) => old[i], newLine: (i) => neu[i], isOld: (b) => b.key === OLD.key }).items.map((i) => [i.link.id, i]));
+  };
+  const ranged = (id: string, line: number, end: number) => mk(id, 0, { target: { book: OLD, line, end }, source: { book: BASE, line: 1 } });
+
+  it("a range end whose line moved out of order is never carried there: the range is shortened, for review", () => {
+    // line 12 moved to the end of the book: findMoves pairs it with 39
+    const neu = [...old.slice(0, 12), ...old.slice(13), old[12]!];
+    const item = run(neu, ranged("r", 10, 12)).get("r")!;
+    expect(item.moved!.target).toMatchObject({ line: 10, end: 11 });
+    expect(item.verdict).toBe("review");
+    expect(item.reasons.join(" ")).not.toContain("השורה זהה");
+  });
+
+  it("an intact range moves with certainty, keeping its length", () => {
+    const neu = ["הקדמה חדשה", ...old];
+    const item = run(neu, ranged("r", 10, 12)).get("r")!;
+    expect(item).toMatchObject({ verdict: "certain", moved: { target: { line: 11, end: 13 } } });
+  });
+
+  it("lines inserted, edited, deleted or moved INSIDE a range send it to review", () => {
+    const inserted = [...old.slice(0, 11), ...Array.from({ length: 27 }, (_, i) => `שורה חדשה ${i} בתוך הטווח`), ...old.slice(11)];
+    const a = run(inserted, ranged("r", 10, 12)).get("r")!;
+    expect(a.verdict).toBe("review");
+    expect(a.moved!.target).toMatchObject({ line: 10, end: 39 });
+    expect(a.reasons.join(" ")).toContain("נוספו");
+
+    const edited = [...old];
+    edited[11] = edited[11]!.replace("טקסט", "כתב");
+    expect(run(edited, ranged("r", 10, 12)).get("r")!.verdict).toBe("review");
+
+    const deleted = [...old.slice(0, 11), ...old.slice(12)];
+    const d = run(deleted, ranged("r", 10, 12)).get("r")!;
+    expect(d.verdict).toBe("review");
+    expect(d.moved!.target).toMatchObject({ line: 10, end: 11 });
+
+    const movedOut = [...old.slice(0, 11), ...old.slice(12), old[11]!];
+    const m = run(movedOut, ranged("r", 10, 12)).get("r")!;
+    expect(m.verdict).toBe("review");
+    expect(m.moved!.target).toMatchObject({ line: 10, end: 11 });
+  });
+
+  it("an edited range end goes to review", () => {
+    const neu = [...old];
+    neu[12] = neu[12]!.replace("טקסט", "כתב");
+    const item = run(neu, ranged("r", 10, 12)).get("r")!;
+    expect(item.verdict).toBe("review");
+    expect(item.moved!.target).toMatchObject({ line: 10, end: 12 });
+  });
+
+  it("a range whose first line moved out of order goes along only as a whole block", () => {
+    // lines 10..12 moved together to the end: carried as 37..39, for review
+    const block = [...old.slice(0, 10), ...old.slice(13), ...old.slice(10, 13)];
+    const b = run(block, ranged("r", 10, 12)).get("r")!;
+    expect(b.verdict).toBe("review");
+    expect(b.moved!.target).toMatchObject({ line: 37, end: 39 });
+    // only line 10 moved: its range is not stretched over what follows it in the new place
+    const one = [...old.slice(0, 10), ...old.slice(11), old[10]!];
+    const o = run(one, ranged("r", 10, 12)).get("r")!;
+    expect(o.verdict).toBe("review");
+    expect(o.moved!.target.line).toBe(39);
+    expect(o.moved!.target.end).toBeUndefined();
   });
 });

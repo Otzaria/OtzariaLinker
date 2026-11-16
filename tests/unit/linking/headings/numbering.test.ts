@@ -39,6 +39,33 @@ describe("heading numbering", () => {
     expect(els("סימן טו", "strict")).toEqual([["siman", 15, null]]);
   });
 
+  it("lenient reads the spellings books use for a number, not any word that sums to one (review C5)", () => {
+    // words after a kind word: a name, never a chapter number
+    expect(els("<h2>פרק בא לו</h2>")).toEqual([["name", "פרק בא לו", null]]);
+    expect(els("פרק במה מדליקין")).toEqual([["name", "פרק במה מדליקין", null]]);
+    expect(els("פרק כל כתבי")).toEqual([["name", "פרק כל כתבי", null]]);
+    expect(els("פרק אלו טריפות")).toEqual([["name", "פרק אלו טריפות", null]]);
+    expect(els("פרק גיד הנשה")).toEqual([["name", "פרק גיד הנשה", null]]);
+    expect(els("פרק אין עומדין")).toEqual([["name", "פרק אין עומדין", null]]);
+    expect(els("פרק אחד עשר")).toEqual([["name", "פרק אחד עשר", null]]); // was 13
+    expect(els("משנה תורה")).toEqual([["name", "משנה תורה", null]]); // was משנה 722
+    expect(els("משנה שבת פרק א")[0]![0]).toBe("name"); // was משנה 702
+    expect(els("פרק גן עדן")).toEqual([["name", "פרק גן עדן", null]]); // גן reordered, but words follow
+    // the spellings books do use
+    expect(els("סימן חי")).toEqual([["siman", 18, null]]);
+    expect(els("סימן טל")).toEqual([["siman", 39, null]]);
+    expect(els("סימן תגל")).toEqual([["siman", 433, null]]);
+    expect(els("סימן ער - במה")).toEqual([["siman", 270, null]]);
+    expect(els("דף טל:")).toEqual([["daf", 39, 2]]);
+    expect(els('דף חי ע"א')).toEqual([["daf", 18, 1]]);
+    expect(els("סימן קיה")).toEqual([["siman", 115, null]]);
+    expect(els("פרק יה מאימתי")).toEqual([["perek", 15, null]]); // יה / יו: anywhere
+    expect(els("פרק ב היה קורא")).toEqual([["perek", 2, null]]); // canonical: a subtitle may follow
+    expect(parseNumeral("בא", "lenient", false)).toBeNull();
+    expect(parseNumeral("חי", "lenient", false, false)).toBeNull();
+    expect(parseNumeral("חי", "lenient", false, true)?.n).toBe(18);
+  });
+
   it("a bare numeral must look like one; ordinary words stay names", () => {
     expect(els("יב")).toEqual([["?", 12, null]]);
     expect(els("(יב)")).toEqual([["?", 12, null]]);

@@ -9,8 +9,8 @@ import { rawOffsetFromVisible, visibleUnits } from "../core/text/offsets";
  * (matching/line-diff.ts), every project link with an end in the old book gets a plan:
  *   certain — every end it has in that book landed on an identical line;
  *   review  — an end landed on an EDITED line, on a line that MOVED out of order (identical text found
- *             once in each edition — matching/line-diff.ts findMoves), or a range end had to be
- *             shortened: the user decides;
+ *             once in each edition — matching/line-diff.ts findMoves), or a range no longer covers the
+ *             same text (a line in it deleted, edited, moved away, or new lines inserted): the user decides;
  *   lost    — an end's line no longer exists: never moved automatically.
  * Word anchors are carried only to an identical line, or re-found when their words occur exactly
  * once in the edited line; otherwise the anchor is dropped and the item goes to review.
@@ -91,24 +91,55 @@ function planOne(link: Link, inSource: boolean, inTarget: boolean, input: Relink
       reasons.push(`שורה ${side.line + 1} ב${label} נערכה במהדורה החדשה (עכשיו שורה ${to + 1}).`);
       worse("review");
     } else if (to !== side.line) reasons.push(`שורה ${side.line + 1} ב${label} זזה לשורה ${to + 1}.`);
-    let end: number | undefined;
-    if (side.end !== undefined) {
-      const e = relocated(side.end);
-      if (e > to) end = e;
-      else {
-        // the range's last line is gone: shorten to the last surviving line of the range
-        for (let i = side.end - 1; i > side.line; i--) {
-          const m = relocated(i);
-          if (m > to) {
-            end = m;
-            break;
-          }
-        }
-        reasons.push(`סוף הטווח ב${label} נמחק, והטווח קוצר.`);
-        worse("review");
+    const end = side.end !== undefined && side.end > side.line ? moveEnd(side.line, side.end, to, label) : undefined;
+    return { book: input.newBook, line: to, ...(end !== undefined && { end }) };
+  };
+
+  /*
+   * A range is carried with certainty only when it covers the same text: every line of it landed, in
+   * order, on an identical line, with nothing inserted between. A line that moved out of order (`moves`)
+   * is not part of the range any more — carrying the end through it stretched 10..12 over 10..39 (C6).
+   * Otherwise the range ends on the last line of it the monotone alignment kept, for review.
+   */
+  const moveEnd = (line: number, oldEnd: number, to: number, label: string): number | undefined => {
+    const mono = (i: number) => input.mapping.to[i] ?? -1;
+    const fate = (i: number) => input.mapping.fate[i] ?? "deleted";
+    const span = oldEnd - line;
+    if (mono(line) < 0) {
+      // the first line moved out of order: the range goes along only when the whole block moved with it
+      let block = true;
+      for (let k = 1; k <= span && block; k++) block = mono(line + k) < 0 && moves.get(line + k) === to + k;
+      if (block) return to + span;
+      reasons.push(`הטווח ב${label} לא הועבר: רק חלק משורותיו הועבר למקום החדש.`);
+      worse("review");
+      return undefined;
+    }
+    let e = -1;
+    for (let i = oldEnd; i > line && e < 0; i--) if (mono(i) > to) e = mono(i);
+    let deleted = 0, moved = 0, changed = 0, kept = 0;
+    for (let i = line + 1; i <= oldEnd; i++) {
+      const m = mono(i);
+      if (m < 0) {
+        if (moves.has(i)) moved++;
+        else deleted++;
+      } else {
+        kept++;
+        if (fate(i) === "changed") changed++;
       }
     }
-    return { book: input.newBook, line: to, ...(end !== undefined && { end }) };
+    const inserted = e > to ? e - to - kept : 0;
+    if (e === to + span && !deleted && !moved && !changed && !inserted) return e;
+    worse("review");
+    const n = (k: number, one: string, many: string) => (k === 1 ? one : `${k} ${many}`);
+    const parts = [
+      deleted && n(deleted, "שורה אחת נמחקה", "שורות נמחקו"),
+      moved && n(moved, "שורה אחת הועברה למקום אחר", "שורות הועברו למקום אחר"),
+      changed && n(changed, "שורה אחת נערכה", "שורות נערכו"),
+      inserted && (inserted === 1 ? "נוספה שורה אחת" : `נוספו ${inserted} שורות`),
+    ].filter(Boolean);
+    if (mono(oldEnd) < 0) reasons.push(`סוף הטווח ב${label} (שורה ${oldEnd + 1}) ${moves.has(oldEnd) ? "הועבר למקום אחר" : "נמחק"} במהדורה החדשה, ולכן הטווח ${e > to ? "קוצר" : "בוטל"}.`);
+    if (parts.length) reasons.push(`בטווח ב${label}: ${parts.join(", ")}.`);
+    return e > to ? e : undefined;
   };
 
   const source = inSource ? moveSide(link.source, "ספר המקור") : link.source;
@@ -121,7 +152,9 @@ function planOne(link: Link, inSource: boolean, inTarget: boolean, input: Relink
     if (fate === "changed") {
       const moved = refindAnchor(anchor, input.oldLine?.(link.source.line), input.newLine?.(source.line));
       if (moved) {
-        anchor = { ...anchor, ...moved };
+        // contentHash named the OLD line's text: kept, it would vouch for an anchor on text it never saw
+        const { contentHash: _stale, ...kept } = anchor;
+        anchor = { ...kept, ...moved };
         reasons.push("העוגן נמצא שוב בשורה הערוכה.");
       } else {
         anchor = undefined;

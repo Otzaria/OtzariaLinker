@@ -64,6 +64,14 @@ describe("trimBefore (v3 F-064)", () => {
     expect(trimBefore([l], bookOf(A, 20), "source", 5).map((e) => e.after)).toEqual([undefined]);
   });
 
+  it("a cut never ends on a heading: it steps back from it (review C11)", () => {
+    // a new link on the line right after a chapter heading, the most common place to start one
+    const l = link(at(A, 10, 59), at(B, 0));
+    expect(trimBefore([l], bookOf(A, 60, [50]), "source", 51).map((e) => e.after)).toEqual([49]);
+    const near = link(at(A, 48, 59), at(B, 0));
+    expect(trimBefore([near], bookOf(A, 60, [49, 50]), "source", 51).map((e) => e.after)).toEqual([undefined]);
+  });
+
   it("database links are never changed", () => {
     expect(trimBefore([link(at(A, 2, 9), at(B, 0), { provenance: "db" })], bookOf(A, 20), "source", 5)).toEqual([]);
   });
@@ -87,6 +95,34 @@ describe("fillRanges (v3 F-084/F-105)", () => {
     expect(r.edits.map((e) => [e.link.source.line, e.after])).toEqual([[1, 3], [4, 6], [8, 10]]);
     const done = r.edits.map((e) => applyRangeEdit(e.link, e.side, e.after));
     expect(fillRanges(done, bookOf(A, 12, [7, 11]), "source", { onlyRanged: false }).edits).toEqual([]);
+  });
+
+  it("a range stops before the next heading, as suggestEnd does — it never crosses a chapter (review C15)", () => {
+    const book = bookOf(A, 100, [0, 20, 50]);
+    const ls = [link(at(A, 10, 11), at(B, 0)), link(at(A, 60), at(B, 1))];
+    const r = fillRanges(ls, book, "source");
+    expect(r.edits.map((e) => [e.link.source.line, e.after])).toEqual([[10, 19]]);
+    expect(r.edits[0]!.after).toBe(suggestEnd(10, rangeMarkers(ls, book, "source"), book));
+  });
+
+  it("a range that swallows the next link's start is removed, not left overlapping (review C15)", () => {
+    const a = link(at(A, 10, 30), at(B, 0));
+    const b = link(at(A, 11), at(B, 1));
+    const r = fillRanges([a, b], bookOf(A, 40), "source");
+    expect(r.edits.map((e) => [e.link.id, e.before, e.after])).toEqual([[a.id, 30, undefined]]);
+  });
+
+  it("property: filling ranged links leaves no overlap either", () => {
+    fc.assert(
+      fc.property(fc.uniqueArray(fc.integer({ min: 0, max: 59 }), { minLength: 1, maxLength: 20 }), fc.array(fc.integer({ min: 0, max: 59 }), { minLength: 20, maxLength: 20 }), (starts, ends) => {
+        const book: RangeBook = { owns: (r) => r.key === "a", lineCount: 60, headings: new Set() };
+        const ls = starts.map((s, i) => link(at(A, s, ends[i]! > s ? ends[i] : undefined), at(B, i)));
+        const byId = new Map(ls.map((l) => [l.id, l]));
+        for (const e of fillRanges(ls, book, "source").edits) byId.set(e.link.id, applyRangeEdit(e.link, e.side, e.after));
+        const spans = [...byId.values()].map((l) => [l.source.line, l.source.end ?? l.source.line] as const).sort((x, y) => x[0] - y[0]);
+        for (let i = 0; i + 1 < spans.length; i++) expect(spans[i]![1]).toBeLessThan(spans[i + 1]![0]);
+      }),
+    );
   });
 
   it("a book with no known length (a shadow book from a links file) is never touched", () => {
