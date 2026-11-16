@@ -41,6 +41,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const asCsv = format === "sefaria-csv";
   const alt = plan?.altToc;
   const outputs = plan ? (asCsv ? (csv?.length ?? 0) : plan.files.length) + (alt?.files.length ?? 0) : 0;
+  /** a file holding only other books' links moved into it (private use): it adds to the base, it replaces nothing of the library */
+  const onlyMoved = (f: { records: number; movedIn?: { records: number }[] }) => !!f.movedIn && f.movedIn.reduce((n, m) => n + m.records, 0) === f.records;
   return (
     <dialog ref={ref} onClose={onClose} aria-labelledby="export-title">
       <div class="dlg">
@@ -128,12 +130,21 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                       <li key={f.name}>
                         <Icon name="oz_document_links" size={18} />
                         <span class="grow"><FileName name={f.name} /></span>
-                        <span class="muted">{f.records.toLocaleString("he")} רשומות</span>
-                        {f.isNewFile && <span class="status edited">קובץ חדש</span>}
+                        <span class="muted">
+                          {f.records.toLocaleString("he")} רשומות
+                          {f.movedIn && `, מהן ${f.movedIn.map((m) => `${m.records.toLocaleString("he")} של "${m.from}"`).join(", ")} כפירוש`}
+                        </span>
+                        {f.isNewFile && !onlyMoved(f) && <span class="status edited">קובץ חדש</span>}
                       </li>
                     ))}
                   </ul>
-                  {plan.files.some((f) => f.isNewFile) && (
+                  {c.movedToBase > 0 && (
+                    <p class="muted" style="margin:0">
+                      {c.movedToBase === 1 ? "קישור אחד" : `${c.movedToBase.toLocaleString("he")} קישורים`} מפירוש אל הספר שעליו נכתב (סוג "מקור") {c.movedToBase === 1 ? "ייכתב" : "ייכתבו"} בקובץ הקישורים של ספר הבסיס, כפירוש: כך באוצריא שלכם הפירוש יופיע בפאנל המפרשים של הבסיס. קובץ כזה מוסיף את הקישורים לספר הבסיס ואינו מחליף את הקישורים שיש לו בספרייה, ולכן אין צורך לטעון בשבילו את קובץ הקישורים של הבסיס.
+                      {advanced && <> (<bdi dir="ltr">"Conection Type": "commentary"</bdi>, ולא <bdi dir="ltr">"source"</bdi> בקובץ של הפירוש)</>}
+                    </p>
+                  )}
+                  {plan.files.some((f) => f.isNewFile && !onlyMoved(f)) && (
                     <p class="muted" style="margin:0">
                       לספרים שמסומנים "קובץ חדש" לא יובא קובץ קישורים קיים. אם בספרייה כבר יש להם קובץ, ייבאו אותו קודם — אחרת הקובץ החדש יחליף אותו והקישורים הישנים יאבדו.
                     </p>

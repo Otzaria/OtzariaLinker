@@ -100,3 +100,15 @@ describe("next steps after an export", () => {
     expect(nextStepsText({ format: "json", purpose: "submission", altToc: false, zip: false })[0]).toBe("");
   });
 });
+
+describe("_report.txt: a private export's source links written at their base", () => {
+  it("names the base's file and the commentary whose links it holds", () => {
+    const p = planExport([link("s", 2, { declaredType: "source" })], { ...ctx, purpose: "private" });
+    const text = buildExportReport({ date: "d", app: "a", format: "json", links: p, altToc: planAltTocExport([], () => ({})), purpose: "private" });
+    expect(text).toContain("links/בראשית_links.json");
+    expect(text).toContain('מהן 1 קישורים של "פירוש על בראשית" אל הספר הזה, מסוג "מקור", שנכתבים כאן כפירוש');
+    expect(text).not.toContain("Conection Type");
+    // a file of moved records only is not "new": it adds to the base, it replaces nothing
+    expect(text).not.toContain("[קובץ חדש");
+  });
+});

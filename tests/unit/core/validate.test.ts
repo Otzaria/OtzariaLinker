@@ -169,3 +169,23 @@ describe("plain words for everyone, field names apart (audit F14)", () => {
     expect(detail("export/linker")).toContain("linker");
   });
 });
+
+describe('private use: where a "source" link is written (PRIVATE_TO_BASE)', () => {
+  const COMM = book("ביאור על בראשית", { origin: "personal" });
+  const src = (over: Partial<Link> = {}) => link({ source: { book: COMM, line: 1 }, target: { book: SEF, line: 2 }, declaredType: "source", ref2: "Genesis 1:2", ...over });
+  const run = (l: Link, c: ValidationContext) => validateExport([l], c).get(l.id)!;
+
+  it("for private use it says, in plain words, that the link goes to the base's file as a commentary", () => {
+    const p = run(src(), { ...ctx, purpose: "private" }).find((x) => x.code === "export/private-source-to-base")!;
+    expect(p.severity).toBe("info");
+    expect(p.message).toContain('בקובץ הקישורים של "בראשית"');
+    expect(p.message).toContain("בפאנל המפרשים");
+    expect(p.message).not.toMatch(/Conection|source|_links/);
+    expect(p.detail).toContain('"commentary" ב־בראשית_links.json');
+  });
+
+  it("not for the library, nor for other types", () => {
+    expect(run(src(), ctx).map((x) => x.code)).not.toContain("export/private-source-to-base");
+    expect(run(src({ declaredType: "reference" }), { ...ctx, purpose: "private" }).map((x) => x.code)).not.toContain("export/private-source-to-base");
+  });
+});

@@ -71,6 +71,8 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/file-held": "library-file",
   "export/unsafe-title": "title",
   "export/reversed-dependency": "type",
+  "export/private-source-to-base": "type",
+  "export/private-source-kept": "type",
   "export/anchor-on-notes-line": "anchor",
 };
 export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (code.startsWith("sefaria/") ? "sefaria" : "other");
@@ -93,6 +95,8 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/unknown-type": "בחרו בבונה סוג קשר מהרשימה.",
   "export/linker": "בחרו בבונה סוג קשר אחר.",
   "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\".",
+  "export/private-source-to-base": "אין צורך לתקן: כך הפירוש יופיע בפאנל המפרשים של ספר הבסיס באוצריא שלכם.",
+  "export/private-source-kept": "תקנו את מה שעוצר את הקובץ של ספר הבסיס (ההסבר ליד הקישורים שלו), והקישור ייכתב שם כפירוש.",
   "export/sefaria-both": "מחקו את הקישור, או קשרו לספר שאינו של ספריא.",
   "export/heref-missing": "כתבו בבונה שם מקום ביעד, למשל שם הספר ומספר הפרק.",
   "export/line-not-verified": "פתחו את הספר (או את המסד שבו הוא נמצא) והריצו את הבדיקה שוב.",

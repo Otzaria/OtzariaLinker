@@ -2,7 +2,7 @@ import { zipSync, strToU8 } from "fflate";
 import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
 import { unsafeFileTitle } from "../../core/links/titles";
-import { asExported, FILE_LEVEL_CODES, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
+import { asExported, FILE_LEVEL_CODES, PRIVATE_TO_BASE, privateSourceRecord, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
@@ -15,7 +15,9 @@ import { serializeLinksJson } from "./serialize";
  *   • links imported from a file are written back in their original order (minimal diff), minus deletions;
  *   • new links follow, in a deterministic order;
  *   • for a book with no imported file, the plan warns that an existing library file would be overwritten;
- *   • a link with an error is held back (never written silently) and listed with its reasons.
+ *   • a link with an error is held back (never written silently) and listed with its reasons;
+ *   • for private use, a "source" link is written in its BASE's file as "commentary" (validate.ts
+ *     PRIVATE_TO_BASE: Otzaria's personal import does not reverse "source"), and the plan says which file.
  */
 export interface ExportFile {
   /** file name inside the export ("<source title>_links.json") */
@@ -25,6 +27,11 @@ export interface ExportFile {
   records: number;
   /** true when no links file was imported for this book — the library may already have one */
   isNewFile: boolean;
+  /**
+   * Private use: records of OTHER books' links written into this book's file (a commentary's "source"
+   * link, written here as "commentary" — validate.ts PRIVATE_TO_BASE), by the book whose link they are
+   */
+  movedIn?: { from: string; records: number }[];
 }
 
 export interface ExportPlan {
@@ -32,7 +39,9 @@ export interface ExportPlan {
   written: Link[];
   heldBack: { link: Link; problems: Problem[] }[];
   warned: { link: Link; problems: Problem[] }[];
-  counts: { new: number; edited: number; kept: number; deleted: number; heldBack: number; files: number };
+  /** private use: link id → the record written for it in another book's file (a "source" link at its base) */
+  moved: ReadonlyMap<string, Link>;
+  counts: { new: number; edited: number; kept: number; deleted: number; heldBack: number; files: number; movedToBase: number };
 }
 
 export interface ExportOptions {
@@ -64,12 +73,24 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   }
 
   const bySource = new Map<string, Link[]>();
+  /** file title → the book each moved record came from → how many */
+  const movedIn = new Map<string, Map<string, number>>();
+  const moved = new Map<string, Link>();
   // push, not spread: one book's file can hold 100k+ records (the library's largest has 112,905),
   // and copying the list for every link made planning quadratic — 259 s for that one file
   for (const l of written) {
-    const list = bySource.get(l.source.book.title);
-    if (list) list.push(l);
-    else bySource.set(l.source.book.title, [l]);
+    // private use: a "source" link goes into its base's file, as the validation said (PRIVATE_TO_BASE)
+    const atBase = problems.get(l.id)?.some((p) => p.code === PRIVATE_TO_BASE) ? privateSourceRecord(l) : null;
+    const record = atBase ?? l;
+    if (atBase) {
+      moved.set(l.id, atBase);
+      const from = movedIn.get(atBase.source.book.title) ?? new Map<string, number>();
+      from.set(l.source.book.title, (from.get(l.source.book.title) ?? 0) + 1);
+      movedIn.set(atBase.source.book.title, from);
+    }
+    const list = bySource.get(record.source.book.title);
+    if (list) list.push(record);
+    else bySource.set(record.source.book.title, [record]);
   }
   const importedTitles = new Set(links.filter((l) => l.provenance === "file").map((l) => l.source.book.title));
   const heldTitles = new Set(heldBack.filter((h) => h.problems.some((x) => FILE_LEVEL_CODES.has(x.code))).map((h) => h.link.source.book.title));
@@ -82,12 +103,14 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([title, list]) => {
       const ordered = [...list].sort(fileOrder);
+      const from = movedIn.get(title);
       return {
         name: `${title}_links.json`,
         sourceTitle: title,
         text: serializeLinksJson(ordered.map(linkToRecord), opts.layouts?.(title)),
         records: ordered.length,
         isNewFile: !importedTitles.has(title) && !opts.loadedFile?.(title),
+        ...(from && { movedIn: [...from].sort(([a], [b]) => cmp(a, b)).map(([t, records]) => ({ from: t, records })) }),
       };
     });
 
@@ -96,6 +119,7 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     written,
     heldBack,
     warned,
+    moved,
     counts: {
       new: written.filter((l) => l.status === "new").length,
       edited: written.filter((l) => l.status === "edited").length,
@@ -103,6 +127,7 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
       deleted: links.filter((l) => l.status === "deleted" && l.provenance === "file").length,
       heldBack: heldBack.length,
       files: files.length,
+      movedToBase: moved.size,
     },
   };
 }

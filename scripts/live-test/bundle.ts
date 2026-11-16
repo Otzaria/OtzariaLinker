@@ -198,14 +198,14 @@ function cases(): LiveCase[] {
       source: side(CITING, 10), target: g(3), declaredType: "reference", heRef2: autoHeRef(GENESIS.title, 3),
       ...(sef(3) && { ref2: sef(3) }),
     }),
-    link("L9", [11], 'מפירוש אל ספר הבסיס בסוג "מקור" (source), מקובץ הפירוש', {
+    link("L9", [11], 'מפירוש אל ספר הבסיס בסוג "מקור" (source); לשימוש פרטי הכלי כותב אותו בקובץ ספר הבסיס, כפירוש (commentary)', {
       source: side(COMMENTARY, 6), target: side(BASE, 8), declaredType: "source", heRef2: autoHeRef(BASE, 8),
     }),
     link("L10", [10, 12, 14], 'פירוש אישי אל בראשית א, ב בסוג "פירוש" (commentary), מקובץ הפירוש', {
       source: side(ON_GENESIS, 2), target: g(4), declaredType: "commentary", heRef2: autoHeRef(GENESIS.title, 4),
       ...(sef(4) && { ref2: sef(4) }),
     }),
-    link("L11", [11, 12, 14], 'פירוש אישי אל בראשית א, ג בסוג "מקור" (source), מקובץ הפירוש', {
+    link("L11", [11, 12, 14], 'פירוש אישי אל בראשית א, ג בסוג "מקור" (source); לשימוש פרטי הכלי כותב אותו בקובץ בראשית_links.json, כפירוש (commentary)', {
       source: side(ON_GENESIS, 3), target: g(5), declaredType: "source", heRef2: autoHeRef(GENESIS.title, 5),
       ...(sef(5) && { ref2: sef(5) }),
     }),
@@ -287,7 +287,8 @@ const where = (s: LinkSide) => `${s.book.title}:${s.line + 1}${s.end !== undefin
 function reportCases(list: readonly LiveCase[], plan: ExportPlan, ctx: ValidationContext, dir: string): CaseReport[] {
   const problems = validateExport(list.map((c) => c.link), ctx);
   return list.map((c) => {
-    const l = c.link;
+    // the record as written: a "source" link of private use is written at its base (validate.ts PRIVATE_TO_BASE)
+    const l = plan.moved.get(c.link.id) ?? c.link;
     const file = plan.files.find((f) => f.sourceTitle === l.source.book.title)!;
     const records = JSON.parse(file.text) as Record<string, unknown>[];
     const record =

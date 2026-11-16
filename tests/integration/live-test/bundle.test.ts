@@ -68,7 +68,8 @@ describe("the bundle is what the tool writes", () => {
 
   it("every links file passes the tool's own parser and the library's byte rules, and reads back as the same links", () => {
     const files = [...linksFiles(BOOKS_DIR), ...linksFiles("update"), ...linksFiles("negative")];
-    expect(files.length).toBe(5 + 3 + 1);
+    // 4 + 2: the commentary "בדיקת מקשר - פירוש" has no file of its own — its one "source" link (L9) is written at its base
+    expect(files.length).toBe(4 + 2 + 1);
     for (const f of files) {
       const parsed = parseLinksJson(f.text);
       // the generator stores an unknown type as OTHER: the tool's parser only warns (the app rejects it, below)
@@ -80,7 +81,8 @@ describe("the bundle is what the tool writes", () => {
       const title = f.path.slice(`${BOOKS_DIR}/`.length, -"_links.json".length);
       const book = { key: `txt:${title}`, title, origin: "otzaria" as const };
       const back = parseLinksJson(f.text).records.map((r, i) => recordToLink(r, i, book, (t) => ({ key: t, title: t, origin: "otzaria" }), `r${i}`).link);
-      const written = bundle.plans.main.written.filter((l) => l.source.book.title === title);
+      // as written: a "source" link of private use is in its base's file (validate.ts PRIVATE_TO_BASE)
+      const written = bundle.plans.main.written.map((l) => bundle.plans.main.moved.get(l.id) ?? l).filter((l) => l.source.book.title === title);
       expect(back.map((l) => [l.source.line, l.source.end, l.target.book.title, l.target.line, l.target.end, l.declaredType, l.anchor?.rawStart, l.anchor?.rawEnd])).toEqual(
         written.map((l) => [l.source.line, l.source.end, l.target.book.title, l.target.line, l.target.end, l.declaredType, l.anchor?.rawStart, l.anchor?.rawEnd]),
       );

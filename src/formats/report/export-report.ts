@@ -61,6 +61,7 @@ export function buildExportReport(r: ReportInput): string {
   L.push(row("  מהם נשמרו כמו שהם", c.kept));
   L.push(row("נמחקו מהקבצים", c.deleted));
   L.push(row("לא ייוצאו (שגיאה)", c.heldBack));
+  if (c.movedToBase) L.push(row("\"מקור\" שנכתבו אצל הבסיס", c.movedToBase));
   L.push(row("קובצי קישורים", r.format === "json" ? links.files.length : r.csv?.length ?? 0));
   L.push(row("טווחים בצד המקור", w.filter((l) => isRange(l.source)).length));
   L.push(row("טווחים בצד היעד", w.filter((l) => isRange(l.target)).length));
@@ -82,8 +83,12 @@ export function buildExportReport(r: ReportInput): string {
 
   section("הקבצים ולאן הם הולכים");
   if (r.format === "json") {
-    for (const f of links.files)
-      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : ""}`);
+    for (const f of links.files) {
+      const moved = f.movedIn?.reduce((n, m) => n + m.records, 0) ?? 0;
+      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : ""}`);
+      for (const m of f.movedIn ?? [])
+        L.push(`      מהן ${m.records.toLocaleString("he")} קישורים של "${m.from}" אל הספר הזה, מסוג "מקור", שנכתבים כאן כפירוש: כך באוצריא שלכם (ייבוא אישי) "${m.from}" יופיע בפאנל המפרשים של "${f.sourceTitle}"${r.technical ? ' ("Conection Type": "commentary")' : ""}`);
+    }
   } else {
     for (const f of r.csv ?? []) L.push(`  ${f.name}  (${f.rows.toLocaleString("he")} שורות)`);
   }

@@ -120,3 +120,69 @@ describe("titles that are not plain file names (security review A4)", () => {
     expect(plan.heldBack[0]!.problems[0]!.code).toBe("export/unsafe-title");
   });
 });
+
+describe('private use: a "source" link goes into its base\'s file as "commentary"', () => {
+  // Otzaria's personal import does not reverse "source" (user_content_importer.dart:806-860), so in the
+  // commentary's file it would show as "מקור", never among the base's commentators (validate.ts PRIVATE_TO_BASE)
+  const BASE = { ...book("בראשית"), origin: "sefaria" as const, isBaseBook: true };
+  const COMM = { ...book("פירוש פלוני על בראשית"), origin: "personal" as const };
+  const src = (over: Partial<Link> = {}) =>
+    mk("s", { source: { book: COMM, line: 3, end: 5 }, target: { book: BASE, line: 7 }, declaredType: "source", heRef2: "בראשית א, ה", ref2: "Genesis 1:5", ...over });
+  const priv: ValidationContext = { ...ctx, purpose: "private" };
+
+  it("is written base → commentary, in the base's file, with the ranges and refs on their own sides", () => {
+    const plan = planExport([src()], priv);
+    expect(plan.files.map((f) => f.name)).toEqual(["בראשית_links.json"]);
+    expect(plan.files[0]!.movedIn).toEqual([{ from: "פירוש פלוני על בראשית", records: 1 }]);
+    expect(plan.counts.movedToBase).toBe(1);
+    expect(JSON.parse(plan.files[0]!.text)).toEqual([
+      { line_index_1: 8, line_index_2: 4, line_index_2_end: 6, heRef_2: "פירוש פלוני על בראשית 4", path_2: "פירוש פלוני על בראשית.txt", "Conection Type": "commentary", ref_1: "Genesis 1:5" },
+    ]);
+    // the plan lists the user's link as it is (the builder, the report and CSV speak of it)
+    expect(plan.written[0]!.declaredType).toBe("source");
+    expect(plan.warned[0]?.problems.map((p) => p.code) ?? []).not.toContain("export/private-source-kept");
+  });
+
+  it("the anchor on the commentary's words is not carried (a record's anchor is on its source line), as in the library", () => {
+    const local = { ...BASE, origin: "otzaria" as const };
+    const plan = planExport([src({ target: { book: local, line: 7 }, ref2: undefined, anchor: { rawStart: 2, rawEnd: 6 } })], priv);
+    const [rec] = JSON.parse(plan.files[0]!.text) as Record<string, unknown>[];
+    expect(rec).not.toHaveProperty("start");
+    expect(plan.warned[0]!.problems.map((p) => p.code)).toContain("export/anchor-dropped-flip");
+  });
+
+  it("joins the base's own new links in one file, and an imported commentary file that loses all its records is written empty", () => {
+    const own = mk("b", { source: { book: BASE, line: 2 }, target: { book: C, line: 2 } });
+    const fromFile = { ...src(), id: "f", status: "existing" as const, provenance: "file" as const, fileIndex: 0, keyOrder: ["line_index_1"] };
+    const plan = planExport([own, fromFile], priv);
+    expect(plan.files.map((f) => [f.name, f.records])).toEqual([["בראשית_links.json", 2], ["פירוש פלוני על בראשית_links.json", 0]]);
+  });
+
+  it("the library export is unchanged: the record stays in the commentary's file as \"source\"", () => {
+    const plan = planExport([src()], ctx);
+    expect(plan.files.map((f) => f.name)).toEqual(["פירוש פלוני על בראשית_links.json"]);
+    expect(JSON.parse(plan.files[0]!.text)[0]["Conection Type"]).toBe("source");
+    expect(plan.counts.movedToBase).toBe(0);
+    expect(plan.files[0]!.movedIn).toBeUndefined();
+  });
+
+  it("other types are not moved", () => {
+    const plan = planExport([src({ declaredType: "reference" })], priv);
+    expect(plan.files.map((f) => f.name)).toEqual(["פירוש פלוני על בראשית_links.json"]);
+  });
+
+  it("when the base's file cannot be written, the record stays \"source\" in the commentary's file, with a plain warning", () => {
+    const unsafe = { ...BASE, title: "../בראשית" };
+    const plan = planExport([src({ target: { book: unsafe, line: 7 } })], priv);
+    expect(plan.files.map((f) => f.name)).toEqual(["פירוש פלוני על בראשית_links.json"]);
+    const kept = plan.warned[0]!.problems.find((p) => p.code === "export/private-source-kept")!;
+    expect(kept.severity).toBe("warning");
+    expect(kept.message).toContain('בפאנל הקישורים כ"מקור"');
+    expect(kept.message).not.toMatch(/Conection|_links\.json/);
+    expect(kept.detail).toContain('"source"');
+    // a held base file: the same
+    const held = planExport([src(), mk("h", { source: { book: BASE, line: 2 }, target: { book: C, line: 2 }, provenance: "db-copy" })], { ...priv, linksFile: (t) => (t === "בראשית" ? "missing" : "confirmed-new") });
+    expect(held.files.map((f) => f.name)).toEqual(["פירוש פלוני על בראשית_links.json"]);
+    expect(held.warned.flatMap((w) => w.problems.map((p) => p.code))).toContain("export/private-source-kept");
+  });
+});

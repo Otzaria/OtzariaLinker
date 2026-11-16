@@ -1,4 +1,4 @@
-import { SOURCE_VIEW_TYPES } from "./connection-type";
+import { canonicalTypeString, SOURCE_VIEW_TYPES } from "./connection-type";
 import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
@@ -273,6 +273,71 @@ export function asExported(link: Link, problems: readonly Problem[]): Problem[] 
   return problems.map((p) => (p.severity === "error" && !FILE_LEVEL_CODES.has(p.code) ? { ...p, severity: "warning" as const, message: `${p.message} ${KEPT_AS_IS}` } : p));
 }
 
+/*
+ * Private use: where a "source" record goes (the owner's decision, 2026-11-16). The library's generator
+ * stores "source" reversed — base → commentary, "commentary" (stored-form.ts) — so in the official library
+ * the commentary shows in the base's commentators. Otzaria's PERSONAL import does not: it reverses only
+ * the dependent types (commentary, targum…), and only from a personal book into a non-personal one
+ * (otzaria upstream/dev user_content_importer.dart:806-860; SOURCE is not dependent, link_types.dart:61-71),
+ * so a "source" record in the commentary's file is shown as "מקור" in the links panel of both books.
+ * The personal import does accept a links file named after ANY book it can find — official, personal or
+ * in an attached library (user_content_importer.dart:243-252, 713-749) — and a base → commentary
+ * "commentary" record from it is stored as written and listed in the base's commentators
+ * (user_content_repository.dart:609-632, user_links_loader.dart:39-47). So for private use the record
+ * is written that way, in the base's file: one rule, here; the export acts on its code (planExport).
+ */
+/** a "source" record written for private use as "commentary" in the base's links file (info) */
+export const PRIVATE_TO_BASE = "export/private-source-to-base";
+
+/**
+ * The record a private export writes for a "source" link: base → commentary, "commentary", in the base's
+ * file — the orientation the library stores it in. Null when the rule does not apply. The anchor is on the
+ * commentary's words, and a record's anchor is on its source line: it is not carried (the library drops it
+ * too, export/anchor-dropped-flip). The Sefaria refs change sides with their lines.
+ */
+export function privateSourceRecord(link: Link): Link | null {
+  const f = storedForm(link);
+  if (f.skipped || f.declared !== "SOURCE" || link.provenance === "db") return null;
+  return {
+    id: link.id,
+    status: link.status,
+    provenance: link.provenance,
+    source: f.storedSource,
+    target: f.storedTarget,
+    declaredType: canonicalTypeString(f.stored),
+    // the commentary's line, as the tool names a line without a reference of its own
+    heRef2: `${f.storedTarget.book.title} ${f.storedTarget.line + 1}`,
+    ...(link.ref2 !== undefined && { ref1: link.ref2 }),
+    ...(link.ref1 !== undefined && { ref2: link.ref1 }),
+  };
+}
+
+function privateSourceChecks(links: readonly Link[], out: Map<string, Problem[]>, heldFiles: ReadonlyMap<string, Problem>): void {
+  for (const l of links) {
+    const moved = privateSourceRecord(l);
+    if (!moved) continue;
+    const base = moved.source.book.title;
+    const dependant = l.source.book.title;
+    const unsafe = unsafeFileTitle(base);
+    const cannot = unsafe ? `אי אפשר לכתוב קובץ קישורים בשם "${base}" (${unsafe})` : heldFiles.has(base) ? `קובץ הקישורים של "${base}" לא ייוצא הפעם (הסיבה ליד הקישורים שלו)` : null;
+    out.get(l.id)?.push(
+      cannot
+        ? {
+            code: "export/private-source-kept",
+            severity: "warning",
+            message: `הקישור ייכתב כמו שהוא, מסוג "מקור", בקובץ של "${dependant}": ${cannot}. באוצריא שלכם (ייבוא אישי) הוא יופיע בפאנל הקישורים כ"מקור", ולא בפאנל המפרשים של "${base}".`,
+            detail: `"Conection Type": "source" ב־${dependant}_links.json`,
+          }
+        : {
+            code: PRIVATE_TO_BASE,
+            severity: "info",
+            message: `לשימוש פרטי הקישור ייכתב בקובץ הקישורים של "${base}", כפירוש: כך "${dependant}" יופיע בפאנל המפרשים של "${base}". בקובץ של "${dependant}" ייבוא אישי באוצריא היה מציג אותו רק כ"מקור", בפאנל הקישורים.`,
+            detail: `"Conection Type": "${moved.declaredType}" ב־${base}_links.json, במקום "source" ב־${dependant}_links.json`,
+          },
+    );
+  }
+}
+
 const KEPT_AS_IS = "(הרשומה כבר נמצאת בקובץ שבספרייה ולא שיניתם אותה, ולכן הייצוא משאיר אותה כמו שהיא. כדי לתקן אותה, ערכו או מחקו אותה.)";
 
 /**
@@ -297,6 +362,7 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
     if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);
   }
   companionMergeChecks(links, out);
+  if (ctx.purpose === "private") privateSourceChecks(links, out, heldFiles);
   if (heldFiles.size)
     for (const l of links) {
       const why = heldFiles.get(l.source.book.title);
