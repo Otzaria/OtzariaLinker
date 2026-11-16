@@ -18,7 +18,7 @@ import { isGuidedStep } from "./guided-flow";
  * The routes are documented in docs/USER_GUIDE.md ("כתובות") and docs/ARCHITECTURE.md.
  */
 
-export type DialogId = "export" | "help" | "relink" | "alt-toc" | "start";
+export type DialogId = "export" | "help" | "relink" | "alt-toc" | "start" | "compare";
 export type SuggestMode = "pair" | "batch" | "maxlink";
 
 export interface Route {

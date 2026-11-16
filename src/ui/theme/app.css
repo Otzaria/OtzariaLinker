@@ -239,6 +239,32 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .link-item .ends { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; min-width: 0; }
 .link-item .ends span { min-width: 0; overflow-wrap: anywhere; }
 .link-item .acts { grid-row: span 2; display: flex; align-items: center; }
+/* the links table: a scroll box that renders only the rows in view (links-panel.tsx VirtualList, ROW = 64px) */
+.vlist { height: clamp(260px, 60vh, 900px); overflow: auto; contain: strict; }
+.vlist .link-list { position: relative; padding: 0; }
+.vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: start; }
+.vlist .link-item .ends { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+.vlist .link-item .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; padding-top: 6px; }
+.lt-grid label, .lt-head { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.lt-grid label.check, .lt-head { grid-template-columns: auto 1fr; align-items: center; gap: 6px; }
+.lt-head { padding: 6px 12px 2px; }
+.lt-actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 4px 6px; padding: 4px 6px; border-radius: var(--radius); background: var(--secondary-container); }
+.lt-target { display: inline-flex; gap: 2px; }
+.lt-target input { width: 9em; }
+dialog.cmp { width: min(1100px, calc(100vw - 32px)); }
+.cmp .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+.cmp label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.cmp label.check { display: inline-flex; gap: 6px; align-items: center; }
+.cmp-sets { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cmp-sets li { display: flex; gap: 10px; align-items: center; }
+.cmp-merge { display: grid; gap: 8px; }
+.cmp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.cmp-table :is(th, td) { padding: 3px 6px; border-bottom: 1px solid var(--outline-variant); text-align: start; vertical-align: top; }
+.cmp-table tr:is(.k-removed, .k-target, .k-type, .k-direction) td:first-child { color: var(--error); }
+.cmp-table tr.k-added td:first-child { color: var(--primary); }
+.lt-error { color: var(--error); font-weight: 600; }
+.lt-warning { color: var(--warning); }
 .status { flex: none; font-size: 10px; padding: 0 6px; border-radius: var(--radius-full); white-space: nowrap; }
 .status.new { background: var(--primary); color: var(--on-primary); }
 .status.edited { background: var(--warning-container); color: var(--on-warning-container); }

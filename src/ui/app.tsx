@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useStore } from "./context";
 import { AltTocDialog } from "./dialogs/alt-toc-dialog";
+import { CompareDialog } from "./dialogs/compare-dialog";
 import { DbMappingDialog } from "./dialogs/db-mapping-dialog";
 import { ExportDialog } from "./dialogs/export-dialog";
 import { HelpDialog } from "./dialogs/help-dialog";
@@ -72,6 +73,7 @@ export function App() {
       {store.dialog.value === "relink" && <RelinkDialog onClose={() => store.closeDialog("relink")} />}
       {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onSection={(id) => (store.helpSection.value = id)} onClose={() => store.closeDialog("help")} />}
       {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => store.closeDialog("alt-toc")} />}
+      {store.dialog.value === "compare" && <CompareDialog onClose={() => store.closeDialog("compare")} />}
       {store.dialog.value === "start" && <StartTaskDialog onClose={() => store.closeDialog("start")} />}
       <DbMappingDialog />
       <RecordsDialog />

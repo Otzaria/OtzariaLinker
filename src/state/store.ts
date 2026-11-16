@@ -23,6 +23,8 @@ import { loadPreferences, type Preferences } from "./preferences";
 import type { DialogId, SuggestMode } from "./router";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
+import { LinkCompareState } from "./link-compare";
+import { LinkFixes } from "./link-fixes";
 import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
@@ -87,6 +89,10 @@ export class AppStore {
   readonly altToc: AltTocState;
   /** links the open databases already have: list, per-line view, copying into the project (stage 10) */
   readonly dbLinks: DbLinksState;
+  /** comparing and merging a book's links between the database, the project and links files */
+  readonly compare: LinkCompareState;
+  /** group fixes of the links table */
+  readonly fixes: LinkFixes;
   /** max-link: plan, run and report (state/maxlink.ts) */
   readonly maxLink: MaxLinkState;
   /** range suggestions, cutting and completion (state/ranges.ts) */
@@ -213,6 +219,8 @@ export class AppStore {
     this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
     this.altToc = new AltTocState(this, service);
     this.dbLinks = new DbLinksState(this, service);
+    this.compare = new LinkCompareState(this, service, saver);
+    this.fixes = new LinkFixes(this);
     this.maxLink = new MaxLinkState(this, service, saver);
     this.ranges = new RangesState(this, service);
     this.suggestions = new SuggestionsState(this, service);
