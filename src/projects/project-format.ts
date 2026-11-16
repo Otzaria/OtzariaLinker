@@ -100,22 +100,39 @@ const storeSide = (s: LinkSide): StoredSide => ({
   ...(s.end !== undefined && { end: s.end }),
 });
 
-export function serializeProject(p: ProjectData, app: string, now = new Date()): string {
+/**
+ * The project as JSON text. `cache` (one per session) keeps each link's JSON by the link object: links
+ * are immutable, so an autosave after one edit serializes that link only and joins the rest — the
+ * same text, byte for byte, as without the cache (review C18: 112,905 links took 220–350 ms per edit).
+ */
+export function serializeProject(p: ProjectData, app: string, now = new Date(), cache?: WeakMap<Link, string>): string {
+  // database links are never part of a project: they are read again from the database
+  const stored = (l: Link): StoredLink => ({ ...l, source: storeSide(l.source), target: storeSide(l.target) });
+  const kept = p.links.filter((l) => l.provenance !== "db");
   const file: ProjectFile = {
     format: PROJECT_FORMAT,
     version: PROJECT_VERSION,
     savedAt: now.toISOString(),
     app,
     sources: p.sources,
-    // database links are never part of a project: they are read again from the database
-    links: p.links.filter((l) => l.provenance !== "db").map((l) => ({ ...l, source: storeSide(l.source), target: storeSide(l.target) })),
+    links: cache ? [] : kept.map(stored),
     rejectedSuggestions: p.rejectedSuggestions,
     view: p.view,
     ...(p.altToc?.length && { altToc: p.altToc }),
     ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
     ...(p.libraryFiles?.length && { libraryFiles: p.libraryFiles.map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })) }),
   };
-  return JSON.stringify(file);
+  const text = JSON.stringify(file);
+  if (!cache) return text;
+  // "links":[] can only be the key itself: inside a JSON string every quote is escaped
+  const at = text.indexOf('"links":[]') + 9;
+  let links = "";
+  for (const [i, l] of kept.entries()) {
+    let json = cache.get(l);
+    if (json === undefined) cache.set(l, (json = JSON.stringify(stored(l))));
+    links += i ? "," + json : json;
+  }
+  return text.slice(0, at) + links + text.slice(at);
 }
 
 export class ProjectError extends Error {

@@ -986,8 +986,13 @@ export class AppStore {
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
       },
       APP_VERSION,
+      undefined,
+      this.projectJson,
     );
   }
+
+  /** each link's project JSON, by link object (links are immutable): an autosave re-serializes only what changed (C18) */
+  private readonly projectJson = new WeakMap<Link, string>();
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
@@ -1047,15 +1052,20 @@ export class AppStore {
     const KEY = "autosave:v1";
     let timer: ReturnType<typeof setTimeout> | undefined;
     let first = true;
+    /** the revision last written: the state changes without a new revision (books bound to links) are not written again */
+    let written = this.linkState.peek().revision;
     const stop = effect(() => {
       const rev = this.linkState.value.revision;
       if (first) return void (first = false);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const now = this.linkState.peek();
-        const empty = now.links.size === 0 && now.altToc.size === 0 && now.rejected.size === 0;
+        const ls = this.linkState.peek();
+        if (ls.revision === written) return;
+        written = ls.revision;
+        const empty = ls.links.size === 0 && ls.altToc.size === 0 && ls.rejected.size === 0;
         (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
-          /* storage blocked or full — autosave is best effort */
+          /* storage blocked or full — autosave is best effort; the next change tries again */
+          written = -1;
         });
       }, delayMs);
       void rev;
