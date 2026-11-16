@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { linesFingerprint } from "../../../src/core/text/fingerprint";
 import type { BookRef } from "../../../src/core/links/model";
-import { bookFingerprint, failBook, finishBook, jobCsv, jobTotals, parseJobRecord, stableId, stepsSignature, type JobBook, type JobRecord } from "../../../src/linking/batch-job";
+import { bookFingerprint, failBook, runOrder, finishBook, jobCsv, jobTotals, parseJobRecord, stableId, stepsSignature, type JobBook, type JobRecord } from "../../../src/linking/batch-job";
 import type { PlanStep } from "../../../src/linking/plan";
 
 const ref = (key: string, title: string): BookRef => ({ key, title, origin: "otzaria" });
@@ -64,6 +64,13 @@ describe("the batch job's pure parts", () => {
     expect(parseJobRecord("{")).toBeNull();
     expect(parseJobRecord(JSON.stringify({ ...rec, v: 2 }))).toBeNull();
     expect(parseJobRecord(JSON.stringify({ ...rec, books: [{ title: "a", status: "weird", engines: {} }] }))!.books).toEqual([]);
+  });
+
+  it("books that read the same bases run next to each other, groups in order of appearance", () => {
+    const on = (t: string, base: BookRef): PlanStep[] => [{ id: t, kind: "pair", engine: "headings", source: ref(`k:${t}`, t), target: base, relation: {} as never, why: "" } as PlanStep, { id: `c:${t}`, kind: "single", engine: "citations", source: ref(`k:${t}`, t), why: "" }];
+    const S = ref("s1:שמות.txt", "שמות");
+    const steps = new Map([["a", on("a", B)], ["b", on("b", S)], ["c", on("c", B)], ["d", on("d", S)], ["e", [{ id: "c:e", kind: "single", engine: "citations", source: ref("k:e", "e"), why: "" } as PlanStep]]]);
+    expect(runOrder(["a", "b", "c", "d", "e"], steps)).toEqual(["a", "c", "b", "d", "e"]);
   });
 
   it("the per-book report as CSV", () => {

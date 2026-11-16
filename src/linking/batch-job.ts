@@ -102,6 +102,24 @@ const tallies = (steps: readonly PlanStep[]): Partial<Record<EngineId, EngineTal
   return out;
 };
 
+/**
+ * The order the waiting books run in: books that read the same other books (a base, the commentaries on
+ * it they quote) next to each other, groups in the order they first appear, the plan's order inside a
+ * group. The worker keeps the last few books it read (workers/maxlink-job.ts), and the books of one base
+ * then hit it: in the plan's order a folder alternates between bases, and against the Otzaria database
+ * 100 commentaries on the five books of the Torah took 302 s, in this order 154 s (one call for all: 202 s).
+ */
+export function runOrder(titles: readonly string[], steps: ReadonlyMap<string, readonly PlanStep[]>): string[] {
+  const groups = new Map<string, string[]>();
+  for (const t of titles) {
+    const k = [...new Set((steps.get(t) ?? []).flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])))].sort().join("|");
+    const g = groups.get(k);
+    if (g) g.push(t);
+    else groups.set(k, [t]);
+  }
+  return [...groups.values()].flat();
+}
+
 /** A new job of a plan: a book with steps waits; one without is "not planned", with the planner's reason. */
 export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "sources" | "engines" | "engineOptions" | "preferBase">, now = Date.now()): JobRecord {
   const by = stepsByBook(plan);

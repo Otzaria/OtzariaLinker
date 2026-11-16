@@ -3,7 +3,7 @@ import { batch, computed, signal, type ReadonlySignal, type Signal } from "@prea
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
-import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseJobRecord, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
+import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
 import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook, type PlanStep } from "../linking/plan";
@@ -452,7 +452,7 @@ export class MaxLinkState {
     const run = this.service.runMaxLink.bind(this.service);
     const job = this.job.peek()!;
     const steps = this.jobSteps!;
-    const todo = job.books.filter((b) => b.status === "pending" && steps.has(b.title)).map((b) => b.title);
+    const todo = runOrder(job.books.filter((b) => b.status === "pending" && steps.has(b.title)).map((b) => b.title), steps);
     const totals = jobTotals(job);
     const of = totals.runnable;
     let settled = totals.settled;
