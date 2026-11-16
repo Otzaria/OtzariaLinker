@@ -1,17 +1,19 @@
 /*
  * Breaking a tie between places of one ד"ה (the "ambiguous" tier). The search scores a place by the
  * ד"ה's own words, so when the same words stand in two or more base lines of the window the scores
- * tie, and the only tie-break was "the first one after the previous line's place". One more signal,
- * general (no book names, no patterns of one book): the CONTEXT — the commentary line's own words
- * after its ד"ה, weighted by rarity, that also stand in the candidate base line. A lexicon entry
- * ("אמן ב' אין עונין אמן יתומה") or a commentary that goes on quoting the passage ("חבילי קש … פעמים
- * שאדם בא מן השדה") names the right line in its body.
+ * tie, and the only tie-break was "the first one after the previous line's place". Two more signals,
+ * both general (no book names, no patterns of one book):
+ *
+ *   • context — the commentary line's OWN words after its ד"ה, weighted by rarity, that also stand in
+ *     the candidate base line. A lexicon entry ("אמן ב' אין עונין אמן יתומה") or a commentary that
+ *     goes on quoting the passage ("חבילי קש … פעמים שאדם בא מן השדה") names the right line in its body;
+ *   • order — a place between the places of the nearest strong lines before and after it
+ *     (certain/high), since a commentary follows its base. The walk knows only the lines before; this
+ *     also looks at the NEXT strong line, and keeps a context pick from jumping past it.
  *
  * A tie-break only chooses among places whose calibrated scores are within the ambiguity margin of
  * each other: it never adds or drops a suggestion and never raises its tier (engine.ts keeps it
- * "ambiguous"). Tried and dropped: the order of the nearest strong lines before and after (it fired
- * once in 1,844 tied lines of the development sample). Measured on the real database:
- * docs/AUTOMATION_ENGINE.md §3.2.
+ * "ambiguous"). Measured on the real database: docs/AUTOMATION_ENGINE.md §3.2.
  */
 import { skeleton, stem } from "../../../core/text/hebrew";
 import type { HebToken } from "../../../matching/hebrew-tokens";
@@ -98,4 +100,22 @@ export function pickByContext(cands: readonly TieCandidate[], prev: number | nul
   if (best === 0) return 0;
   const runnerUp = Math.max(...cands.filter((_, k) => k !== best).map((c) => c.context));
   return cands[best]!.context - runnerUp >= gain ? best : 0;
+}
+
+/**
+ * The tied place that fits between the nearest strongly placed lines before (`lo`) and after (`hi`)
+ * this one (index into `cands`; `current` = keep). Kept when the current pick fits, or when no rival
+ * does; among several that fit: the most context, then the best score, then the earliest line.
+ */
+export function pickByOrder(cands: readonly TieCandidate[], current: number, lo: number | null, hi: number | null, floor: number): number {
+  const fits = (line: number) => (lo === null || line >= lo) && (hi === null || line <= hi);
+  if (fits(cands[current]!.line)) return current;
+  let best = current;
+  for (let k = 0; k < cands.length; k++) {
+    const c = cands[k]!;
+    if (k === current || c.score < floor || !fits(c.line)) continue;
+    const b = cands[best]!;
+    if (best === current || c.context > b.context || (c.context === b.context && (c.score > b.score || (c.score === b.score && c.line < b.line)))) best = k;
+  }
+  return best;
 }
