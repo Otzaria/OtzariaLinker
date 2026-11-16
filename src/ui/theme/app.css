@@ -244,6 +244,12 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .vlist .link-list { position: relative; padding: 0; }
 .vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: start; }
 .vlist .link-item .ends { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+/* one row with no wrapping: each end shortens with "…" instead of painting over the next one (the
+   spans may shrink below their text, and their overflow was visible — the two book names overlapped) */
+.vlist .link-item .ends > .end { display: inline-flex; gap: 0.3em; min-width: 0; overflow: hidden; }
+.vlist .link-item .end > * { flex: none; }
+.vlist .link-item .end > .t { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
+.vlist .link-item .ends > :is(.status, input, .icon) { flex: none; }
 .vlist .link-item .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; padding-top: 6px; }
 .lt-grid label, .lt-head { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
@@ -276,6 +282,8 @@ dialog.cmp { width: min(1100px, calc(100vw - 32px)); }
 /* the summary keeps a readable width; in a narrow panel the buttons move to a second row */
 .sug-head > .grow { flex: 1 1 160px; min-width: 160px; }
 .bulk { padding: 0 6px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+/* a tool button wider than the side panel (~215px at 1024px) wraps its words instead of scrolling the panel sideways */
+.bulk .btn { white-space: normal; text-align: start; min-width: 0; }
 .sug-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .sug-table th { position: sticky; top: 0; background: var(--surface-container-high); text-align: start; font-weight: 600; padding: 4px 6px; z-index: 1; }
 .sug-table td { padding: 3px 6px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
@@ -455,6 +463,9 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
 .guided-issues li { display: flex; gap: 6px; align-items: center; }
 .guided-card progress { width: 100%; }
 .guided-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0 16px; background: var(--app-bg); }
+/* the notices sit above the flow's buttons, not on them ("חזרה" and "פתיחה בסביבת העבודה" were hidden
+   under them for 5–15 seconds after every step that opens files or runs; V5 UX audit) */
+:root:has(main.guided) .notices { inset-block-end: 76px; }
 .app-bar .guided-back { min-height: 32px; }
 @media (max-width: 720px) {
   .guided { padding: 12px 16px 0; }

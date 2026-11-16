@@ -52,6 +52,11 @@ describe("decodeText", () => {
   it("legacy windows-1255", () => {
     expect(decodeText(new Uint8Array([0xf9, 0xec, 0xe5, 0xed]))).toMatchObject({ text: "שלום", encoding: "windows-1255" });
   });
+  it("the head of a UTF-8 file cut inside a letter is still UTF-8 (partial); the whole file must be complete", () => {
+    const cut = u8("שלום").subarray(0, 7); // "שלו" and the first byte of "ם"
+    expect(decodeText(cut, { partial: true })).toMatchObject({ text: "שלו", encoding: "utf-8" });
+    expect(decodeText(cut).encoding).toBe("windows-1255");
+  });
 });
 
 describe("detectKind — alt_toc files", () => {

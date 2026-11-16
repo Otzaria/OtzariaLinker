@@ -57,7 +57,8 @@ export const TASKS: readonly TaskDef[] = [
     id: "commentary",
     icon: "oz_book_link",
     title: "ספר ופירוש",
-    hint: "פירוש מול ספר הבסיס שלו — לפי כותרות ודיבור המתחיל",
+    // "one": with four commentaries on one tractate, three cards looked right (V5 UX audit, task b)
+    hint: "פירוש אחד מול ספר הבסיס שלו — לפי כותרות ודיבור המתחיל (לכמה פירושים יחד יש כרטיס משלהם)",
     steps: [
       { label: "הפירוש", hint: `קובץ ${ltr(".txt")}, תיקייה או מסד שבו הפירוש. אם גם ספר הבסיס שם — זה מספיק.`, options: ["files", "folder", "db"] },
       { label: "ספר הבסיס, אם הוא במקור אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "files"], optional: true, dbHint: true },

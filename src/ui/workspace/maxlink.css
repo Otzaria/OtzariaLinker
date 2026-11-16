@@ -15,7 +15,7 @@
 .ml-report { margin: 0 6px 6px; display: grid; gap: 6px; }
 .ml-report[open] > summary { margin-bottom: 6px; }
 .ml-report > details.held { margin-top: 6px; }
-.ml-report .row { display: flex; gap: 8px; margin-top: 6px; }
+.ml-report .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 /* compact counters: one wrapping line of "label value" pills, so the suggestions stay in view */
 .ml-tiles { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
 .ml-tiles .tile { display: inline-flex; align-items: baseline; gap: 6px; padding: 1px 10px; border-radius: var(--radius-full); background: var(--surface-container); }

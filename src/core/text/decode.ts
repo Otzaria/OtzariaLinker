@@ -10,7 +10,12 @@ export interface DecodedText {
   hadBom: boolean;
 }
 
-export function decodeText(bytes: Uint8Array): DecodedText {
+/**
+ * `partial`: the bytes are only the head of the file (a sniff). It may end inside a multi-byte
+ * character, which is not a sign of another encoding: the cut sequence is held back instead of
+ * failing the UTF-8 check (a UTF-8 book over 64 KB was flagged "windows-1255" about half the time).
+ */
+export function decodeText(bytes: Uint8Array, { partial = false }: { partial?: boolean } = {}): DecodedText {
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
     return { text: new TextDecoder("utf-8").decode(bytes.subarray(3)), encoding: "utf-8", hadBom: true };
   if (bytes[0] === 0xff && bytes[1] === 0xfe)
@@ -20,7 +25,7 @@ export function decodeText(bytes: Uint8Array): DecodedText {
   if (looksLikeBomlessUtf16le(bytes))
     return { text: new TextDecoder("utf-16le").decode(bytes), encoding: "utf-16le", hadBom: false };
   try {
-    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), encoding: "utf-8", hadBom: false };
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: partial }), encoding: "utf-8", hadBom: false };
   } catch {
     // Not valid UTF-8. windows-1255 maps every byte, so it never throws; the caller can still
     // judge the result (e.g. by the share of Hebrew letters) and ask the user.

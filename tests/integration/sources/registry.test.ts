@@ -64,6 +64,12 @@ describe("SourceRegistry — encoding warnings reach the UI", () => {
     const res = await new SourceRegistry().open([{ path: "old.txt", blob: new Blob([cp1255]) }]);
     expect(res.sources[0]!.info.warnings.map((w) => w.code)).toContain("source/not-utf8");
   });
+  it("a UTF-8 book longer than the sniffed head is not flagged when the head ends inside a letter", async () => {
+    // 64 KiB of one-byte "a" minus one, then Hebrew: the sniff (64 KiB) ends after the first byte of "ש"
+    const book = "a".repeat(64 * 1024 - 1) + "שלום עליכם\n".repeat(10);
+    const res = await new SourceRegistry().open([{ path: "long.txt", blob: new Blob([book]) }]);
+    expect(res.sources[0]!.info.warnings.map((w) => w.code)).not.toContain("source/not-utf8");
+  });
 });
 
 describe("a links file with a BOM", () => {

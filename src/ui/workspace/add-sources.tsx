@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
@@ -77,6 +77,11 @@ export function AddSources({ startOpen }: { startOpen?: boolean }) {
   const store = useStore();
   const [open, setOpen] = useState(!!startOpen);
   const [over, setOver] = useState(false);
+  // open while nothing is open; once the first source opens, the options fold away and the book list
+  // gets the room (a task sheet opens its sources before the workspace shows, links files first)
+  useEffect(() => {
+    if (!startOpen) setOpen(false);
+  }, [startOpen]);
   const add = async (o: SourceOption) => {
     const files = await pickFiles(o.pick);
     if (files.length) await store.openFiles(files);
