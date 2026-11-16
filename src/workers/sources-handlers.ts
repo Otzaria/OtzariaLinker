@@ -1,8 +1,8 @@
 import type { SourceRegistry } from "../sources/registry";
 import { citationsJob } from "./citations-job";
 import { batchJob, diffJob, engineJob } from "./engine-job";
-import { maxlinkJob } from "./maxlink-job";
-import type { CallContext, Handlers } from "./rpc";
+import { fingerprintsJob, maxlinkJob } from "./maxlink-job";
+import { RpcFailure, type CallContext, type CallOptions, type Handlers } from "./rpc";
 import { searchJob } from "./search-job";
 import { selfCheck } from "./self-check";
 import type { SourcesApi } from "./sources-api";
@@ -34,6 +34,7 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     dbLinkSummary: (ctx, bookKey) => registry.dbLinkSummary(bookKey, jobCtx(ctx)),
     dbLinksPage: (ctx, bookKey, query) => registry.dbLinksPage(bookKey, query, { signal: ctx.signal }),
     runMaxLink: (ctx, steps, options) => maxlinkJob(registry, steps, options, jobCtx(ctx)),
+    fingerprints: (ctx, keys) => fingerprintsJob(registry, keys, jobCtx(ctx)),
   };
 }
 
@@ -42,7 +43,10 @@ export function inProcessCall(handlers: Handlers<SourcesApi>): SourcesCall {
   return async (op, args, opts = {}) => {
     const signal = opts.signal ?? new AbortController().signal;
     const handler = handlers[op] as unknown as (ctx: CallContext, ...a: unknown[]) => unknown;
-    return (await handler({ signal, progress: (d, n) => opts.onProgress?.(d, n) }, ...(args as unknown[]))) as never;
+    const value = await handler({ signal, progress: (d, n) => opts.onProgress?.(d, n) }, ...(args as unknown[]));
+    // as RpcClient: a cancelled call is rejected, unless the caller asked for what it found so far
+    if (signal.aborted && !opts.keepPartial) throw new RpcFailure("cancelled", "הפעולה בוטלה.");
+    return value as never;
   };
 }
 
@@ -50,5 +54,5 @@ export function inProcessCall(handlers: Handlers<SourcesApi>): SourcesCall {
 export type SourcesCall = <K extends keyof SourcesApi & string>(
   op: K,
   args: Parameters<SourcesApi[K]>,
-  opts?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void },
+  opts?: CallOptions,
 ) => Promise<Awaited<ReturnType<SourcesApi[K]>>>;

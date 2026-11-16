@@ -612,7 +612,8 @@ export class GuidedFlowState {
     const scope = this.scope.peek();
     if (!plan || !scope) return false;
     this.step.value = "run";
-    return this.host.maxLink.run(plan, this.host.maxLink.scopeLabel(scope));
+    const prefer = this.preferSource.peek() || (this.preferLabel ? this.host.sources.peek().find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
+    return this.host.maxLink.run(plan, this.host.maxLink.scopeLabel(scope), prefer ? { preferSource: prefer } : {});
   }
 
   /** "Approve all N certain" (the same action as the suggestions table's button). */

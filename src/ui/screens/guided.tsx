@@ -11,6 +11,7 @@ import { sourceNameText } from "../shell/file-name";
 import { OtzariaDbHint, SOURCE_OPTIONS } from "../workspace/add-sources";
 import { SourceBadge } from "../workspace/source-badge";
 import { StepView } from "../workspace/suggestions-panel";
+import { MaxLinkJobView } from "../workspace/maxlink-job";
 
 /*
  * The guided flow "link a folder (or several books) to Otzaria" (route "#/guided/<step>"): six
@@ -386,15 +387,22 @@ function RunStep() {
           {task.count ?? "מתחיל…"}
           {eta && ` · ${eta}`}
         </span>
-        <div class="row">
-          <button class="btn text" onClick={task.cancel}>ביטול</button>
-        </div>
+        {/* the max-link job has its own pause and stop; it keeps the finished books */}
+        {store.maxLink.running.value ? <MaxLinkJobView /> : (
+          <div class="row">
+            <button class="btn text" onClick={task.cancel}>ביטול</button>
+          </div>
+        )}
       </div>
     );
   }
+  // a job that waits (paused, stopped, from an earlier session) or has failed books: continue or re-run them here
+  const job = store.maxLink.job.value;
+  const jobView = job && job.books.some((b) => b.status === "pending" || b.status === "failed") ? <MaxLinkJobView /> : null;
   if (!g.ran.value || !rep) {
     return (
       <>
+        {jobView}
         <p class="lede">ההרצה עוד לא נעשתה{g.facts.value.links ? `, אבל בפרויקט כבר ${n(g.facts.value.links)} קישורים שאישרתם` : ""}.</p>
         <div class="row">
           <button class="btn filled" disabled={!g.plan.value?.steps.length} onClick={() => void g.run()}>
@@ -410,6 +418,7 @@ function RunStep() {
   const review = g.toReview();
   return (
     <>
+      {jobView}
       <p class="lede" role="status">
         נמצאו {n(o.links)} הצעות{o.existing ? `, מהן ${n(o.existing)} כבר קיימות באוצריא` : ""}. {o.approved ? `אושרו ${n(o.approved)}.` : ""}
       </p>

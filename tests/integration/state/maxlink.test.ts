@@ -81,7 +81,7 @@ describe("AppStore — max-link", () => {
     expect(String(saved.at(-1)!.data)).toContain("ביאור על בראשית");
   });
 
-  it("the running task counts steps of the plan, with a cancel (audit F21)", async () => {
+  it("the running task counts the books of the plan, with a cancel (audit F21)", async () => {
     const { store, folder } = await opened();
     const scope = { kind: "source", id: folder.info.id } as const;
     const plan = store.maxLink.plan(scope, PAIRS);
@@ -94,10 +94,11 @@ describe("AppStore — max-link", () => {
     });
     expect(await store.maxLink.run(plan, store.maxLink.scopeLabel(scope))).toBe(true);
     stop();
-    const of = plan.steps.length + books;
+    // the batch job (V5 P1-8) runs the plan book after book: the count is of books
+    const of = books;
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every((c) => new RegExp(`^שלב [\\d,]+ מתוך ${of}$`).test(c))).toBe(true);
-    expect(seen.at(-1)).toBe(`שלב ${of} מתוך ${of}`);
+    expect(seen.every((c) => new RegExp(`^ספר [\\d,]+ מתוך ${of}$`).test(c))).toBe(true);
+    expect(seen.at(-1)).toBe(`ספר ${of} מתוך ${of}`);
     expect(store.task.value).toBeNull();
   });
 

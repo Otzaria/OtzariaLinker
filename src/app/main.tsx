@@ -40,6 +40,8 @@ const kv = idbStore();
 store.startAutosave(kv);
 // how far a guided flow got (state/guided-flow.ts): a reload or a closed tab can continue it
 store.guided.startPersist(kv);
+// the max-link job (state/maxlink.ts): a reload or a closed tab can resume it, and re-run only what changed
+store.maxLink.startPersist(kv);
 // the address follows the screens and dialogs (#/workspace/links, #/help/…), and Back/Forward move between them
 new Router(store, hashLocation()).start();
 

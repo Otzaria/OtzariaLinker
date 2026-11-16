@@ -5,7 +5,7 @@ import type { BookRef } from "../../../src/core/links/model";
 import type { EngineResult } from "../../../src/linking/automatic";
 import { planMaxLink, type PlanStep, type SingleEngineId } from "../../../src/linking/plan";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { maxlinkJob, type SingleRunner } from "../../../src/workers/maxlink-job";
+import { fingerprintsJob, maxlinkJob, type SingleRunner } from "../../../src/workers/maxlink-job";
 
 /*
  * The max-link job over the real database slice (tests/fixtures/db/seforim-v7-mini.db) plus text
@@ -66,6 +66,23 @@ describe("maxlinkJob", () => {
     expect(res.items.map((i) => i.stepId)).toEqual(plan.steps.map((s) => s.id)); // still reported in the plan's order
   });
 
+  it("one call per book (the batch job): the base read by the last call is not read again; every book read has a fingerprint", async () => {
+    const { reg, all, byTitle } = await setup();
+    const plan = planMaxLink({ selected: [byTitle("ארצות החיים").key], library: all, singleEngines: [] });
+    const base = byTitle("ארצות החיים").key;
+    const byBook = new Map<string, PlanStep[]>();
+    for (const s of plan.steps) byBook.set(s.source.key, [...(byBook.get(s.source.key) ?? []), s]);
+    expect(byBook.size).toBe(2);
+    const spy = vi.spyOn(reg, "lines");
+    const results = [];
+    for (const steps of byBook.values()) results.push(await maxlinkJob(reg, steps, {}, {}));
+    expect(spy.mock.calls.filter((c) => c[0] === base)).toHaveLength(1);
+    for (const [i, steps] of [...byBook.values()].entries()) expect(Object.keys(results[i]!.fingerprints!).sort()).toEqual([steps[0]!.source.key, base].sort());
+    // the same text, read again by the fingerprints job: the same fingerprint
+    const again = await fingerprintsJob(reg, [base, "s99:ghost"], {});
+    expect(again).toEqual({ [base]: results[0]!.fingerprints![base] });
+  });
+
   it("a failing step is reported and the rest still run", async () => {
     const { reg, all, texts } = await setup();
     const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
@@ -115,12 +132,18 @@ describe("maxlinkJob", () => {
     expect(missing.items.filter((i) => i.result).length).toBe(plan.steps.length - 1);
   });
 
-  it("stops when cancelled", async () => {
+  it("cancelled, it stops and returns what it found: the step that ran is kept, marked stopped; the rest do not run", async () => {
     const { reg, all, texts } = await setup();
     const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
+    expect(plan.steps.length).toBeGreaterThan(1);
     const ac = new AbortController();
-    const run = maxlinkJob(reg, plan.steps, {}, { signal: ac.signal, progress: () => ac.abort() });
-    await expect(run).rejects.toThrow();
+    // cancelled during the first step: it ends with what it has, and the next steps do not start
+    const res = await maxlinkJob(reg, plan.steps, {}, { signal: ac.signal, progress: (d) => d > 0 && ac.abort() });
+    expect(res.stopped).toBe(true);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]).toMatchObject({ stepId: plan.steps[0]!.id, stopped: true });
+    // what the engine found until it saw the cancel (an engine that saw it says so: engine/aborted)
+    expect(res.items[0]!.result).toBeTruthy();
   });
 });
 
