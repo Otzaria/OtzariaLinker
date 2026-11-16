@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Link, LinkSide } from "../../src/core/links/model";
 import { pushTo } from "../../src/core/collections";
 import { countVisibleChars } from "../../src/core/text/offsets";
-import type { Confidence, EngineId, Suggestion } from "../../src/linking/automatic/types";
+import { recordsOf, type Confidence, type EngineId, type Suggestion } from "../../src/linking/automatic/types";
 
 /*
  * The library benchmark (docs/validation/LIBRARY_BENCHMARK.md): pure helpers of
@@ -251,19 +251,21 @@ export function scoreBook(
 // ─── how a span on a Sefaria base is written (LIBRARY_BENCHMARK.md §0.8) ────────────────────────────
 
 /**
- * A structural suggestion whose range on a Sefaria side was collapsed (withoutRange) writes ONE record
- * today, to the span's first line. The policies measured for the owner's decision — none of them a
- * range, so each is sync-safe:
- *   first   — the first line (today);
+ * A structural suggestion whose range on a Sefaria side was collapsed (withoutRange) wrote ONE record,
+ * to the span's first line, until the owner's decision of 2026-11-16 (§0.8). The policies measured for
+ * that decision — none of them a range, so each is sync-safe:
+ *   first   — the first line (the product before the decision);
  *   firstRef — the first line of the span that can carry the record (not a heading, has a ref_2): on a
  *             Shulchan Aruch base a section's first content line is the siman's title, which has no heRef;
  *   last    — the last line;
  *   ends    — both ends (2 records);
  *   all     — every line of the span (one single-line record each);
- *   learned — first or last, by what the database already links in this (book, base) pair (spanEnds).
+ *   learned — first or last, by what the database already links in this (book, base) pair (spanEnds);
+ *   all20   — "all" for a span of at most 20 lines, "firstRef" beyond (the decision, as the measure states it);
+ *   written — what the product writes (the suggestion's target, or its spanLines): must equal all20.
  */
-export type SpanPolicy = "first" | "firstRef" | "last" | "ends" | "all" | "learned";
-export const SPAN_POLICIES: readonly SpanPolicy[] = ["first", "firstRef", "last", "ends", "all", "learned"];
+export type SpanPolicy = "first" | "firstRef" | "last" | "ends" | "all" | "learned" | "all20" | "written";
+export const SPAN_POLICIES: readonly SpanPolicy[] = ["first", "firstRef", "last", "ends", "all", "learned", "all20", "written"];
 
 /** a structural suggestion whose Sefaria-side range was collapsed to its first line (its citedSpan is the span) */
 export const isSpanned = (s: Suggestion, engines: readonly EngineId[]): boolean =>
@@ -279,10 +281,36 @@ export const spanBucket = (lines: number): "2" | "3-5" | "6-20" | ">20" => (line
 export function spanRecords(s: Suggestion, policy: Exclude<SpanPolicy, "learned">, writable: (line: number) => boolean = () => true): Suggestion[] {
   const { line, end } = s.citedSpan!;
   const every = Array.from({ length: end - line + 1 }, (_, i) => line + i).filter(writable);
-  const lines = policy === "first" ? [line] : policy === "firstRef" ? [every[0] ?? line] : policy === "last" ? [end] : policy === "ends" ? [line, end] : every.length ? every : [line];
+  const short = end - line + 1 <= 20;
+  const lines =
+    policy === "written"
+      ? recordsOf(s).map((r) => r.line)
+      : policy === "first"
+        ? [line]
+        : policy === "firstRef" || (policy === "all20" && !short)
+          ? [every[0] ?? line]
+          : policy === "last"
+            ? [end]
+            : policy === "ends"
+              ? [line, end]
+              : every.length
+                ? every
+                : [line];
   return lines.map((l) => {
-    const { citedSpan: _, ...rest } = s;
+    const { citedSpan: _, spanLines: _l, ...rest } = s;
     return { ...rest, id: l === line ? s.id : `${s.id}~${l}`, target: { book: s.target.book, line: l } };
+  });
+}
+
+/**
+ * The records a merged suggestion is written as (Suggestion.spanLines: a short span on a Sefaria side, a
+ * record per line), each as a suggestion of its own — what "by the written line" counts.
+ */
+export function writtenRecords<T extends { s: Suggestion }>(x: T): T[] {
+  if (!x.s.spanLines?.length) return [x];
+  return recordsOf(x.s).map((r) => {
+    const { spanLines: _, ...rest } = x.s;
+    return { ...x, s: { ...rest, id: r.line === x.s.target.line ? x.s.id : `${x.s.id}~${r.line}`, target: { book: x.s.target.book, line: r.line }, heRef2: r.heRef2 } };
   });
 }
 

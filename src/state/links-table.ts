@@ -2,6 +2,7 @@ import { CONNECTION_TYPES, parseConnectionType, type ConnectionType } from "../c
 import type { Link, LinkStatus } from "../core/links/model";
 import { CONFIDENCE_ORDER, type Confidence, type EngineId, type Suggestion } from "../linking/automatic";
 import type { QaReport } from "../linking/qa";
+import { suggestionIdOfLink } from "./suggestions";
 
 /*
  * The links table (V5 task 27): every project link and every pending suggestion of the current run
@@ -48,7 +49,7 @@ export function tableRows(links: readonly Link[], suggestions: readonly Suggesti
     if (sev === "error" || (sev === "warning" && !problems.has(i.link.id))) problems.set(i.link.id, sev);
   }
   const rows: TableRow[] = links.map((link) => {
-    const sid = link.id.startsWith("auto:") ? link.id.slice(5) : undefined;
+    const sid = suggestionIdOfLink(link.id);
     const s = sid === undefined ? undefined : byId.get(sid);
     const engine = s?.engine ?? (sid?.split(":")[0] as EngineId | undefined);
     const problem = problems.get(link.id);

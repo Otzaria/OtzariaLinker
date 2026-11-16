@@ -34,6 +34,7 @@ import {
   spanRecords,
   stratify,
   suggestionSpan,
+  writtenRecords,
   type Counters,
   type DbEnd,
   type Estimate,
@@ -484,7 +485,8 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
     if (SPANS === "all") {
-      const w = scoreBook(book.key, entries, db, lineText, "citations");
+      // by the written line: a short span on a Sefaria side is written a record per line (spanLines)
+      const w = scoreBook(book.key, entries.flatMap(writtenRecords), db, lineText, "citations");
       rec.written = { counters: count(w.scored), matched: {} };
       for (const [k, ids] of w.matched) rec.written.matched[k] = encodeIds(ids);
     }
@@ -639,8 +641,10 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     const sum = (f: (b: (typeof books)[number]) => number) => books.reduce((a, b) => a + f(b), 0);
     const db = sum((b) => b.dbCommentary);
     const lines = [`span policies (§0.8) over ${books.length} books: owned DB COMMENTARY ${db}, regenerated with citedSpan counted ${sum((b) => b.asRun)}`];
-    const firstMismatch = books.filter((b) => b.written !== b.policies.first.commentary).length;
-    if (firstMismatch) lines.push(`  WARNING: policy "first" differs from the written-line measure in ${firstMismatch} books`);
+    const writtenMismatch = books.filter((b) => b.written !== b.policies.written.commentary).length;
+    if (writtenMismatch) lines.push(`  WARNING: policy "written" differs from the written-line measure in ${writtenMismatch} books`);
+    const decided = books.filter((b) => b.policies.written.commentary !== b.policies.all20.commentary || b.policies.written.records !== b.policies.all20.records);
+    if (decided.length) lines.push(`  WARNING: the product ("written") differs from "all20" in ${decided.length} books: ${decided.map((b) => `${b.title} ${b.policies.written.commentary}/${b.policies.all20.commentary} records ${b.policies.written.records}/${b.policies.all20.records}`).join("; ")}`);
     const recs0 = sum((b) => b.policies.first.records);
     for (const p of SPAN_POLICIES) {
       const c = sum((b) => b.policies[p].commentary);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../src/core/links/model";
 import type { Suggestion } from "../../src/linking/automatic/types";
-import { allocate, decodeIds, encodeIds, estimate, indexDbLinks, isSpanned, ownerOf, scoreBook, spanBucket, spanEnds, spanRecords, stratify } from "./library-benchmark";
+import { allocate, decodeIds, encodeIds, estimate, indexDbLinks, isSpanned, ownerOf, scoreBook, spanBucket, spanEnds, spanRecords, stratify, writtenRecords } from "./library-benchmark";
 
 /* The pure parts of the library benchmark (no database needed). */
 
@@ -95,6 +95,14 @@ describe("library benchmark helpers", () => {
     expect(spanRecords(cut, "all", (l) => l !== 5).map((s) => s.target.line)).toEqual([4, 6, 7]);
     expect(spanRecords(cut, "all", () => false).map((s) => s.target.line)).toEqual([4]);
     expect(spanRecords(cut, "firstRef", (l) => l > 5).map((s) => s.target.line)).toEqual([6]);
+    // the decision: every writable line up to 20 lines, firstRef beyond; "written" reads what the product wrote
+    expect(spanRecords(cut, "all20", (l) => l !== 5).map((s) => s.target.line)).toEqual([4, 6, 7]);
+    const long = { ...cut, citedSpan: { line: 4, end: 30 } };
+    expect(spanRecords(long, "all20", (l) => l > 5).map((s) => s.target.line)).toEqual([6]);
+    const product = { ...cut, target: { ...cut.target, line: 5 }, spanLines: [5, 6].map((line) => ({ line, heRef2: `r${line}` })) };
+    expect(spanRecords(product, "written").map((s) => [s.target.line, s.spanLines])).toEqual([[5, undefined], [6, undefined]]);
+    expect(writtenRecords({ s: product }).map((x) => [x.s.target.line, x.s.heRef2, x.s.citedSpan])).toEqual([[5, "r5", cut.citedSpan], [6, "r6", cut.citedSpan]]);
+    expect(writtenRecords({ s: cut })).toEqual([{ s: cut }]);
     expect([2, 3, 6, 21].map(spanBucket)).toEqual(["2", "3-5", "6-20", ">20"]);
     // the database links the last line of two spans, the first of one: "last"; a link to both ends does not vote
     const db = indexDbLinks("s1:2", [link(40, "commentary", [1, 7], [2, 0]), link(41, "commentary", [1, 12], [2, 1]), link(42, "commentary", [1, 20], [2, 2]), link(43, "commentary", [1, 30, 33], [2, 3])], own);

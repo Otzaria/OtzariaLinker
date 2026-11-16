@@ -21,7 +21,7 @@ import { resolveInternal } from "./self";
 import { resolveAltDaf, type DafStructure } from "./altdaf";
 import { hebrewTokens } from "../../../matching/hebrew-tokens";
 import { keySimilarity } from "../../../matching/token-match";
-import { sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { firstRefIn, refBlockByHeRef, sefariaOwnedOf, type RefBlock, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
 /*
  * The CITATIONS engine ("מראי מקומות"): finds references to other books in ONE book's text and links
@@ -181,6 +181,8 @@ export class CitationRun {
   private lines = 0;
   /** source lines with merged notes: an anchor there would cancel the notes merge (validate.ts) */
   private readonly notesLines = new Set<number>();
+  /** per cited book with known heRefs: which lines a single-line record into it can carry (firstRef, sefaria-owned.ts) */
+  private readonly refBlocks = new Map<string, RefBlock>();
 
   constructor(
     readonly source: BookRef,
@@ -309,6 +311,7 @@ export class CitationRun {
     // the citing book's own levels, for its internal references: known once the whole book was scanned
     const depthKinds = book.key === this.source.key ? this.scanner.structure.depthKinds() : [];
     this.resolvedBooks.add(book.key);
+    if (heRefAt && !this.refBlocks.has(book.key)) this.refBlocks.set(book.key, refBlockByHeRef(heRefAt));
     for (const p of this.pendingOf(book)) {
       for (const t of p.citation.candidates) {
         if (t.book.key !== book.key) continue;
@@ -419,7 +422,9 @@ export class CitationRun {
       const res = best.res;
       // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1)
       const ranged = this.opts.ranges && res.end > res.line && !this.sefariaOwned(res.book);
-      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: res.line };
+      // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
+      const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
+      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
       // the id names the span (raw offsets in the line) even without an anchor, so a measure or a
@@ -436,6 +441,10 @@ export class CitationRun {
       counts.resolved++;
       const narrowed = res.end > res.line && !ranged ? (this.opts.ranges ? "sefaria" : "settings") : null;
       const { reasons, warnings, rules } = explain(c, best.target, res, narrowed, anchor !== undefined, allowAnchor, this.notesLines.has(c.line));
+      if (firstRef.reason) {
+        reasons.push(firstRef.reason);
+        rules.push("citations.first-ref");
+      }
       if (rival && confidence === "ambiguous") warnings.push({ code: "citations/ambiguous", text: `השם "${c.name}" מתאים גם ל${rival.target.book.title}, ושם המקום קיים גם כן` });
       suggestions.push({
         id,
