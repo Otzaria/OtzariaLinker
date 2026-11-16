@@ -172,7 +172,9 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   expect(await focused(page)).toMatchObject({ role: "tab", name: expect.stringMatching(/^קישורים \d+$/) });
   await tabTo(page, /^חדש ביאור על בראשית/);
   await page.keyboard.press("Enter");
-  await expect(page.locator(".reader.target .ln.flash")).toHaveCount(1);
+  // both ends stay marked (the flash is 1.2 s and can end before a loaded browser is asked)
+  await expect(page.locator(".reader.target .ln.picked")).toHaveCount(1);
+  await expect(page.locator(".reader.source .ln.picked")).toHaveCount(1);
 
   await tabTo(page, /^ייצוא/, { back: true, max: 120 });
   await page.keyboard.press("Enter");
