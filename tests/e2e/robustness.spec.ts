@@ -19,18 +19,43 @@ test("a database with a b-tree cycle is refused with a message, and the next fil
   expect(seen.errors).toEqual([]);
 });
 
-test("many notices at once: the newest three are shown, the rest fold into 'N more' (audit F16)", async ({ page }) => {
+test("many notices at once: the newest on one line, the rest fold into 'N more'; errors stay and say so (audit F16, V5 U18)", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
   const chooser = page.waitForEvent("filechooser");
   await page.locator(".drop-strip").getByRole("button", { name: "קבצים", exact: true }).click();
   // five broken links files: five error notices, which stay until closed
   await (await chooser).setFiles(["א", "ב", "ג", "ד", "ה"].map((t) => ({ name: `${t}_links.json`, mimeType: "application/json", buffer: Buffer.from(`[{"line_index_1": 1, "path_2": "x.txt"`) })));
-  await expect(page.locator(".notice.error")).toHaveCount(3);
-  await page.getByRole("button", { name: "עוד 2 הודעות" }).click();
-  await expect(page.locator(".notice.error")).toHaveCount(5);
-  await page.getByRole("button", { name: "רק ההודעות האחרונות" }).click();
-  await expect(page.locator(".notice.error")).toHaveCount(3);
+  const errors = page.locator(".notice.error");
+  await expect(errors).toHaveCount(1);
+  // one line: the text is cut, and opens on focus (its close button) to the whole message
+  const text = errors.locator(".notice-text");
+  const lineHeight = async () => (await text.boundingBox())!.height;
+  const closed = await lineHeight();
+  expect(closed).toBeLessThan(30);
+  await errors.getByRole("button", { name: "סגירה" }).focus();
+  await expect.poll(lineHeight).toBeGreaterThan(closed);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.mouse.move(5, 5);
+  await expect.poll(lineHeight).toBe(closed);
+  // a click on the text opens it too, and again closes it
+  await text.click();
+  await page.mouse.move(5, 5);
+  await expect.poll(lineHeight).toBeGreaterThan(closed);
+  await text.click();
+  await page.mouse.move(5, 5);
+  await expect.poll(lineHeight).toBe(closed);
+  // the folded ones are errors too, and the button says so
+  await page.getByRole("button", { name: "עוד 4 הודעות · כולן שגיאות" }).click();
+  await expect(errors).toHaveCount(5);
+  await page.getByRole("button", { name: "רק ההודעה האחרונה" }).click();
+  await expect(errors).toHaveCount(1);
+  // errors do not fade: after closing the newest, the one before it is shown
+  await page.waitForTimeout(6000);
+  await expect(errors).toHaveCount(1);
+  await errors.getByRole("button", { name: "סגירה" }).click();
+  await expect(errors).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "עוד 3 הודעות · כולן שגיאות" })).toBeVisible();
 });
 
 /*

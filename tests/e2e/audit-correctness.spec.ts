@@ -42,7 +42,7 @@ test("F2 + F9: a link to the user's own בראשית is held back for the librar
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("הקישור היחיד נעצר")).toBeVisible({ timeout: 30_000 });
   await expect(dialog.getByText("אין מה לייצא")).toHaveCount(0);
-  await expect(dialog.getByText(/ספר שלכם/)).toBeVisible();
+  await expect(dialog.getByText(/שפתחתם הוא ספר שלכם/)).toBeVisible();
   await expect(dialog.getByText(/ציון ספריא באנגלית/)).toHaveCount(0);
   await dialog.getByRole("button", { name: "ייצוא לשימוש פרטי" }).click();
   // private use: the commentary→base "source" link is written in the base's file as "commentary" (owner decision
