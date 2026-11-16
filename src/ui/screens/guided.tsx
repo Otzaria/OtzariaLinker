@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ENGINES, type EngineId } from "../../linking/automatic";
 import { GUIDED_STEPS, GUIDED_STEP_TITLES, ISSUE_ACTION_LABEL, durationText, nextStep, prevStep, stepSkipped } from "../../state/guided-flow";
 import { remainingText } from "../../state/task-progress";
@@ -6,6 +6,7 @@ import { useStore } from "../context";
 import { NextSteps } from "../dialogs/export-dialog";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon } from "../icons/icon";
+import { focusLost } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { OtzariaDbHint, SOURCE_OPTIONS } from "../workspace/add-sources";
 import { SourceBadge } from "../workspace/source-badge";
@@ -32,6 +33,13 @@ export function GuidedScreen() {
   const next = nextStep(step, f);
   const prev = prevStep(step, f);
   const at = GUIDED_STEPS.indexOf(step);
+  // a new step is announced: focus moves to its heading (on arrival only when focus had nowhere to be)
+  const heading = useRef<HTMLHeadingElement>(null);
+  const arrived = useRef(false);
+  useEffect(() => {
+    if (arrived.current || focusLost()) heading.current?.focus();
+    arrived.current = true;
+  }, [step]);
 
   return (
     <main class="guided" aria-labelledby="guided-title">
@@ -57,7 +65,7 @@ export function GuidedScreen() {
         })}
       </ol>
       <section class="guided-body" aria-label={GUIDED_STEP_TITLES[step]}>
-        <h2>{GUIDED_STEP_TITLES[step]}</h2>
+        <h2 ref={heading} tabIndex={-1} class="focus-target">{GUIDED_STEP_TITLES[step]}</h2>
         {step === "files" && <FilesStep />}
         {step === "books" && <BooksStep />}
         {step === "db" && <DbStep />}
@@ -370,7 +378,8 @@ function RunStep() {
   if (task) {
     const eta = remainingText(task.startedAt, task.done, task.total, Date.now());
     return (
-      <div class="guided-card info" role="status" aria-live="polite">
+      // announced by the app bar's live region (TaskAnnouncer), not at every step of the bar here
+      <div class="guided-card info">
         <b>{task.label}</b>
         {task.total > 0 && <progress max={task.total} value={task.done} />}
         <span>
@@ -453,6 +462,11 @@ function FinishStep() {
   const issues = g.issues.value;
   const purpose = store.exportPurpose.value;
   const done = g.downloaded.value;
+  // the download button gives way to "what now?": focus goes to what happened, which is read aloud
+  const savedNote = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (done) savedNote.current?.focus();
+  }, [!!done]);
 
   if (!b || (stale && !done)) return <p class="lede" role="status">בודק את כל הקישורים מול הספרים, לפי הכללים של {purpose === "private" ? "אוצריא" : "ספריית אוצריא"}…</p>;
   const c = b.counts;
@@ -497,7 +511,7 @@ function FinishStep() {
       </div>
       {done ? (
         <>
-          <p class="saved-note" role="status">
+          <p class="saved-note focus-target" role="status" ref={savedNote} tabIndex={-1}>
             <Icon name="fl_checkmark_circle" size={18} />
             <span>{done}</span>
           </p>

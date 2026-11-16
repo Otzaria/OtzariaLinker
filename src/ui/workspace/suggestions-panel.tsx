@@ -6,6 +6,7 @@ import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
@@ -46,9 +47,9 @@ export function SuggestionsPanel() {
           הרצה חדשה
         </button>
       </div>
-      <div class="filters" role="radiogroup" aria-label="תצוגת ההצעות">
+      <div class="filters" role="radiogroup" aria-label="תצוגת ההצעות" onKeyDown={rovingKeys}>
         {(["table", "inline", "card"] as const).map((v) => (
-          <button key={v} class="chip" role="radio" aria-checked={view === v} aria-pressed={view === v} onClick={() => (store.prefs.suggestionsView.value = v)}>
+          <button key={v} class="chip" role="radio" aria-checked={view === v} tabIndex={rovingTabIndex(view === v)} onClick={() => (store.prefs.suggestionsView.value = v)}>
             {VIEW_LABEL[v]}
           </button>
         ))}
@@ -118,10 +119,10 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   return (
     <div class="builder">
       <h3 style="margin:0">קישור אוטומטי</h3>
-      <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
-        <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
-        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), (info.noBatch || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים ותבנית מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
-        <button class="chip" role="radio" aria-checked={mode === "maxlink"} aria-pressed={mode === "maxlink"} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
+      <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר" onKeyDown={rovingKeys}>
+        <button class="chip" role="radio" aria-checked={mode === "pair"} tabIndex={rovingTabIndex(mode === "pair")} onClick={() => setMode("pair")}>שני ספרים</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} tabIndex={rovingTabIndex(mode === "batch")} onClick={() => (setMode("batch"), (info.noBatch || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים ותבנית מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "maxlink"} tabIndex={rovingTabIndex(mode === "maxlink")} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
       </div>
       {mode === "maxlink" ? <MaxLinkForm onDone={onDone} onCancel={onCancel} /> : <>
       <label class="field">
@@ -290,12 +291,14 @@ function TableView() {
         <thead>
           <tr>
             <th>
-              <input type="checkbox" aria-label="בחירת הכול בעמוד" checked={rows.length > 0 && rows.slice(0, shown).every((r) => sel.has(r.id))} onChange={(e) => setSel(e.currentTarget.checked ? new Set(rows.slice(0, shown).map((r) => r.id)) : new Set())} />
+              <label class="hit">
+                <input type="checkbox" aria-label="בחירת הכול בעמוד" checked={rows.length > 0 && rows.slice(0, shown).every((r) => sel.has(r.id))} onChange={(e) => setSel(e.currentTarget.checked ? new Set(rows.slice(0, shown).map((r) => r.id)) : new Set())} />
+              </label>
             </th>
             <th>שורה</th>
             <th>אל</th>
             <th>ודאות</th>
-            <th />
+            <th><span class="sr-only">החלטה</span></th>
           </tr>
         </thead>
         <tbody>
@@ -330,7 +333,10 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       title={s.reasons.map((r) => r.text).join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+        {/* the label is the hit area: the bare checkbox is 13px (WCAG 2.5.8 asks 24) */}
+        <label class="hit">
+          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+        </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
       <td>
@@ -340,23 +346,40 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
+        {/* the row's decision, which the eye reads from its colour */}
+        {state !== "pending" && <span class="sr-only">, {STATE_LABEL[state]}</span>}
       </td>
       <td onClick={(e) => e.stopPropagation()} class="acts">
-        <Decide s={s} state={state} />
+        <Decide s={s} state={state} what={`ההצעה לשורה ${end(v.from.line, v.from.end)}`} />
       </td>
     </tr>
   );
 }
 
-function Decide({ s, state }: { s: Suggestion; state: SuggestionState }) {
+/** Approve / reject on a table row. `what` names the suggestion: every row has the same two buttons. */
+function Decide({ s, state, what }: { s: Suggestion; state: SuggestionState; what: string }) {
   const store = useStore();
   if (state === "exists") return <span class="muted">{STATE_LABEL.exists}</span>;
+  /**
+   * A decided row leaves the "pending" filter, and its button with it: focus goes on to the same
+   * button of the next row, so the keyboard user decides the next one without finding the table again.
+   */
+  const decide = (e: MouseEvent, act: () => void) => {
+    const btn = e.currentTarget as HTMLElement;
+    const row = btn.closest("tr");
+    const next = (row?.nextElementSibling ?? row?.previousElementSibling) as HTMLElement | null;
+    act();
+    requestAnimationFrame(() => {
+      if (!row || row.isConnected || !next?.isConnected) return;
+      (next.querySelector<HTMLElement>(`[data-decide="${btn.dataset.decide}"]`) ?? next).focus();
+    });
+  };
   return (
     <span class="decide">
-      <button class="icon-btn" aria-pressed={state === "approved"} onClick={() => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id]))} title="אישור" aria-label="אישור">
+      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
         <Icon name="oz_check" size={18} />
       </button>
-      <button class="icon-btn" aria-pressed={state === "rejected"} onClick={() => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id]))} title="דחייה" aria-label="דחייה">
+      <button class="icon-btn" data-decide="reject" aria-pressed={state === "rejected"} onClick={(e) => decide(e, () => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id])))} title="דחייה" aria-label={`דחיית ${what}`}>
         <Icon name="oz_cross" size={18} />
       </button>
     </span>
@@ -431,7 +454,7 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
           <summary>מועמדים חלופיים ({s.alternatives.length})</summary>
           <ul class="link-list" style="padding:6px 0 0">
             {s.alternatives.map((a, i) => (
-              <li key={i} class="link-item" onClick={() => store.reveal("target", a.target.book.key, a.target.line)}>
+              <li key={i} class="link-item" {...activatable(() => store.reveal("target", a.target.book.key, a.target.line))}>
                 <span>שורה {a.target.line + 1}{a.target.end !== undefined ? `–${a.target.end + 1}` : ""} · ציון {Math.round(a.score * 100)}</span>
                 <span class="muted" style="grid-column:1/-1">{a.reasons.map((r) => r.text).join(" · ")}</span>
               </li>

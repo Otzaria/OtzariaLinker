@@ -7,6 +7,7 @@ import { HelpDialog } from "./dialogs/help-dialog";
 import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
 import { fromDataTransfer } from "./files";
+import { installFocusRescue } from "./keyboard";
 import { GuidedScreen } from "./screens/guided";
 import { Home, StartTaskDialog } from "./screens/home";
 import { AppBar } from "./shell/app-bar";
@@ -41,7 +42,9 @@ export function App() {
     };
     addEventListener("keydown", onKey);
     addEventListener("beforeunload", onUnload);
-    return () => (removeEventListener("keydown", onKey), removeEventListener("beforeunload", onUnload));
+    // a control that leaves the page takes focus to its nearest remaining place, not to the top (keyboard.ts)
+    const unRescue = installFocusRescue(document.body);
+    return () => (removeEventListener("keydown", onKey), removeEventListener("beforeunload", onUnload), unRescue());
   }, [store]);
 
   // files dropped anywhere (the home screen's strip handles its own drops)

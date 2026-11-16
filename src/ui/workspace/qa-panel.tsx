@@ -3,6 +3,7 @@ import { problemText } from "../../core/links/validate";
 import { QA_CATEGORIES, qaAction, redundantDuplicates, suggestedFix, type QaCategory } from "../../linking/qa";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable } from "../keyboard";
 
 /*
  * Quality check (stage 16): every project link checked against Otzaria's rules, grouped by what
@@ -102,7 +103,7 @@ export function QaPanel() {
       ) : (
         <ul class="problems" style="padding:0 6px 8px">
           {rows.slice(0, shown).map((i, k) => (
-            <li key={`${i.link.id}:${i.problem.code}:${k}`} class={i.problem.severity} style="cursor:pointer" onClick={() => store.revealLink(i.link)}>
+            <li key={`${i.link.id}:${i.problem.code}:${k}`} class={i.problem.severity} style="cursor:pointer" {...activatable(() => store.revealLink(i.link))} title="הצגת שני צדי הקישור">
               <Icon name={i.problem.severity === "error" ? "fl_error_circle" : i.problem.severity === "warning" ? "fl_warning" : "fl_info"} size={16} />
               <span class="grow">
                 <b>

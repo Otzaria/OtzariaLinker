@@ -13,6 +13,7 @@ import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
+import { plainText } from "./plain-text";
 import { ReopenSources } from "./reopen-sources";
 
 /*
@@ -239,15 +240,26 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
     <>
       <ReaderTools side={side} bookKey={bookKey} count={count} />
       {findOpen && <FindBar side={side} bookKey={bookKey} focusSeq={findSeq} onClose={() => scroller.current?.focus()} />}
-      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} aria-label="שורות הספר">
+      {/* the arrows pick lines here (keyboard use); what was picked is said aloud, the eye sees the highlight */}
+      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ספר ה${SIDE_LABEL[side]} (החצים בוחרים שורה)`}>
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
             <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} />
           ))}
         </div>
       </div>
+      <div class="sr-only" role="status">
+        {pickHere ? pickedLineText(pickHere, store.lines.peek(bookKey, pickHere.line)?.anchorText) : ""}
+      </div>
     </>
   );
+}
+
+/** "שורה 12: בראשית ברא…" — the picked line (or range) for the screen reader's live region. */
+function pickedLineText(pick: { line: number; end?: number; anchor?: { text: string } }, html: string | undefined): string {
+  const where = pick.end !== undefined && pick.end > pick.line ? `שורות ${pick.line + 1}–${pick.end + 1}` : `שורה ${pick.line + 1}`;
+  const text = pick.anchor ? `המילים "${pick.anchor.text}"` : html ? plainText(html).slice(0, 120) : "";
+  return `נבחרה ${where}${text ? `: ${text}` : ""}`;
 }
 
 interface Marks {

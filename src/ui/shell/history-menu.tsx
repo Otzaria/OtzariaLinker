@@ -30,6 +30,7 @@ export function HistoryMenu() {
                   key={e.position}
                   class={`item${e.applied ? "" : " undone"}`}
                   role="menuitemradio"
+                  tabIndex={-1}
                   aria-checked={current}
                   title={current ? "המצב הנוכחי" : e.applied ? "ביטול הפעולות שאחרי זו" : "ביצוע חוזר עד לפעולה זו"}
                   onClick={() => (store.goToHistory(e.position), close())}
@@ -46,7 +47,7 @@ export function HistoryMenu() {
               );
             })}
             {entries.length > 0 && (
-              <button class={`item${at === 0 ? "" : " start"}`} role="menuitemradio" aria-checked={at === 0} onClick={() => (store.goToHistory(0), close())}>
+              <button class={`item${at === 0 ? "" : " start"}`} role="menuitemradio" tabIndex={-1} aria-checked={at === 0} onClick={() => (store.goToHistory(0), close())}>
                 <span class="grow">
                   <span class="history-label">לפני כל הפעולות שברשימה</span>
                   <span class="history-meta">ביטול של כולן{at === 0 && " · המצב הנוכחי"}</span>

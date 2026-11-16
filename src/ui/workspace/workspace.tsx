@@ -3,6 +3,7 @@ import { useRef } from "preact/hooks";
 import type { Layout, PanelId } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { rovingKeys, rovingTabIndex, useFocusOnMount } from "../keyboard";
 import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
@@ -24,6 +25,8 @@ export function Workspace() {
   const visible = layout.order.filter((p) => !layout.hidden.includes(p));
   const grid = useRef<HTMLDivElement>(null);
   const columns = visible.map((p) => `minmax(160px, ${layout.sizes[p]}fr)`).join(" 8px ");
+  // arriving from the home screen or the guided flow, focus starts at the workspace, not at the top of the page
+  useFocusOnMount(grid);
 
   const onPanelDrop = (target: PanelId, e: DragEvent) => {
     const from = e.dataTransfer?.getData(PANEL_DRAG) as PanelId | undefined;
@@ -48,7 +51,7 @@ export function Workspace() {
   });
 
   return (
-    <main class="workspace" ref={grid} style={{ gridTemplateColumns: columns }}>
+    <main class="workspace focus-target" ref={grid} tabIndex={-1} aria-label="סביבת העבודה" style={{ gridTemplateColumns: columns }}>
       {cells}
     </main>
   );
@@ -118,38 +121,32 @@ function SidePanel() {
   const sourcesHidden = layout.hidden.includes("sources") || !layout.order.includes("sources");
   const linkCount = store.allLinks.value.length;
   const current = tab === "books" && !sourcesHidden ? "builder" : tab;
+  const tabButton = (id: typeof current, icon: Parameters<typeof Icon>[0]["name"], label: ComponentChildren) => (
+    <button role="tab" id={`side-tab-${id}`} aria-selected={current === id} aria-controls="side-tabpanel" tabIndex={rovingTabIndex(current === id)} onClick={() => (store.sideTab.value = id)}>
+      <Icon name={icon} size={16} />
+      {label}
+    </button>
+  );
   return (
     <section class="panel side-panel" aria-label="בונה וקישורים">
-      <div class="tabs" role="tablist">
+      <div class="tabs">
         <span class="grip" style="align-self:center;cursor:grab" draggable title="גררו כדי להזיז את הפאנל">
           <Icon name="fl_re_order_dots_vertical" size={16} />
         </span>
-        <button role="tab" aria-selected={current === "builder"} onClick={() => (store.sideTab.value = "builder")}>
-          <Icon name="oz_link_add" size={16} />
-          בונה
-        </button>
-        <button role="tab" aria-selected={current === "links"} onClick={() => (store.sideTab.value = "links")}>
-          <Icon name="oz_links" size={16} />
-          קישורים <span class="count">{linkCount.toLocaleString("he")}</span>
-        </button>
-        <button role="tab" aria-selected={current === "suggestions"} onClick={() => (store.sideTab.value = "suggestions")}>
-          <Icon name="oz_link_search" size={16} />
-          הצעות {store.suggestions.run.value && <span class="count">{store.suggestions.counts.value.pending.toLocaleString("he")}</span>}
-        </button>
-        <button role="tab" aria-selected={current === "qa"} onClick={() => (store.sideTab.value = "qa")}>
-          <Icon name="oz_link_check" size={16} />
-          בדיקה {store.quality.report.value && store.quality.report.value.bySeverity.error > 0 && <span class="count">{store.quality.report.value.bySeverity.error.toLocaleString("he")}</span>}
-        </button>
+        {/* only tabs inside the tab list (the hide button is not a tab); arrows move between them */}
+        <div role="tablist" aria-label="החלונית" onKeyDown={rovingKeys}>
+          {tabButton("builder", "oz_link_add", "בונה")}
+          {tabButton("links", "oz_links", <>קישורים <span class="count">{linkCount.toLocaleString("he")}</span></>)}
+          {tabButton("suggestions", "oz_link_search", <>הצעות {store.suggestions.run.value && <span class="count">{store.suggestions.counts.value.pending.toLocaleString("he")}</span>}</>)}
+          {tabButton("qa", "oz_link_check", <>בדיקה {store.quality.report.value && store.quality.report.value.bySeverity.error > 0 && <span class="count">{store.quality.report.value.bySeverity.error.toLocaleString("he")}</span>}</>)}
+          {sourcesHidden && tabButton("books", "oz_bookshelf", "ספרים")}
+        </div>
         <span class="grow" />
         <HideButton id="side" label="החלונית" />
-        {sourcesHidden && (
-          <button role="tab" aria-selected={current === "books"} onClick={() => (store.sideTab.value = "books")}>
-            <Icon name="oz_bookshelf" size={16} />
-            ספרים
-          </button>
-        )}
       </div>
-      <div class="panel-body">{current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : current === "suggestions" ? <SuggestionsPanel /> : current === "qa" ? <QaPanel /> : <SourcesBody />}</div>
+      <div class="panel-body" role="tabpanel" id="side-tabpanel" aria-labelledby={`side-tab-${current}`}>
+        {current === "builder" ? <Builder /> : current === "links" ? <LinksPanel /> : current === "suggestions" ? <SuggestionsPanel /> : current === "qa" ? <QaPanel /> : <SourcesBody />}
+      </div>
     </section>
   );
 }

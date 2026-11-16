@@ -76,10 +76,10 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
             </span>
           )}
         </button>
-        <button class="side-btn" aria-pressed={store.view.source.value === b.key} onClick={() => show("source", b.key)} title="להציג כספר המקור">
+        <button class="side-btn" aria-pressed={store.view.source.value === b.key} onClick={() => show("source", b.key)} title="להציג כספר המקור" aria-label={`מקור: ${b.title}`}>
           מקור
         </button>
-        <button class="side-btn" aria-pressed={store.view.target.value === b.key} onClick={() => show("target", b.key)} title="להציג כספר היעד">
+        <button class="side-btn" aria-pressed={store.view.target.value === b.key} onClick={() => show("target", b.key)} title="להציג כספר היעד" aria-label={`יעד: ${b.title}`}>
           יעד
         </button>
       </li>

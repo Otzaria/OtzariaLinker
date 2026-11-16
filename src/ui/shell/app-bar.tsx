@@ -1,9 +1,10 @@
+import { useEffect, useState } from "preact/hooks";
 import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import { remainingText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
-import { Menu, MenuItem } from "./menu";
+import { Menu, MenuGroup, MenuItem } from "./menu";
 
 const PRESET_LABELS: Record<LayoutPreset, string> = { four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: "מקור מעל יעד" };
 const PANEL_LABELS: Record<PanelId, string> = { sources: "מקורות וספרים", source: "ספר המקור", target: "ספר היעד", side: "החלונית (בונה, קישורים, הצעות)" };
@@ -38,18 +39,22 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           <Menu icon="fl_layout_column_four" label="פריסת סביבת העבודה">
             {(close) => (
               <>
-                <div class="label">תבניות פריסה</div>
-                {(Object.keys(PRESETS) as LayoutPreset[]).map((p) => (
-                  <MenuItem key={p} checked={prefs.layout.value.preset === p} onSelect={() => ((prefs.layout.value = structuredClone(PRESETS[p])), close())}>
-                    {PRESET_LABELS[p]}
-                  </MenuItem>
-                ))}
-                {prefs.layout.value.hidden.length > 0 && <div class="label">פאנלים מוסתרים</div>}
-                {prefs.layout.value.hidden.map((p) => (
-                  <MenuItem key={p} icon="fl_add" onSelect={() => ((prefs.layout.value = { ...prefs.layout.value, hidden: prefs.layout.value.hidden.filter((x) => x !== p), order: prefs.layout.value.order.includes(p) ? prefs.layout.value.order : [...prefs.layout.value.order, p] }), close())}>
-                    הצגת {PANEL_LABELS[p]}
-                  </MenuItem>
-                ))}
+                <MenuGroup label="תבניות פריסה">
+                  {(Object.keys(PRESETS) as LayoutPreset[]).map((p) => (
+                    <MenuItem key={p} checked={prefs.layout.value.preset === p} onSelect={() => ((prefs.layout.value = structuredClone(PRESETS[p])), close())}>
+                      {PRESET_LABELS[p]}
+                    </MenuItem>
+                  ))}
+                </MenuGroup>
+                {prefs.layout.value.hidden.length > 0 && (
+                  <MenuGroup label="פאנלים מוסתרים">
+                    {prefs.layout.value.hidden.map((p) => (
+                      <MenuItem key={p} icon="fl_add" onSelect={() => ((prefs.layout.value = { ...prefs.layout.value, hidden: prefs.layout.value.hidden.filter((x) => x !== p), order: prefs.layout.value.order.includes(p) ? prefs.layout.value.order : [...prefs.layout.value.order, p] }), close())}>
+                        הצגת {PANEL_LABELS[p]}
+                      </MenuItem>
+                    ))}
+                  </MenuGroup>
+                )}
                 <div class="label">גוררים כותרת של פאנל כדי להחליף מקומות, וגבול בין פאנלים כדי לשנות רוחב.</div>
               </>
             )}
@@ -63,8 +68,9 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           <span>חזרה להדרכה</span>
         </button>
       )}
+      <TaskAnnouncer />
       {task && (
-        <div class="task" role="status">
+        <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
           {task.total > 0 && <progress max={task.total} value={task.done} />}
           {/* the task's own count and the time left, once an estimate means something (audit F21) */}
@@ -91,21 +97,25 @@ export function AppBar({ onExport }: { onExport: () => void }) {
             <MenuItem class="narrow-only" checked={prefs.advanced.value} onSelect={() => ((prefs.advanced.value = !prefs.advanced.value), close())}>
               מצב מתקדם
             </MenuItem>
-            <div class="label">ערכת צבעים</div>
-            {(["system", "light", "dark"] as ThemeSetting[]).map((t) => (
-              <MenuItem key={t} icon={t === "dark" ? "fl_weather_moon" : "fl_weather_sunny"} checked={prefs.theme.value === t} onSelect={() => ((prefs.theme.value = t), close())}>
-                {THEME_LABELS[t]}
-              </MenuItem>
-            ))}
-            <div class="label">גודל טקסט הספרים</div>
-            <div style="display:flex;gap:6px;padding:4px 10px;align-items:center">
-              <button class="btn outlined" onClick={() => (prefs.fontScale.value = Math.max(0.7, +(prefs.fontScale.value - 0.1).toFixed(2)))} aria-label="הקטנה">א−</button>
-              <span class="grow" style="text-align:center">{Math.round(prefs.fontScale.value * 100)}%</span>
-              <button class="btn outlined" onClick={() => (prefs.fontScale.value = Math.min(2, +(prefs.fontScale.value + 0.1).toFixed(2)))} aria-label="הגדלה">א+</button>
-            </div>
-            <div class="label">יצירת קישור</div>
-            <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
-            <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
+            <MenuGroup label="ערכת צבעים">
+              {(["system", "light", "dark"] as ThemeSetting[]).map((t) => (
+                <MenuItem key={t} icon={t === "dark" ? "fl_weather_moon" : "fl_weather_sunny"} checked={prefs.theme.value === t} onSelect={() => ((prefs.theme.value = t), close())}>
+                  {THEME_LABELS[t]}
+                </MenuItem>
+              ))}
+            </MenuGroup>
+            <MenuGroup label="גודל טקסט הספרים">
+              {/* the size is part of each button's name: the screen reader says it after every press */}
+              <div style="display:flex;gap:6px;padding:4px 10px;align-items:center">
+                <button class="btn outlined" role="menuitem" tabIndex={-1} onClick={() => (prefs.fontScale.value = Math.max(0.7, +(prefs.fontScale.value - 0.1).toFixed(2)))} aria-label={`הקטנה (עכשיו ${Math.round(prefs.fontScale.value * 100)}%)`}>א−</button>
+                <span class="grow" style="text-align:center" aria-hidden="true">{Math.round(prefs.fontScale.value * 100)}%</span>
+                <button class="btn outlined" role="menuitem" tabIndex={-1} onClick={() => (prefs.fontScale.value = Math.min(2, +(prefs.fontScale.value + 0.1).toFixed(2)))} aria-label={`הגדלה (עכשיו ${Math.round(prefs.fontScale.value * 100)}%)`}>א+</button>
+              </div>
+            </MenuGroup>
+            <MenuGroup label="יצירת קישור">
+              <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
+              <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
+            </MenuGroup>
             <MenuItem icon="fl_arrow_download" onSelect={() => (store.saveDiagnostics(), close())}>שמירת יומן אבחון (לצירוף לדיווח על תקלה)</MenuItem>
             <div class="label" dir="ltr" style="text-align:start">OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}</div>
           </>
@@ -126,5 +136,25 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
     </header>
+  );
+}
+
+/**
+ * What a screen reader hears about the running task (WCAG 4.1.3): its name when it starts, then every
+ * quarter of the way. A live region that is always on the page — one that appears together with its
+ * text is often not read at all — and not the progress bar itself, which would be read at every step.
+ * Rendered once in the app bar, and again inside a modal dialog that runs a task (the page behind a
+ * modal is inert, and its live regions with it).
+ */
+export function TaskAnnouncer() {
+  const store = useStore();
+  const task = store.task.value;
+  const quarter = task && task.total > 0 ? Math.min(3, Math.floor((task.done / task.total) * 4)) : 0;
+  const [text, setText] = useState("");
+  useEffect(() => setText(!task ? "" : quarter > 0 ? `${task.label}: ${quarter * 25}%` : task.label), [task?.label, quarter, !task]);
+  return (
+    <div class="sr-only" role="status" data-live="task">
+      {text}
+    </div>
   );
 }

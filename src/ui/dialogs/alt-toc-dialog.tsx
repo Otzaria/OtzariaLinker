@@ -3,6 +3,7 @@ import { entriesFromHeadings, numberInGematria } from "../../core/alt-toc/edit";
 import { validateAltToc, type AltTocEntry, type AltTocOrigin, type AltTocStructure, type LibraryAltTocStructure } from "../../core/alt-toc/model";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable } from "../keyboard";
 
 /*
  * The alt_toc editor (version 3's "מבני כותרות אלטרנטיביים", legacy/OtzariaLinker-v3.html
@@ -257,7 +258,7 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
               </summary>
               <ul class="problems" style="margin-top:8px">
                 {problems.slice(0, 100).map((p, i) => (
-                  <li key={i} class={p.severity} style={p.structure !== undefined ? "cursor:pointer" : ""} onClick={() => p.structure !== undefined && (setCur(p.structure), p.entry !== undefined && setShown(Math.max(shown, p.entry + 1)))}>
+                  <li key={i} class={p.severity} style={p.structure !== undefined ? "cursor:pointer" : ""} {...(p.structure !== undefined && activatable(() => (setCur(p.structure!), p.entry !== undefined && setShown(Math.max(shown, p.entry + 1)))))}>
                     {p.message}
                   </li>
                 ))}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { describeMapping, mappingProblems, ROWID, type ColumnPreview, type DbMapping, type PendingDb, type TablePreview } from "../../core/db-mapping";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { TaskAnnouncer } from "../shell/app-bar";
 import "./db-mapping-dialog.css";
 
 /*
@@ -54,6 +55,7 @@ function Wizard({ pending }: { pending: PendingDb }) {
   return (
     <dialog ref={ref} class="db-map" onClose={() => store.pendingDbs.value.some((x) => x.token === pending.token) && store.dismissMapping(pending.token)} aria-labelledby="dbmap-title">
       <div class="dlg">
+        <TaskAnnouncer />
         <header>
           <Icon name="fl_database" size={24} />
           <h2 id="dbmap-title">איך לקרוא את המסד "{pending.label}"?</h2>
@@ -154,7 +156,7 @@ function Wizard({ pending }: { pending: PendingDb }) {
         </div>
         <footer>
           {busy && task ? (
-            <div class="task grow" role="status">
+            <div class="task grow">
               <span>{task.label}</span>
               {task.total > 0 && <progress max={task.total} value={task.done} />}
               <button class="btn text" onClick={task.cancel}>ביטול</button>
