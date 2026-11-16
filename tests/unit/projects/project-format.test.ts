@@ -37,6 +37,14 @@ describe("project file", () => {
     expect(parseProject(withStatus("__proto__"), bind).links[0]).not.toHaveProperty("restoreStatus");
   });
 
+  it("keeps the files a merged link was found in (Link.origins), and only a list of strings (V5 P1-9)", () => {
+    const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ ...b, key: b.title });
+    const withOrigins = (origins: unknown) => serializeProject({ sources: [], links: [{ ...links[0]!, origins } as Link], rejectedSuggestions: [], view: { source: null, target: null } }, "2.0.0");
+    expect(parseProject(withOrigins(["a/x_links.json", "b/x_links.json"]), bind).links[0]!.origins).toEqual(["a/x_links.json", "b/x_links.json"]);
+    expect(parseProject(withOrigins([1, "a"]), bind).links[0]).not.toHaveProperty("origins");
+    expect(parseProject(withOrigins("a"), bind).links[0]).not.toHaveProperty("origins");
+  });
+
   it("refuses what is not a project, and a newer version, with clear codes", () => {
     const bind = (b: { title: string }) => ({ key: b.title, title: b.title, origin: "unknown" as const });
     expect(() => parseProject("{", bind)).toThrow(expect.objectContaining({ code: "project/not-json" }));
