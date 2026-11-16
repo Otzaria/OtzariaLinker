@@ -57,5 +57,8 @@ test("a reopened project lists its sources by name and each one's button opens i
 
   await panel.getByRole("button", { name: "הסתרת רשימת המקורות לפתוח מחדש" }).click();
   await expect(page.getByRole("region", { name: "מקורות לפתוח מחדש" })).toHaveCount(0);
+  // hidden, not gone: one line brings the list back
+  await page.locator(".sources-panel").getByRole("button", { name: "מקורות לפתוח מחדש (1)" }).click();
+  await expect(panel).toContainText("ביאור על בראשית.txt");
   expect(seen.errors).toEqual([]);
 });

@@ -36,3 +36,4 @@
 .ml-job-counts { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .ml-job-counts li { padding: 1px 10px; border-radius: var(--radius-full); background: var(--surface-container); font-variant-numeric: tabular-nums; }
 .ml-job-counts li.st-failed { background: var(--error-container); color: var(--on-error-container); }
+.ml-job.details-only { border: 0; padding: 0; margin: 6px 0 0; }

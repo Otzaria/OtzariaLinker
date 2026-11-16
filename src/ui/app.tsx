@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { fitLayoutToWidth } from "../state/preferences";
 import { useStore } from "./context";
 import { AltTocDialog } from "./dialogs/alt-toc-dialog";
 import { CompareDialog } from "./dialogs/compare-dialog";
@@ -46,6 +47,17 @@ export function App() {
     // a control that leaves the page takes focus to its nearest remaining place, not to the top (keyboard.ts)
     const unRescue = installFocusRescue(document.body);
     return () => (removeEventListener("keydown", onKey), removeEventListener("beforeunload", onUnload), unRescue());
+  }, [store]);
+
+  // a window made narrower than 1200px during work switches to "two texts and a side panel" by itself,
+  // unless the user chose a layout in this session; wide again, the layout it replaced comes back
+  useEffect(() => {
+    const onResize = () => {
+      if (fitLayoutToWidth(store.prefs, innerWidth) === "narrowed" && store.screen.peek() === "workspace")
+        store.notify("info", 'החלון צר, ולכן הפריסה עברה ל"שני טקסטים וחלונית צד": הספרים בלשונית "ספרים". בחלון רחב הפריסה הקודמת חוזרת; פריסה אחרת: בתפריט הפריסה.');
+    };
+    addEventListener("resize", onResize);
+    return () => removeEventListener("resize", onResize);
   }, [store]);
 
   // files dropped anywhere (the home screen's strip handles its own drops)

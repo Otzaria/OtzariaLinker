@@ -12,7 +12,7 @@ const items = (menu: HTMLElement | null): HTMLElement[] => [...(menu?.querySelec
  * not Tab stops); Escape closes and returns focus to the button; Tab closes and moves on from the
  * button; a click outside closes.
  */
-export function Menu({ icon, label, children }: { icon: IconName; label: string; children: (close: () => void) => ComponentChildren }) {
+export function Menu({ icon, label, badge, badgeLabel, children }: { icon: IconName; label: string; badge?: number; badgeLabel?: string; children: (close: () => void) => ComponentChildren }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -38,8 +38,10 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
   }, [open]);
   return (
     <div class="menu" ref={ref}>
-      <button ref={trigger} class="icon-btn" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} class="icon-btn" title={badge ? `${label} (${badgeLabel})` : label} aria-label={badge ? `${label} (${badgeLabel})` : label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name={icon} />
+        {/* something the menu brings back (a hidden panel): a count on the button, so it is not forgotten */}
+        {badge ? <span class="menu-badge" aria-hidden="true">{badge.toLocaleString("he")}</span> : null}
       </button>
       {open && (
         <div
