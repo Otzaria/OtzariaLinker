@@ -121,13 +121,17 @@ interface Raw {
   /** the focus end and the other end of this suggestion */
   fEnd: LinkSide;
   oEnd: LinkSide;
+  /** the place the other end stands for: oEnd, or the whole span a collapsed range kept (`citedSpan`, sefaria-owned.ts withoutRange) */
+  oSpan: LinkSide;
   fAnchor: RawAnchor | undefined;
 }
 
 function toRaw(it: MergeItem): Raw {
   const s = it.suggestion;
   const focusIsTarget = s.target.book.key === it.focus && s.source.book.key !== it.focus;
-  return { s, focus: it.focus, fEnd: focusIsTarget ? s.target : s.source, oEnd: focusIsTarget ? s.source : s.target, fAnchor: focusIsTarget ? undefined : s.anchor };
+  const oEnd = focusIsTarget ? s.source : s.target;
+  const oSpan = s.citedSpan && oEnd === s.target ? { ...oEnd, line: s.citedSpan.line, end: s.citedSpan.end } : oEnd;
+  return { s, focus: it.focus, fEnd: focusIsTarget ? s.target : s.source, oEnd, oSpan, fAnchor: focusIsTarget ? undefined : s.anchor };
 }
 
 /** The raw items behind a list that may already be merged. */
@@ -200,9 +204,17 @@ const bookPair = (g: Group) => `${g.rep.fEnd.book.key}>${g.rep.oEnd.book.key}`;
 /** at least one member is "possible" or better: ambiguous and "none" give no support */
 const strong = (g: Group) => g.exact.some((x) => rank(x.s.confidence) <= POSSIBLE);
 
-/** a's other end strictly contains b's (same book is implied by the shared position) */
+/**
+ * The other end as grouping sees it: a structural engine's range collapsed on a Sefaria side is still its
+ * span, as the range was — a heading's section starting on a ד"ה line is CONTAINING it (consistent, at
+ * most "high"), not the same link (an agreement that would raise it to "certain"). A citation keeps its
+ * written line: it joins a structural suggestion on the very same two lines, as before.
+ */
+const keyEnd = (r: Raw) => (isSingleBook(r.s.engine) ? r.oEnd : r.oSpan);
+
+/** a's other end strictly contains b's (same book is implied by the shared position); a range collapsed on a Sefaria side counts as its whole span */
 const contains = (a: Group, b: Group) => {
-  const [x, y] = [a.rep.oEnd, b.rep.oEnd];
+  const [x, y] = [a.rep.oSpan, b.rep.oSpan];
   return x.line <= y.line && endOf(x) >= endOf(y) && (x.line !== y.line || endOf(x) !== endOf(y));
 };
 
@@ -220,8 +232,8 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   // 2. the same two line positions → one group; one engine with several suggestions there → split by anchor
   const byPair = new Map<string, Raw[]>();
   for (const r of raws) {
-    const a = endKey(r.s.source);
-    const b = endKey(r.s.target);
+    const a = endKey(r.s.source === r.oEnd ? keyEnd(r) : r.s.source);
+    const b = endKey(r.s.target === r.oEnd ? keyEnd(r) : r.s.target);
     const k = a < b ? `${a}|${b}` : `${b}|${a}`;
     const list = byPair.get(k);
     if (list) list.push(r);
@@ -309,7 +321,7 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
       if (!known) continue;
       const v = versus.get(bookPair(g)) ?? { judged: 0, contradicted: 0 };
       v.judged++;
-      if (!known.some((l) => l >= g.rep.oEnd.line && l <= endOf(g.rep.oEnd))) v.contradicted++;
+      if (!known.some((l) => l >= g.rep.oSpan.line && l <= endOf(g.rep.oSpan))) v.contradicted++;
       versus.set(bookPair(g), v);
     }
   const contradicted = new Map([...versus].filter(([, v]) => v.judged >= REFERENCE_DISAGREEMENT.minJudged && v.contradicted / v.judged >= REFERENCE_DISAGREEMENT.ratio));

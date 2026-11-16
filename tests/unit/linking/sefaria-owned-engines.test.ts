@@ -96,12 +96,15 @@ describe("one rule for 'Sefaria book' in the engines and the export (audit F1)",
     expect(r.suggestions.length).toBe(1);
     expect(r.suggestions[0]!.target.line).toBe(2);
     expect(r.suggestions[0]!.target.end).toBeUndefined();
+    // the chapter stays as citedSpan (withoutRange): the merge reads it, the export never writes it
+    expect(r.suggestions[0]!.citedSpan).toEqual({ line: 2, end: 5 });
     expect(r.suggestions[0]!.reasons.map((x) => x.code)).toContain("heading/range-sefaria");
     expect(rangeErrors(r.suggestions, owned)).toEqual([]);
     expect(r.suggestions.flatMap((s) => s.alternatives).every((c) => c.target.end === undefined)).toBe(true);
 
-    // a base the library does not treat as Sefaria's keeps its range
+    // a base the library does not treat as Sefaria's keeps its range, and has no citedSpan
     expect(runEngine("headings", onChapter, base, { sefariaOwned: [] }).suggestions[0]!.target.end).toBe(5);
+    expect(runEngine("headings", onChapter, base, { sefariaOwned: [] }).suggestions[0]!.citedSpan).toBeUndefined();
   });
 
   it("citations: no anchor and no range into a book the library treats as Sefaria's", () => {

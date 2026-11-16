@@ -1,4 +1,4 @@
-import type { BookRef } from "./model";
+import type { BookRef, LinkSide } from "./model";
 
 /*
  * "Does the library's weekly sync treat this book as a Sefaria book" — the question behind every
@@ -21,6 +21,17 @@ export const sefariaByOrigin: SefariaOwned = (book) => book.origin === "sefaria"
 /** The engine option that carries the decision into the worker: keys of the open books it holds for. */
 export interface SefariaOwnedOption {
   readonly sefariaOwned?: readonly string[];
+}
+
+/**
+ * A side that may not get a range (a Sefaria side, F1): its first line as the link, and the whole place
+ * it stands for as the suggestion's `citedSpan` (types.ts) — the one shape every engine collapses to.
+ * The span is not written; the merge reads it, so that a ד"ה line inside a heading's section is still
+ * INSIDE it (merge.ts `contains`: consistent, as with the range) instead of conflicting with its first
+ * line, and the real-DB measure sees what the single line stands for.
+ */
+export function withoutRange(side: LinkSide): { target: LinkSide; citedSpan?: { line: number; end: number } } {
+  return side.end !== undefined && side.end > side.line ? { target: { book: side.book, line: side.line }, citedSpan: { line: side.line, end: side.end } } : { target: side };
 }
 
 /** The library's list of Sefaria titles inside a library checkout: a folder holding it is the library (sefaria-titles.ts). */

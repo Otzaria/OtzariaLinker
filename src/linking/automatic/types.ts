@@ -48,6 +48,9 @@ export interface Suggestion {
    * The whole place the mention names, when `target` is only its first line (a cited unit in a Sefaria
    * book: the weekly sync remaps only the start, so no range is stored — B1; or ranges are off in the
    * settings). Shown to the reviewer; the real-DB measure counts a stored link anywhere in it as a match.
+   * Every engine that collapses a range on a Sefaria side keeps it here (core/links/sefaria-owned.ts
+   * withoutRange): headings (a section), dibur-hamatchil (a quote over several lines), pattern. It is
+   * never written; the merge reads it so that a precise line inside the span agrees with it (merge.ts).
    */
   readonly citedSpan?: { readonly line: number; readonly end: number };
   /** canonical lower-case connection type, e.g. "commentary" */

@@ -1,5 +1,5 @@
 import { parseConnectionType } from "../../../core/links/connection-type";
-import { sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import { storedForm } from "../../../core/links/stored-form";
 import { anchorLabelFromHeRef, withAnchorLabel } from "../../../core/text/anchor-label";
@@ -188,6 +188,8 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       continue;
     }
     perTarget.set(p.target.line, (perTarget.get(p.target.line) ?? 0) + 1);
+    // on a Sefaria target: the first line, with the whole place kept as citedSpan (withoutRange)
+    const { target: to, citedSpan } = ranges ? { target: p.target, citedSpan: undefined } : withoutRange(p.target);
     // the number as a label only when the link reads like a note ("אות יב"); a reference keeps its plain heRef
     const label = mode === "chapter-line" ? toGematria(m.num) : null;
     const heRef2 = withAnchorLabel(heRefOf(p.target.line), label);
@@ -200,7 +202,8 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       engine: ENGINE,
       source: { book: source.book, line: m.line },
       ...(anchor ? { anchor } : {}),
-      target: ranges || p.target.end === undefined ? p.target : { book: p.target.book, line: p.target.line },
+      target: to,
+      ...(citedSpan && { citedSpan }),
       declaredType,
       heRef2,
       score: p.score,

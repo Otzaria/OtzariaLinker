@@ -101,6 +101,7 @@ describe("a range on a Sefaria base: one line, where the ד\"ה starts", () => {
     expect(baseSide(run(comm, RAKIA).suggestions[0]!)).toMatchObject({ line: 0, end: 2 });
     const s = run(comm, RAKIA, sefaria).suggestions[0]!;
     expect(baseSide(s)).toEqual({ book: BASE, line: 0 });
+    expect(s.citedSpan).toEqual({ line: 0, end: 2 }); // the quote's span, for the merge (withoutRange)
     expect(s.rules).toEqual(expect.arrayContaining(["dh/continuation", "dh/range-sefaria"]));
     expect(spanReason(s)).toContain("בשורות 1–3");
     expect(spanReason(s)).toContain("לשורה 1, שבה מתחיל הדיבור המתחיל");
@@ -122,7 +123,9 @@ describe("a range on a Sefaria base: one line, where the ד\"ה starts", () => {
   });
 
   it("a one-line match on a Sefaria base, and any match on another base, get no such reason", () => {
-    expect(run(["<b>ויעש אלהים את הרקיע.</b> פירוש"], RAKIA, sefaria).suggestions[0]!.rules).not.toContain("dh/range-sefaria");
+    const one = run(["<b>ויעש אלהים את הרקיע.</b> פירוש"], RAKIA, sefaria).suggestions[0]!;
+    expect(one.rules).not.toContain("dh/range-sefaria");
+    expect(one.citedSpan).toBeUndefined();
     expect(run(["ויאמר אלהים וכו׳ ויקרא אלהים לרקיע שמים. פירוש"], RAKIA).suggestions[0]!.rules).not.toContain("dh/range-sefaria");
   });
 });
