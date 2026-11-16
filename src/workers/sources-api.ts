@@ -17,6 +17,8 @@ export interface SourcesApi {
   [op: string]: (...args: never[]) => unknown;
   /** the self-check (self-check.ts): what the lazy SQLite reader and the zstd decoder read from tiny probes */
   ping(): { sqlite: string; zstd: string };
+  /** the host's prefix for the ids of the sources this worker opens (the worker's first call: app/worker-host.ts) */
+  init(idPrefix: string): void;
   open(files: InputFile[]): OpenResult;
   /** opens a database from OpenResult.needsMapping through the user's mapping (may scan: progress, cancel) */
   openMapped(token: string, mapping: DbMapping): OpenedSource;

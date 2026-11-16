@@ -345,14 +345,27 @@ export class AppStore {
    */
   workerLost(reason: string): void {
     this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
+    // the links keep their books by title, as a saved project does: the keys named the lost worker's
+    // sources, and attachLinks binds them again to the books opened next (review C2)
+    const unbind = (ref: BookRef): BookRef =>
+      ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
     batch(() => {
       this.sources.value = [];
       this.view.source.value = null;
       this.view.target.value = null;
-      this.pick.source.value = null;
-      this.pick.target.value = null;
+      this.clearPicks();
       this.task.value = null;
+      this.linkState.value = rebindLinks(this.linkState.value, (l) => {
+        const s = unbind(l.source.book);
+        const t = unbind(l.target.book);
+        return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
+      });
+      // suggestions point at lines of the lost sources: approving one would make a link to nothing
+      this.suggestions.run.value = null;
+      this.suggestions.current.value = null;
     });
+    this.find.source.close();
+    this.find.target.close();
     this.lines.forgetAll();
     this.dbLinks.forgetSummary();
     this.notify("warning", `${reason} הקישורים בפרויקט לא נפגעו — פתחו שוב את הספרים כדי להמשיך.`);
