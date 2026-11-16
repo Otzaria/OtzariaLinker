@@ -514,4 +514,18 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
   .app-bar .guided-back span { display: none; }
 }
 .guided-card label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
+/* approving many suggestions together (bulk-approve.tsx): closed by default, the count before the button */
+.bulk-approve { display: grid; gap: 8px; margin: 0 6px 6px; }
+.bulk-approve[open] { padding-bottom: 10px; }
+.bulk-approve > :not(summary) { margin-top: 6px; }
+.bulk-approve .small { margin-bottom: 0; font-size: var(--fs-sm); }
+.bulk-scope, .bulk-levels { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-sm); }
+.bulk-levels { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 4px 10px 8px; margin-inline: 0; }
+.bulk-levels legend { padding-inline: 4px; color: var(--on-surface-variant); }
+.bulk-scope .check, .bulk-levels .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.bulk-approve label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
+.bulk-preview { margin-bottom: 0; font-size: var(--fs-sm); }
+.bulk-approve .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bulk-done { font-size: var(--fs-sm); }
+main.guided .bulk-approve { margin: 0; }
 .stat.text b { font-size: 17px; line-height: 1.6; }

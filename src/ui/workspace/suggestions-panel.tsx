@@ -10,6 +10,7 @@ import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { BulkApprove } from "./bulk-approve";
 import { jobStateText, jobWantsAttention, MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
@@ -321,6 +322,7 @@ function TableView() {
           </>
         )}
       </div>
+      <BulkApprove />
       <table class="sug-table" aria-label="הצעות">
         <thead>
           <tr>

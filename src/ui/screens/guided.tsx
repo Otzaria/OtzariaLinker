@@ -11,6 +11,7 @@ import { sourceNameText } from "../shell/file-name";
 import { OtzariaDbHint, SOURCE_OPTIONS } from "../workspace/add-sources";
 import { SourceBadge } from "../workspace/source-badge";
 import { StepView } from "../workspace/suggestions-panel";
+import { BulkApprove } from "../workspace/bulk-approve";
 import { MaxLinkJobView } from "../workspace/maxlink-job";
 
 /*
@@ -454,6 +455,8 @@ function RunStep() {
           </button>
         </div>
       </div>
+      {/* one by one is the way; a group only when the user opens this and sees how many (V5 UX audit U21) */}
+      <BulkApprove />
       {reviewing && review.length > 0 && (
         <section class="guided-review" aria-label="ההצעות לבדיקה">
           <StepView card standalone />
