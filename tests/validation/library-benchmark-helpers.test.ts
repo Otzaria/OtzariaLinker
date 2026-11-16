@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../src/core/links/model";
 import type { Suggestion } from "../../src/linking/automatic/types";
-import { allocate, decodeIds, encodeIds, estimate, indexDbLinks, ownerOf, scoreBook, stratify } from "./library-benchmark";
+import { allocate, decodeIds, encodeIds, estimate, indexDbLinks, isSpanned, ownerOf, scoreBook, spanBucket, spanEnds, spanRecords, stratify } from "./library-benchmark";
 
 /* The pure parts of the library benchmark (no database needed). */
 
@@ -80,6 +80,26 @@ describe("library benchmark helpers", () => {
     // a citation's cited unit counts either way
     const cited = { s: { ...sug("c", [2, 0], [1, 4]), citedSpan: { line: 4, end: 9 } }, engines: ["citations" as const] };
     expect(scoreBook("s1:2", [cited], db, () => undefined, "citations").scored[0]!.verdict).toBe("correct");
+  });
+
+  it("a cut Sefaria-side span written by each policy (§0.8), and the end the database links", () => {
+    const own = (type: string, s: number, t: number) => ownerOf(type, s, t, related);
+    const cut = { ...sug("h", [2, 0], [1, 4]), engine: "dibur-hamatchil" as const, citedSpan: { line: 4, end: 7 } };
+    expect(isSpanned(cut, ["dibur-hamatchil"])).toBe(true);
+    expect(isSpanned(cut, ["citations"])).toBe(false);
+    expect(spanRecords(cut, "first").map((s) => [s.target.line, s.target.end, s.citedSpan])).toEqual([[4, undefined, undefined]]);
+    expect(spanRecords(cut, "last").map((s) => s.target.line)).toEqual([7]);
+    expect(spanRecords(cut, "ends").map((s) => s.target.line)).toEqual([4, 7]);
+    expect(spanRecords(cut, "all").map((s) => s.target.line)).toEqual([4, 5, 6, 7]);
+    // "all" skips a line that cannot be written (a heading, no ref_2); none writable → the first line, as today
+    expect(spanRecords(cut, "all", (l) => l !== 5).map((s) => s.target.line)).toEqual([4, 6, 7]);
+    expect(spanRecords(cut, "all", () => false).map((s) => s.target.line)).toEqual([4]);
+    expect(spanRecords(cut, "firstRef", (l) => l > 5).map((s) => s.target.line)).toEqual([6]);
+    expect([2, 3, 6, 21].map(spanBucket)).toEqual(["2", "3-5", "6-20", ">20"]);
+    // the database links the last line of two spans, the first of one: "last"; a link to both ends does not vote
+    const db = indexDbLinks("s1:2", [link(40, "commentary", [1, 7], [2, 0]), link(41, "commentary", [1, 12], [2, 1]), link(42, "commentary", [1, 20], [2, 2]), link(43, "commentary", [1, 30, 33], [2, 3])], own);
+    const spans = [cut, { ...cut, source: { ...cut.source, line: 1 }, citedSpan: { line: 10, end: 12 } }, { ...cut, source: { ...cut.source, line: 2 }, citedSpan: { line: 20, end: 25 } }, { ...cut, source: { ...cut.source, line: 3 }, citedSpan: { line: 30, end: 33 } }];
+    expect(spanEnds("s1:2", spans, db).get(1)).toEqual({ end: "last", first: 1, last: 2 });
   });
 
   it("ids survive the compact encoding", () => {

@@ -248,6 +248,76 @@ export function scoreBook(
   return { scored, matched, byLine: db.byLine, pairType: db.pairType };
 }
 
+// ─── how a span on a Sefaria base is written (LIBRARY_BENCHMARK.md §0.8) ────────────────────────────
+
+/**
+ * A structural suggestion whose range on a Sefaria side was collapsed (withoutRange) writes ONE record
+ * today, to the span's first line. The policies measured for the owner's decision — none of them a
+ * range, so each is sync-safe:
+ *   first   — the first line (today);
+ *   firstRef — the first line of the span that can carry the record (not a heading, has a ref_2): on a
+ *             Shulchan Aruch base a section's first content line is the siman's title, which has no heRef;
+ *   last    — the last line;
+ *   ends    — both ends (2 records);
+ *   all     — every line of the span (one single-line record each);
+ *   learned — first or last, by what the database already links in this (book, base) pair (spanEnds).
+ */
+export type SpanPolicy = "first" | "firstRef" | "last" | "ends" | "all" | "learned";
+export const SPAN_POLICIES: readonly SpanPolicy[] = ["first", "firstRef", "last", "ends", "all", "learned"];
+
+/** a structural suggestion whose Sefaria-side range was collapsed to its first line (its citedSpan is the span) */
+export const isSpanned = (s: Suggestion, engines: readonly EngineId[]): boolean =>
+  !!s.citedSpan && s.citedSpan.end > s.citedSpan.line && engines.some((e) => e !== "citations");
+
+export const spanBucket = (lines: number): "2" | "3-5" | "6-20" | ">20" => (lines <= 2 ? "2" : lines <= 5 ? "3-5" : lines <= 20 ? "6-20" : ">20");
+
+/**
+ * The single-line records a spanned suggestion is written as under a policy ("learned" already resolved
+ * to first/last). "firstRef" and "all" write only the lines `writable` accepts (the generator drops a link to a heading
+ * line, and a Sefaria side needs a ref_2) — the first line when it accepts none.
+ */
+export function spanRecords(s: Suggestion, policy: Exclude<SpanPolicy, "learned">, writable: (line: number) => boolean = () => true): Suggestion[] {
+  const { line, end } = s.citedSpan!;
+  const every = Array.from({ length: end - line + 1 }, (_, i) => line + i).filter(writable);
+  const lines = policy === "first" ? [line] : policy === "firstRef" ? [every[0] ?? line] : policy === "last" ? [end] : policy === "ends" ? [line, end] : every.length ? every : [line];
+  return lines.map((l) => {
+    const { citedSpan: _, ...rest } = s;
+    return { ...rest, id: l === line ? s.id : `${s.id}~${l}`, target: { book: s.target.book, line: l } };
+  });
+}
+
+/**
+ * Which end of a cut span the database links in each (this book, other book) pair: over the spanned
+ * suggestions, a stored link from the suggestion's line to the span's first line only votes "first",
+ * to its last line only "last". The majority wins; no vote, or a tie, is "first" (today's rule). This is
+ * what the tool could learn from the commentary's existing links (the merge already reads them).
+ */
+export function spanEnds(
+  bookKey: string,
+  spanned: readonly Suggestion[],
+  db: { byLine: Map<number, DbEnd[]> },
+): Map<number, { end: "first" | "last"; first: number; last: number }> {
+  const votes = new Map<number, [number, number]>();
+  for (const s of spanned) {
+    if (s.source.book.key !== bookKey) continue;
+    const oId = idOfKey(s.target.book.key);
+    const { line, end } = s.citedSpan!;
+    let first = false;
+    let last = false;
+    for (let l = s.source.line; l <= Math.min(endOf(s.source), s.source.line + MAX_RANGE); l++)
+      for (const e of db.byLine.get(l) ?? [])
+        if (e.other === oId) {
+          if (e.oFrom <= line && line <= e.oTo) first = true;
+          if (e.oFrom <= end && end <= e.oTo) last = true;
+        }
+    if (first === last) continue;
+    const v = votes.get(oId) ?? [0, 0];
+    v[first ? 0 : 1]++;
+    votes.set(oId, v);
+  }
+  return new Map([...votes].map(([o, [f, l]]) => [o, { end: l > f ? "last" : "first", first: f, last: l }]));
+}
+
 // ─── compact storage ─────────────────────────────────────────────────────────────────────────────
 
 /** sorted ids as base-36 deltas ("1a.3.f") */
