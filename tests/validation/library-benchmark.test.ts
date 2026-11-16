@@ -89,6 +89,10 @@ import {
  *                   (every structural suggestion the merge touched: ambiguous, in a conflict, or with an
  *                   ambiguous member — its engines, members, rules and both verdicts; BENCH_TEXT_EVERY=k: one
  *                   row in k with the words of its lines)
+ *   BENCH_RERUN     with BENCH_MODE=replay: "<engine>,<engine>" — these engines' steps run again with the current
+ *                   code and replace their part of the raw output (the others are replayed as kept): a change to
+ *                   one engine (headings) measured without running dibur-hamatchil again. With BENCH_RAW=1 the new
+ *                   raw output goes to raw-<BENCH_TAG>/
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
  *                   there), the oracle's population (oracle-*.json) and the reports
@@ -98,6 +102,8 @@ const RAW = !!process.env.BENCH_RAW;
 const TAG = process.env.BENCH_TAG ?? "replay";
 /** BENCH_TEXT_EVERY=k: in a replay, one detail row in k (by rank) carries the words of its lines, for reading by hand */
 const TEXT_EVERY = Number(process.env.BENCH_TEXT_EVERY ?? 0);
+/** BENCH_RERUN="headings": in a replay, these engines run again (their raw output is replaced) */
+const RERUN = process.env.BENCH_RERUN?.split(",").map((t) => t.trim()).filter(Boolean) ?? [];
 /** which owners the report measures: the sample (default) or all of them (default for BENCH_MODE=full) */
 const DESIGN = (process.env.BENCH_DESIGN ?? (MODE === "full" ? "full" : "sample")) as "sample" | "full";
 const RERUN_STOPPED = !!process.env.BENCH_RERUN_STOPPED;
@@ -342,7 +348,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         writeFileSync(out, "");
         const detail: string[] = [];
         for (const id of ids) {
-          const rec = await replayBook(id, isRelated, own, detail);
+          const rec = await replayBook(id, stepsOf.get(id) ?? [], isRelated, own, detail);
           appendFileSync(out, JSON.stringify(rec) + "\n");
         }
         writeFileSync(join(DIR, `detail-${TAG}.jsonl.gz`), gzipSync(detail.join("\n")));
@@ -491,12 +497,29 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     return scoreRun(rec, items, res.dbLinkKeys, isRelated, own, t0);
   }
 
-  /** a raw output BENCH_RAW kept: merged and scored again with the current merge.ts (BENCH_MODE=replay) */
-  async function replayBook(id: number, isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner, detail: string[]): Promise<BookRecord> {
+  /**
+   * a raw output BENCH_RAW kept: merged and scored again with the current merge.ts (BENCH_MODE=replay); with
+   * BENCH_RERUN, the steps of those engines (of the steps that run) run again and replace their part of it
+   */
+  async function replayBook(id: number, steps: readonly PlanStep[], isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner, detail: string[]): Promise<BookRecord> {
     const t0 = Date.now();
     const raw = JSON.parse(gunzipSync(readFileSync(join(DIR, "raw", `${id}.json.gz`))).toString("utf8")) as { rec: BookRecord; items: MergeItem[]; ref: string[] };
     const rec: BookRecord = { ...raw.rec, counters: {}, matched: {} };
-    const out = await scoreRun(rec, raw.items, raw.ref, isRelated, own, t0, detail);
+    let items = raw.items;
+    const again = steps.filter((s) => RERUN.includes(s.engine) && raw.rec.steps.includes(s.id));
+    if (again.length) {
+      const { signal, progress } = stepDeadline();
+      const res = await maxlinkJob(again.some((s) => s.kind === "pair") ? registry : citationsOnly, again, {}, { signal, progress });
+      const byStep = new Map(again.map((s) => [s.id, s]));
+      const fresh: MergeItem[] = [];
+      for (const it of res.items) for (const sg of it.result?.suggestions ?? []) fresh.push({ suggestion: sg, focus: byStep.get(it.stepId)!.source.key });
+      items = [...raw.items.filter((it) => !RERUN.includes(it.suggestion.engine)), ...fresh];
+      if (RAW) {
+        mkdirSync(join(DIR, `raw-${TAG}`), { recursive: true });
+        writeFileSync(join(DIR, `raw-${TAG}`, `${id}.json.gz`), gzipSync(JSON.stringify({ rec: raw.rec, items, ref: raw.ref })));
+      }
+    }
+    const out = await scoreRun(rec, items, raw.ref, isRelated, own, t0, detail);
     return { ...out, ms: raw.rec.ms };
   }
 
