@@ -36,7 +36,9 @@ const sha = createHash("sha256").update(readFileSync("dist/OtzariaLinker.html"))
 writeFileSync("dist/SHA256SUMS", `${sha}  OtzariaLinker.html\n${sha}  ${versioned}\n`);
 const bytes = readFileSync("dist/OtzariaLinker.html").length;
 // size budget: the file is opened by double-click on ordinary machines; growth must be a decision
-const BUDGET = 1.5 * 1024 * 1024;
+// (1.5 MiB → 1.75 MiB on 2026-11-16: the citations reference data — Mishnah/Yerushalmi chapter openings, Rambam
+// topic names, ~40 KB — and the links compare/merge/table, ~33 KB; the fonts are ~190 KB of it)
+const BUDGET = 1.75 * 1024 * 1024;
 if (bytes > BUDGET) {
   console.error(`Size budget exceeded: ${bytes} bytes > ${BUDGET}. Raise BUDGET in scripts/package-release.mjs only on purpose.`);
   process.exit(1);
