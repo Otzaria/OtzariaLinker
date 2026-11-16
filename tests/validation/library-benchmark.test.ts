@@ -341,6 +341,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         }
       }
       if (SHARDS === 1 || MODE === "report") report(types, design, chosen, done, owned, isRelated);
+      if (MODE === "report" && process.env.BENCH_DESIGN_DUMP) dumpDesign(design, chosen, done, own, stepsOf);
       if (SEFARIA_SPAN && (SHARDS === 1 || MODE === "report")) spanPolicyReport(done, owned);
     },
     24 * 3_600_000,
@@ -657,6 +658,56 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     lines.push(`  spans ${sum((b) => b.spans?.n ?? 0)} by length: ${["2", "3-5", "6-20", ">20"].map((k) => `${k}: ${buckets[k] ?? 0}`).join(", ")}; lines in spans >20: ${sum((b) => b.spans?.over20Lines ?? 0)}`);
     console.log(lines.join("\n"));
     writeFileSync(join(DIR, "span-policies.json"), JSON.stringify({ at: new Date().toISOString(), db: before, books }, null, 1));
+  }
+
+  /**
+   * BENCH_DESIGN_DUMP=1 (with BENCH_MODE=report): the measured design as data, for the gap analysis of
+   * the misses (scripts/bench/coverage_gaps.py, docs/validation/COVERAGE_REPORT.md) — per type, kind and
+   * stratum: its links, its population and the chosen owners (links, whether all their books ran, how
+   * many links the runs regenerated); per chosen owner, the (stored source, stored target, links) book
+   * pairs its links are in; and the run books whose plan today differs from the steps their cached
+   * record ran (a stale record: run it again with BENCH_ONLY).
+   */
+  function dumpDesign(
+    design: Map<string, { kind: "D" | "U"; strata: Stratum[] }[]>,
+    chosen: (st: Stratum) => Unit[],
+    done: Map<number, BookRecord>,
+    own: (type: string, s: number, t: number) => Owner,
+    stepsOf: Map<number, PlanStep[]>,
+  ): void {
+    const matched = new Map<string, Set<number>>();
+    for (const r of done.values())
+      for (const [k, enc] of Object.entries(r.matched)) {
+        const set = matched.get(k) ?? new Set<number>();
+        for (const i of decodeIds(enc)) set.add(i);
+        matched.set(k, set);
+      }
+    const ran = (o: Owner) => ownerBooks(o).every((b) => done.has(b) || !byId.has(b));
+    const wanted = new Set<string>();
+    const types: Record<string, unknown> = {};
+    for (const [type, kinds] of design)
+      types[type] = kinds.map((k) => ({
+        kind: k.kind,
+        strata: k.strata.map((st) => ({
+          name: st.name,
+          links: st.links,
+          population: st.units.length,
+          owners: chosen(st).map((u) => {
+            wanted.add(`${type}|${u.id}`);
+            return { id: u.id, links: u.links, ran: ran(u.id), matched: matched.get(`${type}|${u.id}`)?.size ?? 0 };
+          }),
+        })),
+      }));
+    const pairs: Record<string, [number, number, number][]> = {};
+    for (const [type, s, t, n] of data.rows) {
+      const k = `${type}|${own(type, s, t)}`;
+      if (wanted.has(k)) (pairs[k] ??= []).push([s, t, n]);
+    }
+    const stale = [...done.values()]
+      .filter((r) => (stepsOf.get(r.id) ?? []).map((s) => s.id).join(",") !== r.steps.join(","))
+      .map((r) => ({ id: r.id, title: r.title, cached: r.steps, now: (stepsOf.get(r.id) ?? []).map((s) => s.id) }));
+    writeFileSync(join(DIR, `design-${MODE}-${DESIGN}.json`), JSON.stringify({ seed: SEED, n: N, db: before, types, pairs, stale }));
+    console.log(`[bench] design written: ${wanted.size} owners, ${stale.length} run books whose plan changed since their record`);
   }
 
   function report(
