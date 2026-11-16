@@ -170,7 +170,8 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   await tabTo(page, /^הצעות/, { back: true, max: 120, role: "tab" });
   await page.keyboard.press("ArrowRight");
   expect(await focused(page)).toMatchObject({ role: "tab", name: expect.stringMatching(/^קישורים \d+$/) });
-  await tabTo(page, /^חדש ביאור על בראשית/);
+  // the row, not the list around it: in Firefox the scrolled list is a Tab stop too, and its text starts with the first row's
+  await tabTo(page, /^חדש ביאור על בראשית/, { tag: "li" });
   await page.keyboard.press("Enter");
   // both ends stay marked (the flash is 1.2 s and can end before a loaded browser is asked)
   await expect(page.locator(".reader.target .ln.picked")).toHaveCount(1);
