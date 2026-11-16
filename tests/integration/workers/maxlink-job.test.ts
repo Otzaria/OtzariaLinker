@@ -145,6 +145,27 @@ describe("maxlinkJob", () => {
     // what the engine found until it saw the cancel (an engine that saw it says so: engine/aborted)
     expect(res.items[0]!.result).toBeTruthy();
   });
+
+  it("a step over its time budget (stepBudgetMs) stops with what it found, and the job goes on to the next steps", async () => {
+    const { reg, all, byTitle } = await setup();
+    const fake = "citations" as unknown as SingleEngineId;
+    const plan = planMaxLink({ selected: [byTitle("ספר דוגמה").key], library: all, singleEngines: [fake] });
+    expect(plan.steps.length).toBeGreaterThan(1);
+    const slow = plan.steps.find((s) => s.kind === "single")!;
+    // an engine that runs until it is told to stop (or 1.5 s), polling its signal like the sliced engines do
+    const runner: SingleRunner = async (_r, _s, _o, ctx) => {
+      const t0 = Date.now();
+      while (!ctx.signal?.aborted && Date.now() - t0 < 1500) await new Promise((r) => setTimeout(r, 5));
+      return { suggestions: [], notes: ctx.signal?.aborted ? [{ code: "engine/aborted", text: "נעצר" }] : [], unmatched: [] } satisfies EngineResult;
+    };
+    const res = await maxlinkJob(reg, plan.steps, { stepBudgetMs: 50 }, {}, { citations: runner });
+    expect(res.stopped).toBeFalsy();
+    expect(res.items.map((i) => i.stepId)).toEqual(plan.steps.map((s) => s.id));
+    const it0 = res.items.find((i) => i.stepId === slow.id)!;
+    expect(it0).toMatchObject({ stopped: true });
+    expect(it0.ms).toBeLessThan(1000);
+    expect(res.items.filter((i) => i.stepId !== slow.id).every((i) => !i.stopped && (i.result || i.error))).toBe(true);
+  });
 });
 
 describe("maxlinkJob — notes on a main book with no note marks (Sefaria's notes on מכילתא דרשב\"י)", () => {

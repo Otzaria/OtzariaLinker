@@ -35,6 +35,35 @@ export interface MaxLinkJobOptions {
   engineOptions?: Partial<Record<string, Record<string, unknown>>>;
   /** keys of the books the library treats as Sefaria's (core/links/sefaria-owned.ts), given to every engine */
   sefariaOwned?: readonly string[];
+  /**
+   * A time budget for each step: a step that runs longer is stopped with what it found (marked `stopped`)
+   * and the job goes on to the next one — unlike a cancel, which stops the job. The app does not set it;
+   * the library benchmark does (BENCH_STEP_S), so one slow pair does not cost the book's other steps.
+   */
+  stepBudgetMs?: number;
+}
+
+/**
+ * The step's signal under a budget: aborted when the job is cancelled or the time is up. The engines poll
+ * `aborted` between slices; the job's own cancel still reaches listeners through the outer signal.
+ */
+function budgetSignal(outer: AbortSignal | undefined, until: number): AbortSignal {
+  const aborted = () => outer?.aborted === true || Date.now() > until;
+  return {
+    get aborted() {
+      return aborted();
+    },
+    get reason() {
+      return outer?.aborted ? outer.reason : aborted() ? new DOMException("step time budget", "TimeoutError") : undefined;
+    },
+    throwIfAborted() {
+      if (aborted()) throw outer?.aborted ? outer.reason : new DOMException("step time budget", "TimeoutError");
+    },
+    addEventListener: (...a: Parameters<AbortSignal["addEventListener"]>) => outer?.addEventListener(...a),
+    removeEventListener: (...a: Parameters<AbortSignal["removeEventListener"]>) => outer?.removeEventListener(...a),
+    dispatchEvent: () => false,
+    onabort: null,
+  } as unknown as AbortSignal;
 }
 
 /** units of progress per step: engines report their own progress inside a step */
@@ -189,11 +218,14 @@ export async function maxlinkJob(
       break;
     }
     ctx.progress?.(i * UNIT, total);
+    const t0 = Date.now();
+    const budget = options.stepBudgetMs !== undefined ? budgetSignal(ctx.signal, t0 + options.stepBudgetMs) : ctx.signal;
     const inner: EngineContext = {
-      ...(ctx.signal && { signal: ctx.signal }),
+      ...(budget && { signal: budget }),
       progress: (d, n) => ctx.progress?.(i * UNIT + (n > 0 ? Math.min(UNIT - 1, Math.floor((d / n) * UNIT)) : 0), total),
     };
-    const t0 = Date.now();
+    /** the step ran out of its own time (not the job's cancel): keep what it found and go on */
+    const overBudget = () => options.stepBudgetMs !== undefined && !ctx.signal?.aborted && Date.now() > t0 + options.stepBudgetMs;
     try {
       let result: EngineResult;
       if (step.kind === "pair" && step.relation.through) {
@@ -234,7 +266,7 @@ export async function maxlinkJob(
         result = await run(registry, step.source, optionsOf(step.engine), inner);
       }
       const cut = ctx.signal?.aborted === true;
-      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...(cut && { stopped: true }) });
+      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...((cut || overBudget()) && { stopped: true }) });
       if (cut) {
         stopped = true;
         break;
@@ -244,7 +276,7 @@ export async function maxlinkJob(
         stopped = true;
         break;
       }
-      items.push({ stepId: step.id, unmatched: 0, error: messageOf(err), ms: Date.now() - t0 });
+      items.push({ stepId: step.id, unmatched: 0, error: messageOf(err), ms: Date.now() - t0, ...(overBudget() && { stopped: true }) });
     }
   }
   loaded = null;

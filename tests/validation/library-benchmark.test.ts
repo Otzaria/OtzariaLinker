@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Session } from "node:inspector/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -82,6 +83,9 @@ import {
  *   BENCH_SEFARIA_SPAN  first|firstRef|last|ends|all|learned: a run also keeps, for each of these, what a span cut on a
  *                   Sefaria base (citedSpan) would score written that way (§0.8); the report reads the named one
  *                   and prints them side by side (span-policies.json)
+ *   BENCH_CPUPROF   a folder: each book run is CPU-profiled from inside the test process (node:inspector,
+ *                   10 ms samples) into <folder>/<book id>.cpuprofile — NODE_OPTIONS=--cpu-prof misses it, since
+ *                   vitest ends its worker without the exit that writes the profile
  *   BENCH_RAW=1     keep each run's raw engine output (before the merge) in <BENCH_DIR>/raw/<book id>.json.gz
  *   BENCH_MODE=replay  run no engine: merge and score again the raw outputs BENCH_RAW kept (all of them, or
  *                   BENCH_ONLY) — a change to merge.ts measured in minutes, not hours. Writes
@@ -99,6 +103,25 @@ import {
  */
 const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report" | "replay";
 const RAW = !!process.env.BENCH_RAW;
+const CPUPROF = process.env.BENCH_CPUPROF;
+
+/** BENCH_CPUPROF: run() under the V8 sampling profiler, the profile saved as <CPUPROF>/<name>.cpuprofile */
+async function profiled<T>(name: string, run: () => Promise<T>): Promise<T> {
+  if (!CPUPROF) return run();
+  const session = new Session();
+  session.connect();
+  await session.post("Profiler.enable");
+  await session.post("Profiler.setSamplingInterval", { interval: 10_000 });
+  await session.post("Profiler.start");
+  try {
+    return await run();
+  } finally {
+    const { profile } = await session.post("Profiler.stop");
+    mkdirSync(CPUPROF, { recursive: true });
+    writeFileSync(join(CPUPROF, `${name}.cpuprofile`), JSON.stringify(profile));
+    session.disconnect();
+  }
+}
 const TAG = process.env.BENCH_TAG ?? "replay";
 /** BENCH_TEXT_EVERY=k: in a replay, one detail row in k (by rank) carries the words of its lines, for reading by hand */
 const TEXT_EVERY = Number(process.env.BENCH_TEXT_EVERY ?? 0);
@@ -367,7 +390,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
             console.log(`[bench] time budget reached after ${i} books`);
             break;
           }
-          const rec = await runBook(id, stepsOf.get(id) ?? [], isRelated, own);
+          const rec = await profiled(String(id), () => runBook(id, stepsOf.get(id) ?? [], isRelated, own));
           appendFileSync(out, JSON.stringify(rec) + "\n");
           done.set(id, rec);
           console.log(`[bench] ${i + 1}/${mine.length} ${rec.title}: ${(rec.ms / 1000).toFixed(1)} s, ${rec.merged} suggestions${rec.errors.length ? `, ${rec.errors.length} errors` : ""}${rec.stopped.length ? `, ${rec.stopped.length} stopped` : ""}`);
@@ -428,7 +451,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
 
   function readRecords(): Map<number, BookRecord> {
     const out = new Map<number, BookRecord>();
-    for (const f of readdirSync(DIR).filter((x) => /^runs-.*\.jsonl$/.test(x)))
+    for (const f of readdirSync(DIR).filter((x) => /^runs-.*\.jsonl$/.test(x)).sort())
       for (const line of readFileSync(join(DIR, f), "utf8").split("\n"))
         if (line.trim()) {
           const r = JSON.parse(line) as BookRecord;
@@ -437,40 +460,12 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
           const policy = SEFARIA_SPAN && r.policies?.[SEFARIA_SPAN];
           if (policy) Object.assign(r, { counters: policy.counters, matched: policy.matched });
           else if (SPANS === "citations" && r.written) Object.assign(r, r.written);
-          // a book run twice (a stopped step re-run with more time): the run with fewer stopped steps wins
+          // BENCH_ONLY's runs (runs-~only-*, read last) replace the book's record; otherwise a book run twice (a
+          // stopped step re-run with more time, BENCH_RERUN_STOPPED): the run with fewer stopped steps wins
           const old = out.get(r.id);
-          if (!old || r.stopped.length <= old.stopped.length) out.set(r.id, r);
+          if (!old || f.startsWith("runs-~only") || r.stopped.length <= old.stopped.length) out.set(r.id, r);
         }
     return out;
-  }
-
-  /**
-   * A signal whose "aborted" turns true when the CURRENT step of maxlinkJob runs longer than STEP_MS.
-   * The engines are synchronous and only read `aborted` (a timer could not fire inside them); they
-   * return what they found, with a note, and the job goes on to the next step. throwIfAborted is a
-   * no-op so that the job itself never gives up the book.
-   */
-  function stepDeadline(): { signal: AbortSignal; progress: (d: number, n: number) => void } {
-    let step = -1;
-    let deadline = Date.now() + STEP_MS;
-    const signal = {
-      get aborted() {
-        return Date.now() > deadline;
-      },
-      reason: undefined,
-      throwIfAborted() {},
-      addEventListener() {},
-      removeEventListener() {},
-      dispatchEvent: () => false,
-      onabort: null,
-    } as unknown as AbortSignal;
-    return {
-      signal,
-      progress: (d) => {
-        const s = Math.floor(d / 1000);
-        if (s !== step) (step = s), (deadline = Date.now() + STEP_MS);
-      },
-    };
   }
 
   async function runBook(id: number, steps: PlanStep[], isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner): Promise<BookRecord> {
@@ -478,9 +473,9 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     const t0 = Date.now();
     const rec: BookRecord = { id, title: book.title, ms: 0, steps: steps.map((s) => s.id), errors: [], stopped: [], raw: 0, merged: 0, contradictedPairs: 0, counters: {}, matched: {} };
     if (!steps.length) return { ...rec, ms: Date.now() - t0 };
-    const { signal, progress } = stepDeadline();
-    const ctx: EngineContext = { signal, progress };
-    const res = await maxlinkJob(steps.some((s) => s.kind === "pair") ? registry : citationsOnly, steps, {}, ctx);
+    // BENCH_STEP_S: a step that runs longer stops with what it found, and the book's other steps still run
+    const ctx: EngineContext = {};
+    const res = await maxlinkJob(steps.some((s) => s.kind === "pair") ? registry : citationsOnly, steps, { stepBudgetMs: STEP_MS }, ctx);
     const byStep = new Map(steps.map((s) => [s.id, s]));
     const items: MergeItem[] = [];
     for (const it of res.items) {
@@ -508,8 +503,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     let items = raw.items;
     const again = steps.filter((s) => RERUN.includes(s.engine) && raw.rec.steps.includes(s.id));
     if (again.length) {
-      const { signal, progress } = stepDeadline();
-      const res = await maxlinkJob(again.some((s) => s.kind === "pair") ? registry : citationsOnly, again, {}, { signal, progress });
+      const res = await maxlinkJob(again.some((s) => s.kind === "pair") ? registry : citationsOnly, again, { stepBudgetMs: STEP_MS }, {});
       const byStep = new Map(again.map((s) => [s.id, s]));
       const fresh: MergeItem[] = [];
       for (const it of res.items) for (const sg of it.result?.suggestions ?? []) fresh.push({ suggestion: sg, focus: byStep.get(it.stepId)!.source.key });
