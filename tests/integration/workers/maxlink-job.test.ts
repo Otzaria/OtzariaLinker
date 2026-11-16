@@ -227,3 +227,31 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
     expect(res.items[0]!.result!.notes[0]!.text).toContain("אינם מקושרים");
   });
 });
+
+describe("maxlinkJob — a part of the dependant against the same part of the base (RelationScope.baseSection)", () => {
+  // both books are divided by the same two bases; "שמות א" must never be read against "בראשית א"
+  const lines = (texts: string[]) => texts.map((text, index) => ({ index, text, anchorText: text, heading: /^<h(\d)/.exec(text) ? Number(/^<h(\d)/.exec(text)![1]) : null, heRef: null }));
+  const BOOKS: Record<string, ReturnType<typeof lines>> = {
+    "m:1": lines(["<h1>ביאור</h1>", "<h2>בראשית</h2>", "<h3>פרק א</h3>", "ביאור על בראשית א", "<h2>שמות</h2>", "<h3>פרק א</h3>", "ביאור על שמות א"]),
+    "m:2": lines(["<h1>על הביאור</h1>", "<h2>שמות</h2>", "<h3>פרק א</h3>", "הערה על שמות א", "<h2>בראשית</h2>", "<h3>פרק א</h3>", "הערה על בראשית א"]),
+  };
+  const ref = (key: string, title: string): BookRef => ({ key, title, origin: "sefaria" });
+  const registry = { lines: async (key: string) => BOOKS[key]!, existingLinks: async () => [] } as unknown as SourceRegistry;
+  const relation = (section: string, baseSection: string) => ({ kind: "commentary" as const, dependant: ref("m:2", "על הביאור"), base: ref("m:1", "ביאור"), via: "links" as const, caveats: [], scope: { section, baseSection } });
+  const step = (section: string, baseSection = section): PlanStep => ({ id: `headings|m:2>m:1#${baseSection}`, kind: "pair", engine: "headings", source: ref("m:2", "על הביאור"), target: ref("m:1", "ביאור"), relation: relation(section, baseSection), why: "" });
+
+  it("links each part only into the part of the base with the same name", async () => {
+    const res = await maxlinkJob(registry, [step("בראשית"), step("שמות")], {}, {});
+    const at = (i: number) => res.items[i]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`);
+    expect(at(0)).toEqual(["6>3"]);
+    expect(at(1)).toEqual(["3>6"]);
+    expect(res.items[0]!.result!.notes[0]!.code).toBe("maxlink/section");
+  });
+
+  it("a part missing on either side runs nothing, and says which", async () => {
+    const res = await maxlinkJob(registry, [step("ויקרא"), step("בראשית", "ויקרא")], {}, {});
+    for (const it of res.items) expect(it.result!.suggestions).toEqual([]);
+    expect(res.items[0]!.result!.notes[0]!.text).toContain('"על הביאור"');
+    expect(res.items[1]!.result!.notes[0]!.text).toContain('"ביאור"');
+  });
+});

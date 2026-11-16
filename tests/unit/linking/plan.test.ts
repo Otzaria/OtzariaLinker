@@ -354,8 +354,12 @@ describe("planMaxLink — the existing links beside the declaration and the titl
   });
 
   it("below EVIDENCE_MIN, or a book not written on one of its bases, is not a base", () => {
-    const few = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: { "db:2": EVIDENCE_MIN - 1, "db:1": 81 } } : b));
+    // under EVIDENCE_MIN and under half of the links to the base it is written on
+    const few = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: { "db:2": EVIDENCE_MIN - 1, "db:1": 2 * EVIDENCE_MIN } } : b));
     expect(steps(planPairs({ selected: ["db:3"], library: few })).some((s) => s.includes('>פסקי הרא"ש'))).toBe(false);
+    // …but half of them is enough (SIBLING_SHARE)
+    const half = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: { "db:2": EVIDENCE_MIN - 1, "db:1": 2 * EVIDENCE_MIN - 2 } } : b));
+    expect(steps(planPairs({ selected: ["db:3"], library: half })).some((s) => s.includes('>פסקי הרא"ש'))).toBe(true);
     expect(steps(planPairs({ selected: ["db:9"], library: lib })).some((s) => s.includes(">ישעיהו"))).toBe(false);
     // counted only from the other side (no linkedCounts): the declaration alone, as before
     const uncounted = lib.map((b) => (b.key === "db:3" ? { ...b, linkedCounts: undefined, linkedComplete: undefined } : b));
@@ -408,10 +412,56 @@ describe("planMaxLink — the existing links beside the declaration and the titl
     expect(r.map((s) => `${s.engine}>${s.target.title}@${s.relation.scope?.section}`).sort()).toEqual(['dibur-hamatchil>רש"י על בראשית@בראשית', 'dibur-hamatchil>רש"י על שמות@שמות']);
   });
 
-  it('a sibling written on two parts of the book has no one part to read ("יריעות שלמה" ← "מזרחי")', () => {
-    const s = steps(planPairs({ selected: ["tn:6"], library: torah }));
-    expect(s.some((x) => x.endsWith(">מזרחי"))).toBe(false);
+  it('a sibling written on the same parts as the book: each part to the same part of it ("יריעות שלמה" ← "מזרחי")', () => {
+    const p = planPairs({ selected: ["tn:6"], library: torah });
+    const s = steps(p);
     expect(s).toContain('dibur-hamatchil:יריעות שלמה על התורה>רש"י על בראשית');
+    const toMizrachi = pairs(p).filter((x) => x.target.key === "tn:5");
+    expect(toMizrachi.map((x) => `${x.engine}@${x.relation.scope?.section}>${x.relation.scope?.baseSection}`).sort()).toEqual([
+      "dibur-hamatchil@בראשית>בראשית",
+      "dibur-hamatchil@שמות>שמות",
+      "headings@בראשית>בראשית",
+      "headings@שמות>שמות",
+    ]);
+    // one step per part: the ids tell them apart
+    expect(new Set(toMizrachi.map((x) => x.id)).size).toBe(4);
+    expect(toMizrachi[0]!.relation.via).toBe("links");
+  });
+
+  it("…not when the sibling is not divided by the same bases, nor on a handful of links", () => {
+    // a sibling that names the books only by its links (no book_base_text of several bases): no part to read
+    const undeclared = torah.map((b) => (b.key === "tn:5" ? { ...b, bases: undefined, linkedBases: ["tn:1", "tn:2", "tn:3", "tn:4"], linkedCounts: { "tn:1": 900, "tn:2": 900, "tn:3": 1601, "tn:4": 1188 } } : b));
+    expect(steps(planPairs({ selected: ["tn:6"], library: undeclared })).some((x) => x.endsWith(">מזרחי"))).toBe(false);
+    // written on only one part of this book: the ordinary sibling, in that part (no part of its own to match)
+    const other = [...torah, book("tn:8", "ויקרא", { origin: "sefaria", isBaseBook: true })].map((b) => (b.key === "tn:5" ? { ...b, bases: ["tn:1", "tn:8"] } : b));
+    const one = pairs(planPairs({ selected: ["tn:6"], library: other })).filter((x) => x.target.key === "tn:5");
+    expect(one.map((x) => x.relation.scope)).toEqual([{ section: "בראשית" }, { section: "בראשית" }]);
+    const few = torah.map((b) => (b.key === "tn:6" ? { ...b, linkedCounts: { "tn:5": EVIDENCE_MIN - 1, "tn:3": 361 } } : b));
+    expect(steps(planPairs({ selected: ["tn:6"], library: few })).some((x) => x.endsWith(">מזרחי"))).toBe(false);
+  });
+
+  it('a sibling under EVIDENCE_MIN is still a base when it holds half the links of the base it is written on ("לבוש האורה" ← "רש"י על במדבר")', () => {
+    const lib5 = [
+      book("lv:1", "במדבר", { origin: "sefaria", isBaseBook: true }),
+      book("lv:2", "דברים", { origin: "sefaria", isBaseBook: true }),
+      book("lv:3", 'רש"י על במדבר', { origin: "sefaria", bases: ["lv:1"] }),
+      book("lv:4", 'רש"י על דברים', { origin: "sefaria", bases: ["lv:2"] }),
+      book("lv:5", "לבוש האורה", { origin: "sefaria", bases: ["lv:1", "lv:2"], linkedBases: ["lv:1", "lv:2", "lv:3", "lv:4"], linkedCounts: { "lv:1": 82, "lv:2": 64, "lv:3": 74, "lv:4": 31 }, linkedComplete: true }),
+      book("lv:6", "תרגום אונקלוס על במדבר", { origin: "sefaria", bases: ["lv:1"] }),
+      book("lv:7", "מיני תרגומא על תורה", { origin: "sefaria", bases: ["lv:1", "lv:2"], linkedBases: ["lv:1", "lv:2", "lv:6"], linkedCounts: { "lv:1": 61, "lv:2": 86, "lv:6": 57 }, linkedComplete: true }),
+    ];
+    const p = planPairs({ selected: ["lv:5"], library: lib5 });
+    const toRashi = pairs(p).filter((x) => x.target.key === "lv:3");
+    expect(toRashi.map((x) => `${x.engine}@${x.relation.scope?.section}`)).toEqual(["dibur-hamatchil@במדבר"]);
+    expect(toRashi[0]!.relation.dhOnly).toBe("intermediate");
+    // 31 of 64: under half of the links to דברים
+    expect(steps(p).some((x) => x.endsWith('>רש"י על דברים'))).toBe(false);
+    // a translation follows the verses: headings and dibur-hamatchil, in its part
+    const q = planPairs({ selected: ["lv:7"], library: lib5 });
+    expect(pairs(q).filter((x) => x.target.key === "lv:6").map((x) => `${x.engine}@${x.relation.scope?.section}`)).toEqual(["headings@במדבר", "dibur-hamatchil@במדבר"]);
+    // never under LINKED_MIN, whatever the share
+    const tiny = lib5.map((b) => (b.key === "lv:5" ? { ...b, linkedCounts: { "lv:1": 20, "lv:2": 64, "lv:3": LINKED_MIN - 1, "lv:4": 31 } } : b));
+    expect(steps(planPairs({ selected: ["lv:5"], library: tiny })).some((x) => x.endsWith('>רש"י על במדבר'))).toBe(false);
   });
 
   it('the base of its base, in the part of the commentary it explains ("שפתי חכמים" → "בראשית")', () => {
