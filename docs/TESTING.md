@@ -15,7 +15,7 @@
 | ארכיטקטורה | `tests/unit/architecture.test.ts` | Vitest, סריקת `import` | כן |
 | E2E | `tests/e2e/` | Playwright: Chrome ו־Edge המותקנים, ו־Firefox של Playwright | לא: `npx playwright test` |
 | בסיס רגרסיה של v3 | `tests/e2e/legacy-baseline.spec.ts` | Playwright | לא: `npm run test:legacy` |
-| השוואה חזותית | `tests/visual/` (§2א) | Playwright, `toHaveScreenshot`, Chrome בלבד | לא: `npm run test:visual`, ולא ב־CI |
+| השוואה חזותית | `tests/visual/` (§2א) | Playwright, `toHaveScreenshot`, ה־Chromium הנעול של Playwright | לא: `npm run test:visual`; ב־CI כן (job `visual`, Windows) |
 | מול מסד אמיתי | `tests/integration/**/*.local.test.ts` (§4) | Vitest | רק עם `OTZARIA_DB` |
 
 ## 2. הרצה
@@ -30,6 +30,7 @@ npx playwright test tests/e2e/qa.spec.ts --project=chrome
 npm run test:e2e                                    # build + E2E
 npm run test:legacy                                 # 93 הבדיקות העצמיות של v3
 npm run test:visual                                 # build + השוואת צילומי המסכים (§2א)
+npm run test:visual:update                          # אחרי שינוי מכוון בממשק: כתיבה מחדש של הצילומים שהשתנו
 npm run check                                       # typecheck + npm test + E2E
 ```
 
@@ -63,45 +64,86 @@ npm run check                                       # typecheck + npm test + E2E
 | `robustness.spec.ts` | מסד עם מעגל בעץ העמודים נדחה עם הודעה, והקובץ הבא עדיין נפתח |
 | `legacy-baseline.spec.ts` | 93/93 הבדיקות העצמיות של `legacy/OtzariaLinker-v3.html` (לא רץ ב־Firefox) |
 
-## 2א. השוואה חזותית (`npm run test:visual`)
+## 2א. השוואה חזותית (`npm run test:visual`, ובכל ריצה של CI)
 
-`tests/visual/screens.spec.ts` מגיע לשבעה מסכים כמו בדיקות ה־E2E (המסד החלקי וספרי טקסט קטנים, בלי מסד
-אמיתי), ומשווה צילום של החלון לצילום הבסיס: מסך הפתיחה, סביבת העבודה עם שני ספרים, קישור קיים ושתי שורות
-בבונה, טבלת ההצעות אחרי מנוע הכותרות, לשונית הבדיקה, חלון הייצוא, העזרה (<kbd>F1</kbd>) ודוח הקישור המרבי.
-התצורה, `playwright.visual.config.ts`, מריצה כל מסך בשישה פרויקטים: `light`/`dark` כפול `desktop` (1280×800),
-`tablet` (768×1024) ו־`phone` (390×844). מתחת ל־1200 פיקסלים הפריסה ההתחלתית היא "שני טקסטים וחלונית צד",
-ולכן הבדיקה פותחת את רשימת הספרים מהלשונית "ספרים".
+`tests/visual/screens.spec.ts` מגיע ל־15 מסכים וחלונות כמו בדיקות ה־E2E (המסד החלקי, מסדי ה־fixtures של אשף
+המיפוי וספרי טקסט קטנים, בלי מסד אמיתי), ומשווה צילום של החלון לצילום הבסיס:
 
-**מה עושה את הצילום יציב:** Chrome המותקן בלבד, `deviceScaleFactor: 1`, `locale: "he-IL"` ו־`timezoneId` קבועים,
-`reducedMotion`, אנימציות וסמן הקלדה כבויים (`animations: "disabled"`, `caret: "hide"`), העכבר מחוץ לכל פקד
-ושום פקד במיקוד. ההודעות הקופצות (`.notices`) מתנקות לפני כל צילום, כי הודעת הצלחה נעלמת אחרי 5 שניות
-ונוכחותה תלויה במהירות הריצה. בשום מסך אין שעה או תאריך; משך הריצה מופיע רק בדוח הקישור המרבי במצב
-מתקדם, והוא ממוסך (`timeMasks`). גם מיקום הגלילה של החלונית הצדדית (ומתחת ל־900 פיקסלים, של כל סביבת העבודה)
-מתאפס לראש, כי הוא תלוי בתזמון שבין גדילת התוכן לגלילה של הלחיצה האחרונה. אין תקציב של פיקסלים שונים
-(`maxDiffPixels: 0`): סף של 0.2% העביר בשקט שינוי בתווית של לחצן. רעש של החלקת קצוות נבלע בסף הצבע של כל פיקסל
-(`threshold`, ברירת המחדל 0.2). שלוש הרצות רצופות על אותו בסיס עברו 42/42.
+| קבוצה | הצילומים |
+|---|---|
+| מסכים | מסך הפתיחה; דף משימה (`#/start/...`); הזרימה המודרכת בשלב "הספרים שנמצאו"; סביבת העבודה עם שני ספרים, קישור קיים ושתי שורות בבונה; לשונית הבדיקה |
+| מצבים עמוסים | טבלת ההצעות אחרי מנוע הכותרות; 50 הצעות עם שלוש הערות של המנוע לספר בשם עברי ארוך (שם הקובץ נחתך בשני מקומות); טבלת הקישורים אחרי מיזוג, עם 7 קישורים נבחרים וסרגל הפעולות; לוח עבודת הקישור המרבי עם ספר שנכשל, ודוח הקישור המרבי |
+| חלונות | הייצוא; העזרה (<kbd>F1</kbd>); אשף המיפוי עם הניחוש והנימוקים; אשף המיפוי כש"לא נמצאו ספרים"; השוואה ומיזוג (המסד מול שתי גרסאות של קובץ קישורים) |
+| הודעות | חמש הודעות שגיאה: שלוש האחרונות ו"עוד 2 הודעות" |
 
-**למה צילומי הבסיס לכל מערכת בנפרד, ולמה זה לא ב־CI.** גופני הספרים מוטמעים, אבל גופן הממשק הוא של
-המערכת (`--font-ui`: ‏Segoe UI ב־Windows, ובלינוקס מה שמותקן), וגם הריכוך של הטקסט שונה. צילום מ־Windows לא
-יתאים לעולם לצילום מלינוקס. לכן הנתיב כולל את המערכת, `tests/visual/__screenshots__/<platform>/<project>/<מסך>.png`,
-ובמאגר יש כרגע רק צילומי `win32` (42 קבצים, כ־3.5MB). CI רץ על Ubuntu, ולכן ההשוואה **אינה** חלק מ־`npx playwright test`
-(ה־`testDir` שלו הוא `tests/e2e`) ולא מ־`ci.yml`: היא הייתה נכשלת תמיד, או "עוברת" בכתיבת בסיס חדש בלי שאיש הסתכל
-בו. אחרי שינוי בממשק מריצים אותה ב־Windows, לפני PR.
+כל מסך נבדק בשלושה רוחבים, `desktop` (1280×800), `tablet` (768×1024) ו־`phone` (390×844), וכל צילום פעמיים,
+בהיר וכהה: 14 בדיקות (בבדיקת ההשוואה שני צילומים) × 3 רוחבים = 42 בדיקות, 90 צילומים (כ־9.5MB). הרוחב הוא בלוק `describe` שנקבע **לפני**
+שהדף נפתח, כי הפריסה ההתחלתית נבחרת לפי רוחב החלון (מתחת ל־1200 פיקסלים רשימת הספרים עוברת ללשונית "ספרים"
+של החלונית, מתחת ל־900 הכול עמודה אחת). ערכת הצבעים מתחלפת בתוך הבדיקה (`page.emulateMedia`), כי האפליקציה
+עוקבת אחרי `prefers-color-scheme` בזמן אמת; כך מגיעים לכל מסך פעם אחת לשני הצבעים. RTL נבדק בכל צילום (הממשק
+כולו מימין לשמאל), ובמיוחד שמות קבצים כיחידה משמאל לימין בתוך טקסט עברי, ציון ספריא באנגלית בבונה, ושם עברי
+ארוך שנחתך. הצילומים נשמרים ב־`tests/visual/__screenshots__/win32/<רוחב>/<מסך>-<light|dark>.png`.
 
-לבסיס של לינוקס יש workflow ידני, `.github/workflows/visual-baselines.yml` (Actions → Visual baselines → Run workflow):
-הוא מתקין את Chrome ואת גופני Noto, מצלם עם `--update-snapshots=missing` ומעלה את `tests/visual/__screenshots__/linux/`
-כ־artifact. אחרי שמישהו **הסתכל** בצילומים ושמר אותם במאגר, אפשר להוסיף ל־`ci.yml` צעד השוואה (אותה פקודה בלי
-`--update-snapshots`). כל עוד הם לא במאגר, ההרצה בלינוקס כותבת צילומים חסרים ונכשלת.
+### מה עושה את הצילום זהה ממחשב Windows אחד לאחר
+
+| מה משתנה בין מחשבים | מה עושים |
+|---|---|
+| גרסת הדפדפן (Chrome מתעדכן לבד; במחשב שלנו 157, ב־runner מה שבתמונה) | Chromium headless shell של Playwright, שהגרסה שלו נעולה בגרסת `@playwright/test` (‏1.65.0 → Chromium 158.0.8127.18): `npx playwright install chromium-headless-shell` |
+| גופן הממשק (Segoe UI, ‏Cascadia Mono/Consolas): גרסאות שונות בין בניות של Windows, וחסרים בתמונת שרת | `tests/visual/stable.ts` מצל על כל שם גופן מערכת שה־CSS מזכיר (`Segoe UI`, `Arial`, `Consolas`, `Cascadia Mono`, `David` ועוד) בגופן מוטמע: Assistant (OFL, ‏`tests/visual/fonts/`, מאתר הארגון) לטקסט, ו־Frank Ruhl CLM של האפליקציה לאשכולות עם טעמים, שאין ב־Assistant. גופן רשת באותו שם גובר על הגופן המותקן; שום דבר ב־`src/` לא משתנה. גופני הספרים מוטמעים ממילא |
+| גופן שבכל זאת הגיע מהמערכת | לפני כל צילום `fontLeaks` שואל את Chrome (DevTools, `CSS.getPlatformFontsForNode`) איזה גופן צייר כל אלמנט, ונכשל כשגופן מערכת צייר יותר גליפים ממספר הסמלים באלמנט (טקסט עברי או לטיני). סמלים שאין לאף גופן מוטמע (▾ ◂ ← → ✓) באים מגופני הליבה של Windows (Segoe UI Symbol, ‏Cambria Math, ‏Arial), שיש בכל Windows |
+| ClearType: במחשב שלנו הצילומים הישנים היו עם שוליים צבעוניים של subpixel (נמדד: פיקסלים עם R≠G≠B בקצוות של טקסט כהה), והם תלויים בהגדרות ClearType של המכונה | `--disable-lcd-text`: החלקה בגווני אפור בלבד |
+| GPU ודרייבר | `--disable-gpu`: רינדור תוכנה |
+| פרופיל הצבע של המסך, DPI | `--force-color-profile=srgb`, `deviceScaleFactor: 1`, `--disable-font-subpixel-positioning` |
+| שעון, אזור, תנועה | `locale: "he-IL"`, `timezoneId` קבוע, `reducedMotion`, `animations: "disabled"`, `caret: "hide"`; משכי זמן ממוסכים (`timeMasks`) |
+| מצב שתלוי בתזמון | ההודעות מתנקות לפני כל צילום (הודעת הצלחה נעלמת אחרי 5 שניות), חוץ משגיאות בצילום ההודעות, שנשארות עד שסוגרים; העכבר מחוץ לכל פקד ושום פקד במיקוד; גלילת החלונית הצדדית ושל סביבת העבודה מתאפסת לראש |
+
+אין תקציב של פיקסלים שונים (`maxDiffPixels: 0`): סף של 0.2% העביר בשקט שינוי בתווית של לחצן. רעש של החלקת קצוות
+נבלע בסף הצבע של כל פיקסל (`threshold`, ברירת המחדל 0.2). תקציב לא היה עוזר גם בהבדל אמיתי של סביבה: הבדל ברסטור
+של גופן נוגע בכל קצה של כל אות, אלפי פיקסלים, ולא בעשרות.
+
+**נמדד:** אחרי כתיבת הבסיס, כל הרצת השוואה עברה 90/90 צילומים: שתיים רצופות לפני המיזוג של `rewrite/v2` (febc144) ושתיים אחריו, על אותו בסיס, ובדיקת הגופנים לא מצאה טקסט בגופן מערכת באף מסך. זמן ריצה ב־4 workers (כמו ב־CI): 1.3–3.1 דקות במחשב הפיתוח (20 ליבות לוגיות; הטווח לפי העומס על המחשב, שהיה בשימוש בזמן המדידות). ב־runner של 4 ליבות צפוי יותר; ל־job יש `timeout-minutes: 20`. במבנה הקודם, פרויקט לכל רוחב ולכל צבע, אותם 90 צילומים לקחו 2.7–3.9 דקות: כל פרויקט הפעיל סט חדש של workers, ולכל מסך הגיעו שש פעמים במקום שלוש.
+
+### למה Windows ב־CI ולא לינוקס
+
+ההשוואה רצה ב־`ci.yml` בכל push ו־PR, ב־job נפרד, `visual`, על `windows-latest`, מול צילומי `win32` שבמאגר; הבדל
+מכשיל את הריצה, ו־`test-results/` (הצילום, הבסיס וההפרש, `*-actual.png`, `*-expected.png`, `*-diff.png`) עולה
+כ־artifact בשם `visual-diffs`. ב־CI בסיס חסר נכשל בלי שנכתב (`updateSnapshots: "none"`).
+
+- **לינוקס** היה דורש צעד ידני: אי אפשר לייצר בסיס לינוקס במחשב פיתוח של Windows, ולכן מישהו היה צריך להריץ
+  workflow, להסתכל ב־90 צילומים ולשמור אותם, ושוב בכל שינוי מכוון בממשק. גם הרסטור שונה (FreeType מול
+  DirectWrite), כך שבסיס לינוקס לא היה מתאים למה שמפתח רואה ב־Windows.
+- **Windows** עובד בלי צעד ידני: הבסיס נוצר במחשב הפיתוח ונבדק ב־runner באותם תנאים — אותו קובץ Chromium,
+  אותם קובצי גופן, אותו רסטור (DirectWrite; ‏`windows-latest` היא תמונת Windows Server, ובנייתה לא נבדקה כאן),
+  החלקה באפור, רינדור תוכנה, sRGB ו־DPI קבוע. במחשב הפיתוח: Windows 11 ‏26H2.
+- **מה לא אומת:** לא הרצנו על runner (אין push מהמחשב הזה). הסיכון שנשאר: הבדל של DirectWrite בין בניית Windows
+  של המפתח לבניית התמונה של ה־runner ברסטור של אותו גופן, והבדל בגליפים של סמלים מגופני הליבה. אם הריצה הראשונה
+  נכשלת בהבדלים דקים בקצוות של כל הטקסט ולא במבנה (ראו `*-diff.png`), זו הסביבה: מריצים את ה־workflow הידני
+  `.github/workflows/visual-baselines.yml` (Actions → Visual baselines → Run workflow), שכותב את כל הבסיס על
+  `windows-latest` ומעלה אותו כ־artifact (`visual-baselines-win32`), מסתכלים, ושומרים במאגר. מאותו רגע ה־runner
+  הוא המקור, ומפתח מעדכן בסיס דרך ה־workflow הזה.
+- גם שדרוג של `@playwright/test` מחליף את Chromium, ויכול להזיז פיקסלים: עדכון כזה מגיע עם בסיס חדש, באותו PR.
+
+### הרצה ועדכון
 
 ```
-npm run test:visual                                          # build + השוואה (Windows)
-npx playwright test -c playwright.visual.config.ts --project=dark-phone   # פרויקט אחד, אחרי build
-npm run test:visual -- --update-snapshots=all                 # שינוי מכוון בממשק: כתיבה מחדש של הבסיס
+npm run test:visual                                                     # build + השוואה
+npx playwright test -c playwright.visual.config.ts -g "phone"           # רוחב אחד, אחרי build
+npx playwright test -c playwright.visual.config.ts -g "mapping wizard"  # מסך אחד בשלושת הרוחבים
+npm run test:visual:update                                              # שינוי מכוון בממשק: build + כתיבה מחדש של מה שהשתנה
 ```
 
-כשבדיקה נכשלת, Playwright שומר ב־`test-results/` את הצילום, את הבסיס ואת ההפרש (`*-actual.png`, `*-expected.png`,
-`*-diff.png`). `--update-snapshots` בלי ערך כותב רק צילומים שנכשלו; `=all` כותב את כולם. אחרי כתיבה **מסתכלים** בצילומים שהשתנו (`git diff --stat tests/visual`) לפני commit:
-בסיס שנכתב בלי שמישהו ראה אותו לא בודק כלום. בסוף מוחקים את `test-results/` ואת `playwright-report/`.
+התקנה חד־פעמית: `npx playwright install --no-remove chromium-headless-shell` (בלי `--no-remove` Playwright מוחק
+מהמטמון דפדפנים של גרסאות אחרות שלו).
+
+**אחרי שינוי מכוון בממשק** (למשל כשענף עיצוב ממוזג), שתי פקודות:
+
+1. `npm run test:visual` — ההשוואה נכשלת בכל מסך שהשתנה, ו־`test-results/` מחזיקה לכל אחד את הצילום, הבסיס וההפרש
+   (`*-actual.png`, `*-expected.png`, `*-diff.png`). **מסתכלים** בכולם: כל הבדל צריך להיות השינוי שהתכוונו אליו.
+   הבדיקה נעצרת בצילום הראשון שנכשל, הבהיר; הכהה נבדק בשלב הבא.
+2. `npm run test:visual:update` — כותב מחדש רק את הצילומים שהשתנו (`--update-snapshots=changed`; ‏`=all` כותב את
+   כולם), בשני הצבעים ובשלושת הרוחבים, בהרצה אחת של כשתי דקות. `git status tests/visual` מראה מה נכתב; צילום כהה
+   שהשתנה ולא נראה בשלב 1 פותחים ובודקים לפני commit. בסיס שנכתב בלי שמישהו ראה אותו לא בודק כלום. בסוף מוחקים
+   את `test-results/`.
 
 ## 3. Property tests
 
@@ -260,6 +302,7 @@ py -3 -I scripts/fixtures/make_wizard_dbs.py      # Python 3.14+ (zstd ב־compr
 - בזמן עבודה מריצים את הבדיקות הקשורות לשינוי; לפני PR את הכול (`npm run check`).
 - CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test` עם `FC_SEED` שנגזר מה־commit, build, E2E ב־Chrome,
   ב־Edge וב־Firefox (`npx playwright install --with-deps chrome msedge firefox`), ובודק שבנייה חוזרת נותנת
-  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)). ההשוואה החזותית לא רצה ב־CI (§2א).
+  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)). ב־job נפרד, `visual`, על
+  `windows-latest`, רצה ההשוואה החזותית מול צילומי הבסיס שבמאגר, והבדל מכשיל את הריצה (§2א); בשחרור היא לא רצה.
 
 </div>
