@@ -133,7 +133,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 | כללי הייצוא | `src/core/links/validate.ts` |
 | מנוע אוטומטי | `src/linking/automatic/types.ts` ([`docs/AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md)) |
 | זיהוי זוגות באצווה | `src/linking/batch.ts` (`pairByTitle`) |
-| קישור מרבי: תכנון, איחוד, דוח | `src/linking/plan.ts`, `src/linking/merge.ts`, `src/linking/maxlink-report.ts` ([`AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md) §5) |
+| קישור מרבי: תכנון, איחוד, דוח; העבודה ספר אחר ספר (השהיה, המשך, טביעות אצבע) | `src/linking/plan.ts`, `src/linking/merge.ts`, `src/linking/maxlink-report.ts`, `src/linking/batch-job.ts` ([`AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md) §5) |
 | יישור שורות בין שתי מהדורות; תכנון העברת קישורים; שורות ההשוואה ומיפוי השורות כ־CSV | `src/matching/line-diff.ts`, `src/linking/relink.ts`, `src/linking/edition-map.ts` (הממשק: `src/ui/dialogs/relink-dialog.tsx`, `edition-diff.tsx`) |
 | ספר ושורה כפי שכל מקור מחזיר | `src/core/books.ts`, `src/sources/book-source.ts` |
 | state ← עולם חיצוני | `src/state/services.ts` |
