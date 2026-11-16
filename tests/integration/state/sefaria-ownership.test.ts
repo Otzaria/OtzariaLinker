@@ -180,3 +180,36 @@ describe("a personal database in the Otzaria schema (F12, F2)", () => {
     expect(personal!.info.library).toBe(false);
   });
 });
+
+/*
+ * Where Otzaria's personal import finds each book (validate.ts personalImportSide / libraryHasTitle),
+ * decided from the open sources: the user's text file goes to a personal-books folder; the official
+ * database and a personal database are found as libraries. Behaviour of the app checked in its own
+ * code by scripts/live-test/dart/linker_bundle_test.dart ("R1", "title clashes").
+ */
+describe("private use: where the personal import finds a book", () => {
+  it("a text file is personal, the databases are not; a text file named like a library book is flagged", async () => {
+    const { store } = makeStore();
+    await store.openFiles([MINI]);
+    await store.openFiles([BASE, COMM]);
+    await store.openFiles([await personalDb("אישי-מקורות.db", [["ספר במסד", BASE_LINES]])]);
+    const ctx = store.validation();
+    const ref = (title: string, label?: string) => store.refOf(bookOf(store, title, label).key);
+    expect(ctx.personalImportSide!(ref("בראשית", "seforim.db"))).toBe("other");
+    expect(ctx.personalImportSide!(ref("ביאור חדש על בראשית"))).toBe("personal");
+    expect(ctx.personalImportSide!(ref("ספר במסד"))).toBe("other");
+    expect(ctx.personalImportSide!({ key: "nope:1", title: "x", origin: "unknown" })).toBeUndefined();
+    const mine = [...store.books.value.values()].find((b) => b.title === "בראשית" && b.key.startsWith(store.sources.value[1]!.info.id))!;
+    expect(ctx.libraryHasTitle!(store.refOf(mine.key))).toBe(true);
+    expect(ctx.libraryHasTitle!(ref("בראשית", "seforim.db"))).toBe(false);
+    expect(ctx.libraryHasTitle!(ref("ביאור חדש על בראשית"))).toBe(false);
+
+    // the user's בראשית, linked for private use: the export stops it (Otzaria would reject the whole file)
+    expect(await store.suggestions.runEngine("dibur-hamatchil", bookOf(store, "ביאור חדש על בראשית").key, mine.key)).toBe(true);
+    store.suggestions.approve(store.suggestions.run.value!.result.suggestions.map((x) => x.id));
+    store.exportPurpose.value = "private";
+    const plan = (await store.exchange.prepareExport())!;
+    expect(plan.written).toEqual([]);
+    expect(heldCodes(plan)).toContain("export/private-title-in-library");
+  });
+});

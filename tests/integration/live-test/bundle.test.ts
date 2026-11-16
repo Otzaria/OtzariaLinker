@@ -8,6 +8,8 @@ import {
   BOOKS_DIR,
   BUNDLE_BOOKS,
   GENESIS,
+  PERSONAL_DB,
+  RASHI,
   UPDATE_INSERTED_LINE,
   buildLiveTestBundle,
   bundleBookLines,
@@ -45,7 +47,7 @@ describe("the bundle is what the tool writes", () => {
   });
 
   it("nothing is held back, and the tool's validation has no error and no warning on the main links", () => {
-    for (const plan of [bundle.plans.main, bundle.plans.update, bundle.plans.negative]) expect(plan.heldBack).toEqual([]);
+    for (const plan of Object.values(bundle.plans)) expect(plan.heldBack).toEqual([]);
     const main = bundle.cases.filter((c) => c.id.startsWith("L"));
     expect(main).toHaveLength(12);
     for (const c of main) expect(c.tool.filter((p) => p.severity !== "info"), c.id).toEqual([]);
@@ -53,6 +55,18 @@ describe("the bundle is what the tool writes", () => {
     const updated = { ...BUNDLE_BOOKS, [BASE]: bookLines(BASE, "update") };
     const problems = validateExport(bundle.plans.update.written, validationContext(updated));
     expect([...problems.values()].flat().filter((p) => p.severity !== "info")).toEqual([]);
+  });
+
+  it("several databases (dbs/): no warning; the source link goes to the personal database's book", () => {
+    const d = bundle.cases.filter((c) => c.id.startsWith("D"));
+    expect(d.map((c) => [c.id, c.tool.filter((p) => p.severity !== "info").map((p) => p.code)])).toEqual([["D1", []], ["D2", []], ["D3", []]]);
+    expect(d.map((c) => c.file)).toEqual([`dbs/${PERSONAL_DB.title}_links.json`, `dbs/${PERSONAL_DB.title}_links.json`, `dbs/${GENESIS.title}_links.json`]);
+    expect(d[1]!.tool.map((p) => p.code)).toContain("export/private-source-to-base");
+  });
+
+  it("R1 (reversed/): a personal base with a library commentary — the tool warns that Otzaria shows it reversed", () => {
+    const [r] = bundle.cases.filter((c) => c.id.startsWith("R"));
+    expect(r!.tool.map((p) => `${p.severity}:${p.code}`)).toContain("warning:export/private-reversed");
   });
 
   it("the negative file carries exactly the record the tool only warns about", () => {
@@ -91,7 +105,7 @@ describe("the bundle is what the tool writes", () => {
 
   it("the manifest points at the right record of each file", () => {
     const manifest = JSON.parse(fileText("manifest.json")) as { cases: { id: string; file: string; record: number; from: string; to: string }[] };
-    expect(manifest.cases.map((c) => c.id)).toEqual([...Array.from({ length: 12 }, (_, i) => `L${i + 1}`), "N1a", "N1b"]);
+    expect(manifest.cases.map((c) => c.id)).toEqual([...Array.from({ length: 12 }, (_, i) => `L${i + 1}`), "N1a", "N1b", "D1", "D2", "D3", "R1"]);
     for (const c of manifest.cases) {
       const records = JSON.parse(fileText(c.file)) as { line_index_1: number; path_2: string }[];
       const r = records[c.record - 1]!;
@@ -180,6 +194,13 @@ describe("the app's personal import accepts the bundle (gates mirrored from Otza
 
   it("update/: the moved links pass against the new edition", () => {
     for (const f of linksFiles("update")) expect(appNativeGate(f.path, f.text, lines("update")), f.path).toEqual([]);
+  });
+
+  it("dbs/ and reversed/: every file passes every gate (with the personal database and רש\"י open)", () => {
+    const more = (title: string) => (title === PERSONAL_DB.title ? PERSONAL_DB.totalLines : title === RASHI.title ? RASHI.totalLines : lines(BOOKS_DIR)(title));
+    const files = [...linksFiles("dbs"), ...linksFiles("reversed")];
+    expect(files).toHaveLength(3);
+    for (const f of files) expect(appNativeGate(f.path, f.text, more), f.path).toEqual([]);
   });
 
   it("negative/: exactly one record fails — and that rejects the whole file in the app", () => {

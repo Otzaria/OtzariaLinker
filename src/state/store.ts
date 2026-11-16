@@ -937,6 +937,19 @@ export class AppStore {
       sefariaOwned: (book) => this.isSefariaOwned(book),
       sefariaTitle: (book) => hasSefariaTitle(book, this.sefariaTitles.value),
       purpose: this.exportPurpose.value,
+      // a text book of the user's goes into a personal-books folder; every other book is found in the
+      // official library or in a personal database attached to Otzaria (validate.ts appReverses)
+      personalImportSide: (ref) => {
+        const b = this.bookOf(ref);
+        const src = b && this.sources.value.find((x) => x.info.id === sourceIdOfBookKey(b.key));
+        if (!src) return undefined;
+        return src.info.kind === "text-files" && !this.isLibrarySource(src.info.id) ? "personal" : "other";
+      },
+      libraryHasTitle: (ref) => {
+        const b = this.bookOf(ref);
+        if (!b || this.isLibrarySource(sourceIdOfBookKey(b.key))) return false;
+        return (this.booksByTitle.value.get(ref.title) ?? []).some((x) => x.key !== b.key && this.isLibrarySource(sourceIdOfBookKey(x.key)));
+      },
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),
       bookChanged: (ref) => {

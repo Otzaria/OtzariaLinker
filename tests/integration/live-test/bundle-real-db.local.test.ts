@@ -1,6 +1,6 @@
 import { closeSync, fstatSync, openSync, readSync, statSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
-import { BUNDLE_BOOKS, GENESIS } from "../../../scripts/live-test/bundle";
+import { BUNDLE_BOOKS, GENESIS, PERSONAL_DB, RASHI } from "../../../scripts/live-test/bundle";
 import { OtzariaDbReader } from "../../../src/database/otzaria/reader";
 import type { ByteSource } from "../../../src/database/sqlite/lazy/byte-source";
 
@@ -38,12 +38,17 @@ describe.runIf(path)("the live-test bundle against the real seforim.db (read-onl
     const reader = await OtzariaDbReader.open(source!);
     const books = await reader.books();
     const titles = new Set(books.map((b) => b.title));
-    for (const title of Object.keys(BUNDLE_BOOKS)) expect(titles.has(title), title).toBe(false);
+    for (const title of [...Object.keys(BUNDLE_BOOKS), PERSONAL_DB.title]) expect(titles.has(title), title).toBe(false);
 
     const g = books.filter((b) => b.title === GENESIS.title);
     expect(g).toHaveLength(1);
     expect(g[0]).toMatchObject({ isBaseBook: true, totalLines: GENESIS.totalLines });
     const heRefs = await reader.heRefs(g[0]!.id);
     for (const [i, heRef] of Object.entries(GENESIS.heRefs)) expect(heRefs.find((h) => h.index === Number(i))?.heRef).toBe(heRef);
+    const r = books.filter((b) => b.title === RASHI.title);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ isBaseBook: false, totalLines: RASHI.totalLines });
+    const rashiRefs = await reader.heRefs(r[0]!.id);
+    for (const [i, heRef] of Object.entries(RASHI.heRefs)) expect(rashiRefs.find((h) => h.index === Number(i))?.heRef).toBe(heRef);
   }, 300_000);
 });

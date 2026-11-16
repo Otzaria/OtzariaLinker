@@ -79,7 +79,7 @@ describe("_report.txt", () => {
     expect(tail).toContain("בקשת משיכה");
     expect(tail).toContain("לאוצריא שלכם בלבד (הספרייה האישית):");
     expect(tail).toContain('"ייבוא נתונים"');
-    expect(tail).toContain("שימו לב: המסלול הזה מתואר לפי הקוד של אוצריא, ועוד לא נבדק בפועל");
+    expect(tail).toContain("שימו לב: המסלול הזה נבדק בקוד של אוצריא עם קבצים מהכלי");
     expect(tail).toContain("הכלי לא כותב קישורים לתוך מסד");
     // private use puts the personal library first
     const priv = buildExportReport({ date: "d", app: "a", format: "json", links: plan, altToc, purpose: "private" });
