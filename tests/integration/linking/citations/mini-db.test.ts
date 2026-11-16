@@ -60,4 +60,32 @@ describe("citations engine on the real database slice (seforim-v7-mini.db)", () 
     expect(a).toEqual(b);
     expect(new Set(a).size).toBe(a.length);
   });
+
+  it("a cancel during the resolution keeps the suggestions of the books already read (no throw, a note)", async () => {
+    // two cited books (text files: located by their headings) and a book that cites both
+    const reg = new SourceRegistry();
+    const NL = String.fromCharCode(10);
+    const chapters = (n: number, verses: number) => Array.from({ length: n }, (_, c) => [`<h2>פרק ${"אבגדה"[c]}</h2>`, ...Array.from({ length: verses }, (_, v) => `<h3>פסוק ${"אבגדה"[v]}</h3>${NL}תוכן ${c} ${v}`)].join(NL)).join(NL);
+    const file = (name: string, text: string) => ({ path: name, blob: new Blob([text]) });
+    const opened = await reg.open([file("ישעיה.txt", `<h1>ישעיה</h1>${NL}${chapters(3, 4)}`), file("ירמיה.txt", `<h1>ירמיה</h1>${NL}${chapters(3, 4)}`), file("חיבור.txt", ["<h1>חיבור</h1>", "כמו שנאמר (ישעיה ב, ג) ועוד", "וכתיב (ירמיה ג, ב) ועוד"].join(NL))]);
+    const all = opened.sources.flatMap((x) => x.books);
+    const b = all.find((x) => x.title === "חיבור")!;
+    const src: BookRef = { key: b.key, title: b.title, origin: b.origin };
+    const full = await citationsJob(reg, src, {}, {});
+    expect(full.suggestions.map((s) => s.target.book.title).sort()).toEqual(["ירמיה", "ישעיה"]);
+    // turns aborted at the first progress report of the resolution stage (500‰ is the end of the scan), after one book
+    let cancelled = false;
+    const signal = { get aborted() { return cancelled; }, throwIfAborted() { if (cancelled) throw new DOMException("aborted", "AbortError"); } } as unknown as AbortSignal;
+    const partial = await citationsJob(reg, src, {}, { signal, progress: (d) => void (d > 500 && d < 1000 && (cancelled = true)) });
+    expect(partial.notes.map((n) => n.code)).toContain("engine/aborted");
+    expect(partial.suggestions).toHaveLength(1);
+    const byId = new Map(full.suggestions.map((s) => [s.id, s.confidence] as const));
+    expect(byId.get(partial.suggestions[0]!.id)).toBe(partial.suggestions[0]!.confidence);
+    // a cancel during the scan: nothing resolved, still no throw
+    let early = false;
+    const signal2 = { get aborted() { return early; }, throwIfAborted() {} } as unknown as AbortSignal;
+    const none = await citationsJob(reg, src, {}, { signal: signal2, progress: (d) => void (d >= 500 && (early = true)) });
+    expect(none.suggestions).toEqual([]);
+    expect(none.notes.map((n) => n.code)).toContain("engine/aborted");
+  });
 });

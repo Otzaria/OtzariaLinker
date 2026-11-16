@@ -276,8 +276,12 @@ describe("citations: a Rambam topic after a chapter (\"רמב\"ם פ\"ט מתר�
     const i = oneR('הרמב"ם פ"ג מא"ב הלכה ב\' אבל');
     expect(books(i)).toEqual(["r-ib"]);
     expect(i.rule).toBe("rambam-topic-initials");
-    // "מעשר" is the first word of מעשר שני and the start of מעשרות: no guess
-    expect(scanR('כמ"ש רמב"ם סוף פ\' י"ב מהל\' מעשר והכא')).toHaveLength(0);
+    // "מעשר" is the first word of מעשר שני and the start of מעשרות: the titles alone cannot tell — but books mean
+    // מעשרות (the database's LINKER citations: 508 of 508, knowledge/rambam-topics.json); "מעשר שני" is written in full
+    const m = oneR('כמ"ש רמב"ם סוף פ\' י"ב מהל\' מעשר והכא');
+    expect(books(m)).toEqual(["r-maas"]);
+    expect(m.rule).toBe("rambam-topic-known");
+    expect(books(oneR('כמ"ש רמב"ם פ"ב מהל\' מעשר שני ה"א'))).toEqual(["r-ms"]);
   });
 
   it("a commentary on the Rambam named before it: its words on that chapter, when the library has it", () => {

@@ -109,7 +109,9 @@ function markerAt(toks: readonly Tok[], i: number): { kind: Kind; width: number;
   for (let p = 0; p <= 2; p++) {
     if (p && !/^[ובד]$/.test(full[p - 1]!)) break;
     const s = full.slice(p);
-    // "בד'" is not "in daf", but "בדף" is
+    // "בד'" is not "in daf", but "בדף" is — and "בד' ו' ע"ב" is: a numeral and a written amud after it
+    // ("התוס' בעירובין בד' ו' ע"ב בד"ה והאמר"); "בד' אמות", "בד' כוסות" stay "in four"
+    if (p && s === "ד'" && /^ו?ב$/.test(full.slice(0, p)) && numeralOf(toks[i + 1]) && amudAt(toks, i + 2)) return { kind: "daf", width: 1 };
     if (p && s.length < 3 && s !== "דף") break;
     const two = toks[i + 1]?.kind === "word" ? marker(`${s} ${shape(toks[i + 1]!)}`) : undefined;
     if (two) return { kind: two, width: 2 };
@@ -220,7 +222,9 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
     if (elems.length && t.kind === "word" && t.text[0] === "ו" && markerAt(toks, j)) break;
     // "רש"י חולין סוף ה.", "תוספות זבחים ריש ז:": also before a daf with its amud
     const posDaf = () => { const d = readElem(toks, j + 1, lastKind, inside); return !!d && d.elem.amud !== undefined && (d.elem.kind === "daf" || d.elem.amudGlued === true || d.elem.numeral.form !== "bare"); };
-    if (t.kind === "word" && POSITION_WORDS.has(t.text) && (markerAt(toks, j + 1) || (!elems.length && posDaf()))) {
+    // …and before a compact chapter that a daf follows ("ובתוס' בכורות ריש פ"ג דף י"ט ד"ה איש")
+    const posPerek = () => { const d = readElem(toks, j + 1, lastKind, inside); return !!d && d.elem.kind === "perek" && !!d.elem.compact && !!markerAt(toks, d.next) && readElem(toks, d.next, "perek", inside)?.elem.kind === "daf"; };
+    if (t.kind === "word" && POSITION_WORDS.has(t.text) && (markerAt(toks, j + 1) || (!elems.length && (posDaf() || posPerek())))) {
       j++;
       continue;
     }
@@ -253,6 +257,9 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
     // citation goes — the words after it are the quote, not more levels (only a marked level follows)
     const last = elems[elems.length - 1]!;
     if ((last.kind === "daf" || last.amud !== undefined) && !nextIsMarked(toks, j, lastKind)) break;
+    // "מג"א סי' תי"ו סק"ג שכז נהג": a ס"ק is the deepest level a commentary has — a bare word after it is the text
+    // ("שכז", 327), not a level
+    if (last.kind === "sk" && last.explicit && !nextIsMarked(toks, j, lastKind)) break;
   }
   // "ח"ו" alone is "חס ושלום", not a part: a compact part counts only with a place inside it
   if (elems.length === 1 && elems[0]!.kind === "chelek" && elems[0]!.compact) return null;
@@ -437,6 +444,12 @@ function dafWithDalet(t: Tok): Numeral | null {
  * word: alone "י"ה" is far more often the divine name.
  */
 function oldStyleNumeral(t: Tok | undefined, bare = false): Numeral | null {
+  // "סי' תי"ו", "סי' רי"ה": hundreds and then 15 / 16 the plain way, with the gershayim before the last letter
+  // (after a marker word only — the caller)
+  if (t?.kind === "word" && !t.geresh && t.gershayim && t.text.length === 3 && t.gershayimAt === 2 && t.text[1] === "י" && (t.text[2] === "ה" || t.text[2] === "ו")) {
+    const hundreds = strictValue(t.text[0]!);
+    if (hundreds !== null && hundreds >= 100) return { n: hundreds + (t.text[2] === "ה" ? 15 : 16), form: "gershayim", common: false };
+  }
   if (!t || t.kind !== "word" || t.geresh || t.text.length !== 2 || t.text[0] !== "י") return null;
   // bare: "יה" with no quote marks — a word as well, so it is "common" (never the only evidence)
   if (!(t.gershayim && t.gershayimAt === 1) && !(bare && !t.gershayim)) return null;

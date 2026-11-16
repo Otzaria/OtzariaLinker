@@ -167,6 +167,14 @@ export interface Pending {
 export class CitationRun {
   private readonly scanner: CitationScanner;
   private readonly pending = new Map<number, Pending>();
+  /**
+   * The pending citations by candidate book (built by targets(), after the scan): each step of the resolution
+   * visits only the citations that may mean its book — a big book (מיקרופדיה תלמודית: ~100K citations of ~2K books)
+   * would otherwise walk every citation once per book and step.
+   */
+  private byBook: Map<string, Pending[]> | null = null;
+  /** the books resolveWith() has been run for: after a cancel, a citation with a candidate not among them is not ranked */
+  private readonly resolvedBooks = new Set<string>();
   private readonly opts: Required<Omit<CitationsOptions, "thresholds" | "sefariaOwned">> & { thresholds: ConfidenceThresholds };
   /** the library's answer to "is this a Sefaria book" (core/links/sefaria-owned.ts): no anchor and no range on such a side */
   private readonly sefariaOwned: SefariaOwned;
@@ -204,7 +212,7 @@ export class CitationRun {
    */
   needsUnits(book: BookRef): boolean {
     if (this.units.byBook.has(book.key)) return false;
-    for (const p of this.pending.values()) if ((p.citation.unit || chapterByNumber(p.citation)) && p.citation.candidates.some((c) => c.book.key === book.key)) return true;
+    for (const p of this.pendingOf(book)) if (p.citation.unit || chapterByNumber(p.citation)) return true;
     return false;
   }
 
@@ -214,7 +222,7 @@ export class CitationRun {
    */
   wantsPages(book: BookRef, index: TargetIndex | null): boolean {
     if (index?.daf) return false;
-    for (const p of this.pending.values()) if (p.citation.candidates.some((c) => c.book.key === book.key) && p.citation.elems.some(isDafElem)) return true;
+    for (const p of this.pendingOf(book)) if (p.citation.elems.some(isDafElem)) return true;
     return false;
   }
 
@@ -224,7 +232,7 @@ export class CitationRun {
    */
   diburSpans(book: BookRef): { line: number; end: number }[] {
     const out: { line: number; end: number }[] = [];
-    for (const p of this.pending.values()) {
+    for (const p of this.pendingOf(book)) {
       if (!p.citation.dh?.length) continue;
       for (const r of p.resolved) if (r.target.book.key === book.key && r.res.end > r.res.line && r.res.end - r.res.line <= MAX_DIBUR_SPAN) out.push({ line: r.res.line, end: r.res.end });
     }
@@ -238,7 +246,7 @@ export class CitationRun {
    */
   refineDibur(book: BookRef, lines: readonly { index: number; text: string }[], heRefAt?: (line: number) => string | null): void {
     const byIndex = new Map(lines.map((l) => [l.index, l.text] as const));
-    for (const p of this.pending.values()) {
+    for (const p of this.pendingOf(book)) {
       const dh = p.citation.dh;
       if (!dh?.length) continue;
       const want = dh.slice(0, Math.min(3, dh.length));
@@ -269,6 +277,21 @@ export class CitationRun {
         if (cands.length) this.pending.set(c.seq, { citation: { ...c, candidates: cands }, resolved: [], unindexed: 0 });
       }
     }
+    this.byBook = null;
+  }
+
+  /** the pending citations that may mean `book` */
+  private pendingOf(book: BookRef): readonly Pending[] {
+    if (!this.byBook) {
+      this.byBook = new Map();
+      for (const p of this.pending.values())
+        for (const key of new Set(p.citation.candidates.map((c) => c.book.key))) {
+          const list = this.byBook.get(key);
+          if (list) list.push(p);
+          else this.byBook.set(key, [p]);
+        }
+    }
+    return this.byBook.get(book.key) ?? [];
   }
 
   /** Step 2a: every book some citation may point to (each once, in a stable order). */
@@ -285,7 +308,8 @@ export class CitationRun {
   resolveWith(index: TargetIndex | null, book: BookRef, heRefAt?: (line: number) => string | null, bookUnits?: readonly NamedUnit[] | null, pages?: DafStructure | null): void {
     // the citing book's own levels, for its internal references: known once the whole book was scanned
     const depthKinds = book.key === this.source.key ? this.scanner.structure.depthKinds() : [];
-    for (const p of this.pending.values()) {
+    this.resolvedBooks.add(book.key);
+    for (const p of this.pendingOf(book)) {
       for (const t of p.citation.candidates) {
         if (t.book.key !== book.key) continue;
         if (p.citation.internal) {
@@ -347,7 +371,7 @@ export class CitationRun {
     const suggestions: Suggestion[] = [];
     const unmatched = new Map<number, Reason[]>();
     const notes: Reason[] = [];
-    const counts = { detected: this.pending.size, resolved: 0, noLocation: 0, noBook: 0, ibid: 0, belowMin: 0, duplicate: 0 };
+    const counts = { detected: this.pending.size, resolved: 0, noLocation: 0, noBook: 0, ibid: 0, belowMin: 0, duplicate: 0, unfinished: 0 };
     const minRank = CONFIDENCE_ORDER.indexOf(this.opts.minConfidence);
     const chosenBook = new Map<number, string>();
     const seen = new Set<string>();
@@ -355,9 +379,15 @@ export class CitationRun {
     let done = 0;
     const ordered = [...this.pending.values()].sort((a, b) => a.citation.seq - b.citation.seq);
     for (const p of ordered) {
-      if (ctx.signal?.aborted) break;
       if (++done % PROGRESS_EVERY === 0) ctx.progress?.(done, ordered.length);
       const c = p.citation;
+      // a cancelled run (the resolution stopped before every book was read) still ranks what it resolved — this
+      // step is in memory and quick — but not a citation one of whose books was never read: its best reading
+      // may be in that book
+      if (c.candidates.some((x) => !this.resolvedBooks.has(x.book.key))) {
+        counts.unfinished++;
+        continue;
+      }
       let options = p.resolved;
       // an ibid follows the book its antecedent was linked to
       // (one moved to a commentator — "רש"י שם ד"ה" — is in that commentary, not in the antecedent's book)
@@ -441,7 +471,7 @@ export class CitationRun {
     if (counts.belowMin) notes.push({ code: "citations/below-minimum", text: `${counts.belowMin.toLocaleString("he")} הצעות היו מתחת לוודאות המינימלית שנבחרה ולא הוצגו.` });
     const dropped = [...this.scanner.dropped.entries()].filter(([, n]) => n > 0);
     if (dropped.length) notes.push({ code: "citations/guards", text: `כללי זהירות דחו ${dropped.reduce((s, [, n]) => s + n, 0).toLocaleString("he")} מועמדים: ${dropped.map(([k, n]) => `${GUARD_LABEL[k] ?? k} (${n})`).join(", ")}.` });
-    if (ctx.signal?.aborted) notes.push({ code: "engine/aborted", text: "הריצה הופסקה לבקשת המשתמש; התוצאות חלקיות" });
+    if (ctx.signal?.aborted || counts.unfinished) notes.push({ code: "engine/aborted", text: `הריצה הופסקה לבקשת המשתמש; התוצאות חלקיות${counts.unfinished ? ` (${counts.unfinished.toLocaleString("he")} מראי מקומות לא נבדקו עד הסוף)` : ""}` });
     const anchorNote = this.anchorNote(anchorsAllowed);
     if (anchorNote) notes.push(anchorNote);
     return { suggestions, notes, unmatched: [...unmatched.entries()].sort((a, b) => a[0] - b[0]).map(([line, reasons]) => ({ line, reasons })) };
@@ -598,8 +628,11 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
   if (c.internal) s -= PENALTY.internal;
-  if (c.rule && /^rambam-(?:topic|named)-(?:initials|abbrev|word)$/.test(c.rule)) s -= PENALTY.rambamInitials;
+  if (c.rule && /^rambam-(?:topic|named|hilchot)-(?:initials|abbrev|word)$/.test(c.rule)) s -= PENALTY.rambamInitials;
   if (c.rule === "base-daf") s -= PENALTY.baseDaf;
+  // "בירושלמי דסוכה פ' החליל": a chapter of the Yerushalmi / the Mishnah by its opening words — the whole chapter is
+  // coarse, like a unit by name ("possible"); with a halacha after it, the name only confirms the place
+  if (c.rule === "chapter-name-other") s -= c.elems.length > 1 ? PENALTY.named : PENALTY.unitRange;
   if (c.rule === "implicit-context") s -= PENALTY.implicitContext;
   if (c.rule === "implicit-previous-far") s -= PENALTY.implicitFar;
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
@@ -650,14 +683,25 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "rambam-named-initials": "\"רמב\"ם\" ושם ההלכות בראשי תיבות לפני הפרק",
   "rambam-named-abbrev": "\"רמב\"ם\" ושם ההלכות בקיצור לפני הפרק",
   "rambam-named-word": "\"רמב\"ם\" ומילה משם ההלכות לפני הפרק",
+  "rambam-hilchot-full": "\"הלכות\" ושם ההלכות לפני הפרק",
+  "rambam-hilchot-first": "\"הלכות\" והמילים הראשונות של שם ההלכות לפני הפרק",
+  "rambam-hilchot-initials": "\"הלכות\" ושם ההלכות בראשי תיבות לפני הפרק",
+  "rambam-hilchot-abbrev": "\"הלכות\" ושם ההלכות בקיצור לפני הפרק",
+  "rambam-hilchot-word": "\"הלכות\" ומילה משם ההלכות לפני הפרק",
+  "rambam-hilchot-known": "\"הלכות\" ושם ההלכות כפי שספרים כותבים אותו, מרשימת השמות שנבדקה מול הקישורים שבמסד",
+  "rambam-topic-known": "שם ההלכות נכתב כפי שספרים כותבים אותו (\"מעשר\", \"שביעית\", \"איסורי מזבח\"), מרשימת השמות שנבדקה מול הקישורים שבמסד",
+  "rambam-named-known": "\"רמב\"ם\" ושם ההלכות כפי שספרים כותבים אותו, מרשימת השמות שנבדקה מול הקישורים שבמסד",
   "named-level": "אחרי שם הספר נכתב שם של פרשה, שהיא רמה בציוני המקום של הספר (או חלק במבנה הדפים שלו), ואחריה המקום",
   "author-part": "שם שהמסד נותן לכמה חיבורים של מחבר אחד, וחלק השולחן ערוך שאחריו בוחר אחד מהם",
   "part-book": "\"ח\"א\", \"ח\"ב\" אחרי שם החיבור: הכרך, שהוא ספר נפרד בספרייה",
   "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
+  "chapter-name-other": "פרק של הירושלמי או של המשנה לפי שמו — המילים הראשונות של הפרק בספר עצמו (במסד יש שמות פרקים רק לבבלי)",
+  "context-daf": "נכתב \"דף\" בלי שם מסכת, מיד אחרי הפניה לדף בגמרא (באותה שורה או בשורה שלפניה, ובלי ספר אחר ביניהן) — הדף נקרא במסכת ההיא, כמו \"שם\"",
   "dibur-context": "שם המפרש ו\"ד\"ה\" בלי שם מסכת: הדף נלקח מההפניה שלפניו (או מהמסכת שהחיבור נכתב עליה), והקישור הוא לפירוש על הדף הזה",
   "dibur-here": "שם המפרש ו\"ד\"ה\" בלי דף ובלי הפניה לפניו: הדף הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), במסכת שהחיבור נכתב עליה",
   "commentator-ibid": "שם של מפרש ו\"שם\": דבריו על המקום של ההפניה הקודמת (או על הדף שנכתב אחרי \"שם\"), בפירוש שלו על המסכת או על ספר התנ\"ך שנזכר בה",
   "sk-ibid": "נכתב ס\"ק בלי סימן, של הספר שההפניה הקודמת אליו כתבה סימן: הסימן ההוא (כמו \"שם\")",
+  "sk-siman-before": "ס\"ק של פירוש על השולחן ערוך, והסימן נכתב מיד לפני שם הפירוש (\"סי' ר\"ח במג\"א ס\"ק ז'\")",
   "rema-ibid": "\"רמ\"א שם\" וסעיף: הגהת הרמ\"א בשולחן ערוך, בסימן של ההפניה הקודמת (לשולחן ערוך או לפירוש על אחד מחלקיו)",
   "sk-here": "נכתב ס\"ק בלי סימן, בחיבור על השולחן ערוך: הסימן הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), בפירוש על אותו חלק",
   "named-bare": "שם של פרק בלי המילה \"פרק\", ואחריו בסוגריים דף שנמצא בתוך הפרק הזה",
