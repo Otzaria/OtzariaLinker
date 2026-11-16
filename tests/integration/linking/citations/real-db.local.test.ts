@@ -385,8 +385,11 @@ const HELDOUT4: readonly { group: string; title: string }[] = [
  * were set on — is certain 85.3% / 99.9%, high 72.1% / 99.9%, recall 94.5%; the new forms and the internal
  * references are tallied apart and must keep the same "judged" floors). "strict" counts every suggestion the database does not confirm as wrong; hand-checked samples
  * of those put the true precision near 99% (certain) and 95% (high) — docs/AUTOMATION_ENGINE.md §6.8.
+ * Certain "strict" 0.85 → 0.84 on 2026-11-16 (cite6, §6.3ו): the new book names and forms add certain suggestions
+ * LINKER never made (84.91% before the round, 84.80% after; 31 of 32 such new ones hand-checked right on HELDOUT4),
+ * while "judged" stayed 99.92%. The judged floors are the precision guard and did not move.
  */
-const MIN = { certain: { strict: 0.85, judged: 0.99 }, high: { strict: 0.72, judged: 0.98 } } as const;
+const MIN = { certain: { strict: 0.84, judged: 0.99 }, high: { strict: 0.72, judged: 0.98 } } as const;
 
 describe.runIf(path)("citations engine vs the citation links of the real seforim.db (read-only)", () => {
   let registry: SourceRegistry;
