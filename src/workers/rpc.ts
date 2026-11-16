@@ -14,12 +14,17 @@ export interface RpcError {
 
 export type ToWorker =
   | { kind: "call"; id: number; op: string; args: unknown[] }
-  | { kind: "cancel"; id: number };
+  | { kind: "cancel"; id: number }
+  /** liveness probe: answered with "pong" as soon as the worker reads its messages at all */
+  | { kind: "ping"; id: number };
 
 export type FromWorker =
+  /** the worker read the call and started its handler (a call it has not read is still queued behind other work) */
+  | { kind: "started"; id: number }
   | { kind: "result"; id: number; value: unknown }
   | { kind: "error"; id: number; error: RpcError }
-  | { kind: "progress"; id: number; done: number; total: number };
+  | { kind: "progress"; id: number; done: number; total: number }
+  | { kind: "pong"; id: number };
 
 /** What a handler receives besides its arguments. */
 export interface CallContext {
@@ -46,6 +51,8 @@ export function serve<A extends Api>(handlers: Handlers<A>, post: (m: FromWorker
       running.get(m.id)?.abort();
       return;
     }
+    if (m.kind === "ping") return post({ kind: "pong", id: m.id });
+    post({ kind: "started", id: m.id });
     const handler = handlers[m.op as keyof A];
     if (!handler) {
       post({ kind: "error", id: m.id, error: { code: "rpc/unknown-op", message: `unknown operation ${m.op}` } });
@@ -89,45 +96,135 @@ export interface Port {
   onmessage: ((e: MessageEvent<FromWorker>) => void) | null;
 }
 
+/**
+ * When a call the UI cancelled is still running in the worker and the worker stops answering, the
+ * worker is stuck in it: `onStuck` replaces it. Only a call the worker had STARTED counts — a
+ * cancelled call still queued behind other work is just waiting (review C3) — and only when no call
+ * the user did NOT cancel is running too: that one may be what keeps the worker busy.
+ */
+export interface Watchdog {
+  /** how long the worker may leave a liveness probe unanswered (ms) */
+  stuckMs: number;
+  onStuck(): void;
+}
+
+interface PendingCall {
+  resolve: (v: unknown) => void;
+  reject: (e: unknown) => void;
+  onProgress?: CallOptions["onProgress"];
+  /** the worker read the call and runs it */
+  started: boolean;
+  /** removes the abort listener from the caller's signal (a signal may serve many calls) */
+  off: () => void;
+}
+
 /** UI side. */
 export class RpcClient<A extends Api> {
   private next = 1;
-  private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void; onProgress?: CallOptions["onProgress"] }>();
+  private readonly pending = new Map<number, PendingCall>();
+  /** calls the UI cancelled that the worker has not finished yet, with whether the worker had started them */
+  private readonly cancelled = new Map<number, boolean>();
+  /** the liveness probe in flight; `overdue` once it went unanswered for `stuckMs` */
+  private probe: { id: number; timer: ReturnType<typeof setTimeout>; overdue: boolean } | null = null;
+  private recheck: ReturnType<typeof setTimeout> | undefined;
+  private closed = false;
 
-  constructor(private readonly port: Port) {
+  constructor(
+    private readonly port: Port,
+    private readonly watchdog?: Watchdog,
+  ) {
     port.onmessage = (e) => this.receive(e.data);
   }
 
   call<K extends keyof A & string>(op: K, args: Parameters<A[K]>, opts: CallOptions = {}): Promise<Awaited<ReturnType<A[K]>>> {
     const id = this.next++;
     return new Promise((resolve, reject) => {
-      if (opts.signal?.aborted) return reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(opts.onProgress && { onProgress: opts.onProgress }) });
+      const signal = opts.signal;
+      if (signal?.aborted) return reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
       // reject at once: the UI must never wait on a worker that does not stop (security review #6)
-      opts.signal?.addEventListener(
-        "abort",
-        () => {
-          this.port.postMessage({ kind: "cancel", id });
-          if (this.pending.delete(id)) reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
-        },
-        { once: true },
-      );
+      const onAbort = () => this.cancel(id);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const off = () => signal?.removeEventListener("abort", onAbort);
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, started: false, off, ...(opts.onProgress && { onProgress: opts.onProgress }) });
       this.port.postMessage({ kind: "call", id, op, args: args as unknown[] });
     });
   }
 
-  /** Rejects every pending call — the worker died or was replaced. */
+  /** Rejects every pending call — the worker died or was replaced. The client is not used again. */
   failAll(code: string, message: string): void {
-    for (const p of this.pending.values()) p.reject(new RpcFailure(code, message));
+    this.closed = true;
+    for (const p of this.pending.values()) (p.off(), p.reject(new RpcFailure(code, message)));
     this.pending.clear();
+    this.cancelled.clear();
+    if (this.probe) clearTimeout(this.probe.timer);
+    clearTimeout(this.recheck);
+    this.probe = null;
+  }
+
+  private cancel(id: number): void {
+    const p = this.pending.get(id);
+    if (!p) return;
+    this.pending.delete(id);
+    this.cancelled.set(id, p.started);
+    this.port.postMessage({ kind: "cancel", id });
+    p.reject(new RpcFailure("cancelled", "הפעולה בוטלה."));
+    this.watch();
+    this.judge();
   }
 
   private receive(m: FromWorker) {
+    if (this.closed) return;
+    if (m.kind === "pong") return this.answered(m.id);
+    if (m.kind === "started") {
+      const p = this.pending.get(m.id);
+      if (p) p.started = true;
+      else if (this.cancelled.has(m.id)) (this.cancelled.set(m.id, true), this.watch());
+      return;
+    }
     const p = this.pending.get(m.id);
-    if (!p) return;
-    if (m.kind === "progress") return p.onProgress?.(m.done, m.total);
-    this.pending.delete(m.id);
-    if (m.kind === "result") p.resolve(m.value);
-    else p.reject(new RpcFailure(m.error.code, m.error.message));
+    if (m.kind === "progress") return p?.onProgress?.(m.done, m.total);
+    // the call is over in the worker
+    this.cancelled.delete(m.id);
+    if (p) {
+      this.pending.delete(m.id);
+      p.off();
+      if (m.kind === "result") p.resolve(m.value);
+      else p.reject(new RpcFailure(m.error.code, m.error.message));
+    }
+    this.judge();
+  }
+
+  /* ---- the watchdog: one probe at a time, however many calls were cancelled ---- */
+
+  private startedCancelled(): boolean {
+    for (const started of this.cancelled.values()) if (started) return true;
+    return false;
+  }
+
+  /** Probes the worker while a cancelled call it had started is not finished. */
+  private watch(): void {
+    if (!this.watchdog || this.closed || this.probe || !this.startedCancelled()) return;
+    const id = this.next++;
+    this.probe = { id, overdue: false, timer: setTimeout(() => this.probe?.id === id && ((this.probe.overdue = true), this.judge()), this.watchdog.stuckMs) };
+    this.port.postMessage({ kind: "ping", id });
+  }
+
+  private answered(id: number): void {
+    if (this.probe?.id !== id) return;
+    clearTimeout(this.probe.timer);
+    this.probe = null;
+    // the cancelled call may still run between the worker's slices: probe again until it ends
+    clearTimeout(this.recheck);
+    if (this.startedCancelled()) this.recheck = setTimeout(() => this.watch(), Math.min(1000, this.watchdog!.stuckMs));
+  }
+
+  /** Stuck = the probe is overdue, a started call was cancelled, and nothing the user still waits for runs. */
+  private judge(): void {
+    if (!this.probe?.overdue || !this.startedCancelled()) return;
+    for (const p of this.pending.values()) if (p.started) return;
+    clearTimeout(this.recheck);
+    this.probe = null;
+    // the host replaces the worker and fails what is still queued (failAll) with its own message
+    this.watchdog!.onStuck();
   }
 }

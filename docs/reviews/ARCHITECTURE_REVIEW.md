@@ -120,6 +120,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** התרחיש שלמעלה. אחרי `workerLost` ופתיחה בסדר הפוך, ‏`bookOf(l.source.book)?.title === l.source.book.title`, ועריכה שומרת על "ספר א".
 
+**סטטוס:** תוקן ב־4935ed5 (מזהי מקור שהמארח קובע ואינם חוזרים אחרי הפעלה מחדש, ו-`workerLost` קושר את הקישורים מחדש לפי כותרת), בדיקה: `tests/integration/state/worker-restart.test.ts`
+
 ---
 
 ### C3 — High — ה-watchdog מפיל את ה-worker בכל ביטול, גם של בקשה שלא קשורה; מנוע סינכרוני לא ניתן לביטול
@@ -156,6 +158,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 **בדיקת רגרסיה:**
 - הסימולציה שלמעלה: המנוע מסתיים בהצלחה, ואין `lost`.
 - בדיקה שביטול של חיפוש שממתין בתור לא קורא ל-`restartWorker`.
+
+**סטטוס:** תוקן ב־79e2ace (watchdog רק לבקשה שהתחילה, בוטלה ותוקעת את ה-worker), ב־48be749 (מנועי דיבור המתחיל והכותרות רצים בפרוסות ונעצרים בביטול) וב־e16c7bf (E2E), בדיקה: `tests/unit/workers/watchdog.test.ts`, ‏`tests/unit/linking/engine-steps.test.ts`, ‏`tests/e2e/robustness.spec.ts`. נשאר: מנועי הערות השוליים והתבנית רצים כצעד אחד (מעבר לינארי קצר), ו-`diffLines` כצעד אחד חסום
 
 ---
 
@@ -264,6 +268,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** התרחיש שלמעלה מחזיר 500 מתוך 500.
 
+**סטטוס:** תוקן ב־ed0e998, בדיקה: `tests/integration/state/check-many-chunks.test.ts`. נשאר: `fillSefariaRefs` עדיין קורא heRef מה-cache, ושורה שפונתה משאירה ref ריק (שגיאה, לא מעבר בשקט)
+
 ---
 
 ### C8 — Medium — LineStore: שגיאה נדבקת לתמיד, ו-chunk שהיה בדרך חוזר ל-cache אחרי `forgetAll`
@@ -288,6 +294,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 - מצב error יקבל `retryAfter`, או ש-`line()` יטען שוב chunk במצב error.
 
 **בדיקת רגרסיה:** התרחיש שלמעלה מחזיר `errorAt === null`, ו-`line()` טוען מחדש.
+
+**סטטוס:** תוקן ב־0b95675, בדיקה: `tests/unit/state/lines.test.ts`
 
 ---
 
@@ -425,6 +433,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **סטטוס:** תוקן ב־6e9f06b (במצב, ובחלונית ההצעות; ה-workers של max-link וציטוטים לא בתחום הזה), בדיקה: `tests/integration/state/store.test.ts`
 
+**סטטוס (ה-workers):** תוקן ב־eeda0fa — max-link מדווח ספרים שקישורי המסד שלהם לא נקראו (`dbLinksUnread`) ומשתמש באותו מסלול של `retryDbLinks`; ‏`partByLinks` ו-`linkedLines` מכשילים את השלב במקום לבלוע. ב-`citations-job.ts` אין קריאת קישורי מסד. בדיקה: `tests/integration/workers/maxlink-job.test.ts`, ‏`tests/integration/state/maxlink.test.ts`
+
 ---
 
 ### C14 — Low — ‏BLOB של טקסט שמתחיל ב-"x " מזוהה כ-zlib
@@ -508,6 +518,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 - לחלופין, להעביר את הסדרה ל-worker. ולפחות `requestIdleCallback`, וגם לא לסדר כשאין שינוי מאז הכתיבה הקודמת.
 
 **בדיקת רגרסיה:** בדיקת ביצועים עם תקציב, למשל עדכון autosave של פחות מ-30ms ל-100 אלף קישורים.
+
+**סטטוס:** תוקן חלקית ב־03a70f0 (JSON של כל קישור נשמר לפי האובייקט, ואין כתיבה כשה-revision לא השתנה): 175–192ms לעריכה ירדו ל-35–57ms ב-112,905 קישורים. התקציב של 30ms לא הושג: המחרוזת עצמה (31M תווים) עדיין נבנית ונכתבת ל-IndexedDB בשלמותה. בדיקה: `tests/unit/projects/project-cache.test.ts`
 
 ---
 
@@ -690,6 +702,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 - worker נפרד לחישוב, כדי שהפעלה מחדש שלו לא תסגור את המקורות.
 - לשלוח תוצאות max-link במנות (streaming) ולאחד אותן ב-worker.
 - להסיר את ה-listeners כשה-promise מסתיים.
+
+**סטטוס (חלקי):** בדיקות ה-`signal` במנועי דיבור המתחיל והכותרות פועלות עכשיו ב-worker, ו-max-link מוותר על ה-CPU בתוך המנועים (48be749); ‏`diffJob` מקבל ctx; ה-listener של abort מוסר כשקריאה מסתיימת (79e2ace). לא טופלו: תוצאת max-link בהודעה אחת, האיחוד ב-UI thread, ו-`results` של כל הזוגות.
 
 ---
 

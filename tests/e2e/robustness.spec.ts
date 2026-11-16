@@ -32,3 +32,78 @@ test("many notices at once: the newest three are shown, the rest fold into 'N mo
   await page.getByRole("button", { name: "רק ההודעות האחרונות" }).click();
   await expect(page.locator(".notice.error")).toHaveCount(3);
 });
+
+/*
+ * Review C3: cancelling a long engine used to restart the worker (the engine read the cancel only after
+ * it ended, and the watchdog replaced it after 4 s), closing every open source. Now the engine runs in
+ * slices: the reader is served while it runs, and a cancel stops it without a restart.
+ * A generated pair of 20,000 lines takes dibur-hamatchil ~30 s (Node).
+ */
+test("a long engine: the reader is answered while it runs, and a cancel stops it without restarting the worker (review C3)", async ({ page }) => {
+  test.setTimeout(120_000);
+  const seen = watchPage(page);
+  await page.goto(distUrl);
+  const LETTERS = "אבגדהוזחטיכלמנסעפצקרשת";
+  const word = (n: number) => {
+    let s = "";
+    for (let k = 0; k < 4; k++, n = Math.floor(n / LETTERS.length)) s += LETTERS[n % LETTERS.length];
+    return s;
+  };
+  const base: string[] = ["<h1>בסיס</h1>"];
+  const comm: string[] = ["<h1>פירוש על בסיס</h1>"];
+  for (let i = 0; i < 20_000; i++) {
+    if (i % 50 === 0) for (const b of [base, comm]) b.push(`<h2>פרק ${word(200_000 + i / 50)}</h2>`);
+    const w = [0, 1, 2, 3, 4, 5].map((k) => word(6 * i + k));
+    base.push(w.join(" "));
+    comm.push(`<b>${w[0]} ${w[1]} ${w[2]}.</b> פירוש`);
+  }
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "בסיס.txt", mimeType: "text/plain", buffer: Buffer.from(base.join("\n")) },
+    { name: "פירוש על בסיס.txt", mimeType: "text/plain", buffer: Buffer.from(comm.join("\n")) },
+  ]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 15_000 });
+
+  const r = await page.evaluate(async () => {
+    type Store = {
+      books: { value: Map<string, { key: string; title: string }> };
+      sources: { value: unknown[] };
+      task: { value: { cancel(): void; done: number } | null };
+      notices: { value: { text: string }[] };
+      suggestions: { runEngine(e: string, s: string, t: string): Promise<boolean> };
+      lines: { load(k: string, f: number, t: number): Promise<void>; peek(k: string, i: number): { text: string } | undefined };
+    };
+    const store = (globalThis as unknown as { __linker: Store }).__linker;
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    const c = key("פירוש על בסיס");
+    const b = key("בסיס");
+    const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+    const run = store.suggestions.runEngine("dibur-hamatchil", c, b);
+    // the engine is running once it reports progress
+    for (let i = 0; i < 200 && !(store.task.value && store.task.value.done > 0); i++) await sleep(50);
+    const running = !!store.task.value && store.task.value.done > 0;
+    // a page of lines far into the book, while the engine runs
+    const t0 = performance.now();
+    await store.lines.load(b, 15_000, 15_010);
+    const linesMs = performance.now() - t0;
+    store.task.value?.cancel();
+    const ran = await run;
+    await sleep(6_000); // longer than the watchdog's 4 s
+    return {
+      running,
+      linesMs,
+      ran,
+      line: store.lines.peek(b, 15_005)?.text ?? null,
+      sources: store.sources.value.length,
+      restarted: store.notices.value.some((n) => n.text.includes("הופעל מחדש")),
+    };
+  });
+  expect(r.running).toBe(true);
+  expect(r.linesMs).toBeLessThan(2_000);
+  expect(r.ran).toBe(false); // cancelled
+  expect(r.line).not.toBeNull();
+  expect(r.restarted).toBe(false);
+  expect(r.sources).toBe(1);
+  expect(seen.errors).toEqual([]);
+});

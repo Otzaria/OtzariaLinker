@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import type { EngineId } from "../../../src/linking/automatic";
 import { effect } from "@preact/signals";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
@@ -18,7 +18,7 @@ function makeStore() {
   const service = registryService(reg);
   const saved: { name: string; data: Uint8Array | string }[] = [];
   const store = new AppStore(service, { save: (name, data) => saved.push({ name, data }) }, loadPreferences(null));
-  return { store, saved };
+  return { store, saved, reg };
 }
 const DB = { path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) };
 const heb = (n: number) => ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י", "יא", "יב", "יג", "יד", "טו", "טז", "יז", "יח", "יט", "כ"][n]!;
@@ -31,12 +31,12 @@ const FOLDER = [
 ];
 
 async function opened() {
-  const { store, saved } = makeStore();
+  const { store, saved, reg } = makeStore();
   await store.openFiles([DB]);
   await store.openFiles(FOLDER);
   const folder = store.sources.value.find((s) => s.info.kind === "text-files")!;
   const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
-  return { store, saved, folder, key };
+  return { store, saved, folder, key, reg };
 }
 
 /** the pair engines: these cases count their steps; the citations engine (single-book) is checked in maxlink-job.test.ts */
@@ -111,6 +111,20 @@ describe("AppStore — max-link", () => {
     expect(rep.overall.existing).toBeGreaterThan(100);
     expect(rep.overall.existing / rep.overall.links).toBeGreaterThan(0.9);
     expect(store.suggestions.run.value!.result.suggestions.filter((s) => s.rules.includes("maxlink/exists-db")).length).toBe(rep.overall.existing);
+  });
+
+  it("a book whose database links the worker could not read is said, and the run waits for a re-read (review C13)", async () => {
+    const { store, key, reg } = await opened();
+    const onkelos = key("תרגום אונקלוס על בראשית");
+    const scope = { kind: "book", key: onkelos } as const;
+    const plan = store.maxLink.plan(scope, PAIRS);
+    const fail = vi.spyOn(reg, "existingLinks").mockRejectedValue(new Error("דף פגום במסד"));
+    await store.maxLink.run(plan, "אונקלוס");
+    expect(store.suggestions.run.value!.dbLinksUnread).toEqual([{ key: onkelos, title: "תרגום אונקלוס על בראשית" }]);
+    expect(store.notices.value.some((n) => n.kind === "warning" && n.text.includes("תרגום אונקלוס על בראשית") && n.details?.[0]?.includes("דף פגום במסד"))).toBe(true);
+    fail.mockRestore();
+    expect(await store.suggestions.retryDbLinks()).toBe(true);
+    expect(store.suggestions.run.value!.dbLinksUnread).toBeUndefined();
   });
 
   it("a rejection survives a re-run, and a link approved in a single-engine run is 'already exists' here", async () => {

@@ -28,6 +28,12 @@ export interface MaxLinkJobResult {
   items: StepResult[];
   /** linePairKey of every database link touching the books the steps read from */
   dbLinkKeys: string[];
+  /**
+   * Books whose database links could not be read, with the error: their suggestions may already be in
+   * the library (the run says so and holds back bulk approval: SuggestionRun.dbLinksUnread, review C13).
+   * Absent when every book was read.
+   */
+  dbLinksUnread?: { key: string; why: string }[];
 }
 
 export interface StepOutcome {

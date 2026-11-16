@@ -206,6 +206,8 @@ export class MaxLinkState {
 
     // "already exists": the database's links, and the project's — except the link a suggestion's own approval made
     const db = new Set(res.dbLinkKeys);
+    // books whose database links the worker could not read: said, and a bulk approval waits for retryDbLinks (review C13)
+    const unread = (res.dbLinksUnread ?? []).map((u) => ({ key: u.key, title: this.host.refOf(u.key).title, why: u.why }));
     const project = new Map<string, string[]>();
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
     const merged = mergeSuggestions(items, {
@@ -231,10 +233,16 @@ export class MaxLinkState {
     ];
     batch(() => {
       this.host.suggestions.dbLinkKeys.value = db;
-      this.host.suggestions.run.value = { engine: steps[0]!.engine, label: `${scopeLabel}: ${plan.books.length.toLocaleString("he")} ספרים`, result: { suggestions: merged.suggestions, notes, unmatched: [] }, at: Date.now(), maxlink: info };
+      this.host.suggestions.run.value = { engine: steps[0]!.engine, label: `${scopeLabel}: ${plan.books.length.toLocaleString("he")} ספרים`, result: { suggestions: merged.suggestions, notes, unmatched: [] }, at: Date.now(), maxlink: info, ...(unread.length && { dbLinksUnread: unread.map(({ key, title }) => ({ key, title })) }) };
       this.host.suggestions.current.value = merged.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
+    if (unread.length)
+      this.host.notify(
+        "warning",
+        `הקישורים שכבר יש במסד ל־${unread.map((u) => `"${u.title}"`).join(", ")} לא נקראו, ולכן הצעות שכבר קיימות בספרייה עלולות להופיע כממתינות. אישור של כמה הצעות יחד מושבת עד שהם ייקראו: לחצו "קריאה חוזרת" בחלונית ההצעות.`,
+        unread.map((u) => `${u.title}: ${u.why}`),
+      );
     const c = this.report.value!.overall;
     this.host.notify(
       failed ? "warning" : "success",

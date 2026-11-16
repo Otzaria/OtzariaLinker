@@ -345,14 +345,27 @@ export class AppStore {
    */
   workerLost(reason: string): void {
     this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
+    // the links keep their books by title, as a saved project does: the keys named the lost worker's
+    // sources, and attachLinks binds them again to the books opened next (review C2)
+    const unbind = (ref: BookRef): BookRef =>
+      ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
     batch(() => {
       this.sources.value = [];
       this.view.source.value = null;
       this.view.target.value = null;
-      this.pick.source.value = null;
-      this.pick.target.value = null;
+      this.clearPicks();
       this.task.value = null;
+      this.linkState.value = rebindLinks(this.linkState.value, (l) => {
+        const s = unbind(l.source.book);
+        const t = unbind(l.target.book);
+        return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
+      });
+      // suggestions point at lines of the lost sources: approving one would make a link to nothing
+      this.suggestions.run.value = null;
+      this.suggestions.current.value = null;
     });
+    this.find.source.close();
+    this.find.target.close();
     this.lines.forgetAll();
     this.dbLinks.forgetSummary();
     this.notify("warning", `${reason} הקישורים בפרויקט לא נפגעו — פתחו שוב את הספרים כדי להמשיך.`);
@@ -777,7 +790,12 @@ export class AppStore {
    * the builder must not depend on the export to check a link, and the three must never disagree.
    */
 
-  /** Loads the lines at both ends of every link, so the rules can be checked on real lines. */
+  /**
+   * Loads the lines at both ends of every link, so the rules can be checked on real lines. Their facts
+   * are kept apart from the views' bounded cache (LineStore.loadFacts), and so are the database links
+   * read around them (beginCheck): a project that needs more chunks than the cache holds is still
+   * checked on every link, never passed as "not verified" because its lines were evicted (review C7).
+   */
   async loadLinkLines(label: string): Promise<boolean> {
     const need = new Map<string, Set<number>>();
     for (const l of this.allLinks.value) {
@@ -786,21 +804,18 @@ export class AppStore {
         const b = this.bookOf(side.book);
         if (!b) continue;
         const set = need.get(b.key) ?? new Set<number>();
-        set.add(Math.floor(side.line / CHUNK)).add(Math.floor((side.end ?? side.line) / CHUNK));
+        set.add(side.line).add(side.end ?? side.line);
         need.set(b.key, set);
       }
     }
-    const total = [...need.values()].reduce((n, s) => n + s.size, 0);
+    const chunks = (lines: Set<number>) => new Set([...lines].map((i) => Math.floor(i / CHUNK))).size;
+    const total = [...need.values()].reduce((n, s) => n + chunks(s), 0);
     const ok = await this.runTask(label, async (opts) => {
+      this.lines.beginCheck();
       // database links around the project's own links: validation reports "already in the database"
       await this.dbLinks.loadAround(this.allLinks.value);
       let done = 0;
-      for (const [key, chunks] of need)
-        for (const c of chunks) {
-          opts.signal?.throwIfAborted();
-          await this.lines.load(key, c * CHUNK, c * CHUNK);
-          opts.onProgress?.(++done, total);
-        }
+      for (const [key, lines] of need) await this.lines.loadFacts(key, lines, { signal: opts.signal, onChunk: () => opts.onProgress?.(++done, total) });
       return true;
     });
     return ok === true;
@@ -902,8 +917,7 @@ export class AppStore {
       },
       line: (ref, index): LineFacts | undefined => {
         const b = this.bookOf(ref);
-        const l = b && this.lines.peek(b.key, index);
-        return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
+        return b && this.lines.factsAt(b.key, index);
       },
       linksFile: (title) => this.dbLinks.linksFile(title),
       sefariaOwned: (book) => this.isSefariaOwned(book),
@@ -972,8 +986,13 @@ export class AppStore {
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
       },
       APP_VERSION,
+      undefined,
+      this.projectJson,
     );
   }
+
+  /** each link's project JSON, by link object (links are immutable): an autosave re-serializes only what changed (C18) */
+  private readonly projectJson = new WeakMap<Link, string>();
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
@@ -1033,15 +1052,20 @@ export class AppStore {
     const KEY = "autosave:v1";
     let timer: ReturnType<typeof setTimeout> | undefined;
     let first = true;
+    /** the revision last written: the state changes without a new revision (books bound to links) are not written again */
+    let written = this.linkState.peek().revision;
     const stop = effect(() => {
       const rev = this.linkState.value.revision;
       if (first) return void (first = false);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const now = this.linkState.peek();
-        const empty = now.links.size === 0 && now.altToc.size === 0 && now.rejected.size === 0;
+        const ls = this.linkState.peek();
+        if (ls.revision === written) return;
+        written = ls.revision;
+        const empty = ls.links.size === 0 && ls.altToc.size === 0 && ls.rejected.size === 0;
         (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
-          /* storage blocked or full — autosave is best effort */
+          /* storage blocked or full — autosave is best effort; the next change tries again */
+          written = -1;
         });
       }, delayMs);
       void rev;

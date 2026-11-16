@@ -1,3 +1,4 @@
+import { runToEnd, type EngineSteps } from "../steps";
 import type { LinkSide } from "../../../core/links/model";
 import { sefariaOwnedOf, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { toGematria } from "../../../core/text/gematria";
@@ -81,6 +82,11 @@ function pageMarked(book: EngineBook): boolean {
 }
 
 export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, options: HeadingsOptions = {}, ctx: EngineContext = {}): EngineResult {
+  return runToEnd(headingsSteps(commentary, base, options, ctx));
+}
+
+/** The engine as steps (../steps.ts): it yields between the books' analyses and before every commentary line. */
+export function* headingsSteps(commentary: EngineBook, base: EngineBook, options: HeadingsOptions = {}, ctx: EngineContext = {}): EngineSteps<EngineResult> {
   const opts = {
     // "source": the record sits in the commentary's file and the generator stores it base → commentary,
     // which is how the app shows a commentary (compatibility review #1). "commentary" would be stored backwards.
@@ -105,7 +111,9 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   const sideAt = (start: number, end: number) => sideOf(base, start, baseRanges ? end : start);
 
   const cs = analyzeBook(commentary, opts);
+  yield;
   const bs = analyzeBook(base, opts);
+  yield;
   if (aborted()) return abortedResult(notes, done);
   const units = buildUnits(bs);
   const actx: AlignContext = {
@@ -168,7 +176,9 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
   let skipped = 0;
   let partial = 0;
   let prevStart: number | null = null;
+  yield;
   for (let p = 0; p < total; p++) {
+    yield;
     if (aborted()) return abortedResult(notes, done);
     if (p % PROGRESS_EVERY === 0) ctx.progress?.(p, total);
     const info = cs.lines[p]!;

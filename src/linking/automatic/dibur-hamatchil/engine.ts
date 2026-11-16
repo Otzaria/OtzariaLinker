@@ -15,6 +15,7 @@
  *     "commentary" (a record of the BASE book's links file). Stored identically, plus the anchor.
  * One shape per run; `result.notes` says which and why.
  */
+import { runToEnd, type EngineSteps } from "../steps";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import { storedForm } from "../../../core/links/stored-form";
 import { skeleton, stem } from "../../../core/text/hebrew";
@@ -258,6 +259,11 @@ export function anchorPolicy(commentary: BookRef, base: BookRef, mode: "auto" | 
  * found so far, with an "engine/aborted" note.
  */
 export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook, options: DhOptions = {}, ctx: EngineContext = {}): EngineResult {
+  return runToEnd(diburHamatchilSteps(commentary, base, options, ctx));
+}
+
+/** The engine as steps (../steps.ts): it yields before every commentary line and between the phases of the base's preparation. */
+export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, options: DhOptions = {}, ctx: EngineContext = {}): EngineSteps<EngineResult> {
   const maxWords = options.maxDhWords ?? DEFAULT_MAX_DH_WORDS;
   const thresholds = options.thresholds ?? DEFAULT_THRESHOLDS;
   const maxRatio = options.singleWordMaxOpeningRatio ?? 0.008;
@@ -341,6 +347,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const weightIdf = (k: string) => wordWeight(k, idf);
   const weightStatic = (k: string) => wordWeight(k);
 
+  yield;
   const contentPositions = bLines.map((_, i) => i).filter((i) => !bHeading[i] && bTokens[i]!.length);
 
   /*
@@ -358,6 +365,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   // be the next line's first, when a run may continue there
   const initials = new Map<string, number[]>();
   for (const p of contentPositions) {
+    if ((p & 1023) === 1023) yield;
     const toks = bTokens[p]!;
     const nextLine = bLines[p + 1]?.index === bLines[p]!.index + 1 && !bHeading[p + 1] ? bTokens[p + 1]![0] : undefined;
     toks.forEach((t, i) => {
@@ -1032,7 +1040,9 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
   const total = commentary.lines.length;
   let done = 0;
   let aborted = false;
+  yield;
   for (const line of commentary.lines) {
+    yield;
     if (done % 25 === 0) ctx.progress?.(done, total);
     if (ctx.signal?.aborted) {
       aborted = true;
@@ -1145,6 +1155,7 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     itemHead = ex.bold && (placed.confidence === "certain" || placed.confidence === "high") ? placed : null;
   }
   ctx.progress?.(done, total);
+  yield;
   if (aborted) notes.push(r("engine/aborted", "הריצה הופסקה לפני הסוף. מוצגות רק ההצעות שנמצאו עד כה."));
 
   /*

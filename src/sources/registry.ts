@@ -60,6 +60,7 @@ export class SourceRegistry {
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
   private readonly pending = new Map<string, { blob: Blob; label: string }>();
   private seq = 0;
+  private idPrefix = "s";
   /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
   private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
 
@@ -274,8 +275,17 @@ export class SourceRegistry {
     return s;
   }
 
+  /**
+   * The prefix of the ids this registry gives its sources (default "s": s1, s2…). The worker host gives
+   * each worker its own, so ids never repeat after a restart (app/worker-host.ts, review C2).
+   */
+  useIdPrefix(prefix: string): void {
+    if (!/^[\w.-]+$/.test(prefix)) throw new Error(`bad source id prefix "${prefix}"`); // never ":" (the key separator)
+    this.idPrefix = prefix;
+  }
+
   private nextId(): string {
-    return `s${++this.seq}`;
+    return `${this.idPrefix}${++this.seq}`;
   }
 }
 

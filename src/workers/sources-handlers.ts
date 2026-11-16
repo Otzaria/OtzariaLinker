@@ -17,13 +17,13 @@ const jobCtx = (ctx: CallContext) => ({ signal: ctx.signal, progress: (d: number
 export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> {
   return {
     ping: () => selfCheck(),
-    alive: () => true as const,
+    init: (_ctx, idPrefix) => registry.useIdPrefix(idPrefix),
     open: (ctx, files) => registry.open(files, ctx.signal),
     openMapped: (ctx, token, mapping) => registry.openMapped(token, mapping, jobCtx(ctx)),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     close: (_ctx, sourceId) => registry.close(sourceId),
-    diffBooks: (_ctx, oldKey, newKey) => diffJob(registry, oldKey, newKey),
+    diffBooks: (ctx, oldKey, newKey) => diffJob(registry, oldKey, newKey, jobCtx(ctx)),
     runBatch: (ctx, engine, pairs, options) => batchJob(registry, engine, pairs, options, jobCtx(ctx)),
     searchBook: (ctx, bookKey, query, options) => searchJob(registry, bookKey, query, options, jobCtx(ctx)),
     runEngine: (ctx, engine, source, target, options) => engineJob(registry, engine, source, target, options, jobCtx(ctx)),
