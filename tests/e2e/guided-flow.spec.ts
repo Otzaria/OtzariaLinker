@@ -213,3 +213,64 @@ test("guided flow: the books already hold their bases — no database step; a wa
   await page.getByRole("button", { name: "חזרה להדרכה" }).click();
   await expect(page).toHaveURL(/#\/guided\/books$/);
 });
+
+/*
+ * The run step (V5 UX audit U16, the owner's choice B): ONE bar with the time left — not a second in the
+ * app bar nor a third in the job card — "השהיה" and "עצירה" (no "ביטול" for the same thing), and the
+ * progress per method and per book under "פרטים". Seen while the job runs: the page records what is on
+ * screen the moment the fourth book is done, then pauses through the step's own button.
+ */
+test("guided flow: the run shows one bar, pause and stop, and the details on request", async ({ page }) => {
+  test.slow();
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 860 });
+  const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`ביאור ${i + 1} על בראשית`, commentary(`ביאור ${i + 1} על בראשית`)]));
+  const dir = folder("שלושים", many);
+  await page.goto(distUrl);
+  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("30 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+  await page.evaluate(() => {
+    type Job = { books: { status: string }[] };
+    const w = globalThis as unknown as { __linker: { maxLink: { job: { subscribe(f: (j: Job | null) => void): () => void } } }; __run?: unknown };
+    const stop = w.__linker.maxLink.job.subscribe((j) => {
+      if (!j || j.books.filter((b) => b.status === "done" || b.status === "no-match").length < 4) return;
+      const step = document.querySelector(".guided-run");
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.getClientRects().length).map((b) => b.textContent?.trim());
+      w.__run = {
+        bars: [...document.querySelectorAll("progress")].filter((p) => p.getClientRects().length).length,
+        appBarTask: !!document.querySelector(".app-bar .task"),
+        cancel: buttons.includes("ביטול"),
+        pause: !!step && [...step.querySelectorAll("button")].some((b) => b.textContent === "השהיה"),
+        stop: !!step && [...step.querySelectorAll("button")].some((b) => b.textContent === "עצירה"),
+        details: step?.querySelector("details summary")?.textContent ?? null,
+        detailsOpen: !!step?.querySelector("details[open]"),
+        jobCard: !!document.querySelector('[aria-label="עבודת הקישור המרבי"]'),
+      };
+      queueMicrotask(stop);
+      [...(step?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => b.textContent === "השהיה")?.click();
+    });
+  });
+  await main.getByRole("button", { name: "הפעלה" }).click();
+  await expect.poll(() => page.evaluate(() => (globalThis as unknown as { __run?: unknown }).__run ?? null), { timeout: 60_000 }).not.toBeNull();
+  const run = await page.evaluate(() => (globalThis as unknown as { __run: Record<string, unknown> }).__run);
+  expect(run).toEqual({ bars: 1, appBarTask: false, cancel: false, pause: true, stop: true, details: "פרטים: לפי שיטה ולפי ספר", detailsOpen: false, jobCard: false });
+  // paused: the finished books are kept, and the job's card offers to continue
+  const card = page.getByRole("region", { name: "עבודת הקישור המרבי" });
+  await expect(card.getByRole("status")).toContainText("קישור מרבי: מושהה", { timeout: 30_000 });
+  await expect(card.getByRole("button", { name: /^המשך \([\d,]+ ספרים\)$/ })).toBeEnabled();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

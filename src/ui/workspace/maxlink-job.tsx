@@ -34,7 +34,12 @@ export function jobWantsAttention(ml: AppStore["maxLink"]): boolean {
   return t.byStatus.pending > 0 || t.byStatus.failed > 0;
 }
 
-export function MaxLinkJobView() {
+/**
+ * The job card. `detailsOnly`: the counts per status, per method and per book, without the status
+ * line, the bar and the buttons — the guided flow's run step has one bar of its own and puts these
+ * under "פרטים" (V5 UX audit U16, the owner's choice B).
+ */
+export function MaxLinkJobView({ detailsOnly = false }: { detailsOnly?: boolean } = {}) {
   const store = useStore();
   const ml = store.maxLink;
   const job = ml.job.value;
@@ -48,13 +53,9 @@ export function MaxLinkJobView() {
   const failed = t.byStatus.failed;
   const state = jobStateText(ml)!;
   const rows = [...job.books].sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
-  return (
-    <section class="ml-job" aria-label="עבודת הקישור המרבי">
-      <div role="status">
-        <b>{restored ? "קישור מרבי שלא הסתיים" : `קישור מרבי: ${state}`}</b> — {job.scope} · {n(t.settled)} מתוך {n(t.runnable)} ספרים
-      </div>
-      <progress max={t.runnable || 1} value={t.settled} />
-      <ul class="ml-job-counts">
+  const counts = (
+    <>
+      <ul class="ml-job-counts" aria-label="לפי מצב">
         {ORDER.filter((s) => t.byStatus[s]).map((s) => (
           <li key={s} class={`st-${s}`}>{STATUS_TEXT[s]}: {n(t.byStatus[s])}</li>
         ))}
@@ -64,6 +65,31 @@ export function MaxLinkJobView() {
           <li key={e.engine}>{e.title}: {n(e.done)}/{n(e.planned)}{e.failed ? ` (${n(e.failed)} נכשלו)` : ""}</li>
         ))}
       </ul>
+    </>
+  );
+  const books = (
+    <details class="held">
+      <summary>לפי ספר ({n(job.books.length)})</summary>
+      <ul class="ml-books">
+        {rows.slice(0, SHOWN).map((b) => <BookRow key={b.title} b={b} />)}
+        {rows.length > SHOWN && <li class="muted">ועוד {n(rows.length - SHOWN)} ספרים — כולם בדוח הספרים.</li>}
+      </ul>
+    </details>
+  );
+  if (detailsOnly)
+    return (
+      <div class="ml-job details-only">
+        {counts}
+        {books}
+      </div>
+    );
+  return (
+    <section class="ml-job" aria-label="עבודת הקישור המרבי">
+      <div role="status">
+        <b>{restored ? "קישור מרבי שלא הסתיים" : `קישור מרבי: ${state}`}</b> — {job.scope} · {n(t.settled)} מתוך {n(t.runnable)} ספרים
+      </div>
+      <progress max={t.runnable || 1} value={t.settled} />
+      {counts}
       {missing.length > 0 && (pending > 0 || restored) && (
         <p class="why-not">
           <Icon name="fl_warning" size={14} /> {n(missing.length)} מספרי העבודה אינם פתוחים. כדי להמשיך, פתחו שוב את {job.sources.map((l) => `"${l}"`).join(", ")}.
@@ -93,13 +119,7 @@ export function MaxLinkJobView() {
         </button>
         {!running && <button class="btn text" onClick={() => ml.discardJob()}>סגירת העבודה</button>}
       </div>
-      <details class="held">
-        <summary>לפי ספר ({n(job.books.length)})</summary>
-        <ul class="ml-books">
-          {rows.slice(0, SHOWN).map((b) => <BookRow key={b.title} b={b} />)}
-          {rows.length > SHOWN && <li class="muted">ועוד {n(rows.length - SHOWN)} ספרים — כולם בדוח הספרים.</li>}
-        </ul>
-      </details>
+      {books}
     </section>
   );
 }

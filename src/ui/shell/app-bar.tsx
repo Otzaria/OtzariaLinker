@@ -74,7 +74,8 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       <TaskAnnouncer />
-      {task && (
+      {/* the guided run step shows the task's one bar itself (V5 UX audit U16): not a second one here */}
+      {task && !(store.screen.value === "guided" && store.guided.step.value === "run") && (
         <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
           {task.total > 0 && <progress max={task.total} value={task.done} />}

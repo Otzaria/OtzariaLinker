@@ -378,20 +378,28 @@ function RunStep() {
 
   if (task) {
     const eta = remainingText(task.startedAt, task.done, task.total, Date.now());
+    const ml = store.maxLink;
+    const job = ml.running.value;
     return (
-      // announced by the app bar's live region (TaskAnnouncer), not at every step of the bar here
-      <div class="guided-card info">
+      // ONE bar for the run (V5 UX audit U16, the owner's choice B): the app bar hides its own here, and
+      // the job's counts are under "פרטים". Announced by the app bar's live region (TaskAnnouncer).
+      <div class="guided-card info guided-run">
         <b>{task.label}</b>
-        {task.total > 0 && <progress max={task.total} value={task.done} />}
+        {task.total > 0 && <progress max={task.total} value={task.done} aria-label={task.label} />}
         <span>
           {task.count ?? "מתחיל…"}
           {eta && ` · ${eta}`}
         </span>
-        {/* the max-link job has its own pause and stop; it keeps the finished books */}
-        {store.maxLink.running.value ? <MaxLinkJobView /> : (
-          <div class="row">
-            <button class="btn text" onClick={task.cancel}>ביטול</button>
-          </div>
+        <div class="row">
+          {/* the max-link job pauses (the finished books stay, "המשך" continues); one word for stopping */}
+          {job && <button class="btn outlined" onClick={() => ml.pause()}>השהיה</button>}
+          <button class="btn text" onClick={() => (job ? ml.cancel() : task.cancel())}>עצירה</button>
+        </div>
+        {job && (
+          <details class="guided-details">
+            <summary>פרטים: לפי שיטה ולפי ספר</summary>
+            <MaxLinkJobView detailsOnly />
+          </details>
         )}
       </div>
     );
