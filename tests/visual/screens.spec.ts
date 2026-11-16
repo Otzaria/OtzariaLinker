@@ -191,8 +191,10 @@ for (const [width, viewport] of WIDTHS) {
       await page.getByRole("radio", { name: "קישור מרבי" }).click();
       await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
       await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
-      await expect(page.locator("details.ml-report")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole("region", { name: "עבודת הקישור המרבי" })).toContainText("שנכשלו");
+      // a failed book: the job card comes forward by itself; the report opens on request (V5 UX audit U15)
+      await expect(page.getByRole("region", { name: "עבודת הקישור המרבי" })).toContainText("שנכשלו", { timeout: 30_000 });
+      await page.getByRole("button", { name: /^דוח העבודה/ }).click();
+      await expect(page.locator("details.ml-report")).toBeVisible();
       await expect(page.getByRole("button", { name: /אישור כל הוודאיות/ })).toBeEnabled();
       await snap(page, "maxlink-report");
     });
@@ -209,13 +211,13 @@ for (const [width, viewport] of WIDTHS) {
       await snap(page, "suggestions-loaded");
     });
 
-    test("notices: errors stay, the newest three and a fold for the rest", async ({ page }) => {
+    test("notices: errors stay, the newest on one line and a fold for the rest", async ({ page }) => {
       const chooser = page.waitForEvent("filechooser");
       await page.locator(".drop-strip").getByRole("button", { name: "קבצים", exact: true }).click();
       // five broken links files: five error notices (tests/e2e/robustness.spec.ts)
       await (await chooser).setFiles(["א", "ב", "ג", "ד", "ה"].map((t) => ({ name: `${t}_links.json`, mimeType: "application/json", buffer: Buffer.from(`[{"line_index_1": 1, "path_2": "x.txt"`) })));
-      await expect(page.locator(".notice.error")).toHaveCount(3);
-      await expect(page.getByRole("button", { name: "עוד 2 הודעות" })).toBeVisible();
+      await expect(page.locator(".notice.error")).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "עוד 4 הודעות · כולן שגיאות" })).toBeVisible();
       await snap(page, "notices-errors", { keepErrors: true });
     });
 
