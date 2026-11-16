@@ -43,6 +43,10 @@ const CATALOG: CatalogBook[] = [
   book("m-suk", "משנה סוכה"),
   book("bk", "בבא קמא", "sefaria", ['ב"ק']),
   book("ber", "ברכות"),
+  book("pri-etz", "פרי עץ חיים", "otzaria"),
+  book("yoma", "יומא"),
+  book("m-yoma", "משנה יומא"),
+  book("m-tamid", "משנה תמיד"),
 ];
 
 function scan(lines: string[], sourceTitle = "ספר כלשהו"): Citation[] {
@@ -83,6 +87,10 @@ describe("the Rambam's topics as books write them (knowledge/rambam-topics.json)
     // without a chapter after it, no place: "בהל' שבת" alone is no citation
     expect(scan(["כמבואר בהל' מעשה\"ק ע\"ש"])).toHaveLength(0);
   });
+  it('"הלכות X" named right after another book is a section of that book (צפנת פענח: "בפרי עץ חיים הלכות פסח (פ"ז)")', () => {
+    expect(scan(['דמבואר בפרי עץ חיים הלכות פסח (פ"ז) כי אות ו\' שבתוך']).filter((c) => c.candidates.some((x) => x.collection === "rambam"))).toEqual([]);
+    expect(scan(["שוב ראיתי כעת בפרי חדש על הלכות ע\"ג פרק ז' שכתב"]).filter((c) => c.candidates.some((x) => x.collection === "rambam"))).toEqual([]);
+  });
   it('"עבודת כוכבים" is עבודה זרה, not "עבודת" יום הכפורים', () => {
     expect(books(scan(['עיין רמב"ם פ"א מהל\' עבודת כוכבים ה"ב'])[0])).toEqual(["r-az"]);
   });
@@ -110,6 +118,8 @@ describe("a daf with no tractate, told by the citation before it", () => {
     expect(scan(["בשבת בדף ע\"ג", "שורה", "וגם בדף ע\"ה"]).map(books)).toEqual([["shab"]]);
     expect(scan(['בשבת בדף ע"ג ובגיטין כתב וגם בדף ע"ה']).map((c) => c.rule ?? "")).not.toContain("context-daf");
     expect(scan(['בשבת בדף ע"ג ובמהרש"א בדף ע"ה']).map(books)).toEqual([["shab"]]);
+    // a plain word before "דף" with no ב is the page's own book (מגלה עמוקות על פרשת ואתחנן: "בפי' מערכת דף ע'")
+    expect(scan(['כמבואר בשבת דף ס"ט', "כדאיתא בפי' מערכת דף ע', ואז הם נגאלים"]).map(books)).toEqual([["shab"]]);
   });
 });
 
@@ -185,6 +195,11 @@ describe("a chapter of the Yerushalmi or the Mishnah by its name (knowledge/chap
     const [c] = scan(["בזוכר את הקשין. בפ' גדיש מפ' למתני'"], "פירוש שלמה סיריליו על תלמוד ירושלמי פאה");
     expect(books(c)).toEqual(["y-peah"]);
     expect(loc(c)).toBe("perek:5");
+  });
+  it('in a commentary on the Mishnah, a tractate named next to the chapter is the Bavli (תוספות יום טוב על משנה תמיד: "ביומא [פרק בראשונה (יומא דף כ"ד ע"ב])")', () => {
+    const cs = scan(['כדאיתא ביומא פרק בראשונה (יומא דף כ"ד ע"ב) אלו דברי רשב"א'], "תוספות יום טוב על משנה תמיד");
+    expect(cs.some((c) => c.rule === "chapter-name-other")).toBe(false);
+    expect(cs.flatMap(books)).toContain("yoma");
   });
   it("not without the collection, not without the tractate, not a name that opens no chapter or two", () => {
     expect(scan(["ובירושלמי פרק אין עומדין"])).toHaveLength(0);

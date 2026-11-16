@@ -458,7 +458,9 @@ export class CitationScanner {
   private rambamNamed(toks: readonly Tok[], i: number, line: number): number | null {
     // …or a word for "הלכות" and the topic as books write it, then the chapter: "ובהל' מעשה"ק (פ"ב הי"ב)", "בה' ק"פ
     // (פ"ד ה"ד)" (a topic written in full is a name of the book: forward() reads it)
-    const hilchotFirst = toks[i]?.kind === "word" && HILCHOT.has(wordShape(toks[i]!).replace(/^ו?ב/, ""));
+    let hilchotFirst = toks[i]?.kind === "word" && HILCHOT.has(wordShape(toks[i]!).replace(/^ו?ב/, ""));
+    // "בפרי עץ חיים הלכות פסח (פ"ז)", "בפרי חדש על הלכות ע"ג": the section of another book, named right before it
+    if (hilchotFirst && (isWord(before(toks, i, 1), "על") || [1, 2, 3].some((back) => { const at = beforeIndex(toks, i, back); return at >= 0 && this.aliases.matchAt(toks, at).some((m) => m.to === i && !m.entry.targets.some((t) => t.collection === "rambam")); }))) hilchotFirst = false;
     if ((!hilchotFirst && wordIn(toks[i], QUALIFIERS) !== "rambam") || !this.aliases.rambamTopics.length) return null;
     let k = i + 1;
     const open = !hilchotFirst && opensAt(toks, k);
@@ -803,7 +805,8 @@ export class CitationScanner {
     }
     const base = this.otherBase;
     const baseColl = base?.collection ?? null;
-    if (coll === null && baseColl) coll = baseColl;
+    const fromBase = coll === null && !!baseColl;
+    if (fromBase) coll = baseColl;
     if (coll !== "yerushalmi" && coll !== "mishna") return null;
     // the tractate: named a few words before, or glued after the chapter's name, or the citing book's base
     let tractate: string | null = null;
@@ -855,8 +858,11 @@ export class CitationScanner {
         found = f;
       }
     };
+    // with no word for the collection, a tractate named next to the chapter is the Bavli's ("ביומא פרק בראשונה (דף
+    // כ"ד ע"ב)" in תוספות יום טוב on the Mishnah): named() reads it; the base's collection is for its own chapters only
+    if (fromBase && tractate) return null;
     tryTractate(tractate);
-    if (!target) {
+    if (!target && !fromBase) {
       // "פ' החליל דסוכה": the tractate glued after the name (the longest name that opens a chapter of it)
       for (let n = Math.min(words.length, 4); n >= 1 && !target; n--) {
         const m = after(head.next + n);
@@ -874,6 +880,8 @@ export class CitationScanner {
     let k = head.next + f.n;
     if (bookAt > k) k = this.aliases.matchAt(toks, bookAt).find((m) => m.prefix !== "")?.to ?? k;
     const rest = parseAddress(toks, k, { after: "perek" });
+    // a daf after it is a chapter of the Bavli ("בפרק X (דף …)")
+    if (rest?.elems.some((e) => e.kind === "daf" || e.amud !== undefined)) return null;
     const deeper = rest && rest.elems.every((e) => e.kind === "halacha" || e.kind === "mishna" || e.kind === "?") ? rest.elems : [];
     const cands = this.own([{ ...target, tier: "derived" }]);
     if (!cands.length) return this.drop("self");
@@ -1229,8 +1237,10 @@ export class CitationScanner {
     const addr = parseAddress(toks, i);
     const e = addr?.elems[0];
     if (!addr || !e || e.kind !== "daf" || !e.explicit || addr.elems.length > 1) return null;
-    // "במהרש"א דף ט'": a name we do not know right before is the daf's own book
+    // "במהרש"א דף ט'": a name we do not know right before is the daf's own book; so is a plain word before "דף"
+    // with no ב ("בפי' מערכת דף ע'" — a page of מערכת האלקות): "איתא בדף", "רש"י בדף", "עיין דף", "שם דף" read on
     const prev = before(toks, i, 1);
+    if (!/^ו?ב/.test(t.text) && prev?.kind === "word" && !prev.gershayim && !prev.geresh && !CONTEXT_DAF_BEFORE.has(prev.text) && !wordIn(prev, QUALIFIERS) && !wordIn(prev, COMMENTATORS) && beforeIndex(toks, i, 1) === i - 1) return this.drop("daf-of-another-book");
     if (prev?.kind === "word" && (prev.gershayim || prev.geresh) && !numeralOf(prev) && !COMMON_ABBREVIATIONS.has(wordShape(prev)) && !wordIn(prev, COMMENTATORS) && !wordIn(prev, QUALIFIERS)) return this.drop("daf-of-another-book");
     // another book named between the last citation and the daf
     const keys = new Set(named.map((x) => x.book.key));
@@ -1800,6 +1810,9 @@ function diburWordsAt(toks: readonly Tok[], j: number): string[] | null {
   }
   return out.length ? out : null;
 }
+
+/** plain words that may stand right before "דף" (no ב) in a daf told by the citation before it (contextDaf) */
+const CONTEXT_DAF_BEFORE: ReadonlySet<string> = new Set(["שם", "עיין", "ועיין", "לעיל", "לקמן", "ולקמן", "ולעיל", "להלן", "וכן", "וגם", "גם", "ראה", "וראה", "ושם"]);
 
 /** "תוספת": תוספות as some books spell it, only right before a ד"ה (dibur()) */
 const TOSEFET: readonly (readonly [string, string])[] = [["תוספת", "תוספות"]];
