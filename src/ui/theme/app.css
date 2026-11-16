@@ -282,6 +282,8 @@ dialog.cmp { width: min(1100px, calc(100vw - 32px)); }
 /* the summary keeps a readable width; in a narrow panel the buttons move to a second row */
 .sug-head > .grow { flex: 1 1 160px; min-width: 160px; }
 .bulk { padding: 0 6px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+/* a tool button wider than the side panel (~215px at 1024px) wraps its words instead of scrolling the panel sideways */
+.bulk .btn { white-space: normal; text-align: start; min-width: 0; }
 .sug-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .sug-table th { position: sticky; top: 0; background: var(--surface-container-high); text-align: start; font-weight: 600; padding: 4px 6px; z-index: 1; }
 .sug-table td { padding: 3px 6px; border-top: 1px solid var(--outline-variant); vertical-align: middle; }
