@@ -1,3 +1,4 @@
+import bookNames from "./knowledge/book-names.json";
 import chapterNames from "./knowledge/chapter-names.json";
 import rambamTopics from "./knowledge/rambam-topics.json";
 
@@ -20,3 +21,10 @@ export const RAMBAM_TOPIC_NAMES: readonly { readonly written: string; readonly t
  * By the book's title, in order (chapter 1 first).
  */
 export const CHAPTER_OPENINGS: Readonly<Record<string, readonly string[]>> = chapterNames.books;
+
+/**
+ * How books write a book's title where the title and the spellings the engine derives do not say it: "ספר החסידים"
+ * (ספר חסידים), 'וי"ר' (ויקרא רבה), "ערוך השלחן" (ערוך השולחן). Mined from the LINKER citations into each book, kept
+ * when the scanner did not read them so, LINKER agrees (5 links and more, 95% to one book) and the letters fit the title.
+ */
+export const BOOK_NAMES: readonly { readonly written: string; readonly title: string; readonly linker: number }[] = bookNames.names;

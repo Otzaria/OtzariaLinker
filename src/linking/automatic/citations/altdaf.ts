@@ -133,11 +133,18 @@ export function resolveAltDaf(ds: DafStructure, elems: readonly AddrElem[], pars
     volume = es[0].n;
     es = es.slice(1);
   }
+  // "בזוהר (ח"ב מ"ח א')": a lone א/ב after a quoted daf (two bare numbers to the address) is its amud
+  let letter: 1 | 2 | undefined;
+  const s = es[1];
+  if (es.length === 2 && es[0]!.kind === "?" && es[0]!.amud === undefined && es[0]!.maybeAmud === undefined && s?.kind === "?" && (s.n === 1 || s.n === 2) && s.numeral.form === "geresh" && s.to === undefined) {
+    letter = s.n as 1 | 2;
+    es = es.slice(0, 1);
+  }
   if (es.length !== 1) return null;
   const e = es[0]!;
-  if (e.kind !== "daf" && !(e.kind === "?" && (e.amud !== undefined || e.maybeAmud !== undefined))) return null;
+  if (e.kind !== "daf" && !(e.kind === "?" && (e.amud !== undefined || e.maybeAmud !== undefined || letter !== undefined))) return null;
   if (e.to !== undefined) return null;
-  const amud = e.amud ?? e.maybeAmud;
+  const amud = e.amud ?? e.maybeAmud ?? letter;
   let hits = ds.entries.filter((x) => x.n === e.n && (amud === undefined || x.amud === amud) && (volume === null || x.volume === volume));
   if (parsha) {
     // the parsha's lines: from the book's own references when they name it (the Zohar's "ספר הזהר, וירא, …"),

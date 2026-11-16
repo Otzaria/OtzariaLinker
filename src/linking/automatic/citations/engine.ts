@@ -12,7 +12,7 @@ import {
   type Reason,
   type Suggestion,
 } from "../types";
-import type { AddrElem } from "./address";
+import { pageShaped, type AddrElem } from "./address";
 import { AliasIndex, COMMON_TITLES, type AliasTarget, type CatalogBook, type Collection } from "./aliases";
 import { CitationScanner, type Citation } from "./detect";
 import { NamedUnitIndex, unitKindOf, unitNameKey, type NamedUnit, type NamedUnitSource } from "./named";
@@ -224,7 +224,7 @@ export class CitationRun {
    */
   wantsPages(book: BookRef, index: TargetIndex | null): boolean {
     if (index?.daf) return false;
-    for (const p of this.pendingOf(book)) if (p.citation.elems.some(isDafElem)) return true;
+    for (const p of this.pendingOf(book)) if (pageShaped(p.citation.elems)) return true;
     return false;
   }
 
@@ -322,7 +322,7 @@ export class CitationRun {
           continue;
         }
         // "בזוה"ק (וירא קג:)", "זוה"ק ח"א פ"ט ע"ב": a daf of the book's printed pagination
-        if (pages && !index?.daf && p.citation.elems.some(isDafElem) && (!p.citation.unit || p.citation.unit.kind === "parsha")) {
+        if (pages && !index?.daf && pageShaped(p.citation.elems) && (!p.citation.unit || p.citation.unit.kind === "parsha")) {
           const u = p.citation.unit;
           const span = u ? (index?.resolveNamed?.(u.key, []) ?? null) : null;
           const res = resolveAltDaf(pages, p.citation.elems, u ? { key: u.key, span } : null);
@@ -521,6 +521,7 @@ const SECTION_KINDS: ReadonlySet<string> = new Set(["klal", "shaar", "maamar", "
 
 const isDafElem = (e: AddrElem): boolean => e.kind === "daf" || e.amud !== undefined;
 
+
 /** an amud of a commentator is a few dozen lines; a longer range is no place to look for a ד"ה in */
 const MAX_DIBUR_SPAN = 200;
 
@@ -717,6 +718,13 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "midrash-rabbah": "לפני שם הספר כתוב \"מדרש רבה\" / \"ברבות\" / \"במד\"ר\": ההפניה היא למדרש רבה על הספר הזה, לא לפסוק",
   "title-commentator": "הספר הוא אוצר של מילות מפרש אחד, ולכן המקום הוא בפירוש שלו על הדף או על הפרק",
   "title-commentator-base": "הספר הוא אוצר של מילות מפרש אחד: ההפניה מקושרת לפירוש שלו במקום הזה (בהצעה נפרדת), וגם למקום עצמו, לפסוק או לדף שהמילה כתובה בו",
+  "commentator-after-base": "אחרי המקום כתוב \"ו\" ושם של מפרש עם ד\"ה (\"שבת סח א, ותוס' ד\"ה …\"): המקום עצמו מצוטט, ודברי המפרש עליו בהצעה נפרדת",
+  "dalet-four": "\"ד'\" ואחריו מספר בספר של התנ\"ך: פרק ד והפסוק (בספר שאין בו דפים \"ד'\" אינו \"דף\")",
+  "tur-seif": "סימן וסעיף בטור: הסעיף הוא הרמה השנייה בציוני המקום של הטור",
+  "part-siman": "אחרי חלק של השולחן ערוך (\"או\"ח\", \"יו\"ד\") מספר אחד בלי סימן: הסימן בחלק הזה",
+  "rabbah-parsha": "פרשה של מדרש רבה כפי שכותבים אותה: \"פרשה ז'\", \"רפכ\"ב\" / \"ספמ\"ז\" (ריש / סוף פרשה), \"סוף פ\"ד\"",
+  "yalkut-remez": "\"ילקוט\" ואחריו פרשה בתורה או ספר בנביאים ובכתובים, ורמז: הרמז בילקוט שמעוני על התורה או על נ\"ך",
+  "yalkut-parsha": "\"ילקוט\" ואחריו פרשה בתורה, בלי רמז: כל הפרשה בילקוט שמעוני על התורה",
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",

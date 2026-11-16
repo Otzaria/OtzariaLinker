@@ -1,6 +1,6 @@
 import { pushTo } from "../../../core/collections";
 import type { BookRef } from "../../../core/links/model";
-import { RAMBAM_TOPIC_NAMES } from "./knowledge";
+import { BOOK_NAMES, RAMBAM_TOPIC_NAMES } from "./knowledge";
 import { strictValue } from "./numbers";
 import { citationTokens, unifyFinals, type Tok } from "./text";
 
@@ -647,6 +647,12 @@ function spellingVariants(topic: string): string[] {
   return [...out];
 }
 
+const BOOK_NAMES_BY_TITLE: ReadonlyMap<string, readonly string[]> = (() => {
+  const m = new Map<string, string[]>();
+  for (const n of BOOK_NAMES) pushTo(m, n.title, n.written);
+  return m;
+})();
+
 interface Derived {
   name: string;
   secondary?: boolean;
@@ -656,6 +662,8 @@ interface Derived {
 function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<string, readonly BookRef[]>): Derived[] {
   const out: Derived[] = [];
   for (const s of SPELLINGS) if (s[0] === title) for (const n of s.slice(1)) out.push({ name: n });
+  // how books write the title, mined from the database's citations (knowledge/book-names.json)
+  for (const n of BOOK_NAMES_BY_TITLE.get(title) ?? []) out.push({ name: n });
   switch (coll) {
     case "bavli":
       out.push({ name: `מסכת ${title}` }, { name: `מס' ${title}` }, { name: `גמרא ${title}` }, { name: `תלמוד בבלי ${title}` }, { name: `בבלי ${title}` });

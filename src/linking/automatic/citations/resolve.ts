@@ -205,7 +205,8 @@ const KINDS: Readonly<Record<Collection, ReadonlySet<Kind>>> = {
   rambam: new Set(["perek", "halacha"]),
   sa: new Set(["siman", "seif"]),
   "sa-commentary": new Set(["siman", "sk", "seif"]),
-  tur: new Set(["siman"]),
+  // "בטור חו"מ סימן רס"ב ס"ט": the Tur's paragraphs are its second level ("טור, חושן משפט, רסב, ט"), as LINKER links them
+  tur: new Set(["siman", "seif"]),
   other: new Set(["perek", "pasuk", "siman", "seif", "sk", "halacha", "mishna", "os", "mizmor", "chelek", "klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]),
 };
 
