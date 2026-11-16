@@ -85,9 +85,10 @@ export class SuggestionsState {
   readonly dbLinkKeys = signal<ReadonlySet<string>>(new Set());
   /**
    * Rejected suggestions, by a key made of book TITLES and positions (rejectionKey) — session book keys
-   * change between sessions, titles do not — so a rejection survives re-runs and saved projects.
+   * change between sessions, titles do not — so a rejection survives re-runs and saved projects. They
+   * live in LinkState: rejecting is an undoable action like approving, and it is saved (review C10).
    */
-  readonly rejected = signal<ReadonlySet<string>>(new Set());
+  readonly rejected = computed<ReadonlySet<string>>(() => this.host.linkState.value.rejected);
   /** the suggestion shown in the inline/card views */
   readonly current = signal<string | null>(null);
 
@@ -250,27 +251,26 @@ export class SuggestionsState {
     const links = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists").map((s) => this.linkOf(s));
     if (!links.length) return 0;
     const ids2 = new Set(links.map((l) => l.id.slice(5)));
-    batch(() => {
-      this.commit(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links));
-      const keys = new Set(run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys));
-      if ([...keys].some((k) => this.rejected.value.has(k))) this.rejected.value = new Set([...this.rejected.value].filter((k) => !keys.has(k)));
-    });
+    // an approval forgets a rejection of the same suggestion, in the same step: undo brings both back
+    const keys = run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys);
+    this.commit(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links), { remove: keys });
     return links.length;
   }
 
+  /** Rejects suggestions — and removes the links of the approved ones among them — as ONE undoable action. */
   reject(ids: readonly string[]): void {
-    const { linkState } = this.host;
-    const approved = ids.map((id) => `auto:${id}`).filter((id) => linkState.value.links.has(id));
-    batch(() => {
-      if (approved.length) this.commit(approved.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approved.length.toLocaleString("he")} הצעות`, approved.map((id) => ({ id, before: linkState.value.links.get(id)! })));
-      this.rejected.value = new Set([...this.rejected.value, ...this.keysOf(ids)]);
-    });
+    const { links } = this.host.linkState.value;
+    const approved = ids.map((id) => `auto:${id}`).filter((id) => links.has(id));
+    const n = ids.length;
+    const label = approved.length
+      ? approved.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approved.length.toLocaleString("he")} הצעות`
+      : n === 1 ? "דחיית הצעה" : `דחיית ${n.toLocaleString("he")} הצעות`;
+    this.commit(label, approved.map((id) => ({ id, before: links.get(id)! })), { add: this.keysOf(ids) });
   }
 
-  /** Back to "pending": forgets the rejection. */
+  /** Back to "pending": forgets the rejection (undoable). */
   reset(ids: readonly string[]): void {
-    const drop = new Set(this.keysOf(ids));
-    this.rejected.value = new Set([...this.rejected.value].filter((k) => !drop.has(k)));
+    this.commit(ids.length === 1 ? "החזרת הצעה להמתנה" : `החזרת ${ids.length.toLocaleString("he")} הצעות להמתנה`, [], { remove: this.keysOf(ids) });
   }
 
   private keysOf(ids: readonly string[]): string[] {
@@ -339,8 +339,8 @@ export class SuggestionsState {
     });
   }
 
-  private commit(label: string, changes: Change[]): void {
-    this.host.linkState.value = commit(this.host.linkState.value, label, changes);
+  private commit(label: string, changes: Change[], rejections?: { add?: Iterable<string>; remove?: Iterable<string> }): void {
+    this.host.linkState.value = commit(this.host.linkState.value, label, changes, Date.now(), [], [], rejections);
   }
 }
 

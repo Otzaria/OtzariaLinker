@@ -13,7 +13,7 @@ import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTit
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -856,6 +856,8 @@ export class AppStore {
     const s = this.sources.value.find((x) => x.info.id === sourceId);
     if (!s) return;
     this.libraryOverrides.value = new Map(this.libraryOverrides.value).set(sourceId, library);
+    // saved with the project (ProjectSource.library): the project is changed, and autosaved (C10)
+    this.linkState.value = touch(this.linkState.value);
     const named = s.books.filter((b) => hasSefariaTitle(b, this.sefariaTitles.value)).map((b) => `"${b.title}"`);
     const which = named.length ? ` ${named.slice(0, 3).join(", ")}${named.length > 3 ? ` ועוד ${named.length - 3}` : ""}` : "";
     this.notify(
@@ -1000,8 +1002,10 @@ export class AppStore {
     const fileChanges = [...ls.files.keys()].filter((t) => !p.libraryFiles.some((f) => f.title === t)).map((t) => fileChange(ls, t, null));
     for (const f of p.libraryFiles) fileChanges.push(fileChange(ls, f.title, { ...f, verified: false }));
     batch(() => {
-      this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges, fileChanges);
-      this.suggestions.rejected.value = new Set(p.rejectedSuggestions);
+      // the project's rejections replace the current ones, in the same undoable action (C10)
+      const rejected = new Set(p.rejectedSuggestions);
+      const rejections = { add: rejected, remove: [...ls.rejected].filter((k) => !rejected.has(k)) };
+      this.linkState.value = commit(this.linkState.value, `פתיחת פרויקט (${linksCount(p.links.length)})`, changes.filter((c) => c.before !== c.after), Date.now(), altChanges, fileChanges, rejections);
       if (p.dbMappings?.length) this.dbMappings.value = new Map([...this.dbMappings.value, ...p.dbMappings.map((m) => [m.fingerprint, m] as const)]);
       this.savedRevision.value = this.linkState.value.revision;
       const show = (title: string | null) => (title ? this.booksByTitle.value.get(title)?.[0]?.key ?? null : null);
@@ -1034,7 +1038,8 @@ export class AppStore {
       if (first) return void (first = false);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const empty = this.linkState.peek().links.size === 0 && this.linkState.peek().altToc.size === 0;
+        const now = this.linkState.peek();
+        const empty = now.links.size === 0 && now.altToc.size === 0 && now.rejected.size === 0;
         (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
           /* storage blocked or full — autosave is best effort */
         });
@@ -1043,11 +1048,11 @@ export class AppStore {
     });
     void kv.get(KEY).then(
       (text) => {
-        if (!text || this.linkState.peek().links.size || this.linkState.peek().altToc.size) return;
+        if (!text || this.linkState.peek().links.size || this.linkState.peek().altToc.size || this.linkState.peek().rejected.size) return;
         let n = 0;
         try {
-          const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[] };
-          n = (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0);
+          const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[]; rejectedSuggestions?: unknown[] };
+          n = (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0) + (saved.rejectedSuggestions?.length ?? 0);
         } catch {
           return;
         }

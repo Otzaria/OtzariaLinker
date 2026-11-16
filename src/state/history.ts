@@ -69,7 +69,18 @@ export interface Command {
   readonly altToc?: readonly AltTocChange[];
   /** library-file records the same action loaded, replaced or forgot */
   readonly files?: readonly FileChange[];
+  /** suggestion rejections the same action added or forgot (review C10) */
+  readonly rejections?: RejectionChange;
   readonly at: number;
+}
+
+/**
+ * Rejection keys (state/suggestions.ts rejectionKeys) an action added and removed: only keys that
+ * really changed, so undo removes exactly what was added and puts back exactly what was removed.
+ */
+export interface RejectionChange {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
 }
 
 export interface LinkState {
@@ -78,6 +89,12 @@ export interface LinkState {
   readonly altToc: ReadonlyMap<string, AltTocBook>;
   /** the library links files the project holds, by book title */
   readonly files: ReadonlyMap<string, LibraryFile>;
+  /**
+   * Rejected automatic suggestions, by rejectionKey. A decision of the user like a link: it is saved
+   * with the project, so rejecting is an undoable action that makes the project "changed" and is
+   * autosaved (review C10).
+   */
+  readonly rejected: ReadonlySet<string>;
   readonly undo: readonly Command[];
   readonly redo: readonly Command[];
   /** bumps on every change; autosave and "unsaved changes" compare against it */
@@ -86,7 +103,7 @@ export interface LinkState {
 
 export const HISTORY_LIMIT = 500;
 
-export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), files: new Map(), undo: [], redo: [], revision: 0 });
+export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), files: new Map(), rejected: new Set(), undo: [], redo: [], revision: 0 });
 
 function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change[], dir: "after" | "before"): Map<string, Link> {
   const next = new Map(links);
@@ -109,17 +126,42 @@ function applyKeyed<T>(books: ReadonlyMap<string, T>, changes: readonly { title:
   return next;
 }
 
+function applyRejections(set: ReadonlySet<string>, r: RejectionChange | undefined, dir: "after" | "before"): ReadonlySet<string> {
+  if (!r) return set;
+  const next = new Set(set);
+  for (const k of dir === "after" ? r.removed : r.added) next.delete(k);
+  for (const k of dir === "after" ? r.added : r.removed) next.add(k);
+  return next;
+}
+
+/** The keys that really change: added ones not rejected yet, removed ones that are. */
+function rejectionChange(set: ReadonlySet<string>, add: Iterable<string> = [], remove: Iterable<string> = []): RejectionChange | null {
+  const gone = new Set([...remove].filter((k) => set.has(k)));
+  const added = [...new Set([...add].filter((k) => !set.has(k) && !gone.has(k)))];
+  return added.length || gone.size ? { added, removed: [...gone] } : null;
+}
+
 /** Applies a new user action. Empty or no-op changes are dropped and do not create a history entry. */
-export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now(), altToc: readonly AltTocChange[] = [], files: readonly FileChange[] = []): LinkState {
+export function commit(
+  s: LinkState,
+  label: string,
+  changes: readonly Change[],
+  at = Date.now(),
+  altToc: readonly AltTocChange[] = [],
+  files: readonly FileChange[] = [],
+  rejections: { readonly add?: Iterable<string>; readonly remove?: Iterable<string> } = {},
+): LinkState {
   const real = changes.map(settle).filter((c): c is Change => !!c && c.before !== c.after);
   const realAlt = altToc.filter((c) => c.before !== c.after);
   const realFiles = files.filter((c) => c.before !== c.after);
-  if (!real.length && !realAlt.length && !realFiles.length) return s;
-  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), ...(realFiles.length && { files: realFiles }), at };
+  const rej = rejectionChange(s.rejected, rejections.add, rejections.remove);
+  if (!real.length && !realAlt.length && !realFiles.length && !rej) return s;
+  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), ...(realFiles.length && { files: realFiles }), ...(rej && { rejections: rej }), at };
   return {
     links: applyChanges(s.links, real, "after"),
     altToc: applyKeyed(s.altToc, realAlt, "after"),
     files: applyKeyed(s.files, realFiles, "after"),
+    rejected: applyRejections(s.rejected, rej ?? undefined, "after"),
     undo: [...s.undo, cmd].slice(-HISTORY_LIMIT),
     redo: [],
     revision: s.revision + 1,
@@ -129,14 +171,21 @@ export function commit(s: LinkState, label: string, changes: readonly Change[], 
 export function undo(s: LinkState): LinkState {
   const cmd = s.undo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyKeyed(s.altToc, cmd.altToc, "before"), files: applyKeyed(s.files, cmd.files, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyKeyed(s.altToc, cmd.altToc, "before"), files: applyKeyed(s.files, cmd.files, "before"), rejected: applyRejections(s.rejected, cmd.rejections, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
 }
 
 export function redo(s: LinkState): LinkState {
   const cmd = s.redo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), rejected: applyRejections(s.rejected, cmd.rejections, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
 }
+
+/**
+ * A change the project saves that is not an action on its links — a source's "ספרי ספריית אוצריא"
+ * switch (ProjectSource.library): no history entry, but a new revision, so the project shows as changed
+ * and is autosaved (review C10).
+ */
+export const touch = (s: LinkState): LinkState => ({ ...s, revision: s.revision + 1 });
 
 /**
  * Re-points links at books without making an action: `fix` returns the link with its books resolved
@@ -271,7 +320,7 @@ function sameData(a: unknown, b: unknown): boolean {
 export interface HistoryEntry {
   readonly label: string;
   readonly at: number;
-  /** how many links and alt_toc books the action changed */
+  /** how many links, alt_toc books, library files and rejections the action changed */
   readonly changes: number;
   /** the history position right after this action: going "to" the entry applies it and everything before it */
   readonly position: number;
@@ -285,7 +334,7 @@ export const historyPosition = (s: LinkState): number => s.undo.length;
 /** Every action the history holds, oldest first: the applied ones, then the undone ones in redo order. */
 export function timeline(s: LinkState): HistoryEntry[] {
   const all = [...s.undo, ...[...s.redo].reverse()];
-  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0) + (c.files?.length ?? 0), position: i + 1, applied: i < s.undo.length }));
+  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0) + (c.files?.length ?? 0) + (c.rejections ? c.rejections.added.length + c.rejections.removed.length : 0), position: i + 1, applied: i < s.undo.length }));
 }
 
 /** Undoes or redoes, one action at a time, until `position` actions are applied. */

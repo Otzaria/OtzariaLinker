@@ -332,6 +332,73 @@ describe("AppStore — rejections survive a saved project", () => {
   });
 });
 
+describe("AppStore — a rejection is a user action like any other (review C10)", () => {
+  async function ran() {
+    const { store } = makeStore();
+    await store.openFiles([DB, BIUR]);
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    await store.suggestions.runEngine("headings", key("ביאור על בראשית"), key("בראשית"));
+    store.savedRevision.value = store.linkState.value.revision; // as after saving the project
+    return store;
+  }
+
+  it("reject marks the project changed, is saved by autosave, and Ctrl+Z returns the suggestion to pending", async () => {
+    const mem = new Map<string, string>();
+    const kv = { get: async (k: string) => mem.get(k) ?? null, set: async (k: string, v: string) => void mem.set(k, v), delete: async (k: string) => void mem.delete(k) };
+    const store = await ran();
+    store.startAutosave(kv, 0);
+    const ids = store.suggestions.pendingAtLeast("certain").slice(0, 3);
+    store.suggestions.reject(ids);
+    expect(ids.map((id) => store.suggestions.state.value.get(id))).toEqual(["rejected", "rejected", "rejected"]);
+    expect(store.dirty.value).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(JSON.parse(mem.get("autosave:v1") ?? "{}").rejectedSuggestions?.length).toBeGreaterThanOrEqual(3);
+    expect(store.linkState.value.undo.at(-1)!.label).toBe("דחיית 3 הצעות");
+    store.undo();
+    expect(ids.map((id) => store.suggestions.state.value.get(id))).toEqual(["pending", "pending", "pending"]);
+    store.redo();
+    expect(store.suggestions.state.value.get(ids[0]!)).toBe("rejected");
+  });
+
+  it("approving a rejected suggestion forgets the rejection in the same step: undo brings both back", async () => {
+    const store = await ran();
+    const [id] = store.suggestions.pendingAtLeast("certain");
+    store.suggestions.reject([id!]);
+    const steps = store.linkState.value.undo.length;
+    expect(store.suggestions.approve([id!])).toBe(1);
+    expect(store.linkState.value.undo.length).toBe(steps + 1);
+    expect(store.suggestions.state.value.get(id!)).toBe("approved");
+    store.undo();
+    expect(store.suggestions.state.value.get(id!)).toBe("rejected");
+  });
+
+  it("reset (back to pending) is undoable too, and a rejection alone is offered for recovery", async () => {
+    const mem = new Map<string, string>();
+    const kv = { get: async (k: string) => mem.get(k) ?? null, set: async (k: string, v: string) => void mem.set(k, v), delete: async (k: string) => void mem.delete(k) };
+    const store = await ran();
+    store.startAutosave(kv, 0);
+    const [id] = store.suggestions.pendingAtLeast("certain");
+    store.suggestions.reject([id!]);
+    store.suggestions.reset([id!]);
+    expect(store.suggestions.state.value.get(id!)).toBe("pending");
+    store.undo();
+    expect(store.suggestions.state.value.get(id!)).toBe("rejected");
+    await new Promise((r) => setTimeout(r, 10));
+    const b = makeStore();
+    b.store.startAutosave(kv, 0);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(b.store.recovery.value).not.toBeNull();
+  });
+
+  it("the switch \"ספרי ספריית אוצריא\" is saved with the project: it marks it changed", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB]);
+    store.savedRevision.value = store.linkState.value.revision;
+    store.setLibrarySource(store.sources.value[0]!.info.id, false);
+    expect(store.dirty.value).toBe(true);
+  });
+});
+
 describe("AppStore — suggestions the library already has", () => {
   it("Onkelos → Bereshit links that the database already holds show as 'exists'", async () => {
     const { store } = makeStore();
