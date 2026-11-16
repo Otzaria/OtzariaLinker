@@ -63,6 +63,17 @@ export function SuggestionsPanel() {
           ))}
         </ul>
       )}
+      {run.dbLinksUnread?.length ? (
+        <ul class="problems" style="padding:0 6px 6px">
+          <li class="warning" role="alert">
+            <Icon name="fl_warning" size={16} />
+            <span class="grow">
+              הקישורים שכבר יש במסד ל־{run.dbLinksUnread.map((u) => `"${u.title}"`).join(", ")} לא נקראו: הצעות שכבר קיימות בספרייה עלולות להופיע כממתינות, ולכן אישור של כמה הצעות יחד מושבת.
+            </span>
+            <button class="btn text" onClick={() => void store.suggestions.retryDbLinks()}>קריאה חוזרת</button>
+          </li>
+        </ul>
+      ) : null}
       {run.maxlink ? <MaxLinkReportView /> : <BatchSummary />}
       {view === "table" ? <TableView /> : <StepView card={view === "card"} />}
     </div>
@@ -240,6 +251,8 @@ function TableView() {
   // the lines of the shown rows, for the start of each line's text (audit F17)
   useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
+  // the database's links were not read: what is "pending" may exist in the library (review C13)
+  const unread = !!run.dbLinksUnread?.length;
 
   return (
     <>
@@ -262,7 +275,7 @@ function TableView() {
         )}
       </div>
       <div class="row bulk">
-        <button class="btn filled" disabled={!certain} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title="מאשר רק הצעות שהמנוע בטוח בהן לגמרי">
+        <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהמנוע בטוח בהן לגמרי"}>
           <Icon name="oz_link_check" size={18} />
           אישור כל הוודאיות ({certain.toLocaleString("he")})
         </button>

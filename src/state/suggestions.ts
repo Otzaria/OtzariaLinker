@@ -52,6 +52,11 @@ export interface SuggestionRun {
   maxlink?: MaxLinkRunInfo;
   /** a pair run: the book the user chose as the source — the table reads every row from it (audit F18) */
   from?: string;
+  /**
+   * Books whose database links could not be read (review C13): their suggestions cannot be compared with
+   * the library, so one that exists there shows as pending — a bulk approval waits for retryDbLinks().
+   */
+  dbLinksUnread?: readonly { key: string; title: string }[];
 }
 
 /** A suggestion as the table shows it: from the user's book to the other (audit F17, F18). */
@@ -131,9 +136,9 @@ export class SuggestionsState {
     const target = this.host.refOf(targetKey);
     const result = await this.host.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, this.withSefaria(options, [source.key, target.key]), opts));
     if (!result) return false;
-    await this.loadDbLinkKeys([source.key]);
+    const unread = await this.loadDbLinkKeys([source.key]);
     batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now(), from: sourceKey };
+      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }) };
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -150,9 +155,9 @@ export class SuggestionsState {
     const source = this.host.refOf(sourceKey);
     const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), opts));
     if (!result) return false;
-    await this.loadDbLinkKeys([source.key]);
+    const unread = await this.loadDbLinkKeys([source.key]);
     batch(() => {
-      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}`, result, at: Date.now() };
+      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }) };
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -178,7 +183,7 @@ export class SuggestionsState {
     }
     const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), opts));
     if (!items) return false;
-    await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
+    const unread = await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
     const suggestions: Suggestion[] = [];
     const notes: Reason[] = [];
     const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.reason && { problem: p.reason }), suggestions: 0, certain: 0, high: 0, review: 0 }));
@@ -195,7 +200,7 @@ export class SuggestionsState {
       for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
     batch(() => {
-      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows };
+      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }) };
       this.current.value = suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -215,17 +220,40 @@ export class SuggestionsState {
   /**
    * The library may already have a suggested link (compatibility review #7): read the database links
    * of the run's source books, so such suggestions show as "already exists" instead of as new.
+   * A source without links (text files) answers with none; a throw is a real failure (a damaged
+   * database, a restarted worker): the user is told, and the books are returned so the run can hold
+   * back a bulk approval until the read succeeds (review C13). `add` keeps the keys read before.
    */
-  private async loadDbLinkKeys(bookKeys: readonly string[]): Promise<void> {
-    const keys = new Set<string>();
+  private async loadDbLinkKeys(bookKeys: readonly string[], add = false): Promise<{ key: string; title: string }[]> {
+    const keys = new Set<string>(add ? this.dbLinkKeys.peek() : []);
+    const unread: { key: string; title: string; why: string }[] = [];
     for (const key of new Set(bookKeys)) {
       try {
         for (const l of await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
-      } catch {
-        /* a source without links (text files) or a read error: nothing to compare with */
+      } catch (err) {
+        unread.push({ key, title: this.host.refOf(key).title, why: (err as Error)?.message ?? String(err) });
       }
     }
     this.dbLinkKeys.value = keys;
+    if (unread.length)
+      this.host.notify(
+        "warning",
+        `הקישורים שכבר יש במסד ל־${unread.map((u) => `"${u.title}"`).join(", ")} לא נקראו, ולכן הצעות שכבר קיימות בספרייה עלולות להופיע כממתינות. אישור של כמה הצעות יחד מושבת עד שהם ייקראו: לחצו "קריאה חוזרת" בחלונית ההצעות.`,
+        unread.map((u) => `${u.title}: ${u.why}`),
+      );
+    return unread.map(({ key, title }) => ({ key, title }));
+  }
+
+  /** Reads again the database links that failed for the current run (review C13). True when all were read. */
+  async retryDbLinks(): Promise<boolean> {
+    const run = this.run.peek();
+    if (!run?.dbLinksUnread?.length) return true;
+    const unread = await this.loadDbLinkKeys(run.dbLinksUnread.map((u) => u.key), true);
+    if (this.run.peek() !== run) return false;
+    const { dbLinksUnread: _u, ...rest } = run;
+    this.run.value = { ...rest, ...(unread.length && { dbLinksUnread: unread }) };
+    if (!unread.length) this.host.notify("success", "הקישורים שכבר יש במסד נקראו. הצעות שכבר קיימות בספרייה מסומנות עכשיו \"כבר קיים\".");
+    return !unread.length;
   }
 
   /** The link approving a suggestion makes. */
@@ -250,6 +278,10 @@ export class SuggestionsState {
     const want = new Set(ids);
     const links = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists").map((s) => this.linkOf(s));
     if (!links.length) return 0;
+    if (links.length > 1 && run.dbLinksUnread?.length) {
+      this.host.notify("warning", `ההצעות לא אושרו: הקישורים שכבר יש במסד ל־${run.dbLinksUnread.map((u) => `"${u.title}"`).join(", ")} לא נקראו, וחלק מההצעות אולי כבר קיימות בספרייה. לחצו "קריאה חוזרת" בחלונית ההצעות, או אשרו הצעות אחת אחת אחרי בדיקה.`);
+      return 0;
+    }
     const ids2 = new Set(links.map((l) => l.id.slice(5)));
     // an approval forgets a rejection of the same suggestion, in the same step: undo brings both back
     const keys = run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys);

@@ -399,6 +399,34 @@ describe("AppStore — a rejection is a user action like any other (review C10)"
   });
 });
 
+describe("AppStore — a database whose links cannot be read (review C13)", () => {
+  it("says so, keeps \"approve all certain\" from approving what may exist, and a retry reads them", async () => {
+    const reg = new SourceRegistry();
+    const service = registryService(reg);
+    let broken = true;
+    const real = service.existingLinks.bind(service);
+    service.existingLinks = async (k, a, b, o) => {
+      if (broken) throw Object.assign(new Error("מסד הנתונים פגום."), { code: "db/corrupt" });
+      return real(k, a, b, o);
+    };
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    await store.openFiles([DB]);
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    await store.suggestions.runEngine("headings", key("תרגום אונקלוס על בראשית"), key("בראשית"));
+    expect(store.suggestions.run.value!.dbLinksUnread?.map((b) => b.title)).toEqual(["תרגום אונקלוס על בראשית"]);
+    expect(store.notices.value.some((n) => n.kind === "warning" && n.text.includes("תרגום אונקלוס על בראשית") && n.text.includes("לא נקראו"))).toBe(true);
+    // the library already has these links, but they could not be compared: a bulk approval waits
+    const certain = store.suggestions.pendingAtLeast("certain");
+    expect(certain.length).toBeGreaterThan(50);
+    expect(store.suggestions.approve(certain)).toBe(0);
+    expect(store.notices.value.at(-1)!.kind).toBe("warning");
+    broken = false;
+    expect(await store.suggestions.retryDbLinks()).toBe(true);
+    expect(store.suggestions.run.value!.dbLinksUnread).toBeUndefined();
+    expect(store.suggestions.counts.value.exists).toBeGreaterThan(50);
+  });
+});
+
 describe("AppStore — suggestions the library already has", () => {
   it("Onkelos → Bereshit links that the database already holds show as 'exists'", async () => {
     const { store } = makeStore();
