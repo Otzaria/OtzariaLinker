@@ -4,7 +4,7 @@ import { isRange, type Link } from "../../core/links/model";
 import { problemText } from "../../core/links/validate";
 import type { AltTocExportPlan } from "../alt-toc/export";
 import type { ExportPlan } from "../links-json/export";
-import type { SefariaCsvFile } from "../sefaria-csv/write";
+import { sefariaCsvOmissions, type SefariaCsvFile } from "../sefaria-csv/write";
 import { nextStepsText, type ExportPurpose } from "./next-steps";
 
 /*
@@ -60,6 +60,7 @@ export function buildExportReport(r: ReportInput): string {
   L.push(row("  מהם ערוכים", c.edited));
   L.push(row("  מהם נשמרו כמו שהם", c.kept));
   L.push(row("נמחקו מהקבצים", c.deleted));
+  if (c.deletionsHeld) L.push(row("מחיקות שלא יגיעו לספרייה", c.deletionsHeld));
   L.push(row("לא ייוצאו (שגיאה)", c.heldBack));
   if (c.movedToBase) L.push(row("\"מקור\" שנכתבו אצל הבסיס", c.movedToBase));
   L.push(row("קובצי קישורים", r.format === "json" ? links.files.length : r.csv?.length ?? 0));
@@ -108,13 +109,15 @@ export function buildExportReport(r: ReportInput): string {
     for (const [title, parts] of [...books].sort(([a], [b]) => (a < b ? -1 : 1))) L.push(`  ${title}: ${parts.join("; ")}`);
   }
 
-  const errs = links.heldBack;
-  if (errs.length) {
-    section(`קישורים שלא ייוצאו (${errs.length.toLocaleString("he")})`, "!");
-    for (const { link, problems } of errs.slice(0, LIMIT))
-      L.push(`  ✗ ${linkPlace(link)}: ${problems.filter((p) => p.severity === "error").map((p) => problemText(p, r.technical)).join(" ")}`);
-    if (errs.length > LIMIT) L.push(`  … ועוד ${(errs.length - LIMIT).toLocaleString("he")}`);
-  }
+  // every link that is not written is listed with its reason — all of them, never "… and N more" (V5 P0-5)
+  const blocked = (title: string, list: readonly { link: Link; problems: readonly { severity: string; message: string; detail?: string }[] }[]) => {
+    if (!list.length) return;
+    section(`${title} (${list.length.toLocaleString("he")})`, "!");
+    for (const { link, problems } of list) L.push(`  ✗ ${linkPlace(link)}: ${problems.filter((p) => p.severity === "error").map((p) => problemText(p, r.technical)).join(" ")}`);
+  };
+  blocked("קישורים שלא ייוצאו", links.heldBack);
+  blocked("מחיקות שלא יגיעו לספרייה", links.heldDeletions);
+  if (r.format === "sefaria-csv") blocked("קישורים שלא נכללו בקובצי ה־CSV", sefariaCsvOmissions(links));
   if (altToc.heldBack.length) {
     section(`מבני כותרות שלא ייוצאו (${altToc.heldBack.length})`, "!");
     for (const b of altToc.heldBack) {

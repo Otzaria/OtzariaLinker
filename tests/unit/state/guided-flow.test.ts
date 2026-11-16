@@ -127,6 +127,8 @@ describe("guided flow — time, record, check", () => {
       clean: 1,
       bySeverity: { error: 2, warning: 2, info: 1 },
       byCategory: {},
+      blocked: ["1", "2"],
+      deletionsHeld: [],
       issues: [
         { link: link("1"), category: "sefaria", problem: { code: "sefaria/not-library-edition", severity: "error", message: "" } },
         { link: link("2"), category: "sefaria", problem: { code: "sefaria/not-library-edition", severity: "error", message: "" } },

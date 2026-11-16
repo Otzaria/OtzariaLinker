@@ -1,8 +1,7 @@
 import { zipSync, strToU8 } from "fflate";
 import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
-import { unsafeFileTitle } from "../../core/links/titles";
-import { asExported, FILE_LEVEL_CODES, PRIVATE_TO_BASE, privateSourceRecord, validateExport, type Problem, type ValidationContext } from "../../core/links/validate";
+import { exportVerdicts, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
@@ -18,7 +17,9 @@ import { serializeLinksJson } from "./serialize";
  *   • a link with an error is held back (never written silently) and listed with its reasons — but a
  *     library record is never left out of a file that is written: its whole file is held instead (C1);
  *   • for private use, a "source" link is written in its BASE's file as "commentary" (validate.ts
- *     PRIVATE_TO_BASE: Otzaria's personal import does not reverse "source"), and the plan says which file.
+ *     PRIVATE_TO_BASE: Otzaria's personal import does not reverse "source"), and the plan says which file;
+ *   • the accounting adds up, or the export stops (exportAccounting): every link is written or held back
+ *     with a reason, every deletion is delivered or held with a reason (V5 P0-5).
  */
 export interface ExportFile {
   /** file name inside the export ("<source title>_links.json") */
@@ -40,9 +41,15 @@ export interface ExportPlan {
   written: Link[];
   heldBack: { link: Link; problems: Problem[] }[];
   warned: { link: Link; problems: Problem[] }[];
+  /**
+   * Library records the user deleted whose deletion this export does NOT deliver — their book's file is
+   * not written (a snapshot from a saved project, an unsafe title, a held file) — each with the reason
+   */
+  heldDeletions: { link: Link; problems: Problem[] }[];
   /** private use: link id → the record written for it in another book's file (a "source" link at its base) */
   moved: ReadonlyMap<string, Link>;
-  counts: { new: number; edited: number; kept: number; deleted: number; heldBack: number; files: number; movedToBase: number };
+  /** deleted: deletions the written files deliver; deletionsHeld: those that wait (heldDeletions) */
+  counts: { new: number; edited: number; kept: number; deleted: number; deletionsHeld: number; heldBack: number; files: number; movedToBase: number };
 }
 
 export interface ExportOptions {
@@ -55,36 +62,20 @@ export interface ExportOptions {
 }
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
-  const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
-  const problems = validateExport(live, ctx);
-  const written: Link[] = [];
-  const heldBack: ExportPlan["heldBack"] = [];
-  const warned: ExportPlan["warned"] = [];
-  for (const l of live) {
-    // An imported record the user did not touch is kept as it was, its errors as warnings (asExported:
-    // the same rule the quality check reports by)
-    const p = asExported(l, problems.get(l.id) ?? []);
-    // a problem of the book's whole file holds it back always — also untouched and in expert mode (A1–A4)
-    const fileHeld = p.some((x) => FILE_LEVEL_CODES.has(x.code));
-    if (fileHeld || (!opts.includeErrors && p.some((x) => x.severity === "error"))) heldBack.push({ link: l, problems: p });
-    else {
-      written.push(l);
-      if (p.some((x) => x.severity === "warning" || x.severity === "error")) warned.push({ link: l, problems: p });
-    }
-  }
+  // ONE classification for the export and the quality check (validate.ts exportVerdicts)
+  const v = exportVerdicts(links, ctx, opts.includeErrors === true);
+  const { written, heldBack, warned, heldDeletions, moved } = v;
 
   const bySource = new Map<string, Link[]>();
   /** file title → the book each moved record came from → how many */
   const movedIn = new Map<string, Map<string, number>>();
-  const moved = new Map<string, Link>();
   // push, not spread: one book's file can hold 100k+ records (the library's largest has 112,905),
   // and copying the list for every link made planning quadratic — 259 s for that one file
   for (const l of written) {
     // private use: a "source" link goes into its base's file, as the validation said (PRIVATE_TO_BASE)
-    const atBase = problems.get(l.id)?.some((p) => p.code === PRIVATE_TO_BASE) ? privateSourceRecord(l) : null;
+    const atBase = moved.get(l.id);
     const record = atBase ?? l;
     if (atBase) {
-      moved.set(l.id, atBase);
       const from = movedIn.get(atBase.source.book.title) ?? new Map<string, number>();
       from.set(l.source.book.title, (from.get(l.source.book.title) ?? 0) + 1);
       movedIn.set(atBase.source.book.title, from);
@@ -94,11 +85,11 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     else bySource.set(record.source.book.title, [record]);
   }
   const importedTitles = new Set(links.filter((l) => l.provenance === "file").map((l) => l.source.book.title));
-  const heldTitles = new Set(heldBack.filter((h) => h.problems.some((x) => FILE_LEVEL_CODES.has(x.code))).map((h) => h.link.source.book.title));
 
-  // A book whose imported links were ALL deleted still needs its file — empty — or the library's
-  // old file would stay and the deletions would never happen (compatibility review #2).
-  for (const title of importedTitles) if (!bySource.has(title) && !heldTitles.has(title) && !unsafeFileTitle(title)) bySource.set(title, []);
+  // A book whose imported links were ALL deleted still needs its file — empty — or the library's old
+  // file would stay and the deletions would never happen (compatibility review #2); exportVerdicts
+  // decides which, by the file rules.
+  for (const title of v.emptyFiles) if (!bySource.has(title)) bySource.set(title, []);
 
   assertNoLibraryRecordDropped(links, written, bySource);
 
@@ -117,22 +108,63 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
       };
     });
 
-  return {
+  const plan: ExportPlan = {
     files,
     written,
     heldBack,
     warned,
+    heldDeletions,
     moved,
     counts: {
       new: written.filter((l) => l.status === "new").length,
       edited: written.filter((l) => l.status === "edited").length,
       kept: written.filter((l) => l.status === "existing").length,
-      deleted: links.filter((l) => l.status === "deleted" && l.provenance === "file").length,
+      deleted: v.deletions.length,
+      deletionsHeld: heldDeletions.length,
       heldBack: heldBack.length,
       files: files.length,
       movedToBase: moved.size,
     },
   };
+  assertExportAccounting(links, plan);
+  return plan;
+}
+
+/**
+ * The export's accounting (V5 P0-5): every link the project holds is written or held back with a
+ * reason, and every deletion of a library record is delivered or held with a reason. Nothing may fall
+ * between: a plan that does not add up is a bug, and the export stops rather than drop a link silently.
+ */
+export function exportAccounting(links: readonly Link[], plan: Pick<ExportPlan, "files" | "written" | "heldBack" | "heldDeletions" | "counts">): string[] {
+  const out: string[] = [];
+  const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
+  const seen = new Map<string, number>();
+  for (const l of plan.written) seen.set(l.id, (seen.get(l.id) ?? 0) + 1);
+  for (const h of plan.heldBack) {
+    seen.set(h.link.id, (seen.get(h.link.id) ?? 0) + 1);
+    if (!h.problems.some((p) => p.severity === "error" && p.code && p.message)) out.push(`held without a reason: ${h.link.id}`);
+  }
+  for (const l of live) if (seen.get(l.id) !== 1) out.push(`${seen.get(l.id) ? "counted twice" : "neither written nor held back"}: ${l.id}`);
+  if (seen.size !== live.length) out.push(`${seen.size - live.length} links accounted for that the project does not hold as live`);
+  const records = plan.files.reduce((n, f) => n + f.records, 0);
+  if (records !== plan.written.length) out.push(`${plan.written.length} links written, ${records} records in the files`);
+  const deleted = links.filter((l) => l.status === "deleted" && l.provenance === "file");
+  const writtenFiles = new Set(plan.files.map((f) => f.sourceTitle));
+  const held = new Set(plan.heldDeletions.map((h) => h.link.id));
+  for (const h of plan.heldDeletions) if (!h.problems.some((p) => p.severity === "error" && p.code && p.message)) out.push(`deletion held without a reason: ${h.link.id}`);
+  for (const l of deleted) if (writtenFiles.has(l.source.book.title) === held.has(l.id)) out.push(`deletion ${held.has(l.id) ? "both delivered and held" : "neither delivered nor held"}: ${l.id}`);
+  if (plan.counts.deleted + plan.counts.deletionsHeld !== deleted.length) out.push(`deletions: ${plan.counts.deleted} + ${plan.counts.deletionsHeld} ≠ ${deleted.length}`);
+  return out;
+}
+
+function assertExportAccounting(links: readonly Link[], plan: ExportPlan): void {
+  const broken = exportAccounting(links, plan);
+  if (broken.length)
+    throw new LinkerError(
+      "export/accounting",
+      "הייצוא נעצר: החשבון של הקישורים לא נסגר — יש קישור שלא נכתב ולא הוחזק עם סיבה. זו תקלה בכלי ולא בקישורים שלכם; שמרו את הפרויקט ושלחו אותו עם יומן האבחון.",
+      { broken: broken.slice(0, 20) },
+    );
 }
 
 /**

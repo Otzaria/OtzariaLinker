@@ -14,7 +14,7 @@ import { parseLinksCsv } from "../formats/links-csv/parse";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
 import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-report";
 import { nextSteps, type NextStepsRoute } from "../formats/report/next-steps";
-import { planSefariaCsv, type SefariaCsvFile } from "../formats/sefaria-csv/write";
+import { planSefariaCsv, sefariaCsvOmissions, type SefariaCsvFile } from "../formats/sefaria-csv/write";
 import type { AltTocState } from "./alt-toc";
 import { addChanges, commit, fileChange, fileFingerprint, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
 import type { LineStore } from "./lines";
@@ -262,6 +262,15 @@ export class ExchangeState {
    * made or changed; an untouched library record is left as it is in the library (B1).
    */
   private fillSefariaRefs(): void {
+    const changes = this.sefariaRefFills();
+    if (!changes.length) return;
+    this.commit(`השלמת ציוני ספריא ל־${linksCount(changes.length)}`, changes);
+    // plain words: the notice also shows in simple mode and in the guided flow (the field names are in the history label)
+    this.host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+  }
+
+  /** The refs fillSefariaRefs would fill now, as changes — computed without changing anything. */
+  private sefariaRefFills(): Change[] {
     const { host } = this;
     const s = host.linkState.value;
     const changes: Change[] = [];
@@ -277,17 +286,27 @@ export class ExchangeState {
       if (!ref) continue;
       changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
     }
-    if (!changes.length) return;
-    this.commit(`השלמת ציוני ספריא ל־${linksCount(changes.length)}`, changes);
-    // plain words: the notice also shows in simple mode and in the guided flow (the field names are in the history label)
-    host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+    return changes;
+  }
+
+  /**
+   * The project's links as the export will plan them: for the library, with the Sefaria refs the export
+   * fills by itself (prepareExport). The quality check reads these, so a ref the export supplies is not
+   * an error there while the export writes the link — the two report the same blocked set (V5 P0-5).
+   * Nothing is changed.
+   */
+  linksAsExported(): Link[] {
+    const all = this.host.allLinks.value;
+    if (this.host.exportPurpose.value !== "submission") return all;
+    const filled = new Map(this.sefariaRefFills().map((c) => [c.id, c.after!] as const));
+    return filled.size ? all.map((l) => filled.get(l.id) ?? l) : all;
   }
 
   /** The links the plan writes, as CSV in Sefaria's layout (reads the headings of their books for the citations). */
   async prepareSefariaCsv(plan: ExportPlan): Promise<SefariaCsvFile[] | null> {
     const { host } = this;
-    const dropped = new Set(["export/heading-line", "export/line-out-of-range", "export/line-not-in-db"]);
-    const bad = new Set(plan.warned.filter((w) => w.problems.some((p) => dropped.has(p.code))).map((w) => w.link.id));
+    // the dialog and the report list these, each with its reason (sefariaCsvOmissions)
+    const bad = new Set(sefariaCsvOmissions(plan).map((o) => o.link.id));
     const links = plan.written.filter((l) => !bad.has(l.id));
     const headings = new Map<string, BookHeading[]>();
     const ok = await host.runTask("קורא את כותרות הספרים למראי המקום…", async (opts) => {

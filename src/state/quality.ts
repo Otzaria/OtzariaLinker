@@ -19,6 +19,8 @@ export interface QualityHost {
   readonly allLinks: ReadonlySignal<Link[]>;
   validation(): ValidationContext;
   loadLinkLines(label: string): Promise<boolean>;
+  /** the links as the export plans them (exchange.linksAsExported: with the refs it fills itself); absent: allLinks */
+  readonly exchange?: { linksAsExported(): Link[] };
 }
 
 export class QualityState {
@@ -34,7 +36,8 @@ export class QualityState {
 
   async run(): Promise<QaReport | null> {
     if (!(await this.host.loadLinkLines("בודק את איכות הקישורים…"))) return null;
-    const report = runQa(this.host.allLinks.value, this.host.validation());
+    // the links as the export will plan them, so the check and the export hold back the same links
+    const report = runQa(this.host.exchange?.linksAsExported() ?? this.host.allLinks.value, this.host.validation());
     batch(() => {
       this.report.value = report;
       this.revision.value = this.host.linkState.value.revision;

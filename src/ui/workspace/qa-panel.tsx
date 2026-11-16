@@ -52,6 +52,12 @@ export function QaPanel() {
           <div class="muted" style="font-size:var(--fs-sm)">
             {report.clean.toLocaleString("he")} תקינים · {report.bySeverity.error.toLocaleString("he")} שגיאות · {report.bySeverity.warning.toLocaleString("he")} אזהרות
           </div>
+          {/* the same blocked set as the export dialog's "לא ייוצאו" (validate.ts exportVerdicts) */}
+          {(report.blocked.length > 0 || report.deletionsHeld.length > 0) && (
+            <div class="qa-blocked" data-blocked={report.blocked.length} data-deletions-held={report.deletionsHeld.length} style="font-size:var(--fs-sm);color:var(--error)">
+              {[report.blocked.length > 0 && `${report.blocked.length.toLocaleString("he")} קישורים לא ייוצאו`, report.deletionsHeld.length > 0 && `${report.deletionsHeld.length.toLocaleString("he")} מחיקות לא יגיעו לספרייה`].filter(Boolean).join(" · ")}
+            </div>
+          )}
           <div class="muted" style="font-size:var(--fs-sm)">
             {purpose === "private" ? "נבדק לשימוש פרטי (כמו בחלון הייצוא)." : "נבדק לשליחה לספריית אוצריא (כמו בחלון הייצוא)."}{" "}
             <button class="adv-link" onClick={() => remedy(() => (store.exportPurpose.value = purpose === "private" ? "submission" : "private"))}>
@@ -118,6 +124,11 @@ export function QaPanel() {
                 {qaAction(i.problem, purpose) === "private" && (
                   <button class="btn text small" title="הייצוא והבדיקה יהיו לשימוש פרטי: כללי הסנכרון של הספרייה לא יחסמו" onClick={() => remedy(() => (store.exportPurpose.value = "private"))}>
                     לשימוש פרטי
+                  </button>
+                )}
+                {qaAction(i.problem, purpose) === "accept-edition" && (
+                  <button class="btn text small" title="בדקתם את הקישורים על הטקסט החדש והם נכונים: מספר השורות הנוכחי של הספר יישמר בפרויקט, והאזהרה תוסר" onClick={() => remedy(() => store.acceptBookChange([i.link.source.book.title, i.link.target.book.title]))}>
+                    הקישורים נבדקו
                   </button>
                 )}
                 {qaAction(i.problem, purpose) === "drop-anchor" && (

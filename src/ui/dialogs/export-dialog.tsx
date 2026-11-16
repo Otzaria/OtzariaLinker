@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { SefariaCsvFile } from "../../formats/sefaria-csv/write";
-import { problemText } from "../../core/links/validate";
+import { sefariaCsvOmissions, type SefariaCsvFile } from "../../formats/sefaria-csv/write";
+import type { Link } from "../../core/links/model";
+import { problemText, type Problem } from "../../core/links/validate";
 import { qaAction } from "../../linking/qa";
 import type { ExportBundle } from "../../state/exchange";
 import type { AppStore } from "../../state/store";
@@ -87,6 +88,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 {c.kept > 0 && <Stat n={c.kept} label="נשמרים כמו שהם" />}
                 {c.deleted > 0 && <Stat n={c.deleted} label="יימחקו מהקובץ" />}
                 {c.heldBack > 0 && <Stat n={c.heldBack} label="לא ייוצאו (שגיאה)" bad />}
+                {c.deletionsHeld > 0 && <Stat n={c.deletionsHeld} label="מחיקות שלא יגיעו לספרייה" bad />}
                 <Stat n={c.files} label="קבצים" />
                 {alt && alt.files.length > 0 && <Stat n={alt.files.reduce((n, f) => n + f.structures, 0)} label="מבני כותרות" />}
                 {alt && alt.heldBack.length > 0 && <Stat n={alt.heldBack.length} label="ספרים שמבני הכותרות שלהם לא ייוצאו" bad />}
@@ -126,6 +128,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                     ))}
                   </ul>
                   <p class="muted" style="margin:0">הקבצים האלה מיועדים לספריא, לא לספריית אוצריא: אין בהם טווחים ועוגני מילה.</p>
+                  <Blocked list={sefariaCsvOmissions(plan)} summary={(n) => `${n.toLocaleString("he")} קישורים לא נכללים בקובצי ה־CSV, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
                 </>
               )}
               {!asCsv && plan.files.length > 0 && (
@@ -191,20 +194,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   </ul>
                 </details>
               )}
-              {plan.heldBack.length > 0 && (
-                <details class="held" open={plan.heldBack.length <= 5}>
-                  <summary>{plan.heldBack.length} קישורים לא ייוצאו, ולמה</summary>
-                  <ul class="problems" style="margin-top:8px">
-                    {plan.heldBack.slice(0, 200).map(({ link, problems }) => (
-                      <li key={link.id} class="error" style="cursor:pointer" {...activatable(() => (store.revealLink(link), ref.current?.close()))} title="הצגת שני צדי הקישור">
-                        <span>
-                          <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "error").map((p) => problemText(p, advanced)).join(" ")}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
+              <Blocked list={plan.heldBack} summary={(n) => `${n.toLocaleString("he")} קישורים לא ייוצאו, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
+              <Blocked list={plan.heldDeletions} summary={(n) => `${n.toLocaleString("he")} רשומות שמחקתם יישארו בספרייה, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
               {plan.warned.length > 0 && (
                 <details class="held">
                   <summary>{plan.warned.length} קישורים ייוצאו עם אזהרה</summary>
@@ -286,7 +277,8 @@ export function NextSteps({ routes, open }: { routes: ReturnType<AppStore["excha
  */
 function NothingWritten({ plan, onPrivate }: { plan: ExportBundle; onPrivate: () => void }) {
   const store = useStore();
-  const held = plan.heldBack.length + plan.altToc.heldBack.length;
+  // held deletions count too: "nothing to export" over a deletion that waits would hide it
+  const held = plan.heldBack.length + plan.heldDeletions.length + plan.altToc.heldBack.length;
   if (!held) return <p>אין מה לייצא: אין קישורים או מבני כותרות שנוצרו או יובאו (קישורים מתוך מסד אינם נכתבים לקובץ).</p>;
   const purpose = store.exportPurpose.value;
   const privateHelps = plan.heldBack.some((h) => h.problems.some((p) => qaAction(p, purpose) === "private"));
@@ -305,6 +297,34 @@ function NothingWritten({ plan, onPrivate }: { plan: ExportBundle; onPrivate: ()
     </p>
   );
 }
+
+/**
+ * Links that will not be written, each with its reason (V5 P0-5). The list shows the first 200; the rest
+ * are named, not hidden — every one of them, with its reason, is in the report.
+ */
+function Blocked({ list, summary, advanced, onPick }: { list: readonly { link: Link; problems: readonly Problem[] }[]; summary: (n: number) => string; advanced: boolean; onPick: (link: Link) => void }) {
+  if (!list.length) return null;
+  return (
+    <details class="held" open={list.length <= 5}>
+      <summary>{summary(list.length)}</summary>
+      <ul class="problems" style="margin-top:8px">
+        {list.slice(0, SHOWN).map(({ link, problems }) => (
+          <li key={link.id} class="error" style="cursor:pointer" {...activatable(() => onPick(link))} title="הצגת שני צדי הקישור">
+            <span>
+              <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "error").map((p) => problemText(p, advanced)).join(" ")}
+            </span>
+          </li>
+        ))}
+        {list.length > SHOWN && (
+          <li class="error">
+            <span>ועוד {(list.length - SHOWN).toLocaleString("he")} — כולם, כל אחד עם הסיבה, בדוח הייצוא (<bdi dir="ltr">_report.txt</bdi>).</span>
+          </li>
+        )}
+      </ul>
+    </details>
+  );
+}
+const SHOWN = 200;
 
 function Stat({ n, label, bad }: { n: number; label: string; bad?: boolean }) {
   return (

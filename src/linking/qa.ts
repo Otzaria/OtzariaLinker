@@ -1,5 +1,5 @@
 import type { Link } from "../core/links/model";
-import { asExported, validateExport, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
+import { exportVerdicts, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
 /*
  * Link quality report (stage 16). It reuses the export rules — QA and export must never disagree —
@@ -19,6 +19,7 @@ export type QaCategory =
   | "in-db"
   | "db-copy"
   | "library-file"
+  | "edition"
   | "other";
 
 export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: string }>> = {
@@ -35,6 +36,7 @@ export const QA_CATEGORIES: Readonly<Record<QaCategory, { title: string; hint: s
   "in-db": { title: "כבר במסד", hint: "המסד הפתוח כבר מכיל קישור בין אותן שורות" },
   "db-copy": { title: "הועתק מהמסד", hint: "קישורים שהועתקו מהמסד: מה ששוחזר, ומה חסר כדי לייצא אותם בבטחה" },
   "library-file": { title: "קובץ הספרייה", hint: "הקובץ שייוצא יחליף את קובץ הקישורים של הספר בספרייה: טענו אותו מהספרייה או אשרו במפורש" },
+  edition: { title: "הספר השתנה", hint: "מספר השורות של הספר שונה ממה שהיה כשהפרויקט נשמר: ייתכן שקישורים זזו" },
   other: { title: "אחר", hint: "" },
 };
 
@@ -74,6 +76,7 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/private-source-to-base": "type",
   "export/private-source-kept": "type",
   "export/anchor-on-notes-line": "anchor",
+  "export/book-changed": "edition",
 };
 export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (code.startsWith("sefaria/") ? "sefaria" : "other");
 
@@ -133,6 +136,7 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
   "in-db": FIX_BY_CODE["export/in-db"]!,
   "db-copy": "טענו את קובץ הקישורים של הספר מהספרייה לפני הייצוא.",
   "library-file": "טענו את קובץ הקישורים של הספר מהספרייה, או אשרו בחלון הייצוא שזה קובץ חדש.",
+  edition: "אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים (\"השוואת מהדורות\"). אחרת בדקו את הקישורים על הטקסט, ואשרו שהם נכונים.",
   other: "פתחו את הקישור בבונה ותקנו לפי ההסבר.",
 };
 
@@ -141,15 +145,17 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
  * builder cannot fix a rule of the library's sync or an anchor the library refuses, so "fix in the
  * builder" alone left the error where it was.
  *   "private"     — export for private use: the library's Sefaria rules become warnings or do not apply;
- *   "drop-anchor" — remove the word anchor the library refuses or that breaks a notes merge.
+ *   "drop-anchor" — remove the word anchor the library refuses or that breaks a notes merge;
+ *   "accept-edition" — the user checked the links of a book that changed since the project was saved.
  */
-export type QaAction = "private" | "drop-anchor";
+export type QaAction = "private" | "drop-anchor" | "accept-edition";
 const PRIVATE_REMEDY = new Set(["sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
 const ANCHOR_REMEDY = new Set(["sefaria/anchor-range", "sefaria/anchor-into-sefaria", "sefaria/pending-anchor-hash", "export/anchor-on-notes-line", "export/anchor-dropped-flip", "export/companion-merge-broken"]);
 
 export function qaAction(p: Problem, purpose: "submission" | "private" = "submission"): QaAction | null {
   if (p.severity === "info") return null;
   if (ANCHOR_REMEDY.has(p.code)) return "drop-anchor";
+  if (p.code === "export/book-changed") return "accept-edition";
   if (purpose !== "private" && p.severity === "error" && PRIVATE_REMEDY.has(p.code)) return "private";
   return null;
 }
@@ -170,19 +176,27 @@ export interface QaReport {
   issues: QaIssue[];
   bySeverity: Record<Severity, number>;
   byCategory: Partial<Record<QaCategory, number>>;
+  /**
+   * The links the export holds back — the same set, by the same rule (validate.ts exportVerdicts), as
+   * the export dialog's "לא ייוצאו" — and the deletions of library records it cannot deliver.
+   */
+  blocked: string[];
+  deletionsHeld: string[];
 }
 
 export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport {
-  const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
-  const problems = validateExport(live, ctx);
+  // the export's own classification: what QA calls blocked is exactly what the export holds back
+  const v = exportVerdicts(links, ctx);
   const issues: QaIssue[] = [];
   let clean = 0;
-  for (const l of live) {
+  for (const l of v.live) {
     // as the export acts on them (asExported): an untouched library record is kept, its errors are warnings
-    const ps = asExported(l, problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
+    const ps = (v.problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
     if (!ps.some((p) => p.severity !== "info")) clean++;
     for (const p of ps) issues.push({ link: l, category: categoryOf(p.code), problem: p });
   }
+  // a deletion that will not reach the library is a problem too: the check must not say "ready" over it
+  for (const h of v.heldDeletions) for (const p of h.problems) issues.push({ link: h.link, category: categoryOf(p.code), problem: p });
   const order: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
   issues.sort((a, b) => order[a.problem.severity] - order[b.problem.severity] || a.link.source.book.title.localeCompare(b.link.source.book.title, "he") || a.link.source.line - b.link.source.line);
   const bySeverity: Record<Severity, number> = { error: 0, warning: 0, info: 0 };
@@ -191,7 +205,7 @@ export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport 
     bySeverity[i.problem.severity]++;
     byCategory[i.category] = (byCategory[i.category] ?? 0) + 1;
   }
-  return { checked: live.length, clean, issues, bySeverity, byCategory };
+  return { checked: v.live.length, clean, issues, bySeverity, byCategory, blocked: v.heldBack.map((h) => h.link.id), deletionsHeld: v.heldDeletions.map((h) => h.link.id) };
 }
 
 /** Of each group of duplicates, every link but the first — safe to delete in one action. */
