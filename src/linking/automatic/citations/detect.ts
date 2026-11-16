@@ -246,7 +246,7 @@ export class CitationScanner {
 
   /**
    * The Yalkut Shimoni by the parasha or the book of the Tanakh it is arranged by, and its remez: "ובילקוט (בשלח רמז
-   * רנ"ח)", "בילקוט בישעי' (רמז שצ"ג)", "(ילקוט יחזקאל רמז שעג)", "בילקוט (תלים תרי"ג)" — the remez in the Yalkut on the
+   * רנ"ח)", "בילקוט בישעי' (רמז שצ"ג)", "(ילקוט יחזקאל רמז שעג)" — the remez in the Yalkut on the
    * Torah or on the Nach, which the parasha / the book tells apart (their remazim are numbered each from א). Without a
    * remez, a parasha of the Torah is that parasha's section of the Yalkut on the Torah (its alt_toc "פרשות"), a whole unit:
    * "בילקוט פרשת משפטים" (before, the parasha was read in the Torah itself). "ילקוט" is no name in the index (several
@@ -281,11 +281,12 @@ export class CitationScanner {
       at = m.to;
     }
     if (!book) return null;
-    // the remez: "רמז שצ"ג", or in brackets a numeral alone ("(תלים תרי"ג)")
+    // the remez, with its word: "רמז שצ"ג". A numeral alone is not read — "בילקוט (תהלים מ"ג)" is the psalm, not remez 43
+    // (the hand check of HELDOUT4 found it so)
     const inner = opensAt(toks, at);
     const from = inner ? at + 1 : at;
     const addr = parseAddress(toks, from, { enclosed: open || inner });
-    const remez = addr && addr.elems.length === 1 && (addr.elems[0]!.kind === "remez" || (addr.elems[0]!.kind === "?" && (open || inner) && addr.closed && addr.elems[0]!.numeral.form === "gershayim")) ? addr.elems[0]! : null;
+    const remez = addr && addr.elems.length === 1 && addr.elems[0]!.kind === "remez" ? addr.elems[0]! : null;
     const cands = this.own([book]);
     if (!cands.length) return this.drop("self");
     if (remez) {

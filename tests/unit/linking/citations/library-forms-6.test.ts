@@ -160,6 +160,9 @@ describe("the Yalkut Shimoni by parasha or book, and its remez", () => {
     expect(s!.target.line).toBe(41);
     expect(s!.confidence).toBe("possible");
   });
+  it('a numeral alone after the book is its chapter, not a remez ("בילקוט (תהלים מ"ג)", משלי יעקב, line 794 — found by the hand check of HELDOUT4)', () => {
+    expect(run('כמ"ש בילקוט (ישעיה ל"ג) על מאמר').filter((s) => s.target.book.key === "yn")).toHaveLength(0);
+  });
   it('"ילקוט" with no parasha or book after it is no citation; a book of the Nach with no remez is not linked', () => {
     expect(run("כמ\"ש בילקוט הנ\"ל ושם")).toHaveLength(0);
     expect(run("ויעקב (ילקוט ישעיה) ושם").filter((s) => s.target.book.key === "yn")).toHaveLength(0);
