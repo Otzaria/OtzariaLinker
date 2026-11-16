@@ -52,6 +52,12 @@ export function QaPanel() {
           <div class="muted" style="font-size:var(--fs-sm)">
             {report.clean.toLocaleString("he")} תקינים · {report.bySeverity.error.toLocaleString("he")} שגיאות · {report.bySeverity.warning.toLocaleString("he")} אזהרות
           </div>
+          {/* the same blocked set as the export dialog's "לא ייוצאו" (validate.ts exportVerdicts) */}
+          {(report.blocked.length > 0 || report.deletionsHeld.length > 0) && (
+            <div class="qa-blocked" data-blocked={report.blocked.length} data-deletions-held={report.deletionsHeld.length} style="font-size:var(--fs-sm);color:var(--error)">
+              {[report.blocked.length > 0 && `${report.blocked.length.toLocaleString("he")} קישורים לא ייוצאו`, report.deletionsHeld.length > 0 && `${report.deletionsHeld.length.toLocaleString("he")} מחיקות לא יגיעו לספרייה`].filter(Boolean).join(" · ")}
+            </div>
+          )}
           <div class="muted" style="font-size:var(--fs-sm)">
             {purpose === "private" ? "נבדק לשימוש פרטי (כמו בחלון הייצוא)." : "נבדק לשליחה לספריית אוצריא (כמו בחלון הייצוא)."}{" "}
             <button class="adv-link" onClick={() => remedy(() => (store.exportPurpose.value = purpose === "private" ? "submission" : "private"))}>

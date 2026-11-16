@@ -385,3 +385,112 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
     }
   return out;
 }
+
+/*
+ * What the export does with every link of the project — ONE classification, shared by the export plan
+ * (formats/links-json/export.ts planExport) and the quality check (linking/qa.ts runQa), so the two can
+ * never disagree about what is blocked (V5 P0-5). The accounting it guarantees, and planExport checks:
+ *
+ *   live (every link the user approved, made, imported or kept) = written + heldBack, and every link
+ *   held back carries at least one error that says why;
+ *   every deletion of a library record is delivered (its book's file is written without it) or is in
+ *   heldDeletions, with the reason its file is not written.
+ */
+export interface ExportVerdict {
+  link: Link;
+  problems: Problem[];
+}
+
+export interface ExportVerdicts {
+  /** links the export accounts for: not deleted, not a database link (those are never written) */
+  live: Link[];
+  /** each live link's problems as the export acts on them (asExported) */
+  problems: ReadonlyMap<string, Problem[]>;
+  written: Link[];
+  heldBack: ExportVerdict[];
+  /** written, with a warning (or, in expert mode, an error) */
+  warned: ExportVerdict[];
+  /** deleted library records whose deletion this export does NOT deliver: their book's file is not written */
+  heldDeletions: ExportVerdict[];
+  /** deleted library records whose book's file is written without them */
+  deletions: Link[];
+  /** books whose library records were all deleted and that nothing else is written to: their file is written empty */
+  emptyFiles: string[];
+  /** private use: link id → the record written for it in its base's file (PRIVATE_TO_BASE) */
+  moved: ReadonlyMap<string, Link>;
+}
+
+export function exportVerdicts(links: readonly Link[], ctx: ValidationContext, includeErrors = false): ExportVerdicts {
+  const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
+  const raw = validateExport(live, ctx);
+  const problems = new Map<string, Problem[]>();
+  const written: Link[] = [];
+  const heldBack: ExportVerdict[] = [];
+  const warned: ExportVerdict[] = [];
+  const moved = new Map<string, Link>();
+  /** the file each written link's record goes to → nothing else */
+  const fileTitles = new Set<string>();
+  /** title → the problem that holds its whole file back */
+  const heldFile = new Map<string, Problem>();
+  for (const l of live) {
+    // An imported record the user did not touch is kept as it was, its errors as warnings (asExported)
+    const p = asExported(l, raw.get(l.id) ?? []);
+    problems.set(l.id, p);
+    // a problem of the book's whole file holds it back always — also untouched and in expert mode (A1–A4)
+    const fileLevel = p.find((x) => FILE_LEVEL_CODES.has(x.code));
+    if (fileLevel && !heldFile.has(l.source.book.title)) heldFile.set(l.source.book.title, fileLevel);
+    if (fileLevel || (!includeErrors && p.some((x) => x.severity === "error"))) {
+      heldBack.push({ link: l, problems: p });
+      continue;
+    }
+    written.push(l);
+    if (p.some((x) => x.severity === "warning" || x.severity === "error")) warned.push({ link: l, problems: p });
+    // private use: a "source" link goes into its base's file, as the validation said (PRIVATE_TO_BASE)
+    const atBase = p.some((x) => x.code === PRIVATE_TO_BASE) ? privateSourceRecord(l) : null;
+    if (atBase) moved.set(l.id, atBase);
+    fileTitles.add((atBase ?? l).source.book.title);
+  }
+
+  // Deleted library records: the deletion reaches the library only when the book's file is written.
+  const fileLinks = new Map<string, { deleted: Link[]; live: boolean }>();
+  for (const l of links) {
+    if (l.provenance !== "file") continue;
+    const f = fileLinks.get(l.source.book.title) ?? { deleted: [], live: false };
+    if (l.status === "deleted") f.deleted.push(l);
+    else f.live = true;
+    fileLinks.set(l.source.book.title, f);
+  }
+  const heldDeletions: ExportVerdict[] = [];
+  const deletions: Link[] = [];
+  const emptyFiles: string[] = [];
+  for (const [title, { deleted, live: hasLive }] of fileLinks) {
+    if (fileTitles.has(title)) {
+      deletions.push(...deleted);
+      continue;
+    }
+    // A book of the library whose records were all deleted (or, for private use, moved to the base) still
+    // needs its file — empty — or the library's old file would stay and the deletions would never happen
+    // (compatibility review #2). But the empty file replaces the library's file, so the file rules hold it
+    // like any other: a snapshot from a saved project or an unsafe title is never written (A3, A4) — then
+    // the deletions wait, and say why.
+    const why = heldFile.get(title) ?? (hasLive ? undefined : validateLink({ ...deleted[0]!, status: "existing" }, ctx).find((p) => FILE_LEVEL_CODES.has(p.code)));
+    if (!why) {
+      emptyFiles.push(title);
+      deletions.push(...deleted);
+      continue;
+    }
+    for (const l of deleted)
+      heldDeletions.push({
+        link: l,
+        problems: [
+          {
+            code: why.code,
+            severity: "error",
+            message: `מחקתם את הרשומה הזו (שורה ${l.source.line + 1}, אל "${l.target.book.title}"), אבל היא תישאר בספרייה: קובץ הקישורים של "${title}" לא ייכתב בייצוא הזה. ${why.message}`,
+            ...(why.detail && { detail: why.detail }),
+          },
+        ],
+      });
+  }
+  return { live, problems, written, heldBack, warned, heldDeletions, deletions, emptyFiles, moved };
+}

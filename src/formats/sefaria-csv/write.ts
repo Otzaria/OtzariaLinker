@@ -1,6 +1,8 @@
 import type { BookHeading } from "../../core/books";
 import type { BookRef, Link } from "../../core/links/model";
 import { unsafeFileTitle } from "../../core/links/titles";
+import type { Problem } from "../../core/links/validate";
+import type { ExportPlan } from "../links-json/export";
 import { CONNECTION_TYPE_KEY } from "../links-json/record";
 
 /*
@@ -82,3 +84,22 @@ export function planSefariaCsv(links: readonly Link[], headingsOf: (book: BookRe
 }
 
 const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+
+/** what makes Otzaria drop a record; the links files keep such an untouched library record, the CSV does not */
+const DROPPED_BY_OTZARIA = new Set(["export/heading-line", "export/line-out-of-range", "export/line-not-in-db"]);
+
+/**
+ * The links the export writes to the links files that the Sefaria CSV leaves out, each with the reason
+ * (V5 P0-5: nothing approved is left out silently). An untouched library record on a heading or past the
+ * end of its book stays in its links file (dropping it there would delete it from the library), but it
+ * is no link to upload to Sefaria.
+ */
+export function sefariaCsvOmissions(plan: Pick<ExportPlan, "warned">): { link: Link; problems: Problem[] }[] {
+  const out: { link: Link; problems: Problem[] }[] = [];
+  for (const w of plan.warned) {
+    const why = w.problems.filter((p) => DROPPED_BY_OTZARIA.has(p.code));
+    if (why.length)
+      out.push({ link: w.link, problems: why.map((p) => ({ code: "csv/omitted", severity: "error", message: `לא נכלל בקובץ ה־CSV לספריא: ${p.message}`, detail: p.code })) });
+  }
+  return out;
+}

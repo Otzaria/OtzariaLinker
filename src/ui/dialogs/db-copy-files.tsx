@@ -20,7 +20,8 @@ type Reason = (typeof REASONS)[number];
 export function DbCopyFiles({ plan, onChange }: { plan: ExportPlan; onChange: () => void }) {
   const store = useStore();
   const why = new Map<string, Reason>();
-  for (const h of plan.heldBack)
+  // a held deletion waits for the same file (an empty file from a project's snapshot is never written: A3)
+  for (const h of [...plan.heldBack, ...plan.heldDeletions])
     for (const r of REASONS) if (h.problems.some((p) => p.code === r) && !why.has(h.link.source.book.title)) why.set(h.link.source.book.title, r);
   const titles = [...why.keys()].sort();
   if (!titles.length) return null;

@@ -6,6 +6,7 @@ export type ErrorCode =
   | "archive/unsafe-path"
   | "export/unsafe-path"
   | "export/library-record-dropped"
+  | "export/accounting"
   | "archive/too-many-entries"
   | "archive/too-large"
   | "archive/suspicious-ratio"

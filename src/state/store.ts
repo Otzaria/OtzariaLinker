@@ -331,6 +331,14 @@ export class AppStore {
     this.dbLinks.forgetSummary();
     batch(() => {
       this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
+      // the links keep their books by title, as after a worker restart: a key of the closed source names
+      // nothing now — the reader would not show them on the same book opened again (its key is new), and
+      // the check would take the book for open. attachLinks binds them to the book when it opens again.
+      this.linkState.value = rebindLinks(this.linkState.value, (l) => {
+        const s = sourceIdOfBookKey(l.source.book.key) === id ? unboundRef(l.source.book) : l.source.book;
+        const t = sourceIdOfBookKey(l.target.book.key) === id ? unboundRef(l.target.book) : l.target.book;
+        return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
+      });
       for (const side of ["source", "target"] as const) {
         if (this.view[side].value?.startsWith(`${id}:`)) this.view[side].value = null;
         if (this.pick[side].value?.bookKey.startsWith(`${id}:`)) this.pick[side].value = null;
@@ -347,8 +355,7 @@ export class AppStore {
     this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
     // the links keep their books by title, as a saved project does: the keys named the lost worker's
     // sources, and attachLinks binds them again to the books opened next (review C2)
-    const unbind = (ref: BookRef): BookRef =>
-      ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
+    const unbind = unboundRef;
     batch(() => {
       this.sources.value = [];
       this.view.source.value = null;
@@ -1175,3 +1182,9 @@ const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev
 
 export const TYPE_CHOICES = AUTHORABLE_TYPES.map((t) => t.toLowerCase());
 export const isKnownType = (raw: string): boolean => parseConnectionType(raw).known;
+
+/** A book ref by title only ("unresolved:"), as a saved project holds it: attachLinks binds it when a book of that title opens. */
+function unboundRef(ref: BookRef): BookRef {
+  return ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
+}
+

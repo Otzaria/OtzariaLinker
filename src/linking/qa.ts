@@ -1,5 +1,5 @@
 import type { Link } from "../core/links/model";
-import { asExported, validateExport, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
+import { exportVerdicts, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
 /*
  * Link quality report (stage 16). It reuses the export rules — QA and export must never disagree —
@@ -170,19 +170,27 @@ export interface QaReport {
   issues: QaIssue[];
   bySeverity: Record<Severity, number>;
   byCategory: Partial<Record<QaCategory, number>>;
+  /**
+   * The links the export holds back — the same set, by the same rule (validate.ts exportVerdicts), as
+   * the export dialog's "לא ייוצאו" — and the deletions of library records it cannot deliver.
+   */
+  blocked: string[];
+  deletionsHeld: string[];
 }
 
 export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport {
-  const live = links.filter((l) => l.status !== "deleted" && l.provenance !== "db");
-  const problems = validateExport(live, ctx);
+  // the export's own classification: what QA calls blocked is exactly what the export holds back
+  const v = exportVerdicts(links, ctx);
   const issues: QaIssue[] = [];
   let clean = 0;
-  for (const l of live) {
+  for (const l of v.live) {
     // as the export acts on them (asExported): an untouched library record is kept, its errors are warnings
-    const ps = asExported(l, problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
+    const ps = (v.problems.get(l.id) ?? []).filter((p) => p.code !== "export/base-unknown"); // informational only
     if (!ps.some((p) => p.severity !== "info")) clean++;
     for (const p of ps) issues.push({ link: l, category: categoryOf(p.code), problem: p });
   }
+  // a deletion that will not reach the library is a problem too: the check must not say "ready" over it
+  for (const h of v.heldDeletions) for (const p of h.problems) issues.push({ link: h.link, category: categoryOf(p.code), problem: p });
   const order: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
   issues.sort((a, b) => order[a.problem.severity] - order[b.problem.severity] || a.link.source.book.title.localeCompare(b.link.source.book.title, "he") || a.link.source.line - b.link.source.line);
   const bySeverity: Record<Severity, number> = { error: 0, warning: 0, info: 0 };
@@ -191,7 +199,7 @@ export function runQa(links: readonly Link[], ctx: ValidationContext): QaReport 
     bySeverity[i.problem.severity]++;
     byCategory[i.category] = (byCategory[i.category] ?? 0) + 1;
   }
-  return { checked: live.length, clean, issues, bySeverity, byCategory };
+  return { checked: v.live.length, clean, issues, bySeverity, byCategory, blocked: v.heldBack.map((h) => h.link.id), deletionsHeld: v.heldDeletions.map((h) => h.link.id) };
 }
 
 /** Of each group of duplicates, every link but the first — safe to delete in one action. */
