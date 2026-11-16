@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeMapping, guessMapping, mappingProblems, parseDbMapping, ROWID, type ColumnPreview, type DbMapping, type SchemaPreview, type TablePreview } from "../../../src/core/db-mapping";
+import { guessMapping } from "../../../src/core/db-guess";
+import { describeMapping, mappingProblems, parseDbMapping, ROWID, type ColumnPreview, type DbMapping, type SchemaPreview, type TablePreview } from "../../../src/core/db-mapping";
 
 /* Pure rules of the mapping wizard: the guess, the checks, and reading a mapping from untrusted JSON. */
 const col = (name: string, kind: ColumnPreview["kind"], extra: Partial<ColumnPreview> = {}): ColumnPreview => ({ name, type: "", rowidAlias: false, kind, avgLength: kind === "text" || kind === "html" ? 20 : 0, distinct: 5, filled: 5, ...extra });
@@ -74,5 +75,53 @@ describe("parseDbMapping", () => {
 
   it("describes a mapping in one sentence", () => {
     expect(describeMapping(guessMapping(SEFARIA_LIKE)!)).toContain('ספרים מ"books"');
+  });
+});
+
+describe("text units, composite order and chapters/versions (wizard round V5)", () => {
+  const two = guessMapping(SEFARIA_LIKE)!;
+
+  it("parses the new optional fields, drops bad ones, and reads an older mapping unchanged", () => {
+    const m: DbMapping = {
+      ...two,
+      lines: { ...two.lines, orderThen: ["verse"], unit: "chunks" },
+      via: { table: "chapters", id: "id", book: "book_id", order: "num", title: "name", kind: "part" },
+    };
+    expect(parseDbMapping(JSON.parse(JSON.stringify(m)))).toEqual(m);
+    // an older project file: none of the new fields → the very same object as before
+    expect(parseDbMapping(JSON.parse(JSON.stringify(two)))).toEqual(two);
+    // unknown unit, "line" (the default), bad orderThen entries and a via without kind are dropped
+    const bad = parseDbMapping({ ...two, lines: { ...two.lines, unit: "pages", orderThen: [5, "", "ok"] }, via: { table: "c", id: "id", book: "b" } })!;
+    expect(bad.lines).toEqual({ ...two.lines, orderThen: ["ok"] });
+    expect(bad.via).toBeUndefined();
+    expect(parseDbMapping({ ...two, lines: { ...two.lines, unit: "line" } })!.lines.unit).toBeUndefined();
+    // a via on a single-table mapping is dropped
+    const single = { layout: "single-table", lines: { table: "t", book: "b", order: "o", text: "x" }, via: { table: "c", id: "id", book: "b", kind: "part" } };
+    expect(parseDbMapping(single)!.via).toBeUndefined();
+  });
+
+  it("problems: orderThen after rowid, links with a multi-line unit, via on one table", () => {
+    const err = (m: DbMapping) => mappingProblems(SEFARIA_LIKE, m).filter((x) => x.level === "error").map((x) => x.message).join(" | ");
+    expect(err({ ...two, lines: { ...two.lines, order: ROWID, orderThen: ["line_index"] } })).toMatch(/סדר משני/);
+    expect(err({ ...two, lines: { ...two.lines, unit: "lines" }, links: { table: "texts", source: "id", target: "id" } })).toMatch(/רשומה אינה שורה אחת/);
+    expect(err({ layout: "single-table", lines: { table: "texts", book: "book_id", order: "line_index", text: "content" }, via: { table: "books", id: "id", book: "id", kind: "part" } })).toMatch(/פרקים או מהדורות/);
+    expect(err({ ...two, via: { table: "books", id: "id", book: "id", kind: "part" } })).toMatch(/טבלה שלישית/);
+  });
+
+  it("hints: several lines per value, JSON values, garbled TEXT", () => {
+    const p = preview(
+      table("t", [col("title", "text", { distinct: 3, filled: 3 }), col("body", "text", { avgLength: 300, newlines: 7 }), col("js", "text", { avgLength: 300, jsonLines: 9 }), col("old", "text", { garbled: 1 })]),
+    );
+    const msgs = (text: string) => mappingProblems(p, { layout: "single-table", lines: { table: "t", book: "title", order: ROWID, text } }).map((x) => x.message).join(" | ");
+    expect(msgs("body")).toMatch(/יש בממוצע 8 שורות/);
+    expect(msgs("js")).toMatch(/JSON/);
+    expect(msgs("old")).toMatch(/אינו UTF-8 תקין/);
+  });
+
+  it("describes units, composite order and chapters", () => {
+    const d = describeMapping({ ...two, lines: { ...two.lines, orderThen: ["verse"], unit: "json" }, via: { table: "chapters", id: "id", book: "book_id", kind: "part" } });
+    expect(d).toContain("line_index ואז verse");
+    expect(d).toContain("JSON");
+    expect(d).toContain('פרקים מ"chapters"');
   });
 });

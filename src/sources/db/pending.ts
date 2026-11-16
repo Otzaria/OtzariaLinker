@@ -1,4 +1,5 @@
-import { guessMapping, type PendingDb } from "../../core/db-mapping";
+import { analyzeSchema } from "../../core/db-guess";
+import type { PendingDb } from "../../core/db-mapping";
 import { LinkerError } from "../../core/errors";
 import { previewSchema } from "../../database/generic/preview";
 import { blobSource } from "../../database/sqlite/lazy/byte-source";
@@ -26,5 +27,6 @@ export async function pendingMapping(path: string, label: string, blob: Blob, pe
   const token = `m${++seq}`;
   pending.set(token, { blob, label });
   while (pending.size > MAX_PENDING) pending.delete(pending.keys().next().value as string);
-  return { token, path, label, preview, guess: guessMapping(preview) };
+  const analysis = analyzeSchema(preview);
+  return { token, path, label, preview, guess: analysis.guess, analysis };
 }
