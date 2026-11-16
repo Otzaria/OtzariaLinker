@@ -135,6 +135,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 | זיהוי זוגות באצווה | `src/linking/batch.ts` (`pairByTitle`) |
 | קישור מרבי: תכנון, איחוד, דוח | `src/linking/plan.ts`, `src/linking/merge.ts`, `src/linking/maxlink-report.ts` ([`AUTOMATION_ENGINE.md`](docs/AUTOMATION_ENGINE.md) §5) |
 | יישור שורות בין שתי מהדורות; תכנון העברת קישורים; שורות ההשוואה ומיפוי השורות כ־CSV | `src/matching/line-diff.ts`, `src/linking/relink.ts`, `src/linking/edition-map.ts` (הממשק: `src/ui/dialogs/relink-dialog.tsx`, `edition-diff.tsx`) |
+| השוואה סמנטית של קבוצות קישורים ומיזוג קבצים של ספר; פעולות קבוצתיות; שורות טבלת הקישורים | `src/core/links/link-diff.ts`, `src/state/link-compare.ts`, `src/state/link-fixes.ts`, `src/state/links-table.ts` (הממשק: `src/ui/dialogs/compare-dialog.tsx`, `src/ui/workspace/links-panel.tsx`) |
 | ספר ושורה כפי שכל מקור מחזיר | `src/core/books.ts`, `src/sources/book-source.ts` |
 | state ← עולם חיצוני | `src/state/services.ts` |
 | פעולות ה־Worker | `src/workers/sources-api.ts` |
