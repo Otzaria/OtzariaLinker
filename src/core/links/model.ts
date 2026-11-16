@@ -86,6 +86,11 @@ export interface Link {
   readonly targetPath?: string;
   /** position of the record in its imported links file — keeps the file's order on export */
   readonly fileIndex?: number;
+  /**
+   * A "deleted" link only: the status it had before the deletion, which a restore gives back — so an
+   * untouched library record is untouched again, and the export writes it as it was (review C1).
+   */
+  readonly restoreStatus?: Exclude<LinkStatus, "deleted">;
 }
 
 export const isRange = (s: LinkSide): boolean => s.end !== undefined && s.end > s.line;

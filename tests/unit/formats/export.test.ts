@@ -5,6 +5,8 @@ import type { ValidationContext } from "../../../src/core/links/validate";
 import { recordToLink } from "../../../src/formats/links-json/convert";
 import { planExport, zipExport } from "../../../src/formats/links-json/export";
 import { parseLinksJson } from "../../../src/formats/links-json/parse";
+import { addChanges, commit, deleteChange, editChange, emptyLinkState, restoreChange } from "../../../src/state/history";
+import fc from "fast-check";
 
 const book = (title: string): BookRef => ({ key: `k:${title}`, title, origin: "otzaria", isBaseBook: false });
 const A = book("ספר א");
@@ -85,6 +87,84 @@ describe("planExport", () => {
     const files = unzipSync(z1);
     expect(Object.keys(files).sort()).toEqual(["links/ספר א_links.json", "links/ספר ג_links.json"]);
     expect(strFromU8(files["links/ספר א_links.json"]!)).toBe(IMPORTED);
+  });
+});
+
+/*
+ * Review C1: a book's exported file REPLACES the library's file, so a library record that is not in it
+ * is deleted from the library. The plan may leave one out only when the user deleted it, or when the
+ * whole file is held back.
+ */
+describe("an export never drops a library record silently (review C1)", () => {
+  // the first record has no heRef_2: an error (export/heref-missing), as old library records have
+  const WITH_ERROR = JSON.stringify([
+    { line_index_1: 9, heRef_2: "", path_2: "ספר ב.txt", line_index_2: 9, "Conection Type": "commentary" },
+    { line_index_1: 2, heRef_2: "ב", path_2: "ספר ב.txt", line_index_2: 2, "Conection Type": "commentary" },
+  ], null, 2);
+  const library = () => parseLinksJson(WITH_ERROR).records.map((r, i) => recordToLink(r, i, A, () => B, `f${i}`).link);
+  const start = () => commit(emptyLinkState(), "ייבוא", addChanges(library()));
+
+  /** library records the plan's files leave out although the user did not delete them and their file is written */
+  function dropped(plan: ReturnType<typeof planExport>, links: readonly Link[]): string[] {
+    const writtenFiles = new Set(plan.files.map((f) => f.sourceTitle));
+    const written = new Set(plan.written.map((l) => l.id));
+    return links.filter((l) => l.provenance === "file" && l.status !== "deleted" && writtenFiles.has(l.source.book.title) && !written.has(l.id)).map((l) => l.id);
+  }
+
+  it("delete then restore of an untouched record with an error: both records are written", () => {
+    let s = start();
+    expect(planExport([...s.links.values()], ctx).files[0]!.records).toBe(2);
+    s = commit(s, "מחיקה", [deleteChange(s, "f0")!]);
+    s = commit(s, "שחזור", [restoreChange(s, "f0")!]);
+    const plan = planExport([...s.links.values()], ctx);
+    expect(plan.files[0]!.records).toBe(2);
+    expect(plan.counts.kept).toBe(2);
+    expect(plan.files[0]!.text).toBe(WITH_ERROR);
+  });
+
+  it("\"changing\" the type to the type it has: both records are written", () => {
+    let s = start();
+    s = commit(s, "שינוי סוג", [editChange(s, "f0", { declaredType: "commentary" }), editChange(s, "f1", { declaredType: "commentary" })].filter((c) => !!c));
+    const plan = planExport([...s.links.values()], ctx);
+    expect(plan.files[0]!.records).toBe(2);
+    expect(plan.counts.kept).toBe(2);
+  });
+
+  it("an edited library record with an error holds its whole file, with a reason — never a file without it", () => {
+    let s = start();
+    s = commit(s, "שינוי סוג", [editChange(s, "f0", { declaredType: "reference" })!]);
+    const plan = planExport([...s.links.values()], ctx);
+    expect(plan.files).toEqual([]);
+    expect(plan.heldBack.map((h) => h.link.id).sort()).toEqual(["f0", "f1"]);
+    const f1 = plan.heldBack.find((h) => h.link.id === "f1")!;
+    expect(f1.problems.some((p) => p.code === "export/file-held" && p.message.includes("תימחק"))).toBe(true);
+    // one rule for the export and the quality check: expert mode holds the file too, until the record is fixed
+    expect(planExport([...s.links.values()], ctx, { includeErrors: true }).files).toEqual([]);
+    s = commit(s, "תיקון", [editChange(s, "f0", { heRef2: "ספר ב 9" })!]);
+    expect(planExport([...s.links.values()], ctx).files[0]!.records).toBe(2);
+  });
+
+  it("property: whatever the user does to library records, the plan never leaves one out of a written file", () => {
+    type Op = ["del" | "restore" | "type" | "heRef" | "same", number, boolean];
+    const op = fc.tuple(fc.constantFrom<Op[0]>("del", "restore", "type", "heRef", "same"), fc.integer({ min: 0, max: 1 }), fc.boolean());
+    fc.assert(
+      fc.property(fc.array(op, { maxLength: 12 }), fc.boolean(), fc.constantFrom<"submission" | "private">("submission", "private"), fc.boolean(), (ops, includeErrors, purpose, withNew) => {
+        let s = start();
+        for (const [kind, i, flag] of ops) {
+          const id = `f${i}`;
+          const c =
+            kind === "del" ? deleteChange(s, id)
+            : kind === "restore" ? restoreChange(s, id)
+            : kind === "type" ? editChange(s, id, { declaredType: flag ? "reference" : "commentary" })
+            : kind === "heRef" ? editChange(s, id, { heRef2: flag ? "" : "ספר ב 3" })
+            : editChange(s, id, { source: s.links.get(id)!.source });
+          if (c) s = commit(s, kind, [c]);
+        }
+        const links = [...s.links.values(), ...(withNew ? [mk("n", { source: { book: A, line: 5 } })] : [])];
+        const plan = planExport(links, { ...ctx, purpose }, { includeErrors });
+        expect(dropped(plan, links)).toEqual([]);
+      }),
+    );
   });
 });
 

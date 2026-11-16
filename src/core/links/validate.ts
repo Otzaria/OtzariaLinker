@@ -362,6 +362,19 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
     if (fileLevel && !heldFiles.has(l.source.book.title)) heldFiles.set(l.source.book.title, fileLevel);
   }
   companionMergeChecks(links, out);
+  // A library record the user edited, with an error, is not written (asExported keeps only an untouched
+  // one as it was). The book's file replaces the library's, so writing it without the record would
+  // DELETE the record there: hold the whole file instead (review C1). Expert mode writes the record,
+  // but the rule is one for the export and the quality check, so the file waits for a fix there too.
+  for (const l of links) {
+    if (l.provenance !== "file" || l.status === "existing" || heldFiles.has(l.source.book.title)) continue;
+    if (!out.get(l.id)!.some((p) => p.severity === "error" && !FILE_LEVEL_CODES.has(p.code))) continue;
+    heldFiles.set(l.source.book.title, {
+      code: "export/library-record-held",
+      severity: "error",
+      message: `רשומה מקובץ הקישורים שבספרייה (שורה ${l.source.line + 1}, אל "${l.target.book.title}") נערכה ויש בה שגיאה, ולכן היא לא תיכתב. קובץ שייכתב בלעדיה יחליף את הקובץ שבספרייה, והרשומה תימחק ממנו. תקנו את הרשומה, בטלו את העריכה (Ctrl+Z), או מחקו אותה במפורש.`,
+    });
+  }
   if (ctx.purpose === "private") privateSourceChecks(links, out, heldFiles);
   if (heldFiles.size)
     for (const l of links) {

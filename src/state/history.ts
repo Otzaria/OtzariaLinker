@@ -1,5 +1,6 @@
 import type { AltTocBook } from "../core/alt-toc/model";
 import type { Link } from "../core/links/model";
+import { linkToRecord } from "../formats/links-json/convert";
 import type { JsonLayout } from "../formats/links-json/layout";
 
 /*
@@ -103,7 +104,7 @@ function applyKeyed<T>(books: ReadonlyMap<string, T>, changes: readonly { title:
 
 /** Applies a new user action. Empty or no-op changes are dropped and do not create a history entry. */
 export function commit(s: LinkState, label: string, changes: readonly Change[], at = Date.now(), altToc: readonly AltTocChange[] = [], files: readonly FileChange[] = []): LinkState {
-  const real = changes.filter((c) => c.before !== c.after);
+  const real = changes.map(settle).filter((c): c is Change => !!c && c.before !== c.after);
   const realAlt = altToc.filter((c) => c.before !== c.after);
   const realFiles = files.filter((c) => c.before !== c.after);
   if (!real.length && !realAlt.length && !realFiles.length) return s;
@@ -195,26 +196,67 @@ export function fileFingerprint(text: string): string {
 
 export const addChanges = (links: readonly Link[]): Change[] => links.map((l) => ({ id: l.id, after: l }));
 
-/** Editing an imported link marks it "edited"; a new link stays "new". */
+/**
+ * Editing an imported link marks it "edited"; a new link stays "new". A patch that changes nothing is
+ * no change (null): "changing" a mixed selection's type to the type a library record already has must
+ * not turn the record into an edited one (review C1).
+ */
 export function editChange(s: LinkState, id: string, patch: Partial<Omit<Link, "id" | "provenance">>): Change | null {
   const before = s.links.get(id);
   if (!before || before.provenance === "db") return null;
+  if ((Object.keys(patch) as (keyof typeof patch)[]).every((k) => sameData(before[k], patch[k]))) return null;
   const status = before.status === "existing" ? "edited" : before.status;
   return { id, before, after: { ...before, ...patch, status: patch.status ?? status } };
 }
 
-/** Deleting a link the user created removes it; deleting an imported one marks it for deletion on export. */
+/**
+ * Deleting a link the user created removes it; deleting an imported one marks it for deletion on export,
+ * and remembers its status for a restore.
+ */
 export function deleteChange(s: LinkState, id: string): Change | null {
   const before = s.links.get(id);
-  if (!before || before.provenance === "db") return null;
+  if (!before || before.provenance === "db" || before.status === "deleted") return null;
   if (before.status === "new") return { id, before };
-  return { id, before, after: { ...before, status: "deleted" } };
+  return { id, before, after: { ...before, status: "deleted", restoreStatus: before.status } };
 }
 
+/**
+ * A restore gives back the status from before the deletion: an untouched library record is untouched
+ * again, so the export writes it as it was — also with an error, which an "edited" record is held back
+ * for (review C1). A link deleted before the status was remembered (an older project) is "edited" if it
+ * came from a links file: the safe side, since validateExport never lets an edited record's file be
+ * written without it.
+ */
 export function restoreChange(s: LinkState, id: string): Change | null {
   const before = s.links.get(id);
   if (!before || before.status !== "deleted") return null;
-  return { id, before, after: { ...before, status: before.keyOrder ? "edited" : "new" } };
+  const { restoreStatus, ...rest } = before;
+  return { id, before, after: { ...rest, status: restoreStatus ?? (before.provenance === "file" ? "edited" : "new") } };
+}
+
+/*
+ * "existing" means: the record the library's file has, untouched. Every edit path (the builder, a type
+ * change, removing an anchor, range trimming, moving to another edition) marks an existing link
+ * "edited"; commit takes the mark back when the record that would be written is the same, so a
+ * save without a change never turns a library record into an edited one (review C1).
+ */
+function settle(c: Change): Change | null {
+  const { before, after } = c;
+  if (!before || !after || before.status !== "existing" || after.status !== "edited" || !sameRecord(before, after)) return c;
+  const untouched: Link = { ...after, status: "existing" };
+  return sameData(before, untouched) ? null : { id: c.id, before, after: untouched };
+}
+
+/** The same record in the same book's file: what the export would write for the two links is identical. */
+const sameRecord = (a: Link, b: Link): boolean => a.source.book.title === b.source.book.title && sameData(linkToRecord(a), linkToRecord(b));
+
+/** Structural equality of plain data (JSON-like values; key order does not matter). */
+function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a).filter((k) => (a as Record<string, unknown>)[k] !== undefined);
+  const kb = Object.keys(b).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+  return ka.length === kb.length && ka.every((k) => sameData((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
 }
 
 /* ---- the history list (v3 "היסטוריית פעולות") ---- */

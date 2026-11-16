@@ -29,6 +29,14 @@ describe("project file", () => {
     expect(p.skipped).toBe(0);
   });
 
+  it("keeps the status a deleted link is restored to, and only a valid one (review C1)", () => {
+    const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ ...b, key: b.title });
+    const withStatus = (restoreStatus: unknown) => serializeProject({ sources: [], links: [{ ...links[1]!, restoreStatus } as Link], rejectedSuggestions: [], view: { source: null, target: null } }, "2.0.0");
+    expect(parseProject(withStatus("existing"), bind).links[0]!.restoreStatus).toBe("existing");
+    expect(parseProject(withStatus("deleted"), bind).links[0]).not.toHaveProperty("restoreStatus");
+    expect(parseProject(withStatus("__proto__"), bind).links[0]).not.toHaveProperty("restoreStatus");
+  });
+
   it("refuses what is not a project, and a newer version, with clear codes", () => {
     const bind = (b: { title: string }) => ({ key: b.title, title: b.title, origin: "unknown" as const });
     expect(() => parseProject("{", bind)).toThrow(expect.objectContaining({ code: "project/not-json" }));

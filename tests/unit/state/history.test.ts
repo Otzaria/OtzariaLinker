@@ -33,6 +33,29 @@ describe("link history", () => {
     expect(s.links.get("f")!.status).toBe("edited");
   });
 
+  it("restore gives back the status the link had before deletion (review C1)", () => {
+    const untouched = mk("f", { status: "existing", provenance: "file", keyOrder: ["line_index_1"] });
+    let s = commit(emptyLinkState(), "ייבוא", addChanges([untouched]));
+    s = commit(s, "מחיקה", [deleteChange(s, "f")!]);
+    s = commit(s, "שחזור", [restoreChange(s, "f")!]);
+    // an untouched library record stays untouched: the export writes it as it was
+    expect(s.links.get("f")).toEqual(untouched);
+    expect(deleteChange(commit(s, "מחיקה", [deleteChange(s, "f")!]), "f")).toBeNull(); // already deleted: nothing to do
+  });
+
+  it("an edit that changes nothing is no change; a change that writes the same record keeps the record untouched (review C1)", () => {
+    const imported = mk("f", { status: "existing", provenance: "file", keyOrder: ["line_index_1"] });
+    let s = commit(emptyLinkState(), "ייבוא", addChanges([imported]));
+    expect(editChange(s, "f", { declaredType: "commentary" })).toBeNull();
+    expect(editChange(s, "f", { source: { book, line: 1 } })).toBeNull();
+    // e.g. the builder's "save" without a change: a new object, the same record
+    s = commit(s, "עריכת קישור", [{ id: "f", before: imported, after: { ...imported, source: { ...imported.source }, status: "edited" } }]);
+    expect(s.links.get("f")!.status).toBe("existing");
+    expect(s.undo).toHaveLength(1); // nothing changed: no history entry either
+    s = commit(s, "שינוי", [editChange(s, "f", { heRef2: "אחר" })!]);
+    expect(s.links.get("f")!.status).toBe("edited");
+  });
+
   it("database links are read-only", () => {
     const s = commit(emptyLinkState(), "x", addChanges([mk("d", { provenance: "db", status: "existing" })]));
     expect(editChange(s, "d", { declaredType: "other" })).toBeNull();

@@ -249,6 +249,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(l.typeNull === true && { typeNull: true }),
     ...(str(l.targetPath) && { targetPath: l.targetPath }),
     ...(isInt(l.fileIndex) && { fileIndex: l.fileIndex }),
+    ...(l.status === "deleted" && RESTORE_STATUSES.has(l.restoreStatus as string) && { restoreStatus: l.restoreStatus }),
   };
 }
 function copyData(o: Record<string, unknown>): Record<string, unknown> {
@@ -258,6 +259,7 @@ function copyData(o: Record<string, unknown>): Record<string, unknown> {
 }
 
 const STATUSES = new Set(["new", "edited", "existing", "deleted"]);
+const RESTORE_STATUSES = new Set(["new", "edited", "existing"]);
 const PROVENANCES = new Set(["file", "user", "auto", "db-copy", "import"]);
 const isInt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
 const isSide = (s: unknown): s is StoredSide => {

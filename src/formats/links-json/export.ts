@@ -15,7 +15,8 @@ import { serializeLinksJson } from "./serialize";
  *   • links imported from a file are written back in their original order (minimal diff), minus deletions;
  *   • new links follow, in a deterministic order;
  *   • for a book with no imported file, the plan warns that an existing library file would be overwritten;
- *   • a link with an error is held back (never written silently) and listed with its reasons;
+ *   • a link with an error is held back (never written silently) and listed with its reasons — but a
+ *     library record is never left out of a file that is written: its whole file is held instead (C1);
  *   • for private use, a "source" link is written in its BASE's file as "commentary" (validate.ts
  *     PRIVATE_TO_BASE: Otzaria's personal import does not reverse "source"), and the plan says which file.
  */
@@ -99,6 +100,8 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   // old file would stay and the deletions would never happen (compatibility review #2).
   for (const title of importedTitles) if (!bySource.has(title) && !heldTitles.has(title) && !unsafeFileTitle(title)) bySource.set(title, []);
 
+  assertNoLibraryRecordDropped(links, written, bySource);
+
   const files: ExportFile[] = [...bySource.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([title, list]) => {
@@ -130,6 +133,23 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
       movedToBase: moved.size,
     },
   };
+}
+
+/**
+ * The last line (review C1): a book's file replaces the library's, so it is written only with every
+ * record of the library's file the project holds, except the ones the user deleted. validateExport
+ * holds such a file whole (export/library-record-held); if a record still falls out, the export stops
+ * instead of deleting it from the library.
+ */
+function assertNoLibraryRecordDropped(links: readonly Link[], written: readonly Link[], bySource: ReadonlyMap<string, readonly Link[]>): void {
+  const ids = new Set(written.map((l) => l.id));
+  const lost = links.find((l) => l.provenance === "file" && l.status !== "deleted" && bySource.has(l.source.book.title) && !ids.has(l.id));
+  if (lost)
+    throw new LinkerError(
+      "export/library-record-dropped",
+      `הייצוא נעצר: קובץ הקישורים של "${lost.source.book.title}" היה נכתב בלי רשומה שיש בקובץ שבספרייה (שורה ${lost.source.line + 1}), והיא הייתה נמחקת מהספרייה. תקנו את הרשומה או מחקו אותה במפורש, ונסו שוב.`,
+      { title: lost.source.book.title, id: lost.id },
+    );
 }
 
 /** Imported records first, in file order; then new ones by source line, target book, target line, type. */
