@@ -299,6 +299,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(l.status === "deleted" && RESTORE_STATUSES.has(l.restoreStatus as string) && { restoreStatus: l.restoreStatus }),
     // checked again when written: used only while it decodes to this very record (convert.ts)
     ...(str(l.fileText) && { fileText: l.fileText }),
+    ...(Array.isArray(l.origins) && l.origins.every(str) && { origins: l.origins.slice(0, 50) }),
   };
 }
 function copyData(o: Record<string, unknown>): Record<string, unknown> {

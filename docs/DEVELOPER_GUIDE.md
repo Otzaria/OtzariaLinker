@@ -26,7 +26,7 @@ npm run build       # dist/OtzariaLinker.html
 2. `scripts/package-release.mjs` סורק את התוצר ונכשל אם יש בו משאב רשת או ממשק רשת, ואז יוצר
    `dist/OtzariaLinker.html`, `dist/OtzariaLinker-<version>.html` ו־`dist/SHA256SUMS`.
 
-גודל התוצר כ־1MB (הסקריפט נכשל מעל 1.5MiB, `BUDGET`). רוב המשקל: שני הגופנים, ה־WASM והאייקונים.
+גודל התוצר כ־1.6MB (הסקריפט נכשל מעל 1.75MiB, `BUDGET`). רוב המשקל: הקוד, שני הגופנים (כ־190KB), ה־WASM ונתוני הידע של מראי המקומות.
 
 **שרת הפיתוח** נוח לעבודה על הממשק, אבל הוא רץ מ־`http://localhost` ולא מ־`file://`. בעיות של Worker,
 WASM או CSP מופיעות רק בקובץ הבנוי. לכן בודקים את התוצר: `npm run build`, ופותחים את

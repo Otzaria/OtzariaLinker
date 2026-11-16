@@ -189,3 +189,78 @@ describe('private use: where a "source" link is written (PRIVATE_TO_BASE)', () =
     expect(run(src({ declaredType: "reference" }), { ...ctx, purpose: "private" }).map((x) => x.code)).not.toContain("export/private-source-to-base");
   });
 });
+
+/*
+ * Otzaria's personal import reverses a dependent link only from a personal book into one that is not
+ * (user_content_importer.dart:806-860, upstream/dev 36dad5bc; checked through the app's code by
+ * scripts/live-test/dart/linker_bundle_test.dart, case R1). The generator decides by base books.
+ */
+describe("private use: Otzaria's personal import reverses a dependent link (export/private-reversed)", () => {
+  const MINE = book("ספר שלי"); // a text book of the user's
+  const RASHI = book('רש"י על בראשית', { origin: "sefaria" }); // the library's commentary
+  const PDB = book("ספר במסד אישי", { origin: "personal" });
+  const side = (b: BookRef) => (b === MINE || b === A || b === B ? "personal" : "other");
+  const priv: ValidationContext = { ...ctx, purpose: "private", personalImportSide: side };
+  const run = (l: Link, c: ValidationContext = priv) => validateExport([l], c).get(l.id)!.map((p) => `${p.severity}:${p.code}`);
+
+  it("a personal base with a library commentary: warned, in plain words", () => {
+    const l = link({ source: { book: MINE, line: 1 }, target: { book: RASHI, line: 2 }, declaredType: "commentary", ref2: "Rashi on Genesis 1:1:1" });
+    expect(run(l)).toContain("warning:export/private-reversed");
+    const p = validateLink(l, priv).find((x) => x.code === "export/private-reversed")!;
+    expect(p.message).toContain('"רש"י על בראשית" יהיה הבסיס');
+    expect(p.message).not.toMatch(/Conection|_links|isUserBook/);
+  });
+
+  it("not where the import and the library agree, not for the library, not for links-panel types", () => {
+    // a personal commentary on a library base book: both reverse it (the generator by "X על <base>")
+    expect(run(link({ source: { book: book("פירוש על בראשית"), line: 1 }, target: { book: SEF, line: 2 }, declaredType: "commentary", ref2: "Genesis 1:2" }), { ...priv, personalImportSide: (b) => (b === SEF ? "other" : "personal") })).not.toContain("warning:export/private-reversed");
+    expect(run(link({ declaredType: "commentary" }))).not.toContain("warning:export/private-reversed"); // personal → personal
+    expect(run(link({ source: { book: PDB, line: 1 }, declaredType: "commentary" }))).not.toContain("warning:export/private-reversed"); // database → personal
+    expect(run(link({ source: { book: MINE, line: 1 }, target: { book: RASHI, line: 2 }, declaredType: "reference", ref2: "x" }))).not.toContain("warning:export/private-reversed");
+    expect(run(link({ source: { book: MINE, line: 1 }, target: { book: RASHI, line: 2 }, declaredType: "commentary", ref2: "x" }), { ...ctx, personalImportSide: side })).not.toContain("warning:export/private-reversed");
+    // a side whose place is unknown: no guess
+    expect(run(link({ source: { book: MINE, line: 1 }, target: { book: RASHI, line: 2 }, declaredType: "commentary", ref2: "x" }), { ...priv, personalImportSide: () => undefined })).not.toContain("warning:export/private-reversed");
+  });
+
+  it('a "source" link from a library commentary to a personal base stays "source": at the base it would be reversed', () => {
+    const l = link({ source: { book: RASHI, line: 2 }, target: { book: MINE, line: 1 }, declaredType: "source", ref1: "Rashi on Genesis 1:1:1" });
+    const out = validateExport([l], priv).get(l.id)!;
+    expect(out.map((p) => p.code)).not.toContain("export/private-source-to-base");
+    const kept = out.find((p) => p.code === "export/private-source-kept")!;
+    expect(kept.severity).toBe("warning");
+    expect(kept.message).toContain('"ספר שלי" הוא ספר אישי');
+    // with a personal commentary it still moves
+    const ok = link({ source: { book: B, line: 2 }, target: { book: MINE, line: 1 }, declaredType: "source" });
+    expect(validateExport([ok], priv).get(ok.id)!.map((p) => p.code)).toContain("export/private-source-to-base");
+  });
+});
+
+/*
+ * A personal book named like a book of the library (scripts/live-test/dart, "title clashes"): a text book
+ * of the user's makes Otzaria reject the whole file; a personal database's book binds to the library's.
+ */
+describe("private use: a personal book named like a library book (export/private-title-in-library)", () => {
+  const MINE = book("בראשית"); // the user's text file, named like the library's book
+  const PDB = book("שמות", { origin: "personal" });
+  const priv: ValidationContext = {
+    ...ctx,
+    purpose: "private",
+    personalImportSide: (b) => (b === MINE || b === A || b === B ? "personal" : "other"),
+    libraryHasTitle: (b) => b === MINE || b === PDB,
+  };
+  const codes = (l: Link, c: ValidationContext = priv) => validateLink(l, c).map((p) => `${p.severity}:${p.code}`);
+
+  it("a text book: an error (the whole file is rejected); a personal database's book: a warning", () => {
+    expect(codes(link({ source: { book: MINE, line: 1 } }))).toContain("error:export/private-title-in-library");
+    expect(codes(link({ target: { book: MINE, line: 1 } }))).toContain("error:export/private-title-in-library");
+    expect(codes(link({ source: { book: PDB, line: 1 } }))).toContain("warning:export/private-title-in-library");
+    const p = validateLink(link({ source: { book: MINE, line: 1 } }), priv).find((x) => x.code === "export/private-title-in-library")!;
+    expect(p.message).toContain("דוחה את כל קובץ הקישורים");
+    expect(p.message).not.toMatch(/_links|Ambiguous/);
+  });
+
+  it("not for the library, and not when no library book has the title", () => {
+    expect(codes(link({ source: { book: MINE, line: 1 } }), { ...priv, purpose: "submission" })).not.toContain("error:export/private-title-in-library");
+    expect(codes(link())).not.toContain("error:export/private-title-in-library");
+  });
+});

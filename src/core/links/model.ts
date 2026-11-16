@@ -98,6 +98,11 @@ export interface Link {
    * so an untouched file comes back byte-identical (review C9).
    */
   readonly fileText?: string;
+  /**
+   * The links files (by file name) this link was found in, when several files of one book were merged
+   * (state/link-compare.ts): its origin stays known after the merge. Never written to a links file.
+   */
+  readonly origins?: readonly string[];
 }
 
 export const isRange = (s: LinkSide): boolean => s.end !== undefined && s.end > s.line;

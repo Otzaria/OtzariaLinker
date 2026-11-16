@@ -43,6 +43,7 @@ import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
+import { contextScore, contextWords, lineKeys, pickByContext, pickByOrder, type TieCandidate } from "./tie-break";
 import { sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
 export interface DhOptions extends SefariaOwnedOption {
@@ -180,6 +181,8 @@ const NOTE_RE = /class\s*=\s*["']?footnote/i;
 const NAMES_MIN = 5;
 /** …and this share of them */
 const NAMES_SHARE = 0.05;
+/** a tie looks at this many places of the ranking (the winner and its rivals) */
+const TIE_MAX = 8;
 
 /** A placement of one commentary line on the base, before it is shaped into a Suggestion. */
 interface Placement {
@@ -193,10 +196,39 @@ interface Placement {
   readonly reasons: Reason[];
   readonly rules: string[];
   readonly warnings: Reason[];
-  readonly alternatives: { line: number; score: number }[];
+  /** the other places, each with why it lost (dh/alt-*) */
+  readonly alternatives: { line: number; score: number; why?: Reason }[];
   /** score of the directly matched link at the head of an inheritance chain */
   readonly rootScore: number;
   readonly depth: number;
+  /** a tie between places that score alike (tie-break.ts): every tied place, for the order pass to choose again */
+  readonly tie?: TieState & { readonly common: MatchParts };
+}
+
+/** Reasons, rule ids and warnings of a placement. */
+interface MatchParts {
+  readonly reasons: readonly Reason[];
+  readonly rules: readonly string[];
+  readonly warnings: readonly Reason[];
+}
+
+/** What depends on the chosen place itself: the target lines, the anchor words, and how the words matched there. */
+interface MatchPart extends MatchParts {
+  readonly base: number;
+  readonly baseEnd?: number;
+  readonly words: { rawStart: number; rawEnd: number };
+}
+
+/**
+ * The places of a tie, the one chosen (index; 0 = the walk's own pick, the first after the previous line),
+ * and which signal chose it: the context, the order of the strong lines around it, or neither (null).
+ */
+interface TieState {
+  readonly cands: readonly (TieCandidate & { readonly part: MatchPart })[];
+  readonly chosen: number;
+  readonly why: "context" | "order" | null;
+  /** order: the places of the nearest strong lines before and after */
+  readonly bracket?: readonly [number | null, number | null];
 }
 
 interface Cand {
@@ -789,6 +821,44 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     exactPhrase: c.exact,
   });
 
+  /** the keys of a candidate's base line (and of the next line, when the ד"ה runs into it), for the context of a tie */
+  const bKeys: (Set<string> | undefined)[] = [];
+  const keysAt = (p: number) => (bKeys[p] ??= lineKeys(bTokens[p]!));
+  const keysOf = (c: Cand): ReadonlySet<string> => (c.run.tgtEnd > c.lineTokens && bTokens[c.pos + 1] ? new Set([...keysAt(c.pos), ...keysAt(c.pos + 1)]) : keysAt(c.pos));
+
+  /**
+   * A placement with the reasons of its chosen place, and each alternative with why it lost: a weaker
+   * match (dh/alt-weaker), or a place of the tie that the context (dh/alt-context), the order of the strong
+   * lines around it (dh/alt-order) or, failing both, the walk's own order (dh/alt-tie) put second.
+   */
+  const withMatch = (pl: Placement, common: MatchParts, part: MatchPart, tie: TieState | null): Placement => {
+    const reasons = [...common.reasons, ...part.reasons];
+    const rules = [...common.rules, ...part.rules];
+    const warnings = [...common.warnings, ...part.warnings];
+    const won = tie?.cands[tie.chosen];
+    if (tie?.why === "context") {
+      rules.push("dh/tie-context");
+      reasons.push(r("dh/tie-context", `הדיבור המתחיל נמצא באותה מידה בכמה מקומות; נבחר המקום שבו מופיעות גם המילים שבהמשך שורת הפירוש (משקל ${won!.context})`));
+    } else if (tie?.why === "order") {
+      const [lo, hi] = tie.bracket ?? [null, null];
+      rules.push("dh/tie-order");
+      reasons.push(r("dh/tie-order", `הדיבור המתחיל נמצא באותה מידה בכמה מקומות; נבחר מקום שבין המקומות של השורות הוודאיות שלפני השורה ואחריה (${lo === null ? "תחילת הקטע" : `שורה ${lo + 1}`} עד ${hi === null ? "סוף הקטע" : `שורה ${hi + 1}`})`));
+    }
+    if (pl.confidence === "ambiguous" && pl.alternatives[0])
+      warnings.push(r("dh/ambiguous", `מקום אחר בספר הבסיס קרוב מאוד בציון: שורה ${pl.alternatives[0].line + 1}`));
+    const alternatives = pl.alternatives.map((a) => {
+      const t = tie?.cands.find((x) => x.line === a.line);
+      let why: Reason;
+      if (!t || !won) why = r("dh/alt-weaker", `ההתאמה כאן חלשה יותר (ציון ${a.score} מול ${pl.score})`);
+      else if (tie!.why === "context")
+        why = r("dh/alt-context", `ציון כמעט זהה${t === tie!.cands[0] ? ", וזה המקום הראשון אחרי המקום של השורה הקודמת" : ""}, אבל פחות מהמילים שבהמשך שורת הפירוש מופיעות כאן (משקל ${t.context} מול ${won.context})`);
+      else if (tie!.why === "order") why = r("dh/alt-order", `ציון כמעט זהה, אבל המקום אינו בין המקומות של השורות הוודאיות שלפני השורה ואחריה (משקל ההקשר ${t.context} מול ${won.context})`);
+      else why = r("dh/alt-tie", `ציון כמעט זהה, וההמשך של שורת הפירוש אינו מכריע (משקל ${t.context} מול ${won.context}); נבחר המקום הראשון אחרי המקום של השורה הקודמת`);
+      return { line: a.line, score: a.score, why };
+    });
+    return { ...pl, reasons, rules, warnings, alternatives };
+  };
+
   /** Places one ד"ה line, or explains why not. */
   const placeDh = (ex0: ExtractedDh, cLine: EngineLine, prev: number | null): Placement | Reason[] => {
     let ex = ex0;
@@ -839,15 +909,91 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     if (!cands.length)
       return [r("dh/not-found", `הדיבור המתחיל "${ex.text}" לא נמצא בטווח החיפוש (שורות ${window.from + 1}–${window.to + 1} בספר הבסיס)`), r(`dh/window-${window.kind}`, window.label ? `טווח החיפוש: "${window.label}"` : "טווח החיפוש: כל ספר הבסיס")];
 
-    const win = cands[0]!;
+    /** how the ד"ה matched at one place, and where that place is (the winner's, or a tied rival's) */
+    const matchPart = (c: Cand, ex: ExtractedDh, prevIn: number | null): MatchPart => {
+      const reasons: Reason[] = [];
+      const rules: string[] = [];
+      const warnings: Reason[] = [];
+      const kinds = c.run.kinds;
+      const firstLineEnd = Math.min(c.run.tgtEnd, c.lineTokens);
+      const tg = bTokens[c.pos]!;
+      if (c.lemmaHead) {
+        rules.push("dh/lemma-head");
+        reasons.push(r("dh/lemma-head", "המילים נמצאו בראש שורת הבסיס, בדיבור המתחיל שלה עצמה"));
+      }
+      const asWritten =
+        kinds.size === 1 && kinds.has("exact") && c.run.tgtEnd <= c.lineTokens &&
+        ex.dh.slice(c.run.srcStart, c.run.srcStart + c.run.srcUsed).every((t, k) => {
+          const b = tg[c.run.tgtStart + k]!;
+          return visibleSlice(cLine.text, t.rawStart, t.rawEnd) === visibleSlice(bLines[c.pos]!.text, b.rawStart, b.rawEnd);
+        });
+      if (asWritten) {
+        rules.push("dh/exact");
+        reasons.push(r("dh/exact", "הדיבור המתחיל נמצא כלשונו"));
+      } else if (kinds.size === 1 && kinds.has("exact")) {
+        rules.push("dh/normalized");
+        reasons.push(r("dh/normalized", "נמצא אחרי נרמול ניקוד"));
+      } else {
+        if (kinds.has("fuzzy")) {
+          rules.push("dh/fuzzy");
+          reasons.push(r("dh/fuzzy", "נמצא בהתאמה גמישה (כתיב מלא או חסר, אותיות שימוש)"));
+        }
+        if (kinds.has("acronym") || kinds.has("truncation") || kinds.has("split")) {
+          rules.push("dh/abbreviation");
+          reasons.push(r("dh/abbreviation", "נמצא אחרי פתיחת ראשי תיבות או קיצור"));
+        }
+      }
+      if (!uniqueN && c.run.srcUsed < ex.dh.length) reasons.push(r("dh/partial", `נמצאו ${c.run.srcUsed} מתוך ${ex.dh.length} מילות הדיבור המתחיל`));
+      if (prevIn !== null && c.line >= prevIn) {
+        rules.push("dh/order");
+        reasons.push(r("dh/order", "המקום הבא אחרי ההתאמה של השורה הקודמת"));
+      } else if (prevIn !== null) warnings.push(r("dh/backward", `ההתאמה מוקדמת למקום של השורה הקודמת (שורה ${prevIn + 1} בספר הבסיס)`));
+      let baseEnd: number | undefined;
+      if (c.run.tgtEnd > c.lineTokens) {
+        baseEnd = bLines[c.pos + 1]!.index;
+        rules.push("dh/span-next-line");
+        reasons.push(r("dh/span", "הדיבור המתחיל נמשך לשורה הבאה בספר הבסיס"));
+      }
+      if (c.contLine !== null) {
+        rules.push("dh/continuation");
+        reasons.push(r("dh/continuation", 'גם ההמשך שאחרי "וכו\'" נמצא בספר הבסיס'));
+        if (c.contLine > (baseEnd ?? c.line)) baseEnd = c.contLine;
+      }
+      return { base: c.line, ...(baseEnd !== undefined ? { baseEnd } : {}), words: { rawStart: tg[c.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd }, reasons, rules, warnings };
+    };
+
+    let win = cands[0]!;
     const rivals = cands.slice(1, 4);
-    const score = matchConfidence({ evidence: evidenceOf(win, rivals[0]?.rank ?? 0), explicit: ex.explicit || win.lemmaHead, rung });
+    const score0 = matchConfidence({ evidence: evidenceOf(win, rivals[0]?.rank ?? 0), explicit: ex.explicit || win.lemmaHead, rung });
     // every rival is scored on its own measured evidence, against the winner as ITS rival — two
     // verbatim occurrences then score alike and the result is reported as ambiguous (the source
     // kept the verbatim flag for the winner only, which hid exactly these ties)
-    const alternatives = rivals.map((c) => ({ line: c.line, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit || c.lemmaHead, rung }) }));
-    alternatives.sort((a, b) => b.score - a.score);
-    const confidence = confidenceOf(score, alternatives[0]?.score ?? null, thresholds);
+    const scored = [{ c: win, score: score0 }, ...rivals.map((c) => ({ c, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit || c.lemmaHead, rung }) }))];
+    const runnerUp0 = Math.max(...scored.slice(1).map((x) => x.score), -1);
+    let confidence = confidenceOf(score0, runnerUp0 < 0 ? null : runnerUp0, thresholds);
+
+    // a tie (tie-break.ts): the places within the ambiguity margin of the winner, and the context of the line
+    let tie: TieState | null = null;
+    let chosen = scored[0]!;
+    if (confidence === "ambiguous") {
+      // a headword that opens many entries (a lexicon) ties more than three places: the tie reads further down the ranking
+      for (const c of cands.slice(4, TIE_MAX)) scored.push({ c, score: matchConfidence({ evidence: evidenceOf(c, win.rank), explicit: ex.explicit || c.lemmaHead, rung }) });
+      const tied = [scored[0]!, ...scored.slice(1).filter((x) => score0 - x.score < thresholds.ambiguityMargin)];
+      const ctx = contextWords(ex.tokens, ex.from + ex.dh.length, ex.dh, weightIdf);
+      const tc: TieCandidate[] = tied.map((x) => ({ line: x.c.line, score: x.score, context: contextScore(keysOf(x.c), ctx) }));
+      const k = pickByContext(tc, prevIn, thresholds.possible);
+      chosen = tied[k]!;
+      win = chosen.c;
+      tie = { cands: tied.map((x, j) => ({ ...tc[j]!, part: matchPart(x.c, ex, prevIn) })), chosen: k, why: k ? "context" : null };
+    }
+    const score = chosen.score;
+    const alternatives = scored
+      .filter((x) => x !== chosen)
+      .map((x) => ({ line: x.c.line, score: x.score }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(3, (tie?.cands.length ?? 0) - 1));
+    // a tie-break never raises the tier: the pick is still one of places that score alike
+    if (tie?.why) confidence = "ambiguous";
     // A weak match BEFORE the previous line's place is mostly wrong: the commentary moves forward, and
     // a weak backward hit is usually an earlier occurrence of common words. Measured (51 real pairs):
     // "possible"/"ambiguous" backward matches were right 212 times in 1,080. Strong ones stay
@@ -858,13 +1004,6 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     const reasons: Reason[] = [BOUNDARY_REASON[ex.boundary]!];
     const rules = [`dh/extract-${ex.boundary}`, `dh/window-${window.kind}`];
     const warnings: Reason[] = [];
-    const kinds = win.run.kinds;
-    const firstLineEnd = Math.min(win.run.tgtEnd, win.lineTokens);
-    const tg = bTokens[win.pos]!;
-    if (win.lemmaHead) {
-      rules.push("dh/lemma-head");
-      reasons.push(r("dh/lemma-head", "המילים נמצאו בראש שורת הבסיס, בדיבור המתחיל שלה עצמה"));
-    }
     if (ex !== ex0) {
       rules.push("dh/extended");
       reasons.push(r("dh/extended", "רק תחילת הדיבור המתחיל מודגשת; הוא נמשך עד סימן הפיסוק"));
@@ -877,30 +1016,6 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       rules.push("dh/unique-anchor");
       reasons.push(r("dh/unique-anchor", uniqueN === 1 ? "עוגן של מילה אחת נדירה, שמופיעה רק בשורה אחת בטווח" : `עוגן של ${uniqueN} המילים הראשונות, שמופיעות יחד רק בשורה אחת בטווח`));
     }
-    const asWritten =
-      kinds.size === 1 && kinds.has("exact") && win.run.tgtEnd <= win.lineTokens &&
-      ex.dh.slice(win.run.srcStart, win.run.srcStart + win.run.srcUsed).every((t, k) => {
-        const b = tg[win.run.tgtStart + k]!;
-        return visibleSlice(cLine.text, t.rawStart, t.rawEnd) === visibleSlice(bLines[win.pos]!.text, b.rawStart, b.rawEnd);
-      });
-    if (asWritten) {
-      rules.push("dh/exact");
-      reasons.push(r("dh/exact", "הדיבור המתחיל נמצא כלשונו"));
-    } else if (kinds.size === 1 && kinds.has("exact")) {
-      rules.push("dh/normalized");
-      reasons.push(r("dh/normalized", "נמצא אחרי נרמול ניקוד"));
-    } else {
-      if (kinds.has("fuzzy")) {
-        rules.push("dh/fuzzy");
-        reasons.push(r("dh/fuzzy", "נמצא בהתאמה גמישה (כתיב מלא או חסר, אותיות שימוש)"));
-      }
-      if (kinds.has("acronym") || kinds.has("truncation") || kinds.has("split")) {
-        rules.push("dh/abbreviation");
-        reasons.push(r("dh/abbreviation", "נמצא אחרי פתיחת ראשי תיבות או קיצור"));
-      }
-    }
-    if (!uniqueN && win.run.srcUsed < ex.dh.length)
-      reasons.push(r("dh/partial", `נמצאו ${win.run.srcUsed} מתוך ${ex.dh.length} מילות הדיבור המתחיל`));
     if (rung) {
       rules.push(`dh/rung-${rung}`);
       reasons.push(r(`dh/rung-${rung}`, RUNG_TEXT[rung]));
@@ -910,38 +1025,24 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     else if (window.kind === "unit") reasons.push(r("dh/window-unit", `החיפוש הוגבל לשורה הממוספרת שהכותרת בפירוש מציינת (${window.label})`));
     else if (window.kind === "page") reasons.push(r("dh/window-page", `החיפוש הוגבל לעמוד "${window.label}", לפי סימני העמודים שבספר הבסיס`));
     else reasons.push(r("dh/window-book", "החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש"));
-    if (prevIn !== null && win.line >= prevIn) {
-      rules.push("dh/order");
-      reasons.push(r("dh/order", "המקום הבא אחרי ההתאמה של השורה הקודמת"));
-    } else if (prevIn !== null) warnings.push(r("dh/backward", `ההתאמה מוקדמת למקום של השורה הקודמת (שורה ${prevIn + 1} בספר הבסיס)`));
-    if (confidence === "ambiguous" && alternatives[0])
-      warnings.push(r("dh/ambiguous", `מקום אחר בספר הבסיס קרוב מאוד בציון: שורה ${alternatives[0].line + 1}`));
-
-    let baseEnd: number | undefined;
-    if (win.run.tgtEnd > win.lineTokens) {
-      baseEnd = bLines[win.pos + 1]!.index;
-      rules.push("dh/span-next-line");
-      reasons.push(r("dh/span", "הדיבור המתחיל נמשך לשורה הבאה בספר הבסיס"));
-    }
-    if (win.contLine !== null) {
-      rules.push("dh/continuation");
-      reasons.push(r("dh/continuation", 'גם ההמשך שאחרי "וכו\'" נמצא בספר הבסיס'));
-      if (win.contLine > (baseEnd ?? win.line)) baseEnd = win.contLine;
-    }
-    return {
+    const common = { reasons, rules, warnings };
+    const part = tie ? tie.cands[tie.chosen]!.part : matchPart(win, ex, prevIn);
+    const placed: Placement = {
       cLine: cLine.index,
-      base: win.line,
-      ...(baseEnd !== undefined ? { baseEnd } : {}),
-      words: { rawStart: tg[win.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd },
+      base: part.base,
+      ...(part.baseEnd !== undefined ? { baseEnd: part.baseEnd } : {}),
+      words: part.words,
       score,
       confidence,
-      reasons,
-      rules,
-      warnings,
+      reasons: [],
+      rules: [],
+      warnings: [],
       alternatives,
       rootScore: score,
       depth: 0,
+      ...(tie ? { tie: { ...tie, common } } : {}),
     };
+    return withMatch(placed, common, part, tie);
   };
 
   /**
@@ -1162,6 +1263,54 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
   if (aborted) notes.push(r("engine/aborted", "הריצה הופסקה לפני הסוף. מוצגות רק ההצעות שנמצאו עד כה."));
 
   /*
+   * ── a tie against the order of its neighbours (tie-break.ts pickByOrder) ──────────────────────
+   * The walk chose among tied places knowing only the lines BEFORE, and the context may pick a place
+   * further on. Now the next lines are placed too: a tied pick outside the places of the nearest strong
+   * lines (certain/high, placed by their own words, same section) before and after it moves to a tied
+   * place between them. Without this, a context pick past the next strong line was dropped by the order
+   * of the whole commentary below, while the right place was one of its rivals (development sample: 35
+   * lines the database confirms). A line that inherits its place (בא"ד, שם, an item paragraph) moves with it.
+   */
+  if (options.order !== false) {
+    const strong = (pl: Placement) => meta.get(pl.cLine)?.direct && !pl.tie && (pl.confidence === "certain" || pl.confidence === "high");
+    let next = -1;
+    for (let i = 0; i < placements.length; i++) {
+      if ((i & 255) === 255) yield;
+      const pl = placements[i]!;
+      const m = meta.get(pl.cLine)!;
+      if (!pl.tie || !m.direct) continue;
+      let lo: number | null = null;
+      for (let j = i - 1; j >= 0 && meta.get(placements[j]!.cLine)!.section === m.section; j--)
+        if (strong(placements[j]!)) {
+          lo = placements[j]!.base;
+          break;
+        }
+      if (next <= i) for (next = i + 1; next < placements.length && !strong(placements[next]!); next++);
+      const hi = next < placements.length && meta.get(placements[next]!.cLine)!.section === m.section ? placements[next]!.base : null;
+      const tie = pl.tie;
+      const k = pickByOrder(tie.cands, tie.chosen, lo, hi, thresholds.possible);
+      if (k === tie.chosen) continue;
+      const to = tie.cands[k]!;
+      const from = tie.cands[tie.chosen]!;
+      const alternatives = [...pl.alternatives.filter((a) => a.line !== to.line), { line: from.line, score: from.score }].sort((a, b) => b.score - a.score);
+      const moved: TieState = { cands: tie.cands, chosen: k, why: "order", bracket: [lo, hi] };
+      const { baseEnd: _end, ...rest } = pl;
+      placements[i] = withMatch(
+        { ...rest, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}), words: to.part.words, score: to.score, rootScore: to.score, confidence: "ambiguous", alternatives, tie: { ...moved, common: tie.common } },
+        tie.common,
+        to.part,
+        moved,
+      );
+      for (let j = i + 1; j < placements.length && !meta.get(placements[j]!.cLine)!.direct; j++) {
+        const child = placements[j]!;
+        if (meta.get(child.cLine)!.root !== pl.cLine) break;
+        const { baseEnd: _e, ...c } = child;
+        placements[j] = { ...c, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}) };
+      }
+    }
+  }
+
+  /*
    * ── the order of the whole commentary ─────────────────────────────────────────────────────
    * A commentary follows its base, so the lines it places by their own words lie on one non-decreasing
    * chain of base lines — except the wrong ones. Two chains: over the whole book, and inside each
@@ -1255,7 +1404,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     const alternatives: Candidate[] = p.alternatives.map((a) => ({
       target: altSide(a.line),
       score: a.score,
-      reasons: [r("dh/alternative", `מקום נוסף שבו נמצא הדיבור המתחיל: שורה ${a.line + 1} בספר הבסיס`)],
+      reasons: [r("dh/alternative", `מקום נוסף שבו נמצא הדיבור המתחיל: שורה ${a.line + 1} בספר הבסיס`), ...(a.why ? [a.why] : [])],
     }));
     const common = {
       id: `dibur-hamatchil:${commentary.book.key}#${p.cLine}>${base.book.key}#${p.base}`,

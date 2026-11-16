@@ -23,6 +23,8 @@ import { loadPreferences, type Preferences } from "./preferences";
 import type { DialogId, SuggestMode } from "./router";
 import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTask } from "./diagnostics";
 import { DbLinksState } from "./db-links";
+import { LinkCompareState } from "./link-compare";
+import { LinkFixes } from "./link-fixes";
 import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
@@ -87,6 +89,10 @@ export class AppStore {
   readonly altToc: AltTocState;
   /** links the open databases already have: list, per-line view, copying into the project (stage 10) */
   readonly dbLinks: DbLinksState;
+  /** comparing and merging a book's links between the database, the project and links files */
+  readonly compare: LinkCompareState;
+  /** group fixes of the links table */
+  readonly fixes: LinkFixes;
   /** max-link: plan, run and report (state/maxlink.ts) */
   readonly maxLink: MaxLinkState;
   /** range suggestions, cutting and completion (state/ranges.ts) */
@@ -213,6 +219,8 @@ export class AppStore {
     this.find = { source: new BookFind(service, (k, l) => this.reveal("source", k, l)), target: new BookFind(service, (k, l) => this.reveal("target", k, l)) };
     this.altToc = new AltTocState(this, service);
     this.dbLinks = new DbLinksState(this, service);
+    this.compare = new LinkCompareState(this, service, saver);
+    this.fixes = new LinkFixes(this);
     this.maxLink = new MaxLinkState(this, service, saver);
     this.ranges = new RangesState(this, service);
     this.suggestions = new SuggestionsState(this, service);
@@ -937,6 +945,19 @@ export class AppStore {
       sefariaOwned: (book) => this.isSefariaOwned(book),
       sefariaTitle: (book) => hasSefariaTitle(book, this.sefariaTitles.value),
       purpose: this.exportPurpose.value,
+      // a text book of the user's goes into a personal-books folder; every other book is found in the
+      // official library or in a personal database attached to Otzaria (validate.ts appReverses)
+      personalImportSide: (ref) => {
+        const b = this.bookOf(ref);
+        const src = b && this.sources.value.find((x) => x.info.id === sourceIdOfBookKey(b.key));
+        if (!src) return undefined;
+        return src.info.kind === "text-files" && !this.isLibrarySource(src.info.id) ? "personal" : "other";
+      },
+      libraryHasTitle: (ref) => {
+        const b = this.bookOf(ref);
+        if (!b || this.isLibrarySource(sourceIdOfBookKey(b.key))) return false;
+        return (this.booksByTitle.value.get(ref.title) ?? []).some((x) => x.key !== b.key && this.isLibrarySource(sourceIdOfBookKey(x.key)));
+      },
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       existing: (l) => this.dbLinks.matchDb(l),
       bookChanged: (ref) => {

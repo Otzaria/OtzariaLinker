@@ -43,11 +43,12 @@ for (const f of bundle.files) {
   writeFileSync(path, f.text, "utf8"); // UTF-8 without BOM, LF only
 }
 
-const held = bundle.plans.main.heldBack.length + bundle.plans.update.heldBack.length + bundle.plans.negative.heldBack.length;
+const held = Object.values(bundle.plans).reduce((n, plan) => n + plan.heldBack.length, 0);
 console.log(`${bundle.files.length} files → ${out}`);
 console.log(`  ${module.BOOKS_DIR}/  ${bundle.plans.main.files.length} links files, ${bundle.plans.main.written.length} links (add this folder in Otzaria)`);
 console.log(`  update/   the base book's new edition and ${Object.keys(bundle.relinked).length} moved links (check 15)`);
 console.log(`  negative/ a file the app must reject whole (check N1)`);
+console.log(`  dbs/      ${bundle.plans.dbs.written.length} links with a book of a personal database (several databases; app-code check)`);
 if (held) {
   console.error(`${held} links were held back by the tool's validation — the bundle is incomplete.`);
   process.exit(1);
