@@ -124,7 +124,9 @@ async function main() {
   await page.locator(".source-row").first().waitFor({ timeout: 300_000 });
   if (db) {
     const c2 = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "מסד נתונים" }).first().click();
+    // the home screen's source buttons (the workspace keeps them folded in the sources tab)
+    await page.evaluate(() => (window.__linker.screen.value = "home"));
+    await page.getByRole("button", { name: "מסד נתונים", exact: true }).first().click();
     await (await c2).setFiles(resolve(db));
     await page.locator(".source-row").nth(1).waitFor({ timeout: 300_000 });
   }
