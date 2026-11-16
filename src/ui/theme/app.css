@@ -204,6 +204,17 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .mark.file { background: var(--secondary-container); color: var(--on-secondary-container); }
 .mark.deleted { background: var(--error-container); color: var(--on-error-container); }
 .mark.db { background: var(--surface-container-highest); color: var(--on-surface-variant); }
+/* the counts are one button that opens the line's links (line-links.tsx) */
+.marks-btn { display: flex; gap: 3px; padding: 2px; margin: -2px; border: 0; border-radius: var(--radius-full); background: none; cursor: pointer; color: inherit; }
+.marks-btn:hover, .marks-btn[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--primary); }
+.line-links { position: fixed; z-index: 40; width: min(340px, calc(100vw - 16px)); max-height: min(420px, calc(100vh - 16px)); overflow: auto; display: grid; gap: 6px; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-container-high); color: var(--on-surface); border: 1px solid var(--outline-variant); box-shadow: var(--elev-3); font: var(--fs-sm) / 1.45 var(--font-ui); text-align: start; }
+.line-links ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ll-item { display: grid; gap: 1px; width: 100%; text-align: start; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius); background: color-mix(in srgb, var(--tertiary-container) 55%, transparent); color: inherit; cursor: pointer; font: inherit; }
+.ll-item:hover:not(:disabled) { border-color: var(--tertiary); }
+.ll-item:disabled { cursor: default; opacity: 0.7; }
+.ll-item.deleted .ll-where { text-decoration: line-through; }
+.ll-text { font-family: var(--font-book); font-size: 15px; overflow-wrap: anywhere; }
+.ll-kind, .ll-hint { font-size: 11px; color: var(--on-surface-variant); }
 .anchor-hl { background: var(--highlight); border-radius: 2px; }
 
 /* builder */
