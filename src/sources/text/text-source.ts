@@ -1,6 +1,7 @@
 import { pushTo } from "../../core/collections";
 import type { Link } from "../../core/links/model";
 import { otzariaBookTitle } from "../../core/links/titles";
+import { LinkerError } from "../../core/errors";
 import { decodeText } from "../../core/text/decode";
 import { headingLevel, stripTags } from "../../core/text/html";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
@@ -79,7 +80,14 @@ export class TextFilesSource implements BookSource {
     if (hit) return hit;
     const file = this.byKey.get(bookKey);
     if (!file) throw new Error(`unknown book ${bookKey}`);
-    const decoded = decodeText(await file.read());
+    let bytes: Uint8Array;
+    try {
+      bytes = await file.read();
+    } catch (err) {
+      // Chrome refuses to read a chosen file that was changed or deleted on disk since (NotReadableError)
+      throw new LinkerError("text/unreadable", `אי אפשר לקרוא את הקובץ "${file.path}": ייתכן שהוא השתנה או נמחק אחרי שנבחר. בחרו את התיקייה או הקבצים שוב.`, { path: file.path, cause: (err as Error)?.message });
+    }
+    const decoded = decodeText(bytes);
     if (decoded.encoding !== "utf-8")
       this.info.warnings.push({ code: "source/not-utf8", message: `הקובץ "${file.path}" שמור בקידוד ${decoded.encoding} ולא UTF-8. הכלי מציג אותו נכון, אבל אוצריא קוראת כל ספר כ־UTF-8 — שמרו אותו מחדש ב־UTF-8 לפני שליחה לספרייה.` });
     const lines = splitBookLines(decoded.text);

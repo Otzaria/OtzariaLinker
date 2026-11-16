@@ -13,6 +13,7 @@ export type ErrorCode =
   | "archive/corrupt"
   | "archive/unsupported-compression"
   | "text/undecodable"
+  | "text/unreadable"
   | "db/value-not-text"
   | "db/compressed-corrupt"
   | "db/compressed-unknown-dictionary"
