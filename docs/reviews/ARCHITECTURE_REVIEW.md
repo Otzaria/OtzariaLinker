@@ -311,6 +311,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** fixture עם `126.0`, הזחה של 4 ו-`line_index_1: 0`. ‏`planExport` ללא שינויים מחזיר טקסט זהה.
 
+**סטטוס:** תוקן ב־34e0771, בדיקה: `tests/unit/formats/links-byte-identical.test.ts`. התיקון שונה מההצעה: טקסט גולמי נשמר רק לרשומה שהכותב היה מאיית אחרת (ולא לכל רשומה, כדי לא להכפיל את גודל הפרויקט), ו־`floatKeys` בצורת הקובץ מכסה את 351 הקבצים שכל המספרים שלהם `N.0`. הטקסט נכתב כשהוא מפוענח בדיוק לרשומה שהקישור כותב עכשיו, ולא לפי `status === existing`, כי סטטוס לבדו אינו מגן מטקסט ישן או מזויף. בדיקה 3 על הספרייה: 6,875 → 7,228 קבצים זהים (החיים: 750 → 752).
+
 ---
 
 ### C10 — Medium — דחיית הצעות לא "מלכלכת" את הפרויקט, לא נשמרת ב-autosave ואין לה undo
@@ -389,6 +391,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקות רגרסיה:** חמשת המקרים שבטבלה, כל אחד מול `SELECT` של sql.js.
 
+**סטטוס:** תוקן ב־b43b766, בדיקה: `tests/integration/database/sqlite-features.test.ts`. NOCASE, אינדקס חלקי ו־DESC: האינדקס אינו בשימוש (סריקה). מספור `sqlite_autoindex` ממומש כמו ב־SQLite ונבדק מול `PRAGMA index_xinfo` (28 אינדקסים). UTF-16 ועמודות STORED נתמכים. עמודה VIRTUAL נקראת NULL, ומיפוי שלה נדחה בעברית, וכך גם טבלת WITHOUT ROWID שהמפתח שלה NOCASE או DESC.
+
 ---
 
 ### C13 — Medium — כשל בקריאת קישורי המסד נבלע, והצעות שכבר קיימות מוצגות כחדשות
@@ -429,6 +433,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 **תיקון:** לסווג zlib רק אם inflate הצליח. אם נכשל ואם הבתים הם UTF-8 תקין, להחזיר טקסט. לדווח את `undecodable` כאזהרה.
 
 **בדיקת רגרסיה:** `decode` של `"x marks the spot"` מחזיר את הטקסט.
+
+**סטטוס:** תוקן ב־3a95dc4, בדיקה: `tests/unit/database/text-codec.test.ts`. "inflate הצליח" לבדו אינו מספיק: fflate אינו בודק את ה־Adler-32, ו־`"x^ab"` נפרס למחרוזת ריקה. לכן zlib מזוהה רק כשגם סכום הביקורת תואם. המונה `undecodable` עדיין אינו מוצג (צריך ערוץ אזהרות מאוחר מה־worker).
 
 ---
 
@@ -474,6 +480,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** מבנה סינתטי של 30 אלף רשומות נבנה בפחות מ-100ms.
 
+**סטטוס:** תוקן ב־a82a7c9, בדיקה: `tests/integration/database/alt-toc-reader.test.ts` (וגם `alt-toc-real-db.local.test.ts`). במסד האמיתי: 5,071ms → ‏106ms. במבנה הסינתטי: 10,207ms → ‏104ms. התקציב בבדיקה הוא 1,000ms, כי הזמן כולל קריאת עמודים.
+
 ---
 
 ### C18 — Low — כל עריכה מסדרת את כל הפרויקט ב-UI thread
@@ -507,6 +515,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 **תיקון:** BigInt עם `BigInt.asIntN(64)`, והמרה ל-Number כשהערך בטווח הבטוח.
 
 **בדיקת רגרסיה:** שלושת ה-rowids שלמעלה.
+
+**סטטוס:** תוקן ב־9b00b18, בדיקה: `tests/integration/database/lazy-sqlite-rowids.test.ts`.
 
 ---
 
