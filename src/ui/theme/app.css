@@ -461,6 +461,9 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
 .guided-issues li { display: flex; gap: 6px; align-items: center; }
 .guided-card progress { width: 100%; }
 .guided-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0 16px; background: var(--app-bg); }
+/* the notices sit above the flow's buttons, not on them ("חזרה" and "פתיחה בסביבת העבודה" were hidden
+   under them for 5–15 seconds after every step that opens files or runs; V5 UX audit) */
+:root:has(main.guided) .notices { inset-block-end: 76px; }
 .app-bar .guided-back { min-height: 32px; }
 @media (max-width: 720px) {
   .guided { padding: 12px 16px 0; }
