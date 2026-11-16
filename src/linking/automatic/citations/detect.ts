@@ -1,5 +1,5 @@
 import type { BookRef } from "../../../core/links/model";
-import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
+import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, pageShaped, parseAddress, type AddrElem, type Address, type Kind } from "./address";
 import { collectionOf, COMMON_TITLES, normTitle, rambamNameKey, SA_PARTS, saSpelling, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { toGematria } from "../../../core/text/gematria";
@@ -239,9 +239,61 @@ export class CitationScanner {
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
-      const next = this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.otherChapter(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line) ?? this.contextDaf(toks, i, line)) : null);
+      const next = this.yalkut(toks, i, line) ?? this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.otherChapter(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line) ?? this.contextDaf(toks, i, line)) : null);
       if (next !== null) i = next - 1;
     }
+  }
+
+  /**
+   * The Yalkut Shimoni by the parasha or the book of the Tanakh it is arranged by, and its remez: "ובילקוט (בשלח רמז
+   * רנ"ח)", "בילקוט בישעי' (רמז שצ"ג)", "(ילקוט יחזקאל רמז שעג)", "בילקוט (תלים תרי"ג)" — the remez in the Yalkut on the
+   * Torah or on the Nach, which the parasha / the book tells apart (their remazim are numbered each from א). Without a
+   * remez, a parasha of the Torah is that parasha's section of the Yalkut on the Torah (its alt_toc "פרשות"), a whole unit:
+   * "בילקוט פרשת משפטים" (before, the parasha was read in the Torah itself). "ילקוט" is no name in the index (several
+   * books are called so), so it is read here, before the names.
+   */
+  private yalkut(toks: readonly Tok[], i: number, line: number): number | null {
+    const t = toks[i]!;
+    if (!YALKUT_WORD.test(wordShape(t))) return null;
+    let k = i + 1;
+    if (isWord(toks[k], "שמעוני")) k++;
+    const open = opensAt(toks, k);
+    if (open) k++;
+    const w = toks[k];
+    if (w?.kind === "word" && (/^ו?ב?(?:פרשת|פרשה)$/.test(w.text) || (w.geresh && /^ו?ב?פר?$/.test(w.text)))) k++;
+    const torah = this.aliases.lookup("ילקוט שמעוני על התורה")?.targets.find((x) => x.tier === "title");
+    const nach = this.aliases.lookup('ילקוט שמעוני על נ"ך')?.targets.find((x) => x.tier === "title");
+    let book: AliasTarget | undefined;
+    let unit: CitedUnit | null = null;
+    const parsha = this.units?.matchAt(toks, k, ["parsha"]);
+    const full = parsha ? parsha.matches.filter((x) => x.full && x.unit.kind === "parsha") : [];
+    let at: number;
+    if (parsha && full.length && new Set(full.map((x) => x.unit.name)).size === 1) {
+      book = torah;
+      const name = full[0]!.unit.name;
+      unit = { kind: "parsha", name, key: toks.slice(k, parsha.to).map((x) => looseWord(x.key)).join(" "), context: "named", partial: false };
+      at = parsha.to;
+    } else {
+      // a book of the Nach ("בישעי'", "תלים"); a book of the Torah is its first parasha, read above
+      const m = this.aliases.matchAt(toks, k).find((x) => (x.prefix === "" || x.prefix === "ב") && x.entry.targets.length > 0 && x.entry.targets.every((y) => y.collection === "tanakh" && !TORAH_BOOKS.has(normTitle(y.book.title))));
+      if (!m) return null;
+      book = nach;
+      at = m.to;
+    }
+    if (!book) return null;
+    // the remez: "רמז שצ"ג", or in brackets a numeral alone ("(תלים תרי"ג)")
+    const inner = opensAt(toks, at);
+    const from = inner ? at + 1 : at;
+    const addr = parseAddress(toks, from, { enclosed: open || inner });
+    const remez = addr && addr.elems.length === 1 && (addr.elems[0]!.kind === "remez" || (addr.elems[0]!.kind === "?" && (open || inner) && addr.closed && addr.elems[0]!.numeral.form === "gershayim")) ? addr.elems[0]! : null;
+    const cands = this.own([book]);
+    if (!cands.length) return this.drop("self");
+    if (remez) {
+      const to = (open || inner) && addr!.closed ? addr!.to + 1 : addr!.to;
+      return this.emit(toks, line, { from: i, to, candidates: cands, name: wordShape(t), elems: [{ ...remez, kind: "remez", explicit: true }], evidence: "strong", bracketed: !!addr!.closed, ibid: "none", form: "forward", numericName: false, commentators: false, rule: "yalkut-remez" });
+    }
+    if (!unit || addr) return null;
+    return this.emitUnit(toks, line, i, open && closesAt(toks, at) ? at + 1 : at, cands, unit, null, false, "yalkut-parsha");
   }
 
   private drop(reason: string): null {
@@ -273,7 +325,12 @@ export class CitationScanner {
       // references (its parshiyot), then the place under it
       const level = sec ? null : this.namedLevel(toks, i, line, m);
       if (level !== null) return level;
-      const addr = (sec && parseAddress(toks, sec.next)) || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      // "טור או"ח תרסה", "בית יוסף או"ח תמז": after a part of the Shulchan Aruch / the Tur, one bare numeral is its siman
+      const secAddr = sec ? parseAddress(toks, sec.next) : null;
+      const ps = sec && !secAddr ? partSiman(toks, sec.next) : null;
+      // "(קהלת רבה פרשה ז')", "בויקרא רבה סוף פ"ד", "(ויק"ר רפכ"ב)", "(ב"ר ספמ"ז)": a parasha of a Midrash Rabbah
+      const rabbah = !sec && m.entry.targets.length && m.entry.targets.every((t) => isRabbah(t.book.title)) ? rabbahParsha(toks, m.to) : null;
+      const addr = rabbah || secAddr || ps || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       // …or "ע"ז כ"ו א'": a quoted daf and a lone amud letter
@@ -302,13 +359,28 @@ export class CitationScanner {
         if (own.length) cands = own;
       }
       let elems = addr.elems;
+      // "(דברים ד' ל"ט)", "(משלי ד' י"ח)": "ד'" and a numeral is "דף ל"ט" only in a book of dafim — in the Tanakh it is
+      // chapter 4 and the verse (LINKER links them so; before, the citation was dropped as a daf of Deuteronomy)
+      let readAs: string | undefined;
+      const d0 = elems[0]!;
+      if (d0.daletGeresh && elems.length === 1 && cands.length && cands.every((c) => c.collection === "tanakh")) {
+        elems = [{ kind: "?", n: 4, explicit: false, numeral: { n: 4, form: "geresh", common: true } }, { kind: "?", n: d0.n, explicit: false, numeral: d0.numeral, ...(d0.to !== undefined && { to: d0.to }) }];
+        readAs = "dalet-four";
+      }
+      // "בטור חו"מ סימן רס"ב ס"ט": a paragraph of the Tur (its second level), which the Tur's index did not allow before
+      if (cands.length && cands.every((c) => c.collection === "tur") && elems.some((e) => e.kind === "seif")) readAs = "tur-seif";
+      if (ps && addr === ps) readAs = "part-siman";
+      if (rabbah && addr === rabbah) readAs = "rabbah-parsha";
       // "ברכות פרק בתרא דף נ"ו", "במסכת כתובות פרק בתרא": a chapter by an ordinal word is the Gemara's
       if (elems[0]!.ordinal && cands.some((x) => x.collection === "bavli") && !qualifierBefore(toks, i)) cands = cands.filter((x) => x.collection === "bavli");
       // "ובמדרש רבה [ויקרא פכ"ב]", "ברבות [בראשית פי"א]", "ובמד"ר [במדבר פי"ב]": the midrash on that book, not the book
       if (m.entry.targets.every((t) => t.collection === "tanakh") && rabbahBefore(toks, i)) {
         const midrash = this.midrashOf(m.entry.targets);
         if (!midrash.length) return this.drop("midrash-not-in-library");
-        return this.emit(toks, line, { from: i, to: addr.bracketed && addr.closed ? addr.to + 1 : addr.to, candidates: midrash, name: m.entry.text, elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: false, commentators: false, rule: "midrash-rabbah" });
+        // "במד"ר בראשית רפ"ה": the start / end of a parasha, or "פרשה X" (rabbahParsha)
+        const rp = rabbahParsha(toks, m.to);
+        const a = rp ?? addr;
+        return this.emit(toks, line, { from: i, to: a.bracketed && a.closed ? a.to + 1 : a.to, candidates: midrash, name: m.entry.text, elems: rp ? rp.elems : elems, evidence: a.evidence, bracketed: a.closed, ibid: "none", form: "forward", numericName: false, commentators: false, rule: "midrash-rabbah" });
       }
       // "שו"ת הרשב"א ח"ו סי' ה": a work in parts, each its own book ("… חלק ו"): the part picks the book
       const part = elems[0]!.kind === "chelek" && elems.length > 1 ? this.partBook(m, elems[0]!.n) : null;
@@ -319,7 +391,7 @@ export class CitationScanner {
       if (sec && addr.from === sec.next) cands = withSection(cands, sec.part);
       // "נ"ב עיין במג"א סק"א" in a commentary on the Shulchan Aruch: a ס"ק with no siman is in the siman the citing
       // line is on (its own reference), in a commentary on the same part
-      let rule: string | undefined = part ? "part-book" : undefined;
+      let rule: string | undefined = part ? "part-book" : readAs;
       // "סי' ר"ח במג"א ס"ק ז'", "(עיין סימן תקסח במגן אברהם ס"ק י"א)": the siman written right before the name
       if (elems[0]!.kind === "sk" && cands.some((c) => c.collection === "sa-commentary")) {
         for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
@@ -541,7 +613,8 @@ export class CitationScanner {
     // and a verse is the Torah's verse, quoted after a word that happens to be a book's name
     // ("ותניא (דברים ו)", "עין יעקב (דברים לג:כח)", "בתורת כהנים (ויקרא כו, יד-מג)"): only a daf after it is the
     // book's own page ("בזוה"ק בראשית (נב.)")
-    if (!addr.elems.some((e) => e.kind === "daf" || e.amud !== undefined) && this.aliases.matchAt(toks, k).some((x) => x.entry.targets.some((t) => t.collection === "tanakh"))) return null;
+    // …or a quoted number and a lone amud letter ("בזהר (בראשית כ' א')" — page 20a of the Zohar's בראשית, not Genesis 20:1)
+    if (!pageShaped(addr.elems) && this.aliases.matchAt(toks, k).some((x) => x.entry.targets.some((t) => t.collection === "tanakh"))) return null;
     // a parsha of the Torah and a chapter and verse after it is the Torah ("ויקרא (ה, א)") — not this book's level
     if (isDate(toks, addr.to)) return this.drop("date");
     const cands = this.own(m.entry.targets);
@@ -1458,6 +1531,7 @@ export class CitationScanner {
     let rule = c.rule;
     /** a glossary that links the place itself too (CommentatorGlossary.alsoBase): the books as named */
     let alsoBase: readonly AliasTarget[] | null = null;
+    let alsoBaseRule = "title-commentator-base";
     let diburWords: readonly string[] | null = c.dh ?? null;
     if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
@@ -1484,6 +1558,12 @@ export class CitationScanner {
         if (!moved.length) {
           this.drop("commentator-not-in-library");
           return c.to;
+        }
+        // "(שבת סח א, ותוס' ד"ה דאית)", "(סנהדרין מח א, ורש"י שם ד"ה מצוה)": the place AND the commentator's words on
+        // it ("and Tosafot") — the place is cited too (LINKER links both; before, only the commentary was linked)
+        if (!before && after && isPunct1(toks[c.to], ",") && after.next === c.to + 2 && /^ו/.test(toks[c.to + 1]!.text)) {
+          alsoBase = candidates;
+          alsoBaseRule = "commentator-after-base";
         }
         movedFrom = candidates;
         candidates = moved;
@@ -1554,7 +1634,7 @@ export class CitationScanner {
       // ...and the place itself, as written (the library links both: LIBRARY_BENCHMARK §6.4). A citation of
       // its own, so each is resolved and scored by itself; "שם" after them follows the commentator's (this.last)
       const { commentator: _who, movedFrom: _from, dh: _dh, ...plain } = cit;
-      this.citations.push({ ...plain, seq: this.seq++, candidates: [...alsoBase].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]), rule: "title-commentator-base" });
+      this.citations.push({ ...plain, seq: this.seq++, candidates: [...alsoBase].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]), rule: alsoBaseRule });
     }
     this.last = { c: cit, line, elems: c.elems };
     if (c.elems[0] && (c.elems[0].kind === "daf" || c.elems[0].amud !== undefined) && (cit.movedFrom ?? cit.candidates).some((x) => x.collection === "bavli" && !x.book.title.includes(" על "))) this.lastTalmud = { c: cit, line };
@@ -1732,15 +1812,28 @@ function sectionAt(toks: readonly Tok[], at: number): { part: string; next: numb
   const i = isOpen(toks[at]) ? at + 1 : at;
   const t = toks[i];
   if (!t || t.kind !== "word") return null;
-  // "ב"ח בח"מ סי' רמ"ב": the part may carry a ב
+  // "ב"ח בח"מ סי' רמ"ב": the part may carry a ב; "ב"י ליו"ד סי' רט"ז", "בדרכי משה ליו"ד": or a ל
   const shape = wordShape(t);
-  const one = /^ב./.test(shape) && Object.values(SA_PARTS).some((n) => n.includes(shape.slice(1))) ? shape.slice(1) : shape;
+  const one = /^[בל]./.test(shape) && Object.values(SA_PARTS).some((n) => n.includes(shape.slice(1))) ? shape.slice(1) : shape;
   const two = toks[i + 1]?.kind === "word" ? `${one} ${wordShape(toks[i + 1]!)}` : "";
   for (const [part, names] of Object.entries(SA_PARTS)) {
     if (two && names.includes(two)) return { part, next: i + 2 };
     if (names.includes(one)) return { part, next: i + 1 };
   }
   return null;
+}
+
+/**
+ * "טור או"ח תרסה,", "בית יוסף או"ח תמז לדעת": after a part of the Shulchan Aruch, one bare numeral — the siman (the
+ * part is the evidence that a place follows). Not a numeral that is also a word ("באו"ח לא נזכר"), and not before
+ * another numeral (parseAddress reads two) or a word in quote marks that may be a number.
+ */
+function partSiman(toks: readonly Tok[], at: number): Address | null {
+  const n = numeralOf(toks[at]);
+  if (!n || n.common || n.form === "digits") return null;
+  const after = toks[at + 1];
+  if (after?.kind === "word" && (numeralOf(after) || after.gershayim)) return null;
+  return { elems: [{ kind: "siman", n: n.n, explicit: false, numeral: n }], from: at, to: at + 1, bracketed: false, closed: false, evidence: "medium" };
 }
 
 /** A part given after the name: a Shulchan Aruch book must BE that part; another book gets it as its first level. */
@@ -2167,6 +2260,54 @@ function abbreviates(letters: string, words: readonly string[]): boolean {
 }
 
 /** "מדרש רבה", "ברבות", "במד"ר" (maybe "פרשה"/"פ'" after it) right before a book of the Tanakh: its midrash rabbah */
+/** "ילקוט", "בילקוט", "ובילקוט", "ילק"ש", "יל"ש" (the Yalkut Shimoni) */
+const YALKUT_WORD = /^[ובד]{0,2}(?:ילקוט|ילק"ש|יל"ש)$/;
+const TORAH_BOOKS: ReadonlySet<string> = new Set(["בראשית", "שמות", "ויקרא", "במדבר", "דברים"]);
+
+/** the Midrash Rabbah on a book of the Torah or a scroll (its first level is the parasha) */
+const isRabbah = (title: string): boolean => /^(?:בראשית|שמות|ויקרא|במדבר|דברים|שיר השירים|רות|איכה|קוהלת|קהלת|אסתר) רבה$/.test(normTitle(title));
+
+/** the most parshiyot a Midrash Rabbah has (בראשית רבה: 100) — "רפ"ב" is never 282 there */
+const RABBAH_MAX = 100;
+const PARSHA_MARK = /^ו?ב?(?:פרשה|פרש')$/;
+
+/**
+ * A parasha of a Midrash Rabbah as books write it where the generic address fails: "פרשה ז'" (no marker of a chapter),
+ * "רפכ"ב" / "ספמ"ז" (the start / end of a parasha — elsewhere "רפ"ב" may be 282, and "ספ"X" is read only up to 30),
+ * "סוף פ"ד". Then the rest of the place, if any ("פרשה ב' סימן ג'").
+ */
+function rabbahParsha(toks: readonly Tok[], at: number): Address | null {
+  const open = opensAt(toks, at);
+  let j = open ? at + 1 : at;
+  const t = toks[j];
+  if (!t || t.kind !== "word") return null;
+  let n: number | null = null;
+  const shape = wordShape(t);
+  if (PARSHA_MARK.test(shape)) {
+    n = numeralOf(toks[j + 1])?.n ?? null;
+    j += 2;
+  } else if (/^ו?ב?(?:סוף|ריש)$/.test(t.text) && !t.gershayim && toks[j + 1]?.kind === "word" && /^פ[א-ת]?"[א-ת]$/.test(wordShape(toks[j + 1]!))) {
+    n = strictValue(toks[j + 1]!.text.slice(1));
+    j += 2;
+  } else if (t.gershayim && !t.geresh && /^[רס]?פ./.test(t.text) && t.gershayimAt === t.text.length - 1) {
+    // "פי"ו": 16 the plain way, as in "בב"ר פי"ו"
+    const rest = t.text.slice(t.text.indexOf("פ") + 1);
+    n = strictValue(rest) ?? (rest === "יו" ? 16 : rest === "יה" ? 15 : null);
+    // a plain "פ"כ" the generic address reads already; here only what it cannot
+    if (t.text[0] === "פ" && strictValue(rest)) return null;
+    j += 1;
+  }
+  if (!n || n > RABBAH_MAX) return null;
+  const elems: AddrElem[] = [{ kind: "perek", n, explicit: true, numeral: { n, form: "gershayim", common: false } }];
+  let to = j;
+  const rest = parseAddress(toks, isPunct1(toks[j], ",") ? j + 1 : j, { after: "perek", enclosed: open });
+  if (rest && rest.elems.every((e) => e.kind !== "perek" && e.kind !== "daf")) {
+    elems.push(...rest.elems);
+    to = rest.to;
+  }
+  return { elems, from: at, to, bracketed: open, closed: open && closesAt(toks, to), evidence: "strong" };
+}
+
 const RABBAH_WORDS: ReadonlySet<string> = new Set(["רבות", "ברבות", "וברבות", 'מד"ר', 'במד"ר', 'ובמד"ר', 'מדר"ר', 'במדר"ר', 'ובמדר"ר']);
 const PARSHA_WORDS: ReadonlySet<string> = new Set(["פרשה", "בפרשה", "פ'", "פר'", "פרש'"]);
 

@@ -48,6 +48,11 @@ export interface AddrElem {
   readonly afterPeh?: true;
   /** a chapter written as an ordinal word ("פרק קמא", "פרק בתרא"); n 0 is the last chapter ("בתרא") */
   readonly ordinal?: true;
+  /**
+   * a daf read from "ד'" and a numeral with no amud after it ("ד' ל"ט"): in a book that has no dafim it is the
+   * numeral 4 and the next number ("(דברים ד' ל"ט)" — chapter 4, verse 39; detect.ts)
+   */
+  readonly daletGeresh?: true;
 }
 
 /** ordinal words for a chapter ("פרק קמא", "פרק שלישי"); "בתרא" / "אחרון" — the last (0, told by the book) */
@@ -337,7 +342,10 @@ function readElem(toks: readonly Tok[], j: number, prev: Kind | null, inBrackets
     // "(דניאל ד', כ"ד)": "ד'" with no numeral after it is the numeral 4, not "דף"
     if (!num && !(m.width === 1 && m.kind === "daf" && shape(t) === "ד'")) return null;
     if (num) {
-      if (m.kind === "daf") return readDaf(toks, k, num, true);
+      if (m.kind === "daf") {
+        const d = readDaf(toks, k, num, true);
+        return m.width === 1 && shape(t) === "ד'" && d.elem.amud === undefined && d.elem.maybeAmud === undefined ? { ...d, elem: { ...d.elem, daletGeresh: true } } : d;
+      }
       return withRange(toks, k + 1, { kind: m.kind, n: num.n, explicit: true, numeral: num, ...(m.v4 && { v4: true }), ...(shape(t) === "פ'" && { afterPeh: true }) });
     }
   }
@@ -466,6 +474,16 @@ function withRange(toks: readonly Tok[], next: number, elem: AddrElem): { elem: 
     if (end && end.n > elem.n && end.n - elem.n <= 50) return { elem: { ...elem, to: end.n }, next: next + 2 };
   }
   return { elem, next };
+}
+
+/**
+ * A place that may be a page of a book's printed pagination: a daf, or a quoted number and a lone "א'"/"ב'" after it,
+ * maybe after a volume ("בזוהר (ח"ב מ"ח א')", "בזהר (בראשית כ' א')" — altdaf.ts reads the letter as the amud)
+ */
+export function pageShaped(elems: readonly AddrElem[]): boolean {
+  if (elems.some((e) => e.kind === "daf" || e.amud !== undefined)) return true;
+  const es = elems[0]?.kind === "chelek" ? elems.slice(1) : elems;
+  return es.length === 2 && es[0]!.kind === "?" && (es[0]!.numeral.form === "gershayim" || es[0]!.numeral.form === "geresh") && es[1]!.kind === "?" && (es[1]!.n === 1 || es[1]!.n === 2) && es[1]!.numeral.form === "geresh";
 }
 
 /** "ע"ב", "עמוד א" alone at toks[i] (an amud with no daf: "ושם ע"ב") → [amud, tokens], or null. */
