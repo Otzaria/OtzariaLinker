@@ -132,7 +132,8 @@ test("keyboard only: the guided flow from the home card to the download", async 
   await page.keyboard.press("Enter");
   expect((await dl).suggestedFilename()).toMatch(/\.zip$/);
   // the button gave way to "what now?": focus is on what happened, not on the top of the page
-  expect((await focused(page))?.name).toMatch(/ירד|הורד/);
+  // the focus moves when the notice is rendered, a frame or two after the download event
+  await expect.poll(async () => (await focused(page))?.name ?? "").toMatch(/ירד|הורד/);
   expect(seen.errors).toEqual([]);
 });
 
