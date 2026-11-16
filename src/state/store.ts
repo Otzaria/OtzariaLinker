@@ -1096,14 +1096,33 @@ export class AppStore {
     this.notices.value = this.notices.value.filter((n) => n.id !== id);
   }
 
+  /**
+   * Tasks that run now, oldest first. Two can overlap (a drop of files while an engine runs); `task`
+   * shows the latest, and a task that ends shows the one before it again — it never clears the slot
+   * while another still runs, which hid that one's progress and its cancel (review C16).
+   */
+  private readonly running: { task: Task }[] = [];
+
+  private showTask(): void {
+    this.task.value = this.running.at(-1)?.task ?? null;
+  }
+
   /** Runs a long task with a cancel and progress; `count` turns the progress into the task's own units (audit F21). */
   async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null> {
     const ac = new AbortController();
     const logged = logTask(this.log, label);
     const startedAt = Date.now();
-    this.task.value = { label, done: 0, total: 0, cancel: () => ac.abort(), startedAt };
+    const mine = { task: { label, done: 0, total: 0, cancel: () => ac.abort(), startedAt } as Task };
+    this.running.push(mine);
+    this.showTask();
     try {
-      const result = await run({ signal: ac.signal, onProgress: (done, total) => (this.task.value = { label, done, total, cancel: () => ac.abort(), startedAt, ...(count && total > 0 && { count: count(done, total) }) }) });
+      const result = await run({
+        signal: ac.signal,
+        onProgress: (done, total) => {
+          mine.task = { label, done, total, cancel: () => ac.abort(), startedAt, ...(count && total > 0 && { count: count(done, total) }) };
+          if (this.running.at(-1) === mine) this.task.value = mine.task;
+        },
+      });
       logged.ok();
       return result;
     } catch (err) {
@@ -1112,7 +1131,9 @@ export class AppStore {
       else (logged.failed(err), this.notify("error", e.message ?? String(err)));
       return null;
     } finally {
-      this.task.value = null;
+      const i = this.running.indexOf(mine);
+      if (i >= 0) this.running.splice(i, 1);
+      this.showTask();
     }
   }
 

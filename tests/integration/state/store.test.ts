@@ -399,6 +399,48 @@ describe("AppStore — a rejection is a user action like any other (review C10)"
   });
 });
 
+describe("AppStore — tasks that run at the same time (review C16)", () => {
+  const deferred = () => {
+    let resolve!: (v: string) => void;
+    const promise = new Promise<string>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  it("a task that ends never takes away another one's progress and cancel", async () => {
+    const { store } = makeStore();
+    const a = deferred();
+    const b = deferred();
+    let bSignal: AbortSignal | undefined;
+    const ta = store.runTask("משימה א", () => a.promise);
+    const tb = store.runTask("משימה ב", (o) => ((bSignal = o.signal), b.promise));
+    expect(store.task.value!.label).toBe("משימה ב");
+    a.resolve("א");
+    expect(await ta).toBe("א");
+    expect(store.task.value!.label).toBe("משימה ב"); // used to be null while B still ran
+    store.task.value!.cancel();
+    expect(bSignal!.aborted).toBe(true);
+    b.resolve("ב");
+    await tb;
+    expect(store.task.value).toBeNull();
+  });
+
+  it("when the later task ends first, the earlier one is shown again with its own cancel", async () => {
+    const { store } = makeStore();
+    const a = deferred();
+    const b = deferred();
+    let aSignal: AbortSignal | undefined;
+    const ta = store.runTask("משימה א", (o) => ((aSignal = o.signal), a.promise));
+    const tb = store.runTask("משימה ב", () => b.promise);
+    b.resolve("ב");
+    await tb;
+    expect(store.task.value!.label).toBe("משימה א");
+    store.task.value!.cancel();
+    expect(aSignal!.aborted).toBe(true);
+    a.resolve("א");
+    await ta;
+    expect(store.task.value).toBeNull();
+  });
+});
+
 describe("AppStore — a database whose links cannot be read (review C13)", () => {
   it("says so, keeps \"approve all certain\" from approving what may exist, and a retry reads them", async () => {
     const reg = new SourceRegistry();
