@@ -11,6 +11,8 @@ body { background: var(--app-bg); color: var(--on-surface); font: var(--fs-md) /
 #app { height: 100%; display: flex; flex-direction: column; }
 button, input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* a container or heading that takes focus only to place the keyboard user (keyboard.ts), not a control */
+.focus-target:focus { outline: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .icon { flex: none; display: block; }
 .muted { color: var(--on-surface-variant); }

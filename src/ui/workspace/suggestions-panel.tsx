@@ -341,23 +341,40 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
+        {/* the row's decision, which the eye reads from its colour */}
+        {state !== "pending" && <span class="sr-only">, {STATE_LABEL[state]}</span>}
       </td>
       <td onClick={(e) => e.stopPropagation()} class="acts">
-        <Decide s={s} state={state} />
+        <Decide s={s} state={state} what={`ההצעה לשורה ${end(v.from.line, v.from.end)}`} />
       </td>
     </tr>
   );
 }
 
-function Decide({ s, state }: { s: Suggestion; state: SuggestionState }) {
+/** Approve / reject on a table row. `what` names the suggestion: every row has the same two buttons. */
+function Decide({ s, state, what }: { s: Suggestion; state: SuggestionState; what: string }) {
   const store = useStore();
   if (state === "exists") return <span class="muted">{STATE_LABEL.exists}</span>;
+  /**
+   * A decided row leaves the "pending" filter, and its button with it: focus goes on to the same
+   * button of the next row, so the keyboard user decides the next one without finding the table again.
+   */
+  const decide = (e: MouseEvent, act: () => void) => {
+    const btn = e.currentTarget as HTMLElement;
+    const row = btn.closest("tr");
+    const next = (row?.nextElementSibling ?? row?.previousElementSibling) as HTMLElement | null;
+    act();
+    requestAnimationFrame(() => {
+      if (!row || row.isConnected || !next?.isConnected) return;
+      (next.querySelector<HTMLElement>(`[data-decide="${btn.dataset.decide}"]`) ?? next).focus();
+    });
+  };
   return (
     <span class="decide">
-      <button class="icon-btn" aria-pressed={state === "approved"} onClick={() => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id]))} title="אישור" aria-label="אישור">
+      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
         <Icon name="oz_check" size={18} />
       </button>
-      <button class="icon-btn" aria-pressed={state === "rejected"} onClick={() => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id]))} title="דחייה" aria-label="דחייה">
+      <button class="icon-btn" data-decide="reject" aria-pressed={state === "rejected"} onClick={(e) => decide(e, () => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id])))} title="דחייה" aria-label={`דחיית ${what}`}>
         <Icon name="oz_cross" size={18} />
       </button>
     </span>

@@ -26,6 +26,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   /** what was downloaded: the dialog stays open on "what now?" (audit F13) */
   const [saved, setSaved] = useState<string | null>(null);
   const advanced = store.prefs.advanced.value;
+  // after the download the buttons give way to "what now?": focus goes to what happened, which is read aloud
+  const savedNote = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (saved) savedNote.current?.focus();
+  }, [saved]);
 
   const replan = () => void store.exchange.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
   useEffect(() => {
@@ -54,7 +59,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         {saved && plan ? (
           <>
             <div class="body">
-              <p class="saved-note">
+              <p class="saved-note focus-target" ref={savedNote} tabIndex={-1}>
                 <Icon name="fl_checkmark_circle" size={18} />
                 <span>{saved}</span>
               </p>
