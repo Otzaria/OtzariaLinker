@@ -50,6 +50,16 @@ const UNIT = MAXLINK_PROGRESS_UNIT;
 
 const withoutWhy = ({ why: _w, ...b }: JobBook): JobBook => b;
 
+/** " ספר אחד נעצר באמצע…": the books stopped while they ran, whose suggestions are shown as partial; "" when none. */
+function partialText(job: JobRecord): string {
+  const cut = job.books.filter((b) => b.status === "pending" && b.partial);
+  if (!cut.length) return "";
+  const n = cut.reduce((s, b) => s + b.partial!, 0).toLocaleString("he");
+  return cut.length === 1
+    ? ` "${cut[0]!.title}" נעצר באמצע: ${n} ההצעות שנמצאו בו עד העצירה מוצגות, והן חלקיות — "המשך" מריץ אותו שוב מההתחלה.`
+    : ` ${cut.length.toLocaleString("he")} ספרים נעצרו באמצע: ${n} ההצעות שנמצאו בהם עד העצירה מוצגות, והן חלקיות — "המשך" מריץ אותם שוב מההתחלה.`;
+}
+
 /**
  * Binds the book refs inside a stored result to this session's books by title (BookRef: key, title,
  * origin). A title that is not open keeps its old key: it names no open book.
@@ -467,7 +477,12 @@ export class MaxLinkState {
           const t = Date.now();
           const at = settled * UNIT;
           try {
-            const res = await run(own, { ...(engineOptions && { engineOptions }), ...(sefariaOwned && { sefariaOwned }) }, { signal: ctl.signal, onProgress: (d, n) => opts.onProgress?.(at + (n > 0 ? Math.min(UNIT - 1, Math.floor((d / n) * UNIT)) : 0), of * UNIT) });
+            // a pause or stop hands back what the book's engines found so far (keepPartial): shown as partial
+            const res = await run(own, { ...(engineOptions && { engineOptions }), ...(sefariaOwned && { sefariaOwned }) }, { signal: ctl.signal, keepPartial: true, onProgress: (d, n) => opts.onProgress?.(at + (n > 0 ? Math.min(UNIT - 1, Math.floor((d / n) * UNIT)) : 0), of * UNIT) });
+            if (res.stopped) {
+              this.takePartial(title, own, res);
+              break;
+            }
             this.take(title, own, res, Date.now() - t);
           } catch (err) {
             if (ctl.signal.aborted) break;
@@ -505,7 +520,7 @@ export class MaxLinkState {
     if (state !== "done")
       this.host.notify(
         "info",
-        `הקישור המרבי ${state === "paused" ? "הושהה" : "נעצר"}: ${t.settled.toLocaleString("he")} מתוך ${t.runnable.toLocaleString("he")} ספרים הסתיימו${shown ? ", וההצעות שלהם כאן" : ""}. "המשך" ממשיך מהספר הבא${lost ? " אחרי שתפתחו שוב את הספרים" : ""}.`,
+        `הקישור המרבי ${state === "paused" ? "הושהה" : "נעצר"}: ${t.settled.toLocaleString("he")} מתוך ${t.runnable.toLocaleString("he")} ספרים הסתיימו${shown ? ", וההצעות שלהם כאן" : ""}.${partialText(this.job.peek()!)} "המשך" ממשיך מהספר הבא${lost ? " אחרי שתפתחו שוב את הספרים" : ""}.`,
       );
     else if (shown) {
       const c = this.report.value!.overall;
@@ -517,21 +532,35 @@ export class MaxLinkState {
     return shown;
   }
 
-  /** Keeps what one book's call returned (ids without session keys), and its status. */
-  private take(title: string, steps: readonly PlanStep[], res: MaxLinkJobResult, ms: number): void {
-    const job = this.job.peek()!;
+  /** A book stopped while it ran: what its engines found is shown (partial); the book still waits, and runs again from its start. */
+  private takePartial(title: string, steps: readonly PlanStep[], res: MaxLinkJobResult): void {
+    const result = this.resultOf(title, steps, res);
+    if (!result.steps.some((s) => s.item.result?.suggestions.length)) return;
+    this.results.set(title, { ...result, partial: true });
+    const book = this.job.peek()!.books.find((b) => b.title === title)!;
+    this.setBook(title, { ...book, partial: result.steps.reduce((n, s) => n + (s.item.result?.suggestions.length ?? 0), 0) });
+  }
+
+  private resultOf(title: string, steps: readonly PlanStep[], res: MaxLinkJobResult): BookResult {
     const byId = new Map(steps.map((s) => [s.id, s]));
     const stored: StoredStep[] = res.items.flatMap((it) => {
       const s = byId.get(it.stepId);
       return s ? [{ id: s.id, kind: s.kind, engine: s.engine, ...(s.kind === "pair" && { target: s.target }), item: withStableIds(it) }] : [];
     });
-    const result: BookResult = {
+    return {
       title,
       source: steps[0]!.source,
       steps: stored,
       dbLinkKeys: res.dbLinkKeys,
       ...(res.dbLinksUnread?.length && { dbLinksUnread: res.dbLinksUnread.map((u) => ({ title: this.host.refOf(u.key).title, why: u.why })) }),
     };
+  }
+
+  /** Keeps what one book's call returned (ids without session keys), and its status. */
+  private take(title: string, steps: readonly PlanStep[], res: MaxLinkJobResult, ms: number): void {
+    const job = this.job.peek()!;
+    const result = this.resultOf(title, steps, res);
+    const stored = result.steps;
     this.results.set(title, result);
     const i = job.books.findIndex((b) => b.title === title);
     const done = stored.map((s) => ({ engine: s.engine, ...(s.item.error !== undefined && { error: s.item.error }), suggestions: s.item.result?.suggestions.length ?? 0 }));
@@ -615,6 +644,7 @@ export class MaxLinkState {
         ? [{ code: "maxlink/pair-disagree", text: `ב־${st.suspectPairs} זוגות ספרים השיטות סותרות זו את זו ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה של שיטה אחת אינה "ודאית"; הן מסומנות לבדיקה.` }]
         : []),
       ...(failed ? [{ code: "maxlink/errors", text: `${failed} שלבים נכשלו; שאר השלבים רצו. הפרטים ב"דוח הקישור המרבי".` }] : []),
+      ...(partialText(job) ? [{ code: "maxlink/partial", text: partialText(job).trim() }] : []),
     ];
     batch(() => {
       this.host.suggestions.dbLinkKeys.value = db;

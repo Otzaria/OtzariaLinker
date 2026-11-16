@@ -1,4 +1,5 @@
 import { strToU8 } from "fflate";
+import { effect } from "@preact/signals";
 import { describe, expect, it } from "vitest";
 import type { EngineId } from "../../../src/linking/automatic";
 import { SourceRegistry } from "../../../src/sources/registry";
@@ -171,5 +172,66 @@ describe("max-link as a batch job", () => {
     expect(st.get(on(1)[1]!)).toBe("approved");
     expect(st.get(on(4)[0]!)).toBe("rejected");
     expect(store.suggestions.counts.value).toMatchObject({ approved: 3, rejected: 1 });
+  });
+});
+
+/*
+ * A cancel keeps what the engines found (owner's default, with the engines' "engine/aborted"): never
+ * silently complete, never thrown away. A long dibur-hamatchil pair makes the engine report progress
+ * before it ends, and the cancel comes at its first report.
+ */
+describe("a cancel keeps the partial suggestions, marked partial", () => {
+  const VERSES = 400;
+  const bigBase = ["<h1>שמות</h1>", "<h2>פרק א</h2>", ...Array.from({ length: VERSES }, (_, i) => `פסוק ${i + 1} ובו מילים מיוחדות ${i + 1} כגון אלף${i} ובית${i} וגימל${i}.`)];
+  const bigCommentary = ["<h1>פירוש ארוך על שמות</h1>", "<h2>פרק א</h2>", ...Array.from({ length: VERSES }, (_, i) => `אלף${i} ובית${i} - פירוש על הפסוק ${i + 1}.`)];
+  const big = [text("גדול/שמות.txt", bigBase), text("גדול/פירוש ארוך על שמות.txt", bigCommentary)];
+  const cancelOnProgress = (store: AppStore, act: () => void) => {
+    const stop = effect(() => {
+      const t = store.task.value;
+      if (t && t.done > 0 && t.total > 0) (stop(), act());
+    });
+    return stop;
+  };
+
+  it("a single engine run: the suggestions found so far are the run, said to be partial", async () => {
+    const { store } = makeStore();
+    await store.openFiles(big);
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    const stop = cancelOnProgress(store, () => store.task.value!.cancel());
+    expect(await store.suggestions.runEngine("dibur-hamatchil", key("פירוש ארוך על שמות"), key("שמות"))).toBe(true);
+    stop();
+    const run = store.suggestions.run.value!;
+    expect(run.partial).toBe(true);
+    expect(run.label).toContain("חלקי");
+    expect(run.result.notes.some((n) => n.code === "engine/aborted")).toBe(true);
+    expect(run.result.suggestions.length).toBeGreaterThan(0);
+    expect(run.result.suggestions.length).toBeLessThan(VERSES);
+    expect(store.notices.value.at(-1)).toMatchObject({ kind: "warning" });
+    expect(store.notices.value.at(-1)!.text).toContain("חלקיות");
+    expect(store.notices.value.some((n) => n.text.includes("שום דבר לא השתנה"))).toBe(false);
+  });
+
+  it("a max-link job: the stopped book's suggestions are shown as partial; it waits and runs again whole on resume", async () => {
+    const { store } = makeStore();
+    await store.openFiles(big);
+    const scope = { kind: "source", id: store.sources.value[0]!.info.id } as const;
+    const stop = cancelOnProgress(store, () => store.maxLink.pause());
+    await store.maxLink.run(store.maxLink.plan(scope, new Set<EngineId>(["dibur-hamatchil"])), "גדול");
+    stop();
+    let job = store.maxLink.job.value!;
+    const book = job.books.find((b) => b.title === "פירוש ארוך על שמות")!;
+    expect(book.status).toBe("pending");
+    expect(book.partial).toBeGreaterThan(0);
+    const run = store.suggestions.run.value!;
+    expect(run.result.suggestions).toHaveLength(book.partial!);
+    expect(run.result.notes.some((n) => n.code === "maxlink/partial")).toBe(true);
+    expect(store.notices.value.at(-1)!.text).toContain("נעצר באמצע");
+    await store.maxLink.resume();
+    job = store.maxLink.job.value!;
+    const whole = job.books.find((b) => b.title === "פירוש ארוך על שמות")!;
+    expect(whole.status).toBe("done");
+    expect(whole.partial).toBeUndefined();
+    expect(whole.suggestions).toBeGreaterThan(book.partial!);
+    expect(store.suggestions.run.value!.result.notes.some((n) => n.code === "maxlink/partial")).toBe(false);
   });
 });

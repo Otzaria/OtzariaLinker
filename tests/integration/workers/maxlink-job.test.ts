@@ -132,12 +132,18 @@ describe("maxlinkJob", () => {
     expect(missing.items.filter((i) => i.result).length).toBe(plan.steps.length - 1);
   });
 
-  it("stops when cancelled", async () => {
+  it("cancelled, it stops and returns what it found: the step that ran is kept, marked stopped; the rest do not run", async () => {
     const { reg, all, texts } = await setup();
     const plan = planMaxLink({ selected: texts.map((b) => b.key), library: all, singleEngines: [] });
+    expect(plan.steps.length).toBeGreaterThan(1);
     const ac = new AbortController();
-    const run = maxlinkJob(reg, plan.steps, {}, { signal: ac.signal, progress: () => ac.abort() });
-    await expect(run).rejects.toThrow();
+    // cancelled during the first step: it ends with what it has, and the next steps do not start
+    const res = await maxlinkJob(reg, plan.steps, {}, { signal: ac.signal, progress: (d) => d > 0 && ac.abort() });
+    expect(res.stopped).toBe(true);
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]).toMatchObject({ stepId: plan.steps[0]!.id, stopped: true });
+    // what the engine found until it saw the cancel (an engine that saw it says so: engine/aborted)
+    expect(res.items[0]!.result).toBeTruthy();
   });
 });
 

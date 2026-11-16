@@ -36,6 +36,11 @@ export interface JobBook {
   fingerprint?: string;
   /** it changed since its last run, and the user had decided on this many suggestions on it: kept, to check */
   changedDecisions?: number;
+  /**
+   * Stopped while it ran (pause, stop): it still waits, and the suggestions its engines found until then
+   * — this many — are shown, marked partial. "המשך" runs it again from its start.
+   */
+  partial?: number;
 }
 
 export interface JobRecord {
@@ -69,6 +74,8 @@ export interface StoredStep {
 /** What one book's run left: kept in memory and in the browser until the job is replaced. */
 export interface BookResult {
   title: string;
+  /** what the book's engines found before the job was stopped (MaxLinkJobResult.stopped): shown, never kept as its result */
+  partial?: boolean;
   source: BookRef;
   steps: StoredStep[];
   /** linePairKey (by titles) of the database links of the book */
@@ -166,7 +173,7 @@ export function finishBook(book: JobBook, steps: readonly { engine: EngineId; er
     else t[1]++;
     suggestions += s.suggestions;
   }
-  const { why: _w, changedDecisions: _c, ...rest } = book;
+  const { why: _w, changedDecisions: _c, partial: _p, ...rest } = book;
   const status: JobBookStatus = errors.length ? "failed" : suggestions ? "done" : "no-match";
   return { ...rest, status, engines, suggestions, ms, ...(fingerprint && { fingerprint }), ...(errors.length && { why: [...new Set(errors)].join(" · ") }), ...(book.changedDecisions && { changedDecisions: book.changedDecisions }) };
 }
@@ -175,7 +182,7 @@ export function finishBook(book: JobBook, steps: readonly { engine: EngineId; er
 export function failBook(book: JobBook, why: string, ms: number): JobBook {
   const engines: Partial<Record<EngineId, EngineTally>> = {};
   for (const [e, t] of Object.entries(book.engines) as [EngineId, EngineTally][]) engines[e] = [t[0], 0, t[0]];
-  const { fingerprint: _f, ...rest } = book;
+  const { fingerprint: _f, partial: _p, ...rest } = book;
   return { ...rest, status: "failed", why, engines, suggestions: 0, ms };
 }
 

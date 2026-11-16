@@ -176,8 +176,17 @@ export async function maxlinkJob(
 
   let loaded = null as { key: string; source: EngineBook; target: EngineBook } | null;
   let loadError = null as { key: string; message: string } | null;
+  /**
+   * Cancelled: the job stops and returns what it found — the steps that ran, the one that was running with
+   * what its engine found until then (engines stop with an "engine/aborted" note) marked `stopped` — never
+   * throws it away (the batch job keeps it as a partial book).
+   */
+  let stopped = false;
   for (const [i, step] of sorted.entries()) {
-    ctx.signal?.throwIfAborted();
+    if (ctx.signal?.aborted) {
+      stopped = true;
+      break;
+    }
     ctx.progress?.(i * UNIT, total);
     const inner: EngineContext = {
       ...(ctx.signal && { signal: ctx.signal }),
@@ -223,9 +232,17 @@ export async function maxlinkJob(
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);
         result = await run(registry, step.source, optionsOf(step.engine), inner);
       }
-      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0 });
+      const cut = ctx.signal?.aborted === true;
+      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...(cut && { stopped: true }) });
+      if (cut) {
+        stopped = true;
+        break;
+      }
     } catch (err) {
-      if (ctx.signal?.aborted) throw err;
+      if (ctx.signal?.aborted) {
+        stopped = true;
+        break;
+      }
       items.push({ stepId: step.id, unmatched: 0, error: messageOf(err), ms: Date.now() - t0 });
     }
   }
@@ -236,27 +253,28 @@ export async function maxlinkJob(
   // failure, and the run must say so — its suggestions may already be in the library (review C13, M7)
   const keys = new Set<string>();
   const unread: { key: string; why: string }[] = [];
+  // read also after a cancel (from the links table's book indexes: quick), so what was found is judged "already exists" too
   for (const [j, key] of focusBooks.entries()) {
-    ctx.signal?.throwIfAborted();
     ctx.progress?.((steps.length + j) * UNIT, total);
     try {
       for (const l of await registry.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
     } catch (err) {
-      if (ctx.signal?.aborted) throw err;
       unread.push({ key, why: messageOf(err) });
     }
   }
+  if (ctx.signal?.aborted) stopped = true;
   // the fingerprint of every book the steps depend on (V5 P1-8): the ones a single-book engine read by
   // itself are hashed here (a text book is in its source's cache; a failing read leaves it out)
   const wanted = new Set<string>(focusBooks);
   for (const s of steps) if (s.kind === "pair") wanted.add(s.target.key);
-  const missing = [...wanted].filter((k) => !fps.has(k));
+  // a stopped book runs again from its start, and gets its fingerprints then
+  const missing = stopped ? [] : [...wanted].filter((k) => !fps.has(k));
   if (missing.length) Object.entries(await fingerprintsJob(registry, missing, { ...(ctx.signal && { signal: ctx.signal }) })).forEach(([k, v]) => fps.set(k, v));
   ctx.progress?.(total, total);
   // back in the plan's order
   const pos = new Map(steps.map((s, i) => [s.id, i]));
   items.sort((a, b) => pos.get(a.stepId)! - pos.get(b.stepId)!);
-  return { items, dbLinkKeys: [...keys], ...(unread.length && { dbLinksUnread: unread }), fingerprints: Object.fromEntries([...fps].filter(([k]) => wanted.has(k))) };
+  return { items, dbLinkKeys: [...keys], ...(unread.length && { dbLinksUnread: unread }), ...(stopped && { stopped: true }), fingerprints: Object.fromEntries([...fps].filter(([k]) => wanted.has(k))) };
 }
 
 /**

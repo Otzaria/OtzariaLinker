@@ -92,6 +92,7 @@ function BookRow({ b }: { b: JobBook }) {
         {b.status === "done" && ` · ${n(b.suggestions)} הצעות`}
       </span>
       {b.why && <span class="why-not">{b.why}</span>}
+      {b.status === "pending" && b.partial ? <span class="why-not">נעצר באמצע: {n(b.partial)} הצעות חלקיות מוצגות. ירוץ שוב מההתחלה.</span> : null}
       {b.changedDecisions ? <span class="why-not">הספר השתנה מאז ההרצה הקודמת: {n(b.changedDecisions)} החלטות שלכם עליו נשמרו כמו שהן — בדקו אותן.</span> : null}
     </li>
   );

@@ -37,6 +37,8 @@ export interface OpenResult {
 export interface CallOptions {
   signal?: AbortSignal;
   onProgress?: (done: number, total: number) => void;
+  /** a cancel waits for what the call found so far instead of rejecting (workers/rpc.ts CallOptions.keepPartial) */
+  keepPartial?: boolean;
 }
 
 export interface BooksService {
