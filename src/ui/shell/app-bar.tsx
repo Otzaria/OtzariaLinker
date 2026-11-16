@@ -1,3 +1,4 @@
+import { useEffect, useState } from "preact/hooks";
 import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import { remainingText } from "../../state/task-progress";
 import { useStore } from "../context";
@@ -67,8 +68,9 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           <span>חזרה להדרכה</span>
         </button>
       )}
+      <TaskAnnouncer />
       {task && (
-        <div class="task" role="status">
+        <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
           {task.total > 0 && <progress max={task.total} value={task.done} />}
           {/* the task's own count and the time left, once an estimate means something (audit F21) */}
@@ -134,5 +136,25 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
     </header>
+  );
+}
+
+/**
+ * What a screen reader hears about the running task (WCAG 4.1.3): its name when it starts, then every
+ * quarter of the way. A live region that is always on the page — one that appears together with its
+ * text is often not read at all — and not the progress bar itself, which would be read at every step.
+ * Rendered once in the app bar, and again inside a modal dialog that runs a task (the page behind a
+ * modal is inert, and its live regions with it).
+ */
+export function TaskAnnouncer() {
+  const store = useStore();
+  const task = store.task.value;
+  const quarter = task && task.total > 0 ? Math.min(3, Math.floor((task.done / task.total) * 4)) : 0;
+  const [text, setText] = useState("");
+  useEffect(() => setText(!task ? "" : quarter > 0 ? `${task.label}: ${quarter * 25}%` : task.label), [task?.label, quarter, !task]);
+  return (
+    <div class="sr-only" role="status" data-live="task">
+      {text}
+    </div>
   );
 }

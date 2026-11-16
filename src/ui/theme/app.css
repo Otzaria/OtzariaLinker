@@ -257,6 +257,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .sug-table tr.st-rejected, .sug-table tr.st-exists { color: var(--on-surface-faint); }
 .sug-table tr.st-rejected .muted, .sug-table tr.st-exists .muted { color: inherit; }
 .sug-table .acts { white-space: nowrap; }
+/* a checkbox's hit area of 24px (WCAG 2.5.8) without moving it: the label around it, padded */
+.sug-table label.hit { display: inline-grid; place-items: center; min-width: 24px; min-height: 24px; margin: -2px; padding: 4px; cursor: pointer; }
+.sug-table label.hit input { margin: 0; }
 .sug-table .snippet { font-size: 11.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .decide { display: inline-flex; }
 .decide .icon-btn { width: 28px; height: 28px; }

@@ -378,7 +378,8 @@ function RunStep() {
   if (task) {
     const eta = remainingText(task.startedAt, task.done, task.total, Date.now());
     return (
-      <div class="guided-card info" role="status" aria-live="polite">
+      // announced by the app bar's live region (TaskAnnouncer), not at every step of the bar here
+      <div class="guided-card info">
         <b>{task.label}</b>
         {task.total > 0 && <progress max={task.total} value={task.done} />}
         <span>

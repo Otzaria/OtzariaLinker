@@ -291,12 +291,14 @@ function TableView() {
         <thead>
           <tr>
             <th>
-              <input type="checkbox" aria-label="בחירת הכול בעמוד" checked={rows.length > 0 && rows.slice(0, shown).every((r) => sel.has(r.id))} onChange={(e) => setSel(e.currentTarget.checked ? new Set(rows.slice(0, shown).map((r) => r.id)) : new Set())} />
+              <label class="hit">
+                <input type="checkbox" aria-label="בחירת הכול בעמוד" checked={rows.length > 0 && rows.slice(0, shown).every((r) => sel.has(r.id))} onChange={(e) => setSel(e.currentTarget.checked ? new Set(rows.slice(0, shown).map((r) => r.id)) : new Set())} />
+              </label>
             </th>
             <th>שורה</th>
             <th>אל</th>
             <th>ודאות</th>
-            <th />
+            <th><span class="sr-only">החלטה</span></th>
           </tr>
         </thead>
         <tbody>
@@ -331,7 +333,10 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       title={s.reasons.map((r) => r.text).join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+        {/* the label is the hit area: the bare checkbox is 13px (WCAG 2.5.8 asks 24) */}
+        <label class="hit">
+          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+        </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
       <td>

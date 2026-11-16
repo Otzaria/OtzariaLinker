@@ -58,6 +58,8 @@ export function HelpDialog({ section, onSection, onClose }: { section?: string |
             ref={content}
             class="help-content"
             tabIndex={0}
+            role="region"
+            aria-label="תוכן המדריך"
             // in-guide links scroll the guide; they must never navigate the page (file:// would lose the work)
             onClick={(e) => {
               const a = (e.target as HTMLElement).closest?.("a[data-anchor]");
