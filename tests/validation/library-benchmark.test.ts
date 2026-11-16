@@ -4,9 +4,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
 import { pushTo } from "../../src/core/collections";
 import type { Link } from "../../src/core/links/model";
-import type { EngineContext, EngineId } from "../../src/linking/automatic/types";
+import type { EngineContext, EngineId, Suggestion } from "../../src/linking/automatic/types";
 import { mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../src/linking/merge";
 import { LINKED_MIN, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
+import { sefariaRefFromHeRef } from "../../src/core/links/sefaria-ref";
 import { SourceRegistry } from "../../src/sources/registry";
 import { maxlinkJob } from "../../src/workers/maxlink-job";
 import { DB, fileBlob, fingerprint, oracle, cleanupTmp } from "./env";
@@ -21,17 +22,23 @@ import {
   estimate,
   excerpt,
   indexDbLinks,
+  isSpanned,
   ownerBooks,
   ownerOf,
   rankOf,
   scoreBook,
   sizeBucket,
+  SPAN_POLICIES,
+  spanBucket,
+  spanEnds,
+  spanRecords,
   stratify,
   suggestionSpan,
   type Counters,
   type DbEnd,
   type Estimate,
   type Owner,
+  type SpanPolicy,
   type Stratum,
   type Unit,
 } from "./library-benchmark";
@@ -69,6 +76,9 @@ import {
  *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
  *   BENCH_SPANS     all (default): a suggestion's citedSpan counts as its other end; citations: only a
  *                   citation's — a structural range collapsed on a Sefaria side is judged by its written line
+ *   BENCH_SEFARIA_SPAN  first|firstRef|last|ends|all|learned: a run also keeps, for each of these, what a span cut on a
+ *                   Sefaria base (citedSpan) would score written that way (§0.8); the report reads the named one
+ *                   and prints them side by side (span-policies.json)
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
  *                   there), the oracle's population (oracle-*.json) and the reports
@@ -88,6 +98,8 @@ const STEP_MS = Number(process.env.BENCH_STEP_S ?? 600) * 1000;
 const DIR = resolve(process.env.BENCH_DIR ?? ".bench");
 /** BENCH_SPANS=citations: a structural range collapsed on a Sefaria side counts only at the line it writes (§0.6) */
 const SPANS = process.env.BENCH_SPANS === "citations" ? "citations" : "all";
+/** BENCH_SEFARIA_SPAN=<policy>: measure how a cut Sefaria-side span is written (§0.8); the report reads that policy */
+const SEFARIA_SPAN = SPAN_POLICIES.find((p) => p === process.env.BENCH_SEFARIA_SPAN);
 /** hand-check and miss examples are kept for one book in SAMPLE_EVERY (by rank), to keep the cache small */
 const SAMPLE_EVERY = 4;
 const PER_BUCKET = 2;
@@ -119,10 +131,28 @@ interface BookRecord {
   /** the same two, counted by the line a cut Sefaria-side range writes (BENCH_SPANS=citations) — kept by every run
    *  so one run reports both measures (§0.6); the report reads them with BENCH_SPANS=citations */
   written?: { counters: Counters; matched: Record<string, string> };
+  /** BENCH_SEFARIA_SPAN: the same, per way of writing a cut Sefaria-side span (§0.8), with the records each writes */
+  policies?: Partial<Record<SpanPolicy, PolicyMeasure>>;
+  /** the cut spans of the run: how many, by length, and which end the database links per base (spanEnds) */
+  spans?: { n: number; buckets: Record<string, number>; over20Lines: number; ends: Record<string, { end: string; first: number; last: number }> };
+  /** the measure as run (citedSpan counts), kept by readRecords before a BENCH_SPANS / BENCH_SEFARIA_SPAN view replaces it */
+  asRun?: Record<string, string>;
   /** suggestions the database does not have (unconfirmed) or contradicts (wrong), for the hand check */
   fresh?: Sample[];
   /** database links at this book this run did not regenerate */
   misses?: Miss[];
+}
+
+interface PolicyMeasure {
+  counters: Counters;
+  matched: Record<string, string>;
+  /** records written by the whole run, and the verdicts of those written for the cut spans: [n, correct, wrong, new] */
+  records: number;
+  spanRecords: [number, number, number, number];
+  /** span records to a base line that cannot carry one: a heading line (the generator drops it) or no ref_2 from its heRef */
+  noRef: number;
+  /** span records that come from spans of more than 20 lines */
+  over20: number;
 }
 
 interface Sample {
@@ -311,6 +341,7 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         }
       }
       if (SHARDS === 1 || MODE === "report") report(types, design, chosen, done, owned, isRelated);
+      if (SEFARIA_SPAN && (SHARDS === 1 || MODE === "report")) spanPolicyReport(done, owned);
     },
     24 * 3_600_000,
   );
@@ -367,8 +398,11 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       for (const line of readFileSync(join(DIR, f), "utf8").split("\n"))
         if (line.trim()) {
           const r = JSON.parse(line) as BookRecord;
-          // the written-line measure, when the run kept it (§0.6)
-          if (SPANS === "citations" && r.written) Object.assign(r, r.written);
+          r.asRun = r.matched;
+          // a way of writing a cut Sefaria-side span (§0.8), or the written-line measure (§0.6), when the run kept it
+          const policy = SEFARIA_SPAN && r.policies?.[SEFARIA_SPAN];
+          if (policy) Object.assign(r, { counters: policy.counters, matched: policy.matched });
+          else if (SPANS === "citations" && r.written) Object.assign(r, r.written);
           // a book run twice (a stopped step re-run with more time): the run with fewer stopped steps wins
           const old = out.get(r.id);
           if (!old || r.stopped.length <= old.stopped.length) out.set(r.id, r);
@@ -445,14 +479,16 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       text = new Map((await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => [l.index, l.anchorText] as const));
     // a merged suggestion's id is "mx:…"; the citation's words are in its raw member's id
     const spanIdOf = (s: MergedSuggestion) => s.members.find((m) => m.suggestion.engine === "citations" && /@\d+-\d+>/.test(m.suggestion.id))?.suggestion.id ?? s.id;
-    const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, SPANS);
+    const entries = merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) }));
+    const score = scoreBook(book.key, entries, db, lineText, SPANS);
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
     if (SPANS === "all") {
-      const w = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, "citations");
+      const w = scoreBook(book.key, entries, db, lineText, "citations");
       rec.written = { counters: count(w.scored), matched: {} };
       for (const [k, ids] of w.matched) rec.written.matched[k] = encodeIds(ids);
     }
+    if (SEFARIA_SPAN) await measureSpanPolicies(rec, book.key, entries, db, lineText);
     if (keep) {
       const otherLine = async (bookId: number, line: number) => (await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText;
       // new or contradicted suggestions: PER_BUCKET per (group, confidence, pair type), by rank
@@ -517,6 +553,110 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       }
     }
     return { ...rec, ms: Date.now() - t0 };
+  }
+
+  /** §0.8: each way of writing the cut Sefaria-side spans of this run, scored by the lines it writes */
+  async function measureSpanPolicies(
+    rec: BookRecord,
+    bookKey: string,
+    entries: readonly { s: Suggestion; engines: EngineId[]; spanId: string }[],
+    db: Parameters<typeof scoreBook>[2],
+    lineText: (l: number) => string | undefined,
+  ): Promise<void> {
+    const spanned = entries.filter((x) => isSpanned(x.s, x.engines));
+    if (!spanned.length) return;
+    // the base lines the spans cover: a record can be written only to a non-heading line with a ref_2
+    const range = new Map<string, [number, number]>();
+    for (const x of spanned) {
+      const r = range.get(x.s.target.book.key);
+      range.set(x.s.target.book.key, [Math.min(r?.[0] ?? Infinity, x.s.citedSpan!.line), Math.max(r?.[1] ?? -1, x.s.citedSpan!.end)]);
+    }
+    const ok = new Map<string, Set<number>>();
+    for (const [key, [from, to]] of range) ok.set(key, new Set((await registry.lines(key, from, to)).filter((l) => l.heading === null && l.existsInDb && sefariaRefFromHeRef(l.heRef) !== null).map((l) => l.index)));
+    const writableIn = (key: string) => (l: number) => ok.get(key)?.has(l) ?? false;
+    const ends = spanEnds(bookKey, spanned.map((x) => x.s), db);
+    const spans: NonNullable<BookRecord["spans"]> = { n: spanned.length, buckets: {}, over20Lines: 0, ends: {} };
+    for (const [o, v] of ends) spans.ends[byId.get(o)?.title ?? `#${o}`] = v;
+    for (const x of spanned) {
+      const len = x.s.citedSpan!.end - x.s.citedSpan!.line + 1;
+      const b = spanBucket(len);
+      spans.buckets[b] = (spans.buckets[b] ?? 0) + 1;
+      if (b === ">20") spans.over20Lines += len;
+    }
+    rec.spans = spans;
+    rec.policies = {};
+    for (const p of SPAN_POLICIES) {
+      const fromSpans = new Set<Suggestion>();
+      let over20 = 0;
+      const list = entries.flatMap((x) => {
+        if (!isSpanned(x.s, x.engines)) return [x];
+        const q = p === "learned" ? (ends.get(idOf(x.s.target.book.key))?.end ?? "first") : p;
+        const recs = spanRecords(x.s, q, writableIn(x.s.target.book.key));
+        if (x.s.citedSpan!.end - x.s.citedSpan!.line + 1 > 20) over20 += recs.length;
+        return recs.map((s) => (fromSpans.add(s), { ...x, s }));
+      });
+      let noRef = 0;
+      for (const s of fromSpans) if (!writableIn(s.target.book.key)(s.target.line)) noRef++;
+      const sc = scoreBook(bookKey, list, db, lineText, "citations");
+      const spanRecs: [number, number, number, number] = [0, 0, 0, 0];
+      for (const x of sc.scored)
+        if (fromSpans.has(x.s)) {
+          spanRecs[0]++;
+          spanRecs[x.verdict === "correct" ? 1 : x.verdict === "wrong" ? 2 : 3]++;
+        }
+      const matched: Record<string, string> = {};
+      for (const [k, ids] of sc.matched) matched[k] = encodeIds(ids);
+      rec.policies[p] = { counters: count(sc.scored), matched, records: sc.scored.length, spanRecords: spanRecs, noRef, over20 };
+    }
+  }
+
+  /**
+   * §0.8: the ways of writing a cut Sefaria-side span, side by side, over every run that kept them —
+   * per book: its owned COMMENTARY links in the database, those regenerated with citedSpan counted ("as
+   * run") and by the lines each policy writes, the records written, and the verdicts of the span records.
+   */
+  function spanPolicyReport(done: Map<number, BookRecord>, owned: Map<string, Map<Owner, number>>): void {
+    const runs = [...done.values()].filter((r) => r.policies?.first);
+    if (!runs.length) return;
+    const size = (enc: string | undefined) => (enc ? decodeIds(enc).length : 0);
+    const judged = (c: Counters, conf: string): [number, number] => {
+      let ok = 0;
+      let bad = 0;
+      for (const [k, v] of Object.entries(c))
+        if (k.startsWith(`structural|${conf}|`)) (ok += v[1]), (bad += v[2]);
+      return [ok, bad];
+    };
+    const books = runs.map((r) => {
+      const key = `COMMENTARY|D:${r.id}`;
+      const per = Object.fromEntries(
+        SPAN_POLICIES.map((p) => {
+          const m = r.policies![p]!;
+          return [p, { commentary: size(m.matched[key]), records: m.records, spanRecords: m.spanRecords, noRef: m.noRef, over20: m.over20, high: judged(m.counters, "high"), certain: judged(m.counters, "certain") }];
+        }),
+      ) as Record<SpanPolicy, { commentary: number; records: number; spanRecords: PolicyMeasure["spanRecords"]; noRef: number; over20: number; high: [number, number]; certain: [number, number] }>;
+      return { id: r.id, title: r.title, dbCommentary: owned.get("COMMENTARY")?.get(`D:${r.id}`) ?? 0, asRun: size((r.asRun ?? r.matched)[key]), written: size(r.written?.matched[key]), spans: r.spans, policies: per };
+    });
+    const sum = (f: (b: (typeof books)[number]) => number) => books.reduce((a, b) => a + f(b), 0);
+    const db = sum((b) => b.dbCommentary);
+    const lines = [`span policies (§0.8) over ${books.length} books: owned DB COMMENTARY ${db}, regenerated with citedSpan counted ${sum((b) => b.asRun)}`];
+    const firstMismatch = books.filter((b) => b.written !== b.policies.first.commentary).length;
+    if (firstMismatch) lines.push(`  WARNING: policy "first" differs from the written-line measure in ${firstMismatch} books`);
+    const recs0 = sum((b) => b.policies.first.records);
+    for (const p of SPAN_POLICIES) {
+      const c = sum((b) => b.policies[p].commentary);
+      const recs = sum((b) => b.policies[p].records);
+      const sr = [0, 1, 2, 3].map((i) => sum((b) => b.policies[p].spanRecords[i]!));
+      const hi = [0, 1].map((i) => sum((b) => b.policies[p].high[i]!));
+      lines.push(
+        `  ${p.padEnd(8)} COMMENTARY ${String(c).padStart(7)} (${pct(db ? c / db : 0)})  records ${String(recs).padStart(7)} (x${(recs / recs0).toFixed(3)})` +
+          `  span records ${sr[0]}: correct ${sr[1]}, wrong ${sr[2]}, new ${sr[3]}, no ref_2 ${sum((b) => b.policies[p].noRef)}, from spans >20 ${sum((b) => b.policies[p].over20)}  structural|high judged ${pct(hi[0]! + hi[1]! ? hi[0]! / (hi[0]! + hi[1]!) : 0)}`,
+      );
+    }
+    const buckets: Record<string, number> = {};
+    for (const b of books) for (const [k, v] of Object.entries(b.spans?.buckets ?? {})) buckets[k] = (buckets[k] ?? 0) + v;
+    lines.push(`  spans ${sum((b) => b.spans?.n ?? 0)} by length: ${["2", "3-5", "6-20", ">20"].map((k) => `${k}: ${buckets[k] ?? 0}`).join(", ")}; lines in spans >20: ${sum((b) => b.spans?.over20Lines ?? 0)}`);
+    console.log(lines.join("\n"));
+    writeFileSync(join(DIR, "span-policies.json"), JSON.stringify({ at: new Date().toISOString(), db: before, books }, null, 1));
   }
 
   function report(
