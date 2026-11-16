@@ -72,4 +72,17 @@ describe("AppStore — databases in someone else's schema", () => {
     expect(store.pendingDbs.value[0]!.guess!.lines.heading).toBeUndefined();
     expect(await store.openMapped(store.pendingDbs.value[0]!, p.guess!)).toBe(true); // the token is still valid
   });
+
+  it("a database without books waits with the reason and no guess; a manual mapping can still be tested", async () => {
+    const store = makeStore();
+    await store.openFiles([{ path: "app.db", blob: new Blob([readFileSync("tests/fixtures/db/wizard/settings-log.db")]) }]);
+    const [p] = store.pendingDbs.value;
+    expect(p!.guess).toBeNull();
+    expect(p!.analysis!.noBooks).toBe(true);
+    expect(p!.analysis!.summary).toMatch(/^לא נמצאו ספרים במסד הזה/);
+    const t = await store.testMapping(p!, { layout: "single-table", lines: { table: "log", book: "level", order: "id", text: "message" } });
+    expect("error" in t ? t.error : t.books).toBe(2);
+    const bad = await store.testMapping(p!, { layout: "single-table", lines: { table: "log", book: "nope", order: "id", text: "message" } });
+    expect("error" in bad && bad.error).toMatch(/nope/);
+  });
 });

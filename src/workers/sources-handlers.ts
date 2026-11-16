@@ -20,6 +20,7 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     init: (_ctx, idPrefix) => registry.useIdPrefix(idPrefix),
     open: (ctx, files) => registry.open(files, ctx.signal),
     openMapped: (ctx, token, mapping) => registry.openMapped(token, mapping, jobCtx(ctx)),
+    testMapping: (ctx, token, mapping) => registry.testMapping(token, mapping, jobCtx(ctx)),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     close: (_ctx, sourceId) => registry.close(sourceId),

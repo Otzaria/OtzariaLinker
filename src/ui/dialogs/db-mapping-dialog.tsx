@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { describeMapping, mappingProblems, ROWID, type ColumnPreview, type DbMapping, type PendingDb, type TablePreview } from "../../core/db-mapping";
+import {
+  describeMapping,
+  mappingProblems,
+  ROWID,
+  UNIT_LABEL,
+  type ColumnPreview,
+  type DbMapping,
+  type MappingTest,
+  type PendingDb,
+  type TablePreview,
+  type TextCandidate,
+  type TextUnit,
+} from "../../core/db-mapping";
+import { stripTags } from "../../core/text/html";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { TaskAnnouncer } from "../shell/app-bar";
@@ -7,9 +20,12 @@ import "./db-mapping-dialog.css";
 
 /*
  * The mapping wizard: a SQLite database that is not in Otzaria's schema was opened. The worker sent
- * its tables, columns and a few rows, and a guess. The basic path is one sentence ("this is what I
- * found") and one button; "שינוי המיפוי" shows the fields, and advanced mode adds indexes, sizes and
- * the optional links table. Nothing is read from the database until the user confirms.
+ * its tables, columns and a few rows, and an explained guess (core/db-guess.ts). The basic path is
+ * one sentence ("this is what I found"), the reasons, and one button; "שינוי המיפוי" shows the
+ * fields, and advanced mode adds indexes, sizes and the optional links table. When nothing looks
+ * like book text the wizard says so ("לא נמצאו ספרים") instead of proposing a table; manual mapping
+ * stays one click away. What the tool cannot read (views, virtual tables, encodings) is listed
+ * honestly. "בדיקת המיפוי" reads the first lines of the first books before anything is opened.
  */
 export function DbMappingDialog() {
   const store = useStore();
@@ -27,25 +43,38 @@ const KIND_LABEL: Record<ColumnPreview["kind"], string> = {
   empty: "ריק",
 };
 
+type TestState = MappingTest | { error: string } | "running" | null;
+
 function Wizard({ pending }: { pending: PendingDb }) {
   const store = useStore();
   const ref = useRef<HTMLDialogElement>(null);
   const advanced = store.prefs.advanced.value;
   const tables = pending.preview.tables;
+  const analysis = pending.analysis;
+  const noBooks = !pending.guess && !!analysis?.noBooks;
   const [m, setM] = useState<DbMapping>(() => pending.guess ?? blankMapping(tables));
-  const [editing, setEditing] = useState(!pending.guess);
+  // no guess: the fields at once — unless the analysis found no books, which is said first
+  const [editing, setEditing] = useState(!pending.guess && !noBooks);
   const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<TestState>(null);
   const problems = useMemo(() => mappingProblems(pending.preview, m), [m, pending]);
-  const blocked = problems.some((x) => x.level === "error");
+  const manual = editing || !noBooks;
+  const blocked = problems.some((x) => x.level === "error") || !manual;
   const task = store.task.value;
   const table = (name: string | undefined) => tables.find((t) => t.name === name);
   const lines = table(m.lines.table);
   const books = m.layout === "two-tables" ? table(m.books?.table) : undefined;
+  const chosen = analysis?.candidates.find((c) => c.table === m.lines.table && c.column === m.lines.text);
 
   useEffect(() => ref.current?.showModal(), []);
+  useEffect(() => setTest(null), [m]); // a result is about the mapping it was made with
 
-  const setLines = (patch: Partial<DbMapping["lines"]>) => setM({ ...m, lines: { ...m.lines, ...patch } });
+  const setLines = (patch: Partial<DbMapping["lines"]>) => setM({ ...m, lines: clean({ ...m.lines, ...patch }) });
   const setBooks = (patch: Partial<NonNullable<DbMapping["books"]>>) => setM({ ...m, books: { ...(m.books ?? { table: "", id: ROWID, title: "" }), ...patch } });
+  const runTest = async () => {
+    setTest("running");
+    setTest(await store.testMapping(pending, m));
+  };
   const open = async () => {
     setBusy(true);
     const ok = await store.openMapped(pending, m);
@@ -63,10 +92,36 @@ function Wizard({ pending }: { pending: PendingDb }) {
         <div class="body">
           <p class="muted" style="margin:0">
             המסד אינו במבנה של אוצריא. יש בו {tables.length.toLocaleString("he")} טבלאות. כדי לפתוח אותו, צריך לומר לכלי איפה שמות הספרים ואיפה שורות הטקסט.
-            {pending.guess ? " ניחשתי לפי השמות והתוכן — בדקו שזה נכון." : " לא מצאתי ניחוש סביר; בחרו בעצמכם."}
+            {pending.guess ? " ניחשתי לפי השמות והתוכן — בדקו שזה נכון." : noBooks ? "" : " לא מצאתי ניחוש סביר; בחרו בעצמכם."}
           </p>
 
-          {!editing && (
+          {noBooks && (
+            <div class="map-nobooks" role="status">
+              <Icon name="fl_dismiss_circle" size={20} />
+              <div>
+                <b>לא נמצאו ספרים במסד הזה.</b> {analysis!.summary.replace(/^לא נמצאו ספרים במסד הזה:\s*/, "")}
+                {!editing && (
+                  <div>
+                    <button class="btn text" onClick={() => setEditing(true)}>
+                      <Icon name="fl_settings" size={16} />
+                      מיפוי ידני בכל זאת
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {analysis && analysis.limitations.length > 0 && (
+            <div class="map-limits">
+              <b>מה הכלי אינו קורא במסד הזה</b>
+              <ul>
+                {analysis.limitations.map((x, i) => <li key={i}>{x}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {!editing && !noBooks && (
             <div class="map-summary">
               <b>מה מצאתי:</b> {describeMapping(m)}
               <button class="btn text" onClick={() => setEditing(true)}>
@@ -74,6 +129,19 @@ function Wizard({ pending }: { pending: PendingDb }) {
                 שינוי המיפוי
               </button>
             </div>
+          )}
+
+          {analysis && analysis.candidates.length > 0 && (
+            <Candidates
+              chosen={chosen}
+              candidates={analysis.candidates}
+              current={m}
+              noBooks={noBooks}
+              onUse={(x) => {
+                setM(x);
+                setEditing(true);
+              }}
+            />
           )}
 
           {editing && (
@@ -86,7 +154,7 @@ function Wizard({ pending }: { pending: PendingDb }) {
                 </label>
                 <label>
                   <input type="radio" name="layout" checked={m.layout === "single-table"} onChange={() => setM(toLayout(m, "single-table", tables))} />
-                  טבלה אחת: כל רשומה היא שורה, ועמודה בה היא שם הספר
+                  טבלה אחת: כל רשומה היא שורה (או ספר שלם), ועמודה בה היא שם הספר
                 </label>
               </fieldset>
 
@@ -110,23 +178,46 @@ function Wizard({ pending }: { pending: PendingDb }) {
                 <TableSelect label="טבלה" tables={tables} value={m.lines.table} advanced={advanced} onChange={(t) => setLines(retargetLines(table(t), m.layout))} />
                 {lines && (
                   <>
-                    <ColumnSelect label={m.layout === "two-tables" ? "הספר של השורה (מזהה)" : "שם הספר"} table={lines} value={m.lines.book} onChange={(v) => setLines({ book: v! })} />
+                    <ColumnSelect label={m.layout === "two-tables" ? (m.via ? "הפרק או המהדורה של השורה (מזהה)" : "הספר של השורה (מזהה)") : "שם הספר"} table={lines} value={m.lines.book} onChange={(v) => setLines({ book: v! })} />
                     <ColumnSelect label="סדר השורות" table={lines} value={m.lines.order} rowid onChange={(v) => setLines({ order: v! })} />
+                    <ColumnSelect label="סדר משני (לא חובה)" table={lines} value={m.lines.orderThen?.[0]} optional onChange={(v) => setLines({ orderThen: v ? [v] : undefined })} />
                     <ColumnSelect label="טקסט השורה" table={lines} value={m.lines.text} onChange={(v) => setLines({ text: v! })} />
+                    <label class="field">
+                      יחידת הטקסט
+                      <select value={m.lines.unit ?? "line"} onChange={(e) => setLines({ unit: e.currentTarget.value === "line" ? undefined : (e.currentTarget.value as TextUnit) })}>
+                        {(Object.keys(UNIT_LABEL) as TextUnit[]).map((u) => (
+                          <option key={u} value={u}>
+                            {UNIT_LABEL[u]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <ColumnSelect label="רמת כותרת (לא חובה)" table={lines} value={m.lines.heading} optional onChange={(v) => setLines({ heading: v })} />
                     {m.layout === "single-table" && advanced && <ColumnSelect label="נתיב (לא חובה)" table={lines} value={m.lines.path} optional onChange={(v) => setLines({ path: v })} />}
                   </>
                 )}
               </fieldset>
 
+              {m.layout === "two-tables" && (advanced || m.via) && <ViaFields m={m} tables={tables} onChange={setM} />}
               {advanced && <LinksFields m={m} tables={tables} onChange={setM} />}
             </>
           )}
 
-          {lines && <Sample title={`שורות לדוגמה מ"${lines.name}"`} table={lines} roles={lineRoles(m)} />}
+          {manual && lines && <Sample title={`שורות לדוגמה מ"${lines.name}"`} table={lines} roles={lineRoles(m)} />}
           {editing && books && <Sample title={`ספרים לדוגמה מ"${books.name}"`} table={books} roles={bookRoles(m)} />}
 
-          {problems.length > 0 && (
+          {chosen && chosen.warnings.length > 0 && (
+            <ul class="problems">
+              {chosen.warnings.map((w, i) => (
+                <li key={i} class="warning">
+                  <Icon name="fl_warning" size={16} />
+                  <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {manual && problems.length > 0 && (
             <ul class="problems">
               {problems.map((x, i) => (
                 <li key={i} class={x.level}>
@@ -136,6 +227,8 @@ function Wizard({ pending }: { pending: PendingDb }) {
               ))}
             </ul>
           )}
+
+          {manual && <TestResult test={test} />}
 
           {(pending.preview.notes.length > 0 || advanced) && (
             <details class="held">
@@ -164,6 +257,12 @@ function Wizard({ pending }: { pending: PendingDb }) {
           ) : (
             <>
               <button class="btn text" onClick={() => ref.current?.close()}>לא לפתוח</button>
+              {manual && (
+                <button class="btn outlined" disabled={blocked || busy || test === "running"} onClick={() => void runTest()}>
+                  <Icon name="fl_checkmark_circle" size={18} />
+                  בדיקת המיפוי
+                </button>
+              )}
               <button class="btn filled" disabled={blocked || busy} onClick={() => void open()}>
                 <Icon name="oz_book_open_medium_lines" size={18} />
                 פתיחה
@@ -173,6 +272,99 @@ function Wizard({ pending }: { pending: PendingDb }) {
         </footer>
       </div>
     </dialog>
+  );
+}
+
+/** Why this guess: the reasons of the chosen candidate, and the other candidates with their verdicts. */
+function Candidates(props: { chosen: TextCandidate | undefined; candidates: TextCandidate[]; current: DbMapping; noBooks: boolean; onUse: (m: DbMapping) => void }) {
+  const { candidates, current, noBooks, onUse } = props;
+  // with no books, every candidate is listed under its own name (the fields' default is not a choice)
+  const chosen = noBooks ? undefined : props.chosen;
+  const others = noBooks ? candidates.slice(0, 5) : candidates.filter((c) => c !== chosen);
+  return (
+    <details class="held map-why" open={noBooks}>
+      <summary>{noBooks ? "מה בדקתי, ולמה כל עמודה נפסלה" : "למה ניחשתי כך"}</summary>
+      {chosen && <Reasons c={chosen} />}
+      {others.length > 0 && (
+        <ul class="map-cands">
+          {!noBooks && <li class="muted">עמודות אחרות שבדקתי:</li>}
+          {others.map((c) => (
+            <li key={`${c.table}.${c.column}`}>
+              <div class="map-cand-head">
+                <b dir="ltr">
+                  {c.table}.{c.column}
+                </b>
+                <span class={`map-verdict ${c.verdict}`}>{c.verdict === "books" ? "טקסט של ספרים" : c.verdict === "weak" ? "מועמד חלש" : "נפסל"}</span>
+                {c.mapping && c.verdict !== "rejected" && JSON.stringify(c.mapping) !== JSON.stringify(current) && (
+                  <button class="btn text" onClick={() => onUse(c.mapping!)}>
+                    להשתמש בזה
+                  </button>
+                )}
+              </div>
+              <Reasons c={c} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+function Reasons({ c }: { c: TextCandidate }) {
+  return (
+    <ul class="map-reasons" aria-label={`הסיבות: ${c.table}.${c.column}`}>
+      {c.reasons.map((r, i) => (
+        <li key={i} class={r.weight > 0 ? "plus" : r.weight < 0 ? "minus" : "fact"}>
+          <span aria-hidden="true">{r.weight > 0 ? "+" : r.weight < 0 ? "−" : "·"}</span> {r.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The first lines of the first books, as "בדיקת המיפוי" read them. */
+function TestResult({ test }: { test: TestState }) {
+  if (!test) return null;
+  if (test === "running") return <p class="muted map-test">בודק את המיפוי…</p>;
+  if ("error" in test)
+    return (
+      <div class="map-test" role="status">
+        <Icon name="fl_error_circle" size={16} /> הבדיקה נכשלה: {test.error}
+      </div>
+    );
+  return (
+    <div class="map-test" role="status" aria-label="תוצאת בדיקת המיפוי">
+      <p style="margin:0">
+        <b>{test.books ? `נמצאו ${test.books.toLocaleString("he")} ספרים${test.partial ? " בתחילת המסד (נבדק רק חלק ממנו)" : ""}.` : "לפי המיפוי הזה אין במסד אף ספר."}</b>
+        {test.undecodable > 0 && ` ${test.undecodable.toLocaleString("he")} שורות לא פוענחו.`}
+      </p>
+      {test.sample.map((b, i) => (
+        <div key={i} class="map-test-book">
+          <div>
+            <b>{b.title}</b>
+            {b.lineCount !== null && <span class="muted"> · {b.lineCount.toLocaleString("he")} שורות</span>}
+          </div>
+          {b.lines.length ? (
+            <ol>
+              {b.lines.map((l, j) => (
+                <li key={j} dir="auto" class={l.heading ? "heading" : ""}>
+                  {stripTags(l.text) || <span class="muted">(שורה ריקה)</span>}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p class="muted" style="margin:0">
+              אין בספר שורות.
+            </p>
+          )}
+        </div>
+      ))}
+      {test.warnings.map((w, i) => (
+        <p key={i} class="muted" style="margin:0">
+          <Icon name="fl_warning" size={14} /> {w}
+        </p>
+      ))}
+    </div>
   );
 }
 
@@ -207,6 +399,53 @@ function ColumnSelect(props: { label: string; table: TablePreview; value: string
         ))}
       </select>
     </label>
+  );
+}
+
+/** Optional: a chapters or versions table between the lines and the books. */
+function ViaFields({ m, tables, onChange }: { m: DbMapping; tables: TablePreview[]; onChange: (m: DbMapping) => void }) {
+  const t = tables.find((x) => x.name === m.via?.table);
+  const set = (patch: Partial<NonNullable<DbMapping["via"]>>) => onChange({ ...m, via: clean({ ...(m.via ?? { table: "", id: ROWID, book: "", kind: "part" as const }), ...patch }) });
+  return (
+    <fieldset class="map-grid">
+      <legend>פרקים או מהדורות בין השורות לספרים (לא חובה)</legend>
+      <label class="field">
+        טבלה
+        <select
+          value={m.via?.table ?? ""}
+          onChange={(e) => {
+            const v = e.currentTarget.value;
+            if (!v) {
+              const { via: _drop, ...rest } = m;
+              onChange(rest);
+            } else set({ table: v, id: tables.find((x) => x.name === v)?.columns.find((c) => c.rowidAlias)?.name ?? ROWID, book: "", order: undefined, title: undefined });
+          }}
+        >
+          <option value="">— השורות מפנות ישר לספר —</option>
+          {tables.map((x) => (
+            <option key={x.name} value={x.name}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {t && (
+        <>
+          <ColumnSelect label="מזהה הפרק או המהדורה" table={t} value={m.via!.id} rowid onChange={(v) => set({ id: v ?? "" })} />
+          <ColumnSelect label="הספר שלו (מזהה)" table={t} value={m.via!.book} onChange={(v) => set({ book: v ?? "" })} />
+          <ColumnSelect label="סדר (לא חובה)" table={t} value={m.via!.order} rowid optional onChange={(v) => set({ order: v })} />
+          <ColumnSelect label="שם (לא חובה)" table={t} value={m.via!.title} optional onChange={(v) => set({ title: v })} />
+          <label class="field">
+            כל רשומה בה היא
+            <select value={m.via!.kind} onChange={(e) => set({ kind: e.currentTarget.value as "part" | "edition" })}>
+              <option value="part">פרק (השורות מצטרפות לספר אחד)</option>
+              <option value="edition">מהדורה (כל מהדורה היא ספר נפרד)</option>
+            </select>
+          </label>
+          <p class="muted map-wide">עם טבלה כזאת, "הספר של השורה" בטבלת השורות הוא מזהה הפרק או המהדורה.</p>
+        </>
+      )}
+    </fieldset>
   );
 }
 
@@ -282,8 +521,9 @@ function Sample({ title, table, roles }: { title: string; table: TablePreview; r
 function lineRoles(m: DbMapping): Record<string, string> {
   const r: Record<string, string> = {};
   const add = (col: string | undefined, role: string) => col && (r[col] = r[col] ? `${r[col]}, ${role}` : role);
-  add(m.lines.book, m.layout === "two-tables" ? "ספר" : "שם הספר");
+  add(m.lines.book, m.layout === "two-tables" ? (m.via ? "פרק/מהדורה" : "ספר") : "שם הספר");
   add(m.lines.order, "סדר");
+  for (const c of m.lines.orderThen ?? []) add(c, "סדר משני");
   add(m.lines.text, "טקסט");
   add(m.lines.heading, "כותרת");
   add(m.lines.path, "נתיב");
@@ -298,6 +538,11 @@ function bookRoles(m: DbMapping): Record<string, string> {
   add(m.books?.category, "קטגוריה");
   add(m.books?.path, "נתיב");
   return r;
+}
+
+/** Drops the keys a select set to undefined, so a mapping compares and saves like a parsed one. */
+function clean<T extends object>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
 const textual = (c: ColumnPreview) => c.kind === "text" || c.kind === "html" || c.kind === "compressed";
@@ -322,7 +567,7 @@ function toLayout(m: DbMapping, layout: DbMapping["layout"], tables: TablePrevie
   if (m.layout === layout) return m;
   const lines = { ...m.lines, book: "" };
   if (layout === "single-table") {
-    const { books: _b, ...rest } = m;
+    const { books: _b, via: _v, ...rest } = m;
     return { ...rest, layout, lines };
   }
   const { path: _p, ...ln } = lines;

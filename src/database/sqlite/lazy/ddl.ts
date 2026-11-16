@@ -22,6 +22,14 @@ export interface ColumnDef {
   generated: "virtual" | "stored" | null;
 }
 
+/** A FOREIGN KEY (column-level REFERENCES or table-level), as declared — SQLite does not enforce it by default. */
+export interface ForeignKey {
+  columns: string[];
+  table: string;
+  /** referenced columns; [] = the referenced table's primary key */
+  to: string[];
+}
+
 /** One key column of a PRIMARY KEY / UNIQUE constraint or of an index. */
 export interface KeyPart {
   /** column name; for an expression key, the first word of the expression */
@@ -51,6 +59,8 @@ export interface TableDef {
    * every key column compares BINARY and ascending (always true for a rowid table).
    */
   primaryKeySeekable: boolean;
+  /** declared FOREIGN KEYs (a hint for the mapping wizard; never relied on for reading) */
+  foreignKeys: ForeignKey[];
 }
 
 type Tok = { kind: "word" | "str" | "num" | "punct"; text: string };
@@ -127,6 +137,7 @@ export function parseCreateTable(sql: string): TableDef {
 
   const columns: ColumnDef[] = [];
   const constraints: KeyConstraint[] = [];
+  const foreignKeys: ForeignKey[] = [];
   let primaryKey: string[] = [];
   let tableLevelPk = false;
   for (const d of defs) {
@@ -136,6 +147,12 @@ export function parseCreateTable(sql: string): TableDef {
       const words = d.map((t) => t.text.toUpperCase());
       const pk = words.findIndex((w, k) => w === "PRIMARY" && words[k + 1] === "KEY");
       const uq = words.indexOf("UNIQUE");
+      const fk = words.findIndex((w, k) => w === "FOREIGN" && words[k + 1] === "KEY");
+      if (fk !== -1) {
+        const ref = references(d, fk + 2);
+        if (ref) foreignKeys.push({ columns: keyParts(d.slice(fk + 2)).map((x) => x.name), ...ref });
+        continue;
+      }
       if (pk !== -1) {
         const parts = keyParts(d.slice(pk + 2));
         primaryKey = parts.map((x) => x.name);
@@ -146,6 +163,8 @@ export function parseCreateTable(sql: string): TableDef {
     }
     const { col, keys } = parseColumn(d);
     columns.push(col);
+    const ref = references(d, 1);
+    if (ref) foreignKeys.push({ columns: [col.name], ...ref });
     for (const k of keys) {
       if (k.primaryKey) primaryKey = [col.name];
       constraints.push({ primaryKey: k.primaryKey, parts: [{ name: col.name, collation: null, desc: k.desc, expr: false }] });
@@ -160,7 +179,22 @@ export function parseCreateTable(sql: string): TableDef {
   if (withoutRowid) for (const c of columns) c.rowidAlias = false;
   const pkParts = constraints.find((k) => k.primaryKey)?.parts ?? [];
   const primaryKeySeekable = !withoutRowid || pkParts.every((k) => !k.desc && !k.expr && collationOf(columns, k) === "BINARY");
-  return { columns, withoutRowid, primaryKey, constraints, primaryKeySeekable };
+  return { columns, withoutRowid, primaryKey, constraints, primaryKeySeekable, foreignKeys };
+}
+
+/** "REFERENCES t (a, b)" at the top level of a definition, from token `from` on. */
+function references(d: Tok[], from: number): { table: string; to: string[] } | null {
+  let depth = 0;
+  for (let k = from; k < d.length; k++) {
+    const t = d[k]!;
+    if (t.text === "(") depth++;
+    else if (t.text === ")") depth--;
+    else if (depth === 0 && t.kind === "word" && t.text.toUpperCase() === "REFERENCES" && d[k + 1]) {
+      const to = d[k + 2]?.text === "(" ? keyParts(d.slice(k + 2)).map((x) => x.name) : [];
+      return { table: d[k + 1]!.text, to };
+    }
+  }
+  return null;
 }
 
 /** The collation a key part compares with: its own COLLATE, else its column's, else BINARY. */

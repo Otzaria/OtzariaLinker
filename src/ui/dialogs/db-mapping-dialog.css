@@ -17,3 +17,19 @@ dialog.db-map { width: min(920px, calc(100vw - 32px)); }
 .db-map .map-notes { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .db-map footer .task { display: flex; gap: 8px; align-items: center; }
 .db-map footer .task progress { flex: 1; }
+.db-map .map-nobooks { display: flex; gap: 10px; align-items: start; padding: 10px 12px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); }
+.db-map .map-limits { padding: 8px 12px; border-radius: var(--radius); border: 1px solid var(--outline-variant); background: var(--surface-container); font-size: var(--fs-sm); }
+.db-map .map-limits ul { margin: 4px 0 0; padding-inline-start: 18px; display: grid; gap: 4px; }
+.db-map .map-reasons { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: var(--fs-sm); }
+.db-map .map-reasons li > span { display: inline-block; inline-size: 1em; font-weight: 700; text-align: center; }
+.db-map .map-reasons li.plus > span { color: var(--primary); }
+.db-map .map-reasons li.minus > span { color: var(--error); }
+.db-map .map-reasons li.fact { color: var(--on-surface-variant); }
+.db-map .map-cands { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.db-map .map-cand-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.db-map .map-verdict { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--surface-container); color: var(--on-surface-variant); }
+.db-map .map-verdict.books { background: var(--primary-container); color: var(--on-primary-container); }
+.db-map .map-verdict.weak { background: var(--warning-container); color: var(--on-warning-container); }
+.db-map .map-test { display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--outline-variant); background: var(--surface); font-size: var(--fs-sm); }
+.db-map .map-test ol { margin: 2px 0 0; padding-inline-start: 22px; }
+.db-map .map-test li.heading { font-weight: 600; }

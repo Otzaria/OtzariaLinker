@@ -28,6 +28,30 @@ export interface ColumnPreview {
   compression?: string;
   /** a GENERATED … VIRTUAL column: not stored in the file, so it cannot be read or mapped */
   virtual?: boolean;
+  /*
+   * Statistics of the sampled values, for ranking the candidates (db-guess.ts). All optional: a
+   * preview made by an older build, or a hand-made one in a test, simply has no evidence of that kind.
+   */
+  /** share of the letters that are Hebrew (0–1); absent when the samples have no letters */
+  hebrew?: number;
+  /** average words per value */
+  words?: number;
+  /** average line breaks per value: a whole book, a chapter or a chunk in one cell */
+  newlines?: number;
+  /** share of the values that have the most common length: fixed-size chunks of one text */
+  sameLength?: number;
+  /** the values are JSON arrays/objects of text: the average number of lines they flatten to */
+  jsonLines?: number;
+  /** BLOB text in an encoding other than UTF-8 */
+  encoding?: "utf16le" | "utf16be" | "cp1255";
+  /** share of the values with U+FFFD: TEXT that is not valid UTF-8 (a legacy code page stored as TEXT) */
+  garbled?: number;
+  /** most values look like dates or times */
+  timestamps?: boolean;
+  /** integer columns: the distinct sampled values (at most 20), to see which table a column refers to */
+  ints?: number[];
+  /** binary columns: a recognised non-text format ("תמונת PNG", "דחיסת bzip2") */
+  format?: string;
 }
 
 export interface IndexPreview {
@@ -49,14 +73,34 @@ export interface TablePreview {
   samples: string[][];
   /** leaf pages of the table's b-tree: a cheap measure of its size */
   pages: number;
+  /** rowids of the sampled rows (rowid tables), to see which table a column refers to */
+  rowids?: number[];
+  /** declared FOREIGN KEYs of single columns (a hint for the guess) */
+  foreignKeys?: { column: string; table: string }[];
+  /** an internal table of a virtual table (FTS index storage, R-tree nodes): `docs_content` of `docs` */
+  shadowOf?: { table: string; module: string };
+}
+
+/** A virtual table (FTS, R-tree…): only SQLite's module can read it; its storage tables may be ordinary tables. */
+export interface VirtualTablePreview {
+  name: string;
+  /** "fts5", "fts4", "rtree"… lower-cased */
+  module: string;
+  /** declared column names (FTS: the text columns, stored as c0, c1… in `<name>_content`) */
+  columns: string[];
+  /** FTS with content='' (no text kept) or content=<other table> (the text is elsewhere) */
+  content: "stored" | "none" | "external";
 }
 
 export interface SchemaPreview {
   /** identifies the schema (hash of sqlite_master): the same schema reuses a saved mapping */
   fingerprint: string;
   tables: TablePreview[];
-  /** what else was seen (views, virtual tables, compressed or binary columns…), in Hebrew */
+  /** what else was seen (compressed or binary columns, WAL…), in Hebrew */
   notes: string[];
+  /** VIEWs, with the tables their SQL names: the reader reads b-trees, and a view has none */
+  views?: { name: string; reads: string[] }[];
+  virtualTables?: VirtualTablePreview[];
 }
 
 export interface DbMapping {
@@ -75,9 +119,72 @@ export interface DbMapping {
     heading?: string;
     /** single-table only: a path/category shown next to the title */
     path?: string;
+    /** more order columns after `order`, for a composite key: (chapter, verse) → order "chapter", orderThen ["verse"] */
+    orderThen?: string[];
+    /**
+     * How a row's text becomes lines (default "line"):
+     *   "line"   one row = one line;
+     *   "lines"  a row holds several lines separated by line breaks (a whole book, or a chapter, per row);
+     *   "chunks" the rows of a book are consecutive pieces of one text: joined, then split at line breaks;
+     *   "json"   a row holds JSON: an array of lines, of chapters (arrays), or of {title, verses} objects.
+     */
+    unit?: TextUnit;
   };
+  /**
+   * two-tables only: the lines refer to a row of an intermediate table, which refers to the book.
+   * "part": chapters — a book's lines in (part order, line order); "edition": versions — every row of
+   * this table is a book of its own, titled "<book> — <title>".
+   */
+  via?: { table: string; id: string; book: string; order?: string; title?: string; kind: "part" | "edition" };
   /** optional: an existing links table whose two columns hold line ids (the lines table's rowid) */
   links?: { table: string; source: string; target: string; type?: string };
+}
+
+export type TextUnit = "line" | "lines" | "chunks" | "json";
+
+/** Why the wizard guessed what it guessed — or why it found no books (db-guess.ts). */
+export interface CandidateReason {
+  /** points for (> 0) or against (< 0) this column holding book text; 0 = a plain fact */
+  weight: number;
+  text: string;
+}
+
+export interface TextCandidate {
+  table: string;
+  column: string;
+  /** the sum of the reasons' weights; ≥ BOOKS_SCORE is proposed */
+  score: number;
+  verdict: "books" | "weak" | "rejected";
+  reasons: CandidateReason[];
+  /** what to check before trusting this candidate */
+  warnings: string[];
+  /** the mapping this candidate gives, or null when its rows could not be grouped into books */
+  mapping: DbMapping | null;
+}
+
+export interface DbAnalysis {
+  /** the best candidates first (at most 8) */
+  candidates: TextCandidate[];
+  /** the mapping proposed to the user: the best "books" candidate, or null */
+  guess: DbMapping | null;
+  /** nothing in the database looks like book text */
+  noBooks: boolean;
+  /** one sentence: what was found, or why nothing was */
+  summary: string;
+  /** what the tool cannot read in this database (views, virtual tables, encodings…), in Hebrew */
+  limitations: string[];
+}
+
+/** First lines of the first books, read through a mapping before it is confirmed ("בדיקת המיפוי"). */
+export interface MappingTest {
+  /** books found (in the part read, when `partial`) */
+  books: number;
+  /** the test read only the beginning of a large table */
+  partial: boolean;
+  sample: { title: string; lineCount: number | null; lines: { text: string; heading: number | null }[] }[];
+  warnings: string[];
+  /** lines whose text could not be decoded (shown empty) */
+  undecodable: number;
 }
 
 /** A database that needs a mapping before it can be opened (returned by the open operation). */
@@ -89,6 +196,8 @@ export interface PendingDb {
   preview: SchemaPreview;
   /** the automatic guess, or null when nothing plausible was found */
   guess: DbMapping | null;
+  /** why the guess (ranked candidates, reasons, limitations); absent in entries made before it existed */
+  analysis?: DbAnalysis;
 }
 
 /** A mapping remembered for a schema, kept in the project file. */
@@ -153,28 +262,55 @@ export function mappingProblems(preview: SchemaPreview, m: DbMapping): MappingPr
     }
     if (books && lines && books.name === lines.name) err("טבלת הספרים וטבלת השורות הן אותה טבלה. אם כל שורה מחזיקה את שם הספר, בחרו \"טבלה אחת\".");
   }
+  const unit = m.lines.unit ?? "line";
+  const then = m.lines.orderThen ?? [];
   if (lines) {
-    column(lines, m.lines.book, m.layout === "two-tables" ? "הספר של כל שורה" : "שם הספר");
+    column(lines, m.lines.book, m.layout === "two-tables" ? (m.via ? "הפרק או המהדורה של כל שורה" : "הספר של כל שורה") : "שם הספר");
     const order = column(lines, m.lines.order, "סדר השורות", { rowid: true });
+    for (const c of then) column(lines, c, "סדר משני");
+    if (then.length && m.lines.order === ROWID) err("סדר משני בא אחרי עמודת סדר. בחרו עמודה לסדר השורות (לא את סדר הרשומות).");
     const text = column(lines, m.lines.text, "טקסט השורה");
     column(lines, m.lines.heading, "רמת כותרת", { optional: true });
     if (m.layout === "single-table") column(lines, m.lines.path, "נתיב", { optional: true });
     if (text && text !== "rowid") {
-      if (text.kind === "binary") err(`העמודה "${text.name}" מכילה נתונים בינאריים שאינם טקסט, ואי אפשר להציג אותם.`);
+      if (text.kind === "binary") err(`העמודה "${text.name}" מכילה ${text.format ?? "נתונים בינאריים שאינם טקסט"}, ואי אפשר להציג אותם כטקסט.`);
       else if (text.kind === "integer" || text.kind === "real") out.push({ level: "warning", message: `העמודה "${text.name}" מכילה מספרים. האם זו באמת עמודת הטקסט?` });
       else if (text.kind === "empty") out.push({ level: "warning", message: `בשורות הראשונות העמודה "${text.name}" ריקה.` });
+      if ((text.garbled ?? 0) > 0.2) out.push({ level: "warning", message: garbledMessage(lines.name, text.name) });
+      if (unit === "line" && (text.jsonLines ?? 0) > 1)
+        out.push({ level: "info", message: `הערכים בעמודה "${text.name}" הם JSON (כ־${Math.round(text.jsonLines!)} שורות בכל ערך). כדי לקרוא אותם כשורות, בחרו "JSON" ביחידת הטקסט.` });
+      else if (unit === "line" && (text.newlines ?? 0) >= 1)
+        out.push({ level: "info", message: `בכל ערך בעמודה "${text.name}" יש בממוצע ${Math.round(text.newlines! + 1)} שורות. אם כל רשומה היא ספר, פרק או קטע של טקסט, בחרו את יחידת הטקסט המתאימה.` });
+      if (unit === "json" && text.jsonLines === undefined && text.kind !== "empty") out.push({ level: "warning", message: `הערכים בעמודה "${text.name}" אינם נראים כמו JSON בשורות הראשונות.` });
     }
+    if (unit !== "line" && m.lines.heading) out.push({ level: "info", message: "כשרשומה מחזיקה כמה שורות, עמודת רמת הכותרת אינה בשימוש: כותרות מזוהות לפי <h1>–<h6> בטקסט." });
     if (lines.withoutRowid && order) {
       const pk = lines.primaryKey.map((x) => x.toLowerCase());
-      if (pk[0] !== m.lines.book.toLowerCase() || pk[1] !== m.lines.order.toLowerCase())
-        err(`הטבלה "${lines.name}" היא WITHOUT ROWID, והכלי קורא אותה רק כשהמפתח הראשי שלה מתחיל ב(${m.lines.book}, ${m.lines.order}).`);
+      const want = [m.lines.book, m.lines.order, ...then].map((x) => x.toLowerCase());
+      if (want.some((x, i) => pk[i] !== x))
+        err(`הטבלה "${lines.name}" היא WITHOUT ROWID, והכלי קורא אותה רק כשהמפתח הראשי שלה מתחיל ב(${[m.lines.book, m.lines.order, ...then].join(", ")}).`);
       else if (lines.primaryKeySeekable === false) err(unsortedKeyMessage(lines.name));
+      if (m.via) err(withoutRowidViaMessage(lines.name));
     }
-    if (!out.some((p) => p.level === "error") && !lines.withoutRowid && !hasSeekableIndex(lines, m.lines.book))
-      out.push({
-        level: "info",
-        message: `אין בטבלה "${lines.name}" אינדקס לפי ${m.layout === "two-tables" ? "ספר" : "שם הספר"}, ולכן בפתיחה הכלי יקרא אותה פעם אחת מתחילתה ועד סופה ויבנה אינדקס בזיכרון. במסד גדול זה ייקח זמן (אפשר לבטל).`,
-      });
+    if (!out.some((p) => p.level === "error")) {
+      if (m.via) out.push({ level: "info", message: `עם טבלת ביניים ("${m.via.table}") הכלי קורא בפתיחה את טבלת השורות פעם אחת מתחילתה ועד סופה. במסד גדול זה ייקח זמן (אפשר לבטל).` });
+      else if (!lines.withoutRowid && !hasSeekableIndex(lines, m.lines.book))
+        out.push({
+          level: "info",
+          message: `אין בטבלה "${lines.name}" אינדקס לפי ${m.layout === "two-tables" ? "ספר" : "שם הספר"}, ולכן בפתיחה הכלי יקרא אותה פעם אחת מתחילתה ועד סופה ויבנה אינדקס בזיכרון. במסד גדול זה ייקח זמן (אפשר לבטל).`,
+        });
+    }
+  }
+  if (m.via) {
+    if (m.layout !== "two-tables") err("טבלת פרקים או מהדורות אפשרית רק עם טבלת ספרים וטבלת שורות.");
+    const vt = table(m.via.table, "הפרקים או המהדורות");
+    if (vt) {
+      column(vt, m.via.id, "מזהה הפרק או המהדורה", { rowid: true });
+      column(vt, m.via.book, "הספר של הפרק או המהדורה");
+      column(vt, m.via.order, "סדר הפרקים", { rowid: true, optional: true });
+      column(vt, m.via.title, "שם הפרק או המהדורה", { optional: true });
+      if (vt.name === lines?.name || vt.name === books?.name) err("טבלת הפרקים או המהדורות צריכה להיות טבלה שלישית, לא טבלת הספרים או השורות.");
+    }
   }
   if (m.links) {
     const lt = table(m.links.table, "הקישורים");
@@ -184,139 +320,25 @@ export function mappingProblems(preview: SchemaPreview, m: DbMapping): MappingPr
       column(lt, m.links.type, "סוג הקישור", { optional: true });
     }
     if (lines?.withoutRowid) err("קישורים נקראים לפי מזהה השורה (rowid), ולטבלת השורות אין rowid.");
+    if (unit !== "line") err("קישורים נקראים לפי מזהה השורה (rowid), ובמיפוי הזה רשומה אינה שורה אחת. הסירו את טבלת הקישורים או בחרו \"כל רשומה היא שורה\".");
   }
   return out;
 }
 
+/** WITHOUT ROWID lines are sought by (book, order…); through a chapters table the "book" of a line is its chapter. */
+export const withoutRowidViaMessage = (table: string): string =>
+  `טבלת השורות "${table}" היא WITHOUT ROWID, והכלי אינו קורא טבלה כזאת דרך טבלת פרקים או מהדורות. אפשר למפות את הפרקים או המהדורות עצמם כספרים.`;
+
+/** TEXT that is not valid UTF-8: SQLite keeps the bytes, but they reach the tool already replaced by U+FFFD. */
+export const garbledMessage = (table: string, column: string): string =>
+  `בעמודה "${table}.${column}" יש טקסט שאינו UTF-8 תקין — כנראה קידוד ישן (Windows-1255 או DOS) שנשמר כ־TEXT. הכלי אינו יכול לשחזר את האותיות מעמודת TEXT, והן יוצגו כסימני שאלה. (אותו טקסט בעמודת BLOB כן נקרא.)`;
+
 export const hasSeekableIndex = (t: TablePreview, firstColumn: string): boolean =>
   t.indexes.some((ix) => ix.seekable && ix.columns[0]?.toLowerCase() === firstColumn.toLowerCase());
 
-/* ---------------- the automatic guess ---------------- */
-
-const RX = {
-  title: /^(title|name|book_?title|book_?name|sefer|heb_?title|he_?title|שם|כותרת|שם_?ספר)$/i,
-  titleLoose: /title|name|שם|כותרת/i,
-  id: /^(id|book_?id|_id|bid|key)$/i,
-  bookRef: /^(book_?id|bookid|book|sefer_?id|work_?id|id_?book|ספר|book_?key)$/i,
-  bookRefLoose: /book|sefer|work|ספר/i,
-  order: /^(line_?index|line_?idx|line_?no|line_?num(ber)?|index|idx|ord|order|order_?index|seq|sequence|position|pos|num|number|line|row_?num|סדר|מספר)$/i,
-  orderLoose: /index|order|seq|pos|num|סדר/i,
-  text: /^(content|text|line|body|html|line_?text|txt|value|תוכן|טקסט)$/i,
-  textLoose: /content|text|body|html|תוכן|טקסט/i,
-  heading: /^(heading|heading_?level|level|header_?level|h_?level|toc_?level|depth)$/i,
-  path: /^(path|file|file_?path|folder|dir)$/i,
-  category: /^(category|category_?id|cat|categoryid|genre|section|קטגוריה)$/i,
-  linkSource: /^(source|src|from|line_?id_?1|source_?line(_?id)?|from_?line(_?id)?|line1|line_?from|src_?line)$/i,
-  linkTarget: /^(target|dst|to|line_?id_?2|target_?line(_?id)?|to_?line(_?id)?|line2|line_?to|dst_?line)$/i,
-  linkType: /^(type|kind|connection_?type(_?id)?|link_?type|relation)$/i,
-};
-
-const textual = (c: ColumnPreview) => TEXTUAL.has(c.kind);
-const integral = (c: ColumnPreview) => c.kind === "integer" || c.rowidAlias;
-
-function bestTextColumn(t: TablePreview): ColumnPreview | null {
-  let best: ColumnPreview | null = null;
-  let score = 0;
-  for (const c of t.columns) {
-    if (!textual(c)) continue;
-    const s = c.avgLength * (RX.text.test(c.name) ? 3 : RX.textLoose.test(c.name) ? 2 : 1) + (c.kind === "html" ? 5 : 0);
-    if (s > score) (best = c), (score = s);
-  }
-  return best;
-}
-
-function titleColumn(t: TablePreview, exclude?: string): ColumnPreview | null {
-  const cands = t.columns.filter((c) => textual(c) && c.name !== exclude && c.avgLength > 0 && c.avgLength <= 200);
-  return cands.find((c) => RX.title.test(c.name)) ?? cands.find((c) => RX.titleLoose.test(c.name)) ?? null;
-}
-
-function idColumn(t: TablePreview): string | null {
-  if (t.withoutRowid) return t.primaryKey[0] ?? null;
-  const alias = t.columns.find((c) => c.rowidAlias);
-  if (alias) return alias.name;
-  return t.columns.find((c) => RX.id.test(c.name))?.name ?? ROWID;
-}
-
-function orderColumn(t: TablePreview, exclude: string[]): string {
-  const cands = t.columns.filter((c) => !exclude.includes(c.name) && (integral(c) || c.kind === "real") && !c.rowidAlias);
-  const hit = cands.find((c) => RX.order.test(c.name)) ?? cands.find((c) => RX.orderLoose.test(c.name));
-  if (hit) return hit.name;
-  if (t.withoutRowid) return t.primaryKey[1] ?? t.primaryKey[0] ?? "";
-  return ROWID;
-}
-
-function headingColumn(t: TablePreview, exclude: string[]): string | undefined {
-  return t.columns.find((c) => !exclude.includes(c.name) && integral(c) && RX.heading.test(c.name))?.name;
-}
-
-function linksGuess(preview: SchemaPreview, skip: string[]): DbMapping["links"] {
-  for (const t of preview.tables) {
-    if (skip.includes(t.name) || !/link|connection|relation|קישור/i.test(t.name)) continue;
-    const ints = t.columns.filter(integral);
-    const source = ints.find((c) => RX.linkSource.test(c.name));
-    const target = ints.find((c) => RX.linkTarget.test(c.name));
-    if (!source || !target) continue;
-    const type = t.columns.find((c) => c !== source && c !== target && RX.linkType.test(c.name));
-    return { table: t.name, source: source.name, target: target.name, ...(type && { type: type.name }) };
-  }
-  return undefined;
-}
-
-/**
- * A plausible mapping from names and sample values, or null. It is only a starting point: the
- * wizard always shows it to the user, who confirms or corrects it.
- */
-export function guessMapping(preview: SchemaPreview): DbMapping | null {
-  // the lines table: the one with the most text (by size, then by average text length)
-  const withText = preview.tables
-    .map((t) => ({ t, text: bestTextColumn(t) }))
-    .filter((x): x is { t: TablePreview; text: ColumnPreview } => x.text !== null)
-    .sort((a, b) => b.t.pages - a.t.pages || b.text.avgLength - a.text.avgLength);
-  for (const { t: lines, text } of withText) {
-    // two tables: a column of the lines table refers to another table that has titles
-    const refs = lines.columns.filter((c) => c !== text && (integral(c) || textual(c)) && !c.rowidAlias);
-    const ref = refs.find((c) => RX.bookRef.test(c.name)) ?? refs.find((c) => RX.bookRefLoose.test(c.name) && integral(c));
-    if (ref) {
-      const books = preview.tables
-        .filter((b) => b !== lines && titleColumn(b))
-        .sort((a, b) => Number(/book|sefer|ספר/i.test(b.name)) - Number(/book|sefer|ספר/i.test(a.name)) || a.pages - b.pages)[0];
-      if (books) {
-        const title = titleColumn(books)!;
-        const id = idColumn(books);
-        const path = books.columns.find((c) => RX.path.test(c.name) && textual(c));
-        const category = books.columns.find((c) => RX.category.test(c.name));
-        const order = orderColumn(lines, [ref.name, text.name]);
-        const heading = headingColumn(lines, [ref.name, text.name, order]);
-        const links = linksGuess(preview, [lines.name, books.name]);
-        if (id && order)
-          return {
-            layout: "two-tables",
-            books: { table: books.name, id, title: title.name, ...(path && { path: path.name }), ...(category && { category: category.name }) },
-            lines: { table: lines.name, book: ref.name, order, text: text.name, ...(heading && { heading }) },
-            ...(links && { links }),
-          };
-      }
-    }
-    // one table: a short text column whose values repeat (the book title of every line)
-    const title = titleColumn(lines, text.name) ?? lines.columns.find((c) => c !== text && textual(c) && c.avgLength <= 120 && c.distinct < c.filled);
-    if (title) {
-      const order = orderColumn(lines, [title.name, text.name]);
-      const heading = headingColumn(lines, [title.name, text.name, order]);
-      const path = lines.columns.find((c) => RX.path.test(c.name) && textual(c) && c !== title);
-      const links = linksGuess(preview, [lines.name]);
-      if (order)
-        return {
-          layout: "single-table",
-          lines: { table: lines.name, book: title.name, order, text: text.name, ...(heading && { heading }), ...(path && { path: path.name }) },
-          ...(links && { links }),
-        };
-    }
-  }
-  return null;
-}
-
 /* ---------------- reading a mapping back from untrusted JSON ---------------- */
 
+const UNITS = ["line", "lines", "chunks", "json"] as const;
 const s = (x: unknown): x is string => typeof x === "string" && x.length > 0 && x.length <= 256;
 const opt = (o: Record<string, unknown>, k: string) => (s(o[k]) ? { [k]: o[k] as string } : {});
 
@@ -326,7 +348,18 @@ export function parseDbMapping(x: unknown): DbMapping | null {
   if (!m || typeof m !== "object" || (m.layout !== "two-tables" && m.layout !== "single-table")) return null;
   const l = m.lines as Record<string, unknown> | null;
   if (!l || typeof l !== "object" || !s(l.table) || !s(l.book) || !s(l.order) || !s(l.text)) return null;
-  const lines = { table: l.table, book: l.book, order: l.order, text: l.text, ...opt(l, "heading"), ...(m.layout === "single-table" ? opt(l, "path") : {}) };
+  const then = Array.isArray(l.orderThen) ? l.orderThen.filter(s).slice(0, 4) : [];
+  const unit = typeof l.unit === "string" && (UNITS as readonly string[]).includes(l.unit) && l.unit !== "line" ? (l.unit as TextUnit) : undefined;
+  const lines = {
+    table: l.table,
+    book: l.book,
+    order: l.order,
+    text: l.text,
+    ...opt(l, "heading"),
+    ...(m.layout === "single-table" ? opt(l, "path") : {}),
+    ...(then.length && { orderThen: then }),
+    ...(unit && { unit }),
+  };
   let books: DbMapping["books"];
   if (m.layout === "two-tables") {
     const b = m.books as Record<string, unknown> | null;
@@ -336,7 +369,11 @@ export function parseDbMapping(x: unknown): DbMapping | null {
   let links: DbMapping["links"];
   const k = m.links as Record<string, unknown> | null | undefined;
   if (k && typeof k === "object" && s(k.table) && s(k.source) && s(k.target)) links = { table: k.table, source: k.source, target: k.target, ...opt(k, "type") };
-  return { layout: m.layout, ...(books && { books }), lines, ...(links && { links }) };
+  let via: DbMapping["via"];
+  const v = m.via as Record<string, unknown> | null | undefined;
+  if (m.layout === "two-tables" && v && typeof v === "object" && s(v.table) && s(v.id) && s(v.book) && (v.kind === "part" || v.kind === "edition"))
+    via = { table: v.table, id: v.id, book: v.book, ...opt(v, "order"), ...opt(v, "title"), kind: v.kind };
+  return { layout: m.layout, ...(books && { books }), lines, ...(links && { links }), ...(via && { via }) };
 }
 
 export function parseSavedDbMappings(x: unknown): SavedDbMapping[] {
@@ -352,8 +389,20 @@ export function parseSavedDbMappings(x: unknown): SavedDbMapping[] {
 
 /** One sentence describing a mapping, for the wizard's summary and notices. */
 export function describeMapping(m: DbMapping): string {
-  const order = (o: string) => (o === ROWID ? "סדר הרשומות" : o);
-  if (m.layout === "two-tables")
-    return `ספרים מ"${m.books!.table}" (שם: ${m.books!.title}); שורות מ"${m.lines.table}" (ספר: ${m.lines.book}, סדר: ${order(m.lines.order)}, טקסט: ${m.lines.text}${m.lines.heading ? `, כותרת: ${m.lines.heading}` : ""})${m.links ? `; קישורים מ"${m.links.table}"` : ""}`;
-  return `טבלה אחת, "${m.lines.table}": שם הספר ב־${m.lines.book}, סדר: ${order(m.lines.order)}, טקסט: ${m.lines.text}${m.lines.heading ? `, כותרת: ${m.lines.heading}` : ""}${m.links ? `; קישורים מ"${m.links.table}"` : ""}`;
+  const order = [m.lines.order === ROWID ? "סדר הרשומות" : m.lines.order, ...(m.lines.orderThen ?? [])].join(" ואז ");
+  const unit = m.lines.unit && m.lines.unit !== "line" ? `, ${UNIT_LABEL[m.lines.unit]}` : "";
+  const tail = `${m.lines.heading ? `, כותרת: ${m.lines.heading}` : ""}${unit}`;
+  const links = m.links ? `; קישורים מ"${m.links.table}"` : "";
+  if (m.layout === "two-tables") {
+    const via = m.via ? `; ${m.via.kind === "edition" ? "מהדורות" : "פרקים"} מ"${m.via.table}"` : "";
+    return `ספרים מ"${m.books!.table}" (שם: ${m.books!.title})${via}; שורות מ"${m.lines.table}" (${m.via ? (m.via.kind === "edition" ? "מהדורה" : "פרק") : "ספר"}: ${m.lines.book}, סדר: ${order}, טקסט: ${m.lines.text}${tail})${links}`;
+  }
+  return `טבלה אחת, "${m.lines.table}": שם הספר ב־${m.lines.book}, סדר: ${order}, טקסט: ${m.lines.text}${tail}${links}`;
 }
+
+export const UNIT_LABEL: Record<TextUnit, string> = {
+  line: "כל רשומה היא שורה",
+  lines: "כמה שורות בכל רשומה",
+  chunks: "הטקסט מחולק לקטעים",
+  json: "JSON של שורות ופרקים",
+};

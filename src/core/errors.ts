@@ -15,6 +15,7 @@ export type ErrorCode =
   | "text/undecodable"
   | "db/value-not-text"
   | "db/compressed-corrupt"
+  | "db/book-too-large"
   | "db/compressed-unknown-dictionary"
   | "db/dictionary-conflict"
   | "db/dictionary-too-large"

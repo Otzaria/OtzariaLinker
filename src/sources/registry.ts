@@ -1,6 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
-import type { DbMapping, PendingDb } from "../core/db-mapping";
+import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import type { Link } from "../core/links/model";
@@ -14,7 +14,7 @@ import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
-import { MappedDbSource } from "./db/mapped-source";
+import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
@@ -93,6 +93,13 @@ export class SourceRegistry {
     const p = this.pending.get(token);
     if (!p) throw new LinkerError("db/mapping-unknown-token", "המסד הזה כבר אינו פתוח לבחירת מיפוי. גררו אותו שוב.");
     return this.add(await MappedDbSource.open(this.nextId(), p.label, blobSource(p.blob), mapping, ctx));
+  }
+
+  /** The first lines of the first books through a mapping that is not confirmed yet (the wizard's test). */
+  async testMapping(token: string, mapping: DbMapping, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<MappingTest> {
+    const p = this.pending.get(token);
+    if (!p) throw new LinkerError("db/mapping-unknown-token", "המסד הזה כבר אינו פתוח לבחירת מיפוי. גררו אותו שוב.");
+    return testMapping(blobSource(p.blob), mapping, ctx);
   }
 
   async lines(bookKey: string, from: number, to: number): Promise<SourceLine[]> {

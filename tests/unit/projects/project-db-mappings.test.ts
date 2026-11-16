@@ -17,6 +17,22 @@ describe("project file — database mappings", () => {
     expect(p.dbMappings).toEqual([saved]);
   });
 
+  it("round-trips the optional mapping fields of the V5 wizard (text unit, composite order, chapters) without a version bump", () => {
+    const v5: SavedDbMapping = {
+      fingerprint: "fedcba9876543210",
+      label: "bible.db",
+      mapping: {
+        layout: "two-tables",
+        books: { table: "books", id: "id", title: "title" },
+        lines: { table: "verses", book: "chapter_id", order: "num", text: "text", orderThen: ["sub"], unit: "lines" },
+        via: { table: "chapters", id: "id", book: "book_id", order: "num", title: "name", kind: "part" },
+      },
+    };
+    const text = serializeProject({ ...base, dbMappings: [saved, v5] }, "2.0.0");
+    expect(JSON.parse(text).version).toBe(1);
+    expect(parseProject(text, bind).dbMappings).toEqual([saved, v5]);
+  });
+
   it("writes nothing extra when there are none, so the file stays as before", () => {
     const text = serializeProject({ ...base, dbMappings: [] }, "2.0.0", new Date(0));
     expect(text).toBe(serializeProject(base, "2.0.0", new Date(0)));
