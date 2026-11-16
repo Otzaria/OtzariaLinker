@@ -64,6 +64,14 @@ describe("trimBefore (v3 F-064)", () => {
     expect(trimBefore([l], bookOf(A, 20), "source", 5).map((e) => e.after)).toEqual([undefined]);
   });
 
+  it("a cut never ends on a heading: it steps back from it (review C11)", () => {
+    // a new link on the line right after a chapter heading, the most common place to start one
+    const l = link(at(A, 10, 59), at(B, 0));
+    expect(trimBefore([l], bookOf(A, 60, [50]), "source", 51).map((e) => e.after)).toEqual([49]);
+    const near = link(at(A, 48, 59), at(B, 0));
+    expect(trimBefore([near], bookOf(A, 60, [49, 50]), "source", 51).map((e) => e.after)).toEqual([undefined]);
+  });
+
   it("database links are never changed", () => {
     expect(trimBefore([link(at(A, 2, 9), at(B, 0), { provenance: "db" })], bookOf(A, 20), "source", 5)).toEqual([]);
   });

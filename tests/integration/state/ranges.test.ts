@@ -65,6 +65,13 @@ describe("ranges through the store", () => {
     expect(store.allLinks.value.length).toBe(1);
   });
 
+  it("a new link right after a heading cuts the range before the heading, not onto it (review C11)", async () => {
+    const { store, create } = await opened();
+    const wide = create(1, 1, 8);
+    create(6, 2); // line 5 is a heading; the book's headings were never asked for, only its lines read
+    expect(store.linkState.value.links.get(wide.id)!.source.end).toBe(4);
+  });
+
   it("range completion of a book: one step, undoable, and a second run changes nothing", async () => {
     const { store, main, create } = await opened();
     create(1, 1);

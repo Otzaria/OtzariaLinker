@@ -17,8 +17,8 @@ import type { NoticeKind } from "./store";
 export interface RangesHost {
   readonly linkState: Signal<LinkState>;
   readonly books: ReadonlySignal<Map<string, SourceBook>>;
-  /** the line count of a text book is known once the reader has read it */
-  readonly lines: Pick<LineStore, "count">;
+  /** the line count of a text book is known once the reader has read it; `peek` gives its loaded lines */
+  readonly lines: Pick<LineStore, "count" | "peek">;
   sameBook(ref: BookRef, bookKey: string): boolean;
   notify(kind: NoticeKind, text: string, details?: string[], action?: { label: string; run: () => void }): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
@@ -60,12 +60,26 @@ export class RangesState {
   }
 
   /**
-   * Edits that cut every range a new link at (`bookKey`, `start`) would fall inside. Synchronous and
-   * header-free: it needs no headings, so the store can put them in the same step as the new link.
+   * Edits that cut every range a new link at (`bookKey`, `start`) would fall inside. Synchronous, so the
+   * store can put them in the same step as the new link; a cut range must still not end on a heading
+   * (Otzaria drops it), so the headings are the ones already read for the book, else the heading lines
+   * right above `start` as far as the reader has loaded them — the lines the user is looking at.
    */
   trimFor(bookKey: string, side: RangeSide, start: number, exclude?: string): Change[] {
-    const book: RangeBook = { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount: 0, headings: new Set() };
+    const headings = this.headingCache.get(bookKey) ?? this.loadedHeadingsAbove(bookKey, start);
+    const book: RangeBook = { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount: 0, headings };
     return this.toChanges(trimBefore(this.links(), book, side, start, exclude));
+  }
+
+  /** The run of heading lines that ends right above `start`, among the lines the reader has loaded. */
+  private loadedHeadingsAbove(bookKey: string, start: number): Set<number> {
+    const out = new Set<number>();
+    for (let i = start - 1; i >= 0; i--) {
+      const l = this.host.lines.peek(bookKey, i);
+      if (!l || l.heading == null) break;
+      out.add(i);
+    }
+    return out;
   }
 
   /** Range completion for one book and side, as one undoable step. Returns the number of links changed (null: not run). */

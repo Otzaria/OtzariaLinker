@@ -85,6 +85,8 @@ export function suggestEnd(start: number, markers: readonly number[], book: Pick
 /**
  * Ranges that would swallow a new link starting at `newStart` are cut to end just before it
  * (v3 `trimPrevious`): only ranges of this book and side that start BEFORE the new line and reach it.
+ * A cut that would end on a heading steps back from it, like every other end here: a new link is
+ * most often made on the line right after a heading, and Otzaria drops a range that ends on one.
  */
 export function trimBefore(links: Iterable<Link>, book: RangeBook, side: RangeSide, newStart: number, exclude?: string): RangeEdit[] {
   const out: RangeEdit[] = [];
@@ -92,8 +94,8 @@ export function trimBefore(links: Iterable<Link>, book: RangeBook, side: RangeSi
     if (!live(l) || l.id === exclude || l.provenance === "db") continue;
     const s = sideOf(l, side);
     if (!book.owns(s.book) || s.end === undefined || s.line >= newStart || s.end < newStart) continue;
-    const after = newStart - 1 > s.line ? newStart - 1 : undefined;
-    out.push({ link: l, side, before: s.end, after });
+    const end = backFromHeading(newStart - 1, s.line, book.headings);
+    out.push({ link: l, side, before: s.end, after: end > s.line ? end : undefined });
   }
   return out;
 }
