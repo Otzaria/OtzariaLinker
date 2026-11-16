@@ -56,6 +56,20 @@ describe("ref_2 into a Sefaria book (B1)", () => {
     expect(store.allLinks.value[0]!.ref2).toBeUndefined();
   });
 
+  it("the notice of the filled refs says where Ctrl+Z undoes it: the guided flow has no undo (V5 UX audit)", async () => {
+    const { store, verse, sheet } = await opened();
+    store.exchange.importLinksCsv("ביאור חדש על בראשית_links.csv", sheet(verse));
+    const said = () => store.notices.value.find((n) => n.text.startsWith("הכלי השלים לבד"))!.text;
+    store.screen.value = "guided";
+    await store.exchange.prepareExport();
+    expect(said()).toContain("אפשר לבטל בסביבת העבודה (Ctrl+Z).");
+    store.undo();
+    store.notices.value = [];
+    store.screen.value = "workspace";
+    await store.exchange.prepareExport();
+    expect(said()).toContain("אפשר לבטל ב־Ctrl+Z.");
+  });
+
   it("a ref that cannot be built holds the link back for a submission, and only warns for private use", async () => {
     const { store } = await opened();
     // רש"י על בראשית is a Sefaria book whose heRef prefix the learned table does not hold

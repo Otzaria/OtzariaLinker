@@ -36,6 +36,8 @@ export interface ExchangeHost {
   /** the link revision last written to disk — a saved export updates it */
   readonly savedRevision: Signal<number>;
   readonly exportPurpose: ReadonlySignal<"submission" | "private">;
+  /** the screen now: Ctrl+Z undoes only in the workspace (ui/app.tsx), so a notice says where */
+  readonly screen?: ReadonlySignal<string>;
   /** advanced mode: the report carries the problems' technical detail (audit F14) */
   readonly prefs?: { readonly advanced: ReadonlySignal<boolean> };
   readonly lines: Pick<LineStore, "peek">;
@@ -266,7 +268,8 @@ export class ExchangeState {
     if (!changes.length) return;
     this.commit(`השלמת ציוני ספריא ל־${linksCount(changes.length)}`, changes);
     // plain words: the notice also shows in simple mode and in the guided flow (the field names are in the history label)
-    this.host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. אפשר לבטל ב־Ctrl+Z.`);
+    const undo = this.host.screen?.value === "workspace" ? "אפשר לבטל ב־Ctrl+Z." : "אפשר לבטל בסביבת העבודה (Ctrl+Z).";
+    this.host.notify("info", `הכלי השלים לבד את ציון ספריא באנגלית ל־${linksCount(changes.length)}, מתוך שם המקום שבמסד. ${undo}`);
   }
 
   /** The refs fillSefariaRefs would fill now, as changes — computed without changing anything. */
