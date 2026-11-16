@@ -271,6 +271,9 @@ test("dialogs and menus keep focus inside, close with Esc and give focus back", 
 });
 
 test("every control has a name, and text has AA contrast, on each main screen", async ({ page }) => {
+  // ~11 screens, each named and measured in two themes after it settles: 30 s alone in Firefox, and
+  // past 60 s beside other workers on a loaded machine (a click took 5 s) — triple the default
+  test.slow();
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(distUrl);
   await screenOk(page, "home");
