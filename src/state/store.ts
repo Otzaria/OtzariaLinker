@@ -1098,6 +1098,9 @@ export class AppStore {
     });
   });
 
+  /** The list of sources to reopen is folded to one line (the user hid it; its button shows it again). */
+  readonly missingSourcesFolded = signal(false);
+
   /** The user does not want to open the project's sources again: the list goes away. */
   dismissMissingSources(): void {
     this.projectSources.value = [];

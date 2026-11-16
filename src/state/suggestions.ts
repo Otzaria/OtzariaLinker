@@ -100,6 +100,28 @@ export function suggestionIdOfLink(linkId: string): string | undefined {
 /** pending → the user has not decided; approved → a link exists for it; exists → the project already has that link */
 export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 
+/**
+ * Approving many suggestions together (V5 UX audit U21, the owner's decision): the levels to include,
+ * and optionally one book (either side) or one method. Nothing is chosen for the user: "possible" and
+ * "ambiguous" are in only when ticked. The approval itself is the one path there is, `approve`.
+ */
+export interface BulkChoice {
+  levels: readonly Confidence[];
+  book?: string;
+  engine?: EngineId;
+}
+
+/** What a bulk choice would approve: the suggestions, per level, and the records they write. */
+export interface BulkPreview {
+  ids: string[];
+  byLevel: Partial<Record<Confidence, number>>;
+  /** the links (file records) approving them writes — more than `ids` when a span on a Sefaria side is written a line at a time */
+  records: number;
+}
+
+/** The levels a bulk approval starts with; the others only when the user ticks them. */
+export const BULK_DEFAULT_LEVELS: readonly Confidence[] = ["certain", "high"];
+
 export class SuggestionsState {
   readonly run = signal<SuggestionRun | null>(null);
   /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
@@ -365,6 +387,34 @@ export class SuggestionsState {
   private keysOf(ids: readonly string[]): string[] {
     const want = new Set(ids);
     return (this.run.value?.result.suggestions ?? []).filter((x) => want.has(x.id)).flatMap(rejectionKeys);
+  }
+
+  /** The pending suggestions by book (either side) and by method, most first — what a bulk approval can narrow to. */
+  bulkGroups(): { books: { title: string; count: number }[]; engines: { id: EngineId; count: number }[] } {
+    const st = this.state.value;
+    const books = new Map<string, number>();
+    const engines = new Map<EngineId, number>();
+    for (const x of this.run.value?.result.suggestions ?? []) {
+      if (st.get(x.id) !== "pending") continue;
+      for (const t of new Set([x.source.book.title, x.target.book.title])) books.set(t, (books.get(t) ?? 0) + 1);
+      engines.set(x.engine, (engines.get(x.engine) ?? 0) + 1);
+    }
+    const most = <K>(m: Map<K, number>) => [...m].sort((a, b) => b[1] - a[1]);
+    return { books: most(books).map(([title, count]) => ({ title, count })), engines: most(engines).map(([id, count]) => ({ id, count })) };
+  }
+
+  /** The pending suggestions a bulk choice takes, per level, and the records approving them writes (the same count `approve` makes). */
+  bulkPreview(c: BulkChoice): BulkPreview {
+    const st = this.state.value;
+    const levels = new Set(c.levels);
+    const chosen = (this.run.value?.result.suggestions ?? []).filter(
+      (x) => st.get(x.id) === "pending" && levels.has(x.confidence) && (!c.book || x.source.book.title === c.book || x.target.book.title === c.book) && (!c.engine || x.engine === c.engine),
+    );
+    const byLevel: Partial<Record<Confidence, number>> = {};
+    for (const x of chosen) byLevel[x.confidence] = (byLevel[x.confidence] ?? 0) + 1;
+    const existing = chosen.length ? this.existingKeys(chosen) : new Set<string>();
+    const records = chosen.reduce((n, x) => n + this.linksOf(x, existing).length, 0);
+    return { ids: chosen.map((x) => x.id), byLevel, records };
   }
 
   /** Pending suggestions at or above a confidence, e.g. "approve every certain one". */

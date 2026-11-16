@@ -13,6 +13,7 @@ import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
+import { LineLinksPopover, type LineLinksAt } from "./line-links";
 import { plainText } from "./plain-text";
 import { ReopenSources } from "./reopen-sources";
 
@@ -159,6 +160,14 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   const marks = useLineMarks(side, bookKey);
   const pick = store.pick[side].value;
   const pickHere = pick && pick.bookKey === bookKey ? pick : null;
+  /** the line whose links are open (its count was clicked) */
+  const [linksAt, setLinksAt] = useState<LineLinksAt | null>(null);
+  const openLinks = (line: number, anchor: HTMLElement) => setLinksAt((cur) => (cur?.line === line ? null : { line, anchor }));
+  const closeLinks = (refocus: boolean) => {
+    const anchor = linksAt?.anchor;
+    setLinksAt(null);
+    if (refocus && anchor?.isConnected) anchor.focus();
+  };
 
   const onClick = (e: MouseEvent) => {
     const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
@@ -188,6 +197,12 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   };
 
   const onKey = (e: KeyboardEvent) => {
+    // Enter on the reader: the picked line's links (when it has any)
+    if (e.key === "Enter" && e.target === e.currentTarget && pickHere) {
+      const btn = scroller.current?.querySelector<HTMLElement>(`.ln[data-i="${pickHere.line}"] .marks-btn`);
+      if (btn) (e.preventDefault(), openLinks(pickHere.line, btn));
+      return;
+    }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
     // keyboard-only use: the first arrow picks the first line in view (UX review #6)
@@ -246,10 +261,11 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
       <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ספר ה${SIDE_LABEL[side]} (החצים בוחרים שורה)`}>
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
-            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} />
+            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} />
           ))}
         </div>
       </div>
+      {linksAt && <LineLinksPopover bookKey={bookKey} at={linksAt} onClose={closeLinks} />}
       <div class="sr-only" role="status">
         {pickHere ? pickedLineText(pickHere, store.lines.peek(bookKey, pickHere.line)?.anchorText) : ""}
       </div>
@@ -309,7 +325,7 @@ function useLineMarks(side: Side, bookKey: string): Marks {
   return { project: project.value, suggested: suggested.value };
 }
 
-function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null }) {
+function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null; linksOpen: number | null; onLinks: (line: number, anchor: HTMLElement) => void }) {
   const { c, bookKey, active, io, count } = props;
   const store = useStore();
   const ref = useRef<HTMLDivElement>(null);
@@ -337,7 +353,7 @@ function Chunk(props: { c: number; bookKey: string; active: boolean; io: Interse
       {lines.map((l, k) => {
         const i = from + k;
         if (!l) return <div key={i} class="ln" data-i={i}><span class="no">{i + 1}</span><span class="tx muted">…</span></div>;
-        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} />;
+        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} linksOpen={props.linksOpen === i} onLinks={props.onLinks} />;
       })}
     </div>
   );
@@ -351,19 +367,33 @@ function countDb(links: Link[] | undefined, bookKey: string, from: number, n: nu
   return m;
 }
 
-function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null }) {
+function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpen, onLinks }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null; linksOpen: boolean; onLinks: (line: number, anchor: HTMLElement) => void }) {
   const html = useMemo(() => sanitizeBookHtml(l.anchorText), [l.anchorText]);
+  const total = (mark?.new ?? 0) + (mark?.file ?? 0) + (mark?.deleted ?? 0) + db;
   const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}`;
   return (
     <div class={cls} data-i={l.index} title={l.heading !== null ? "שורת כותרת — אוצריא לא יוצרת קישור אל כותרת או ממנה" : undefined}>
       <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר היעד" : undefined}>{l.index + 1}</span>
       <span class="tx" dangerouslySetInnerHTML={{ __html: html }} />
       <span class="marks">
-        {mark?.new ? <span class="mark new" title={`${mark.new} קישורים חדשים או ערוכים`}>{mark.new}</span> : null}
-        {mark?.file ? <span class="mark file" title={`${mark.file} קישורים מקובץ שיובא`}>{mark.file}</span> : null}
-        {mark?.deleted ? <span class="mark deleted" title={`${mark.deleted} קישורים שיימחקו`}>{mark.deleted}</span> : null}
+        {/* the counts open the line's links (line-links.tsx); only the picked line's is a Tab stop */}
+        {total > 0 && (
+          <button
+            class="marks-btn"
+            tabIndex={picked ? 0 : -1}
+            aria-haspopup="dialog"
+            aria-expanded={linksOpen}
+            aria-label={`הקישורים של שורה ${l.index + 1} (${total})`}
+            title="הקישורים של השורה"
+            onClick={(e) => onLinks(l.index, e.currentTarget)}
+          >
+            {mark?.new ? <span class="mark new" title={`${mark.new} קישורים חדשים או ערוכים`}>{mark.new}</span> : null}
+            {mark?.file ? <span class="mark file" title={`${mark.file} קישורים מקובץ שיובא`}>{mark.file}</span> : null}
+            {mark?.deleted ? <span class="mark deleted" title={`${mark.deleted} קישורים שיימחקו`}>{mark.deleted}</span> : null}
+            {db ? <span class="mark db" title={`${db} קישורים קיימים במסד`}>{db}</span> : null}
+          </button>
+        )}
         {sug ? <span class={`mark sug conf-${sug}`} title={`הצעה ממתינה, ודאות ${CONFIDENCE_LABELS[sug]}`}>•</span> : null}
-        {db ? <span class="mark db" title={`${db} קישורים קיימים במסד`}>{db}</span> : null}
       </span>
     </div>
   );

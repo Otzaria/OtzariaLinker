@@ -269,10 +269,21 @@ test("every control has a name, and text has AA contrast, on each main screen", 
   await page.locator(".sug-table tbody tr").first().getByRole("button", { name: /^אישור ההצעה/ }).click(); // a link to check
   await page.getByRole("button", { name: "הכול", exact: true }).click(); // every state, the faded rows too
   await screenOk(page, "workspace: suggestions table");
+  // approving a group (V5 UX audit U21): every choice named, the count readable in both themes
+  await page.locator("details.bulk-approve > summary").click();
+  await screenOk(page, "workspace: approve a group");
+  await page.locator("details.bulk-approve > summary").click();
   await page.getByRole("radio", { name: "כרטיס" }).click();
   await screenOk(page, "workspace: suggestions card");
   await page.getByRole("tab", { name: /^קישורים/ }).click();
   await screenOk(page, "workspace: links");
+  // a line's links, from the count beside it (the approved suggestion's line): named, readable, Esc gives focus back
+  const count = page.locator(".reader.source .marks-btn").first();
+  await count.click();
+  await expect(page.getByRole("dialog", { name: /^הקישורים של שורה/ })).toBeVisible();
+  await screenOk(page, "workspace: a line's links");
+  await page.keyboard.press("Escape");
+  await expect(count).toBeFocused();
   await page.getByRole("tab", { name: "קישורים מהמסד" }).click();
   await screenOk(page, "workspace: database links");
   await page.getByRole("tab", { name: /בדיקה/ }).click();

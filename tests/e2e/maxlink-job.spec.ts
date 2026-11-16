@@ -67,8 +67,10 @@ test("max-link job: a failing book, pause → reload → continue → run the fa
   expect(finished.length).toBeGreaterThanOrEqual(4);
   expect(finished.length).toBeLessThan(BOOKS);
   expect(paused.books.find((b) => b.title === "ביאור 1 על בראשית")).toMatchObject({ status: "failed", why: expect.stringContaining("אי אפשר לקרוא את הקובץ") });
-  // the finished books' suggestions are there to review while the job is paused
-  await expect(page.locator("details.ml-report")).toBeVisible();
+  // the finished books' suggestions are there to review while the job is paused: the table first, the
+  // job card above it because there is something to continue, the report on request (V5 UX audit U15)
+  await expect(page.getByRole("table", { name: "הצעות" })).toBeVisible();
+  await expect(page.locator("details.ml-report")).toHaveCount(0);
   await expect(panel.getByRole("button", { name: /^המשך \([\d,]+ ספרים\)$/ })).toBeEnabled();
 
   // the tab is reloaded: the job waits in the browser, and asks for its folder again
@@ -92,6 +94,9 @@ test("max-link job: a failing book, pause → reload → continue → run the fa
   await panel.getByRole("button", { name: "הרצה חוזרת של 1 שנכשלו" }).click();
   // the job is "done" again once that book ran (the failed count drops as soon as it starts)
   await expect.poll(async () => { const j = await job(page); return j?.state === "done" ? settled(j) : -1; }, { timeout: 60_000 }).toBe(BOOKS + 1);
+  // nothing left to continue: the card steps back into "דוח העבודה"
+  await expect(panel).toHaveCount(0);
+  await page.getByRole("button", { name: /^דוח העבודה/ }).click();
   await expect(panel.locator(".ml-job-counts li.st-failed")).toHaveCount(0);
   done = (await job(page))!;
   for (const b of finished) expect(done.books.find((x) => x.title === b.title)!.ms).toBe(b.ms);
