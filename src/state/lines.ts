@@ -10,8 +10,10 @@ import type { BooksService } from "./services";
  */
 export const CHUNK = 200;
 const MAX_CHUNKS = 400; // ~80k lines across all books
+/** a chunk that failed is read again when a view asks for it after this long (review C8) */
+export const RETRY_MS = 5000;
 
-type ChunkState<T> = { status: "loading"; promise: Promise<void> } | { status: "ready"; items: T[] } | { status: "error"; message: string };
+type ChunkState<T> = { status: "loading"; promise: Promise<void> } | { status: "ready"; items: T[] } | { status: "error"; message: string; at: number };
 
 class ChunkCache<T> {
   private readonly chunks = new Map<string, ChunkState<T>>();
@@ -24,17 +26,29 @@ class ChunkCache<T> {
     return this.chunks.get(`${bookKey}#${chunk}`);
   }
 
+  /** Marks a chunk most recently used (a view showed it), so the eviction takes older ones first. */
+  touch(bookKey: string, chunk: number): void {
+    const key = `${bookKey}#${chunk}`;
+    const s = this.chunks.get(key);
+    if (s?.status !== "ready" || this.chunks.size < MAX_CHUNKS / 2) return;
+    this.chunks.delete(key);
+    this.chunks.set(key, s);
+  }
+
   ensure(bookKey: string, chunk: number): Promise<void> {
     const key = `${bookKey}#${chunk}`;
     const hit = this.chunks.get(key);
     if (hit?.status === "ready") return Promise.resolve();
     if (hit?.status === "loading") return hit.promise;
-    const promise = this.fetch(bookKey, chunk * CHUNK, chunk * CHUNK + CHUNK - 1).then(
-      (items) => void this.put(key, { status: "ready", items }),
-      (err: Error) => void this.put(key, { status: "error", message: err.message }),
-    );
-    this.chunks.set(key, { status: "loading", promise });
-    return promise;
+    const loading: ChunkState<T> = {
+      status: "loading",
+      promise: this.fetch(bookKey, chunk * CHUNK, chunk * CHUNK + CHUNK - 1).then(
+        (items) => this.settle(key, loading, { status: "ready", items }),
+        (err: Error) => this.settle(key, loading, { status: "error", message: err.message, at: Date.now() }),
+      ),
+    };
+    this.chunks.set(key, loading);
+    return loading.promise;
   }
 
   drop(bookKeyPrefix: string): void {
@@ -42,13 +56,22 @@ class ChunkCache<T> {
     this.onChange();
   }
 
-  private put(key: string, s: ChunkState<T>): void {
+  /**
+   * A fetch is over. It is recorded only if its chunk is still the one it was started for: a drop
+   * (the source closed, the worker restarted) or a newer load replaced it, and a late answer must not
+   * bring back what was forgotten (review C8).
+   */
+  private settle(key: string, loading: ChunkState<T>, s: ChunkState<T>): void {
+    if (this.chunks.get(key) !== loading) return;
     this.chunks.delete(key); // re-insert = most recently used
     this.chunks.set(key, s);
     while (this.chunks.size > MAX_CHUNKS) this.chunks.delete(this.chunks.keys().next().value!);
     this.onChange();
   }
 }
+
+/** Whether a view should (re)load a chunk: never asked, or it failed long enough ago to try again. */
+const wanted = (s: ChunkState<unknown> | undefined): boolean => !s || (s.status === "error" && Date.now() - s.at >= RETRY_MS);
 
 /**
  * The line count of a book shorter than `below` lines, when it does not say (text files): a binary
@@ -101,7 +124,8 @@ export class LineStore {
   line(bookKey: string, index: number): SourceLine | undefined {
     const c = Math.floor(index / CHUNK);
     const s = this.lines.state(bookKey, c);
-    if (!s) void this.lines.ensure(bookKey, c);
+    if (wanted(s)) void this.lines.ensure(bookKey, c);
+    else if (s!.status === "ready") this.lines.touch(bookKey, c);
     return s?.status === "ready" ? s.items[index - c * CHUNK] : undefined;
   }
 
@@ -132,7 +156,8 @@ export class LineStore {
   existingAt(bookKey: string, index: number): Link[] | undefined {
     const c = Math.floor(index / CHUNK);
     const s = this.existing.state(bookKey, c);
-    if (!s) void this.existing.ensure(bookKey, c);
+    if (wanted(s)) void this.existing.ensure(bookKey, c);
+    else if (s!.status === "ready") this.existing.touch(bookKey, c);
     return s?.status === "ready" ? s.items : undefined;
   }
 
