@@ -864,9 +864,13 @@ export class AppStore {
     if (!saved.length) return undefined;
     const s = this.sources.value.find((x) => x.info.id === sourceId);
     if (!s) return undefined;
-    const files = s.info.kind === "text-files" ? new Set(s.books.flatMap((b) => (b.path ? [b.path] : []))) : null;
-    const same = (p: ProjectSource) =>
-      p.kind === s.info.kind && (files && p.files?.length ? p.files.length === files.size && p.files.every((f) => files.has(f)) : p.label === s.info.label);
+    // the files inside the chosen folder, without the folder's own name: a moved or renamed folder is the
+    // same source (V5 P1-10) — the label is the folder's name, so it cannot be what matches
+    const files = s.info.kind === "text-files" ? new Set(underRoot(s.books.flatMap((b) => (b.path ? [b.path] : [])))) : null;
+    const same = (p: ProjectSource) => {
+      const saved = p.files?.length ? underRoot(p.files) : null;
+      return p.kind === s.info.kind && (files && saved ? saved.length === files.size && saved.every((f) => files.has(f)) : p.label === s.info.label);
+    };
     return saved.find(same)?.library;
   }
 
@@ -1077,20 +1081,32 @@ export class AppStore {
       }, delayMs);
       void rev;
     });
-    void kv.get(KEY).then(
-      (text) => {
-        if (!text || this.linkState.peek().links.size || this.linkState.peek().altToc.size || this.linkState.peek().rejected.size) return;
-        let n = 0;
-        try {
-          const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[]; rejectedSuggestions?: unknown[] };
-          n = (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0) + (saved.rejectedSuggestions?.length ?? 0);
-        } catch {
-          return;
-        }
-        if (!n) return;
-        // kept aside so the next autosave cannot overwrite it before the user decides (UX review #4)
-        void kv.set(`${KEY}:recovered`, text).catch(() => {});
-        this.recovery.value = { links: n, restore: () => (this.openProject("שמירה אוטומטית", text), (this.recovery.value = null)), dismiss: () => ((this.recovery.value = null), void kv.delete(`${KEY}:recovered`).catch(() => {})) };
+    /*
+     * What a crash, refresh or closed tab left behind is offered once the app starts empty. An offer the
+     * user did not answer (they went on working without restoring or dismissing it) is kept aside
+     * (`:recovered`), so the autosave of the new work cannot overwrite it (UX review #4) — and it is offered
+     * again at the next start, after the newer work: never left in storage where nothing would offer it.
+     */
+    const RECOVERED = `${KEY}:recovered`;
+    const keep = (list: readonly string[]) => void (list.length ? kv.set(RECOVERED, JSON.stringify(list)) : kv.delete(RECOVERED)).catch(() => {});
+    const offer = (queue: readonly string[]) => {
+      const [text, ...rest] = queue;
+      if (text === undefined) return void (this.recovery.value = null);
+      this.recovery.value = {
+        links: recoverableCount(text),
+        // the restored work is the project now (its autosave is KEY); the older offers wait for the next start
+        restore: () => (keep(rest), this.openProject("שמירה אוטומטית", text), (this.recovery.value = null)),
+        dismiss: () => (keep(rest), offer(rest)),
+      };
+    };
+    void Promise.all([kv.get(KEY), kv.get(RECOVERED)]).then(
+      ([current, kept]) => {
+        if (this.linkState.peek().links.size || this.linkState.peek().altToc.size || this.linkState.peek().rejected.size) return;
+        const queue: string[] = [];
+        for (const text of [current, ...keptOffers(kept)]) if (text && !queue.includes(text) && recoverableCount(text) > 0) queue.push(text);
+        if (!queue.length) return;
+        keep(queue.slice(0, MAX_RECOVERY_OFFERS));
+        offer(queue.slice(0, MAX_RECOVERY_OFFERS));
       },
       () => {},
     );
@@ -1187,4 +1203,34 @@ export const isKnownType = (raw: string): boolean => parseConnectionType(raw).kn
 function unboundRef(ref: BookRef): BookRef {
   return ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
 }
+
+/** Paths inside their common top folder, when they all have one ("ביאורים/א.txt" → "א.txt"); else as they are. */
+function underRoot(paths: readonly string[]): string[] {
+  const roots = new Set(paths.map((p) => (p.includes("/") ? p.slice(0, p.indexOf("/")) : "")));
+  return roots.size === 1 && !roots.has("") ? paths.map((p) => p.slice(p.indexOf("/") + 1)) : [...paths];
+}
+/** The unanswered offers kept aside: a list of project texts (an older version kept one text). */
+function keptOffers(kept: string | null | undefined): string[] {
+  if (!kept) return [];
+  try {
+    const v = JSON.parse(kept) as unknown;
+    if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+  return [kept];
+}
+
+/** links, alt_toc books and rejections a saved project text holds; 0 when it is not one */
+function recoverableCount(text: string): number {
+  try {
+    const saved = JSON.parse(text) as { links?: unknown[]; altToc?: unknown[]; rejectedSuggestions?: unknown[] };
+    return (saved.links?.length ?? 0) + (saved.altToc?.length ?? 0) + (saved.rejectedSuggestions?.length ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** at most this many unanswered recovery offers are kept (each is a whole project) */
+const MAX_RECOVERY_OFFERS = 3;
 
