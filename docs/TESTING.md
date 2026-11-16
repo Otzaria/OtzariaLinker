@@ -239,6 +239,7 @@ npx vitest run tests/integration/live-test/bundle.test.ts
 | `tests/fixtures/schemas/v0.sql` … `v7.sql` | ה־DDL של כל גרסת סכמה | [`contracts/DATABASE_SUPPORT_MATRIX.md`](contracts/DATABASE_SUPPORT_MATRIX.md) |
 | `tests/fixtures/db/hostile/cycle.db`, `bracket.db` | מסדים זדוניים: עמוד שמצביע על עצמו, ו־`[` שלא נסגר ב־DDL. משמשים את `tests/integration/database/hostile.test.ts` ואת `robustness.spec.ts` | נוצרו בסקירת האבטחה ממסד קטן שנוצר (לא נתונים של ספרייה), תיעוד ב־[`README.md`](../tests/fixtures/db/hostile/README.md) |
 | `tests/fixtures/db/generic/*.db` | מסדים **במבנה שאינו של אוצריא**, לאשף המיפוי: ספרים+שורות (שורות לא לפי הסדר, שורה יתומה, קישורים), טבלה אחת עם אינדקס וכותרות HTML, WITHOUT ROWID עם BLOB ב־gzip/zlib/UTF-8, ומסד בלי טקסט. סינתטיים בכוונה: התכונה נועדה למבנים שלא תוכננו לאוצריא. מסד 50 אלף השורות והמסדים הפגומים נבנים בזמן הבדיקה | `scripts/fixtures/make_generic_dbs.py` |
+| `tests/fixtures/db/wizard/*.db` | **מבנה אחד לכל קובץ** לבדיקת הזיהוי של האשף: ספר ברשומה, שורה ברשומה, ספרים+שורות (עם FK ובלי), JSON, פרקים, מהדורות, BLOB ב־UTF-8/UTF-16/Windows-1255, zlib/zstd, קטעים, מפתח מורכב, קישורים, תוכן עניינים, מסד UTF-16; ובלי ספרים: הגדרות+יומן, FTS5, מבטים, קטלוג, טבלאות ריקות. סינתטיים בכוונה, 1KiB לעמוד | `scripts/fixtures/make_wizard_dbs.py` |
 
 הפקה מחדש (המסד נפתח ב־`mode=ro`):
 
@@ -246,6 +247,7 @@ npx vitest run tests/integration/live-test/bundle.test.ts
 py -3 -I scripts/fixtures/make_mini_db.py C:/ProgramData/otzaria/books/seforim.db
 py -3 -I scripts/fixtures/make_footnotes_fixture.py C:/ProgramData/otzaria/books/seforim.db
 py -3 -I scripts/fixtures/make_generic_dbs.py
+py -3 -I scripts/fixtures/make_wizard_dbs.py      # Python 3.14+ (zstd ב־compression.zstd)
 ```
 
 `make_mini_db.py` שומר את ה־DDL המדויק של המקור ומעתיק שורות כמו שהן (BLOB דחוס נשאר דחוס).

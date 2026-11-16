@@ -101,8 +101,9 @@
        → Worker: SourceRegistry.openMapped(token, mapping) → MappedDbSource (סריקה אחת אם אין אינדקס)
 ```
 
-הטיפוסים של המיפוי (`DbMapping`, `SchemaPreview`, `PendingDb`) והכללים הטהורים שלו (ניחוש, בדיקה, קריאה
-מ־JSON) נמצאים ב־`core/db-mapping.ts`, כדי שגם `state`, `ui` ו־`projects` יוכלו להחזיק אותם.
+הטיפוסים של המיפוי (`DbMapping`, `SchemaPreview`, `PendingDb`, `DbAnalysis`) והכללים הטהורים שלו (בדיקה, קריאה
+מ־JSON) נמצאים ב־`core/db-mapping.ts`, הניחוש המוסבר ב־`core/db-guess.ts` ויחידות הטקסט ב־`core/db-text-units.ts`,
+כדי שגם `state`, `ui` ו־`projects` יוכלו להחזיק אותם.
 
 ### 4.2 קריאת שורות
 

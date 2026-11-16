@@ -87,13 +87,15 @@
 
 | קוד | תפקיד |
 |---|---|
-| `src/core/db-mapping.ts` | `DbMapping`, `SchemaPreview`, הניחוש (`guessMapping`), הבדיקות (`mappingProblems`), קריאה בטוחה מ־JSON (`parseDbMapping`) |
-| `src/database/generic/preview.ts` | טבלאות, עמודות (סוג לפי 20 שורות לדוגמה), אינדקסים, גודל בעמודים, 5 שורות לתצוגה, טביעת מבנה |
-| `src/database/generic/text-codec.ts` | TEXT כמו שהוא; BLOB כ־UTF-8, zstd בלי מילון, gzip או zlib, עם תקרה של 9MB |
+| `src/core/db-mapping.ts` | `DbMapping`, `SchemaPreview`, `DbAnalysis`, הבדיקות (`mappingProblems`), קריאה בטוחה מ־JSON (`parseDbMapping`) |
+| `src/core/db-guess.ts` | הניחוש המוסבר (`analyzeSchema`, `guessMapping`): ציון וסיבות לכל עמודת טקסט, "לא נמצאו ספרים", המגבלות |
+| `src/core/db-text-units.ts` | איך ערך של רשומה הופך לשורות: פיצול במעבר שורה, JSON של שורות ופרקים |
+| `src/database/generic/preview.ts` | טבלאות, עמודות (סוג וסטטיסטיקה לפי 20 שורות לדוגמה: עברית, מילים, מעברי שורה, JSON, קידוד), אינדקסים, FOREIGN KEY, גודל בעמודים, מבטים וטבלאות וירטואליות, 5 שורות לתצוגה, טביעת מבנה |
+| `src/database/generic/text-codec.ts` | TEXT כמו שהוא; BLOB כ־UTF-8, UTF-16, Windows-1255, zstd בלי מילון, gzip או zlib, עם תקרה של 9MB; פורמט בינארי מוכר (PNG, bzip2…) נקרא בשמו בהודעה |
 | `src/database/generic/mapped-reader.ts` | ספרים ושורות לפי המיפוי, בקריאה עצלה (ראו "אסטרטגיות") |
 | `src/sources/db/mapped-source.ts` | `MappedDbSource`: `BookSource` מסוג `mapped-db` |
-| `SourceRegistry.open` / `openMapped` | מסד שאינו של אוצריא חוזר ב־`needsMapping`; פתיחה לפי מיפוי באסימון |
-| `AppStore.pendingDbs`, `openMapped`, `dbMappings` | התור של האשף, הפתיחה, והמיפויים שנשמרים בפרויקט |
+| `SourceRegistry.open` / `openMapped` / `testMapping` | מסד שאינו של אוצריא חוזר ב־`needsMapping`; פתיחה לפי מיפוי באסימון; "בדיקת המיפוי" |
+| `AppStore.pendingDbs`, `openMapped`, `testMapping`, `dbMappings` | התור של האשף, הפתיחה, הבדיקה, והמיפויים שנשמרים בפרויקט |
 | `src/ui/dialogs/db-mapping-dialog.tsx` | האשף |
 
 - **מתי.** `DbBookSource.open` נכשל ב־`db/no-books` כשאין `book`+`line` עם `book.title`, `line.bookId`,
@@ -106,13 +108,28 @@
   בספר (0-based) לפי עמודת הסדר, ולא הערך שבה.
 - **מדידות** (Node, הקובץ בזיכרון): 50 אלף שורות ב־50 ספרים — סריקה 112ms (שתי טבלאות) / 138ms (טבלה אחת),
   עם אינדקס 1ms ונתח ראשון של 200 שורות ב־10–14ms. מיליון שורות (163MB) — סריקה 1.9s; עם אינדקס 4ms. בדפדפן (Chrome, מקובץ, מהגרירה ועד שהמקור פתוח) מיליון השורות נפתחות ב־4.0s: הקורא קורא מראש בחתיכות של 256KiB (`bufferedSource`), כי קריאת `Blob.slice` לכל עמוד לחוד לקחה 26.5s.
+- **הניחוש והסירוב.** `analyzeSchema` מדרג כל עמודת טקסט לפי ראיות, ומציע מיפוי רק כשיש מועמדת עם ציון 5
+  ומעלה שהמיפוי שלה עובר את `mappingProblems`. אחרת `PendingDb.analysis.noBooks`, והאשף אומר "לא נמצאו ספרים
+  במסד הזה" עם הסיבות. הטבלה המלאה, לפני ואחרי, על fixtures ועל מסדים אמיתיים:
+  [`DATABASE_SUPPORT_MATRIX.md`](contracts/DATABASE_SUPPORT_MATRIX.md) §6.1.
+- **יחידות טקסט** (`lines.unit`): `line` (ברירת מחדל), `lines` (כמה שורות ברשומה), `chunks` (קטעים שמחוברים
+  ואז מפוצלים), `json`. בכל יחידה שאינה `line` ה־locator מחזיק את הרשומות של הספר, והשורות נבנות בקריאה
+  הראשונה של הספר (מטמון LRU של 32 מיליון תווים; ספר מעל 64 מיליון תווים נדחה עם `db/book-too-large`), ולכן
+  `lineCount` ידוע רק אז. קישורים מטבלה דורשים `line`.
+- **סדר משני** (`lines.orderThen`): מפתח מורכב, כמו (פרק, פסוק). בטבלת WITHOUT ROWID המפתח הראשי חייב להתחיל
+  ב(ספר, סדר, …סדר משני).
+- **טבלת ביניים** (`via`): השורות מפנות לפרק או למהדורה, והם לספר. `part` מצרף את השורות לספר לפי (סדר הפרק,
+  סדר השורה); `edition` הופך כל מהדורה לספר "שם — מהדורה". תמיד במעבר אחד על טבלת השורות.
+- **בדיקת המיפוי** (`testMapping`): קוראת עד 20,000 רשומות מכל טבלה, בלי טבלת הקישורים, ומחזירה 6 שורות
+  ראשונות של 3 הספרים הראשונים, מספר הספרים, ואם נקרא רק חלק.
 - **שורה ממופה:** `anchorText` = הטקסט כמו שהוא שמור; `heRef` = null; כותרת מעמודת הכותרת (1–6) או מ־`<hN>`
   בתחילת השורה. ערך שאינו טקסט מוצג כשורה ריקה.
 - **קישורים ממופים:** שתי עמודות של מזהה שורה (rowid של טבלת השורות), סוג לפי מזהה של הגנרטור (1-based) או
   לפי שם, אחרת `other`. `provenance: "db"`, כמו קישורי מסד של אוצריא. מזהה שלא נמצא נספר באזהרה.
 - **מסד עוין:** `SqliteFile.leafCount` דוחה עץ שמצהיר על יותר עלים מעמודי הקובץ; סריקה עוצרת כשיש יותר
   רשומות ממה שהעמודים מסוגלים להכיל; פריסה נעשית בחתיכות של 1KiB עם תקרה.
-- **Fixtures:** `scripts/fixtures/make_generic_dbs.py` ← `tests/fixtures/db/generic/`. מסד 50 אלף השורות
+- **Fixtures:** `scripts/fixtures/make_generic_dbs.py` ← `tests/fixtures/db/generic/`, ו־
+  `scripts/fixtures/make_wizard_dbs.py` ← `tests/fixtures/db/wizard/` (מבנה אחד לכל קובץ; 24 קבצים, 126KB). מסד 50 אלף השורות
   והמסדים הפגומים נבנים בזמן הבדיקה (`tests/integration/database/mapped-reader.test.ts`).
 
 ## 3. ייצוא
