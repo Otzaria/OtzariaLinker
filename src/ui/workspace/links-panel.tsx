@@ -59,6 +59,12 @@ function ProjectLinksPanel() {
     for (const r of rows) c[r.status] = (c[r.status] ?? 0) + 1;
     return c;
   }, [rows]);
+  // the choices of the filters, and how many of the chosen rows still exist (an approved suggestion's row goes)
+  const opts = useMemo(() => {
+    const of = (pick: (r: TableRow) => string | undefined) => [...new Set(rows.map(pick).filter((x): x is string => !!x))].sort();
+    return { source: of((r) => r.link.source.book.title), target: of((r) => r.link.target.book.title), type: of((r) => r.type), engine: of((r) => r.engine) };
+  }, [rows]);
+  const chosen = useMemo(() => (sel.size ? rows.reduce((n, r) => n + (sel.has(r.key) ? 1 : 0), 0) : 0), [rows, sel]);
   const set = (patch: Partial<typeof f>) => setF({ ...f, ...patch });
 
   const altToc = store.altToc.count.value;
@@ -86,7 +92,6 @@ function ProjectLinksPanel() {
       </>
     );
 
-  const options = (pick: (r: TableRow) => string | undefined) => [...new Set(rows.map(pick).filter((x): x is string => !!x))].sort();
   const choose = (label: string, key: "source" | "target" | "type" | "engine" | "confidence" | "problem", values: readonly string[], text: (v: string) => string = (v) => v) => (
     <label class="field">
       {label}
@@ -130,10 +135,10 @@ function ProjectLinksPanel() {
       <details class="held" style="margin:0 6px">
         <summary>סינון ומיון</summary>
         <div class="lt-grid">
-          {choose("ספר מקור", "source", options((r) => r.link.source.book.title))}
-          {choose("ספר יעד", "target", options((r) => r.link.target.book.title))}
-          {choose("סוג", "type", options((r) => r.type), (t) => TYPE_LABELS[t as ConnectionType].he)}
-          {choose("מנוע", "engine", ["manual", ...options((r) => r.engine)], (e) => (e === "manual" ? "ידני / מקובץ" : ENGINES.find((x) => x.id === e)?.title ?? e))}
+          {choose("ספר מקור", "source", opts.source)}
+          {choose("ספר יעד", "target", opts.target)}
+          {choose("סוג", "type", opts.type, (t) => TYPE_LABELS[t as ConnectionType].he)}
+          {choose("מנוע", "engine", ["manual", ...opts.engine], (e) => (e === "manual" ? "ידני / מקובץ" : ENGINES.find((x) => x.id === e)?.title ?? e))}
           {choose("ודאות", "confidence", CONFIDENCE_ORDER.filter((c) => rows.some((r) => r.confidence === c)), (c) => CONFIDENCE_LABELS[c as Confidence])}
           {choose("בעיות", "problem", report ? ["error", "warning"] : [], (p) => (p === "error" ? "שגיאות" : "אזהרות ושגיאות"))}
           <label class="field">
@@ -153,9 +158,9 @@ function ProjectLinksPanel() {
       </details>
       <label class="check lt-head">
         <input type="checkbox" checked={allShown} onChange={() => setSel(allShown ? new Set() : new Set(shownKeys))} />
-        <span>{filtered.length.toLocaleString("he")} מוצגים{sel.size ? ` · ${sel.size.toLocaleString("he")} נבחרו` : ""}</span>
+        <span>{filtered.length.toLocaleString("he")} מוצגים{chosen ? ` · ${chosen.toLocaleString("he")} נבחרו` : ""}</span>
       </label>
-      {sel.size > 0 && <GroupActions sel={sel} rows={rows} clear={() => setSel(new Set())} />}
+      {chosen > 0 && <GroupActions sel={sel} rows={rows} clear={() => setSel(new Set())} />}
       <VirtualList
         rows={filtered}
         sel={sel}
@@ -181,7 +186,8 @@ function VirtualList({ rows, sel, toggle }: { rows: readonly TableRow[]; sel: Re
   useEffect(() => {
     if (ref.current?.clientHeight) setHeight(ref.current.clientHeight);
   }, []);
-  const first = Math.max(0, Math.floor(top / ROW) - 4);
+  // a filter that shortens the list while it is scrolled far down still shows its last rows
+  const first = Math.max(0, Math.min(Math.floor(top / ROW) - 4, rows.length - Math.ceil(height / ROW) - 4));
   const last = Math.min(rows.length, first + Math.ceil(height / ROW) + 8);
   return (
     <div ref={ref} class="vlist" onScroll={(e) => setTop(e.currentTarget.scrollTop)}>

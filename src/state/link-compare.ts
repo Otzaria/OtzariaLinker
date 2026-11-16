@@ -179,6 +179,7 @@ export class LinkCompareState {
       if (held.some((l) => l.status !== "existing"))
         return void this.host.notify("error", `בפרויקט יש עותק ערוך של קובץ הקישורים של "${title}". כדי לא לדרוס אותו, בחרו את "הפרויקט" כמקור המועדף.`), null;
       changes.push(...held.map((l) => ({ id: l.id, before: l })));
+      if (held.length) this.host.notify("info", `העותק הקודם של קובץ הקישורים של "${title}" (${linksCount(held.length)}, בלי שינויים) הוחלף במקור המועדף.`);
       const base = merge.entries.filter((e) => e.base).map((e, i) => ({ ...e.link, id: `file:${title}#m${n}:${i}`, origins: e.origins }));
       changes.push(...addChanges(base));
       files.push(fileChange(s, title, { title, records: pref.links.length, hash: fileFingerprint(pref.text ?? ""), verified: true, layout: detectLayout(pref.text ?? "") }));
