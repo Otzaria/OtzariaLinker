@@ -202,6 +202,12 @@ export type RelationVia = "base-text" | "title" | "links" | "corpus";
  */
 export interface RelationScope {
   section: string;
+  /**
+   * The part of the BASE headed by this name, when the base is itself one book on the same several
+   * bases ("מזרחי" on the five books of the Torah, explained by "יריעות שלמה על התורה" part by part):
+   * each part of the dependant is linked only to the same part of the base (siblingRelations).
+   */
+  baseSection?: string;
 }
 
 /**
@@ -381,11 +387,25 @@ function writtenOn(x: PlanBook, baseKey: string, index: TitleIndex): boolean {
  * base: "מעדני יום טוב על ברכות" is declared on the Bavli, but explains the Rosh — 1,503 COMMENTARY links
  * from "פסקי הרא"ש על ברכות", 81 from "ברכות"; "מלבי"ם על ויקרא" follows the "ספרא" (1,905) as well as
  * the verses (1,911); "מזרחי" explains "רש"י על בראשית" in its "בראשית" part. When the existing links
- * show such a sibling X — at least EVIDENCE_MIN of them, X written on one of this book's own bases —
- * X is a base too, in the same part of the book as that base (its scope). Only a commentary on a base
- * of this book: a book the links show but that is not written on one of its bases is left to the
- * declaration and the title (a midrash's verses from all of the Bible, "מדרש לקח טוב" ← "תהילים").
+ * show such a sibling X — X written on one of this book's own bases — X is a base too, in the same part
+ * of the book as that base (its scope). Only a commentary on a base of this book: a book the links show
+ * but that is not written on one of its bases is left to the declaration and the title (a midrash's
+ * verses from all of the Bible, "מדרש לקח טוב" ← "תהילים").
+ *
+ * Enough links: EVIDENCE_MIN, or — from LINKED_MIN on — at least SIBLING_SHARE of the links to the base
+ * X is written on. A part of a book on several bases is small: "לבוש האורה" is linked to "רש"י על במדבר"
+ * 74 times and to "במדבר" itself 82, "מיני תרגומא על תורה" to "תרגום אונקלוס על דברים" 84 times and to
+ * "דברים" 86, while their "רש"י על שמות" (127) and "אונקלוס על בראשית"… passed EVIDENCE_MIN.
+ *
+ * A sibling written on SEVERAL parts of this book ("מזרחי" on the five books of the Torah, explained by
+ * "יריעות שלמה על התורה") has no one part to read. When it is itself one book on exactly those bases,
+ * divided like this one, each part of this book is linked to the part of X with the same name
+ * (RelationScope.baseSection; workers/maxlink-job.ts runPartToPart). Otherwise it is left out.
+ * Measured (LIBRARY_BENCHMARK.md §0.7): 10 pairs in the whole library, 934 of their 1,099 COMMENTARY
+ * links re-produced, 10 suggestions the database contradicts (none certain).
  */
+const SIBLING_SHARE = 0.5;
+
 function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: ReadonlyMap<string, PlanBook>, index: TitleIndex): Relation[] {
   const counts = book.linkedCounts;
   if (!counts) return [];
@@ -394,13 +414,31 @@ function siblingRelations(book: PlanBook, own: readonly Relation[], byKey: Reado
   const out: Relation[] = [];
   for (const x of linkedOpen(book, byKey)) {
     const n = counts[x.key] ?? 0;
-    if (n < EVIDENCE_MIN || have.has(x.key) || book.linkedKinds?.[x.key] || basesOf(x).includes(book.key)) continue;
+    if (n < LINKED_MIN || have.has(x.key) || book.linkedKinds?.[x.key] || basesOf(x).includes(book.key)) continue;
     const hits = anchors.filter((r) => writtenOn(x, r.base.key, index));
-    // written on two parts of this book ("מזרחי" on all five books, for "יריעות שלמה על התורה"): no one part to read
-    if (!hits.length || (hits.length > 1 && hits.some((r) => r.scope))) continue;
+    if (!hits.length) continue;
+    if (hits.length > 1 && hits.some((r) => r.scope)) {
+      // written on several parts of this book: only part to part, when X is itself divided by those bases
+      const parts = n >= EVIDENCE_MIN && (x.bases?.length ?? 0) > 1 && hits.every((r) => r.scope && x.bases!.includes(r.base.key)) ? hits : [];
+      for (const r of parts) {
+        const dhOnly = commentatorOfTitle(x.title) !== null ? "intermediate" : undefined;
+        out.push({
+          kind: "commentary",
+          dependant: ref(book),
+          base: ref(x),
+          via: "links",
+          caveats: [`${quote(x.title)} כתוב גם הוא על ${hits.map((h) => quote(h.base.title)).join(", ")}, כל אחד בחלק משלו, והמסד מקשר את הספר אליו ${n.toLocaleString("he")} פעמים. כל חלק מקושר רק לחלק באותו שם ב־${quote(x.title)}.`],
+          scope: { section: r.scope!.section, baseSection: r.base.title },
+          ...(dhOnly && { dhOnly }),
+        });
+      }
+      if (parts.length) have.add(x.key);
+      continue;
+    }
     const on = hits[0]!;
-    have.add(x.key);
     const onN = counts[on.base.key] ?? 0;
+    if (n < EVIDENCE_MIN && n < SIBLING_SHARE * onN) continue;
+    have.add(x.key);
     const dhOnly = commentatorOfTitle(x.title) !== null ? "intermediate" : x.isBaseBook ? "text" : undefined;
     out.push({
       kind: "commentary",
@@ -813,7 +851,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     for (const rel of rels)
       for (const s of stepsFor(rel, byKey.get(depKey)!)) {
       if (!enabled(s.engine)) continue;
-      const id = `${s.engine}|${s.source.key}>${s.target.key}`;
+      // one step per part when a part of the dependant is linked to the same part of the base
+      const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
       if (seen.has(id)) continue;
       seen.add(id);
       steps.push({ id, kind: "pair", ...s, relation: rel });

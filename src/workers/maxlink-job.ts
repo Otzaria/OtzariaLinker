@@ -49,6 +49,7 @@ const UNIT = MAXLINK_PROGRESS_UNIT;
 async function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext, byLinks?: Section | null): Promise<EngineResult> {
   const scope = step.relation.scope;
   if (!scope) return runEngineSliced(step.engine, source, target, options, ctx);
+  if (scope.baseSection !== undefined) return runPartToPart(step, source, target, scope.section, scope.baseSection, options, ctx);
   const section = sectionFor(source, scope.section) ?? byLinks ?? null;
   if (section) {
     let r = await runEngineSliced(step.engine, section.book, target, options, ctx);
@@ -62,6 +63,26 @@ async function runScoped(step: Extract<PlanStep, { kind: "pair" }>, source: Engi
     return { suggestions: [], notes: [{ code: "maxlink/no-section", text: `בספר "${source.book.title}" אין חלק בשם "${target.book.title}", ולכן שיטה זו לא רצה עליו.` }], unmatched: [] };
   const r = capConfidence(await runEngineSliced(step.engine, source, target, options, ctx), ["certain", "high"], { code: "maxlink/dh-only", text: `בספר אין חלק בשם "${target.book.title}": המילים נמצאו בטקסט, אבל המקום לא מאומת בכותרות. לבדיקה.` });
   const note: Reason = { code: "maxlink/dh-only", text: `בספר "${source.book.title}" אין חלק בשם "${target.book.title}", ולכן רק דיבור המתחיל קישר אליו, וכל ההצעות לבדיקה.` };
+  return { ...r, notes: [note, ...r.notes] };
+}
+
+/**
+ * A part of the dependant against the part of the base headed by the same name (plan.ts
+ * RelationScope.baseSection: "יריעות שלמה על התורה" ← "מזרחי", both divided by the five books). Both
+ * parts must be found by their headings: the library's links cannot tell which part of the base a part
+ * is on, and the whole base would link "שמות א" into "בראשית א". Headings' "high" is left for review,
+ * as in any part (runScoped).
+ */
+async function runPartToPart(step: Extract<PlanStep, { kind: "pair" }>, source: EngineBook, target: EngineBook, part: string, basePart: string, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+  const mine = sectionFor(source, part);
+  const theirs = sectionFor(target, basePart);
+  if (!mine || !theirs) {
+    const missing = !mine ? `בספר "${source.book.title}" אין חלק בשם "${part}"` : `בספר "${target.book.title}" אין חלק בשם "${basePart}"`;
+    return { suggestions: [], notes: [{ code: "maxlink/no-section", text: `${missing}, ולכן שיטה זו לא רצה על החלק הזה.` }], unmatched: [] };
+  }
+  let r = await runEngineSliced(step.engine, mine.book, theirs.book, options, ctx);
+  if (step.engine === "headings") r = capConfidence(r, ["high"], { code: "maxlink/section-high", text: "קישור לפרק שלם בתוך חלק של ספר על כמה ספרים: לבדיקה." });
+  const note: Reason = { code: "maxlink/section", text: `רק החלק "${mine.heading}" של "${source.book.title}" (${mine.lines.toLocaleString("he")} שורות) קושר, ורק אל החלק "${theirs.heading}" של "${target.book.title}" (${theirs.lines.toLocaleString("he")} שורות).` };
   return { ...r, notes: [note, ...r.notes] };
 }
 
@@ -188,10 +209,11 @@ export async function maxlinkJob(
         ctx.signal?.throwIfAborted();
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        const byLinks = step.relation.scope && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
+        const byLinks = step.relation.scope && step.relation.scope.baseSection === undefined && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
         result = await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks);
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
-        results.set(`${step.engine}|${key}`, result);
+        // a part-to-part step is one part of the pair: runThrough reads whole pairs only
+        if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);
       } else {
         loaded = null;
         const run = runners[step.engine];
