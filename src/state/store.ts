@@ -444,12 +444,22 @@ export class AppStore {
     });
   }
 
-  /** Shows both ends of a link. */
+  /**
+   * Shows both ends of a link, and keeps them marked as a suggestion's ends are (suggestions.show): a
+   * flash alone faded after a second and left nothing to say which line goes with which (V5 UX audit).
+   * Not while a link is open in the builder — the picks are its draft.
+   */
   revealLink(l: Link): void {
     const s = this.bookOf(l.source.book);
     const t = this.bookOf(l.target.book);
-    if (s) this.reveal("source", s.key, l.source.line);
-    if (t) this.reveal("target", t.key, l.target.line);
+    const at = (bookKey: string, e: Link["source"]): Pick => ({ bookKey, line: e.line, ...(e.end !== undefined && e.end > e.line && { end: e.end }) });
+    batch(() => {
+      if (s) this.reveal("source", s.key, l.source.line);
+      if (t) this.reveal("target", t.key, l.target.line);
+      if (this.editing.peek()) return;
+      if (s) this.pick.source.value = at(s.key, l.source);
+      if (t) this.pick.target.value = at(t.key, l.target);
+    });
   }
 
   showBook(side: Side, bookKey: string): void {
