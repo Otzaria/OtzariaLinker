@@ -36,7 +36,7 @@ import {
   type Suggestion,
 } from "../types";
 import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
-import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type ExtractedDh } from "./extract";
+import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
@@ -105,11 +105,13 @@ export interface DhOptions extends SefariaOwnedOption {
 
 const r = (code: string, text: string): Reason => ({ code, text });
 
-const BOUNDARY_REASON: Readonly<Record<string, Reason>> = {
+/** one per boundary the extractor reports (typed by DhBoundary: a missing one left an undefined reason, "range") */
+const BOUNDARY_REASON: Readonly<Record<DhBoundary, Reason>> = {
   bold: r("dh/boundary-bold", "הדיבור המתחיל מודגש בשורת הפירוש"),
   etc: r("dh/boundary-etc", 'הדיבור המתחיל מסתיים ב"וכו\'"'),
   punctuation: r("dh/boundary-punctuation", "הדיבור המתחיל מסתיים בנקודה או בנקודתיים"),
   dash: r("dh/boundary-dash", "הדיבור המתחיל מסתיים במקף"),
+  range: r("dh/boundary-range", 'הדיבור המתחיל מסתיים לפני "עד ד"ה"'),
   none: r("dh/boundary-none", "בשורה אין סימן לסוף הדיבור המתחיל, ולכן נבדקו המילים הראשונות שלה"),
 };
 const COLOPHON_RE = /^(?:\s|<[^>]*>)*(?:סליק|סליקו|תם ונשלם|נשלם|תמו ונשלמו|ותשלם)(?![\u05d0-\u05ea])/;
