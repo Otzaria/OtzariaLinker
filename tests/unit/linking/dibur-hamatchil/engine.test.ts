@@ -102,6 +102,9 @@ describe("a range on a Sefaria base: one line, where the ד\"ה starts", () => {
     const s = run(comm, RAKIA, sefaria).suggestions[0]!;
     expect(baseSide(s)).toEqual({ book: BASE, line: 0 });
     expect(s.citedSpan).toEqual({ line: 0, end: 2 }); // the quote's span, for the merge (withoutRange)
+    // only its first line is written: not the exact place, never "certain" (capSpanned)
+    expect(s.confidence).not.toBe("certain");
+    if (run(comm, RAKIA).suggestions[0]!.confidence === "certain") expect(s.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
     expect(s.rules).toEqual(expect.arrayContaining(["dh/continuation", "dh/range-sefaria"]));
     expect(spanReason(s)).toContain("בשורות 1–3");
     expect(spanReason(s)).toContain("לשורה 1, שבה מתחיל הדיבור המתחיל");

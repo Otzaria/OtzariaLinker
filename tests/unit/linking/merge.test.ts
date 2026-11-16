@@ -134,6 +134,18 @@ describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its spa
     expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 19, "high", { line: 19, end: 22 })]).stats.conflicts).toBe(2);
   });
 
+  it("a link that writes only the first line of its span is never certain: not by itself, not by agreement", () => {
+    const alone = mergeSuggestions([Hs(5, 10, 20, "certain")]).suggestions[0]!;
+    expect(alone.confidence).toBe("high");
+    expect(alone.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
+    // headings and a ד"ה quote over the same span: one link, two engines — still high
+    const both = mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 10, "high", { line: 10, end: 20 })]);
+    expect(both.stats.agreements).toBe(1);
+    expect(both.suggestions[0]!.confidence).toBe("high");
+    // a precise line inside it keeps its own certainty
+    expect(mergeSuggestions([Hs(5, 10, 20, "certain"), Dc(5, 15, "certain")]).suggestions[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: "certain" });
+  });
+
   it("the library's links inside the span do not count as contradicting it", () => {
     const ours = Array.from({ length: 30 }, (_, i) => Hs(i, i * 10, i * 10 + 9, "certain"));
     const inside = Array.from({ length: 30 }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i * 10 + 5) }));

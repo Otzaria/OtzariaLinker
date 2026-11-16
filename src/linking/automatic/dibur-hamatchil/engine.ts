@@ -24,6 +24,7 @@ import { hebrewTokens, visibleSlice, type HebToken } from "../../../matching/heb
 import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, stepTable, type StepProfile, type StepTable } from "../../../matching/token-match";
 import { idfFactors, STOP_WORDS, wordWeight } from "../../../matching/word-weights";
 import {
+  capSpanned,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -1226,6 +1227,9 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
       rules.push("dh/not-addressed-cap");
       warnings.push(r("dh/not-addressed-cap", `השורה אינה מזכירה את ${baseIs!.name}, ולכן לא ברור שהיא מפרשת את דבריו ולא את הטקסט; לבדיקה.`));
     }
+    const capped = capSpanned(confidence, citedSpan);
+    if (capped.warning) warnings.push(capped.warning);
+    confidence = capped.confidence;
     let anchor: RawAnchor | undefined;
     if (policy.anchors && p.words) {
       if (baseLine && NOTE_RE.test(baseLine.text))

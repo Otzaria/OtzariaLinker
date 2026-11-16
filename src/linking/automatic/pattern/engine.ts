@@ -11,7 +11,7 @@ import { visibleMap } from "../../../core/text/visible-map";
 import { detectMarkers } from "../footnotes/markers";
 import { dafElement, kindOfWord, kindWord, parseHeading, type PathElement } from "../headings/numbering";
 import { analyzeBook } from "../headings/structure";
-import { confidenceOf, DEFAULT_THRESHOLDS, type Candidate, type ConfidenceThresholds, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../types";
+import { capSpanned, confidenceOf, DEFAULT_THRESHOLDS, type Candidate, type ConfidenceThresholds, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../types";
 import { parseAmud, parseRefNumeral } from "./numerals";
 import { bookMatches, otherBook } from "./books";
 import { DEFAULT_PRESET, presetById, type PatternPreset } from "./presets";
@@ -196,6 +196,7 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
     const keepLabel = label !== null && anchorLabelFromHeRef(heRef2) === label;
     const anchor: RawAnchor | undefined = anchors.allowed ? { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(keepLabel ? { label } : {}) } : undefined;
     const runnerUp = p.alternatives.length ? p.alternatives[0]!.score : null;
+    const capped = capSpanned(confidenceOf(p.score, runnerUp, thresholds), citedSpan);
     const read = mode === "line" || mode === "chapter-line" ? `והמספר ${m.token} נקרא כ־${m.num}` : `ונקרא כ־${refLabel(m)}`;
     suggestions.push({
       id: `${ENGINE}:${source.book.key}#${m.line}@${m.rawStart}>${target.book.key}#${p.target.line}${p.target.end !== undefined ? `-${p.target.end}` : ""}`,
@@ -207,11 +208,11 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       declaredType,
       heRef2,
       score: p.score,
-      confidence: confidenceOf(p.score, runnerUp, thresholds),
+      confidence: capped.confidence,
       reasons: [r("pattern/match", `בשורה נמצא "${m.shown.trim()}", ${read}.`), ...p.reasons],
       rules: [`pattern.${mode}`, ...(preset ? [`pattern.preset.${preset.id}`] : []), ...p.rules],
       alternatives: p.alternatives,
-      warnings: p.warnings,
+      warnings: capped.warning ? [...p.warnings, capped.warning] : p.warnings,
     });
   }
   if (options.carry) {

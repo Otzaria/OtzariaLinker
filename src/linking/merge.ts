@@ -1,7 +1,7 @@
 import { pushTo } from "../core/collections";
 import { linePairIdentity } from "../core/links/equality";
 import type { LinkSide, RawAnchor } from "../core/links/model";
-import { CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type Reason, type Suggestion } from "./automatic";
+import { capSpanned, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type Reason, type Suggestion } from "./automatic";
 
 /*
  * Merging the suggestions of many engine runs into ONE list (max-link, stage 8.4). Pure, and a
@@ -413,6 +413,12 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     }
   alternatives.sort((a, b) => b.score - a.score || cmp(endKey(a.target), endKey(b.target)));
 
+  // a structural link that writes only the first line of the span it stands for is never "certain" (capSpanned)
+  if (level < rank("high") && rep.citedSpan && !isSingleBook(rep.engine)) {
+    const capped = capSpanned("certain", rep.citedSpan);
+    level = rank("high");
+    if (!warnings.some((w) => w.code === capped.warning!.code)) warnings.push(capped.warning!);
+  }
   if (level < own) {
     stats.raised++;
     rules.push("maxlink/raised");

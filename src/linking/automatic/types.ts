@@ -113,6 +113,21 @@ export interface ConfidenceThresholds {
 
 export const DEFAULT_THRESHOLDS: ConfidenceThresholds = { certain: 0.95, high: 0.85, possible: 0.6, ambiguityMargin: 0.05 };
 
+/**
+ * A link that stands for a whole span but writes only its first line (a range collapsed on a Sefaria side:
+ * `citedSpan`, core/links/sefaria-owned.ts withoutRange) is not the exact place, so it is never "certain" —
+ * only "certain" is approved in bulk. Measured on 16 commentaries (LIBRARY_BENCHMARK.md §0.6): such links
+ * left "certain" agreed with the library's own line in 82.3% of the judged ones, the rest in 99.8%.
+ * The citations engine keeps its own rule for a cited unit (it names the unit, not a line in it).
+ */
+export function capSpanned(confidence: Confidence, citedSpan: { readonly line: number; readonly end: number } | undefined): { confidence: Confidence; warning?: Reason } {
+  if (!citedSpan || confidence !== "certain") return { confidence };
+  return {
+    confidence: "high",
+    warning: { code: "range/sefaria-not-exact", text: `הקישור עומד לשורות ${citedSpan.line + 1}–${citedSpan.end + 1}, אבל בספר ספריא נכתבת רק הראשונה שבהן. זה אינו המקום המדויק, ולכן הוא לבדיקה ולא לאישור בקבוצה.` },
+  };
+}
+
 export function confidenceOf(score: number, runnerUp: number | null, t: ConfidenceThresholds = DEFAULT_THRESHOLDS): Confidence {
   if (score < t.possible) return "none";
   if (runnerUp !== null && score - runnerUp < t.ambiguityMargin) return "ambiguous";

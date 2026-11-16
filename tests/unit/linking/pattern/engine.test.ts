@@ -110,6 +110,7 @@ describe("target = heading", () => {
     const res = run(["עיין סימן ב"], tgt, { target: "heading", sectionRanges: true, sefariaOwned: ["t"] });
     expect(pairs(res)).toEqual(["0>4"]);
     expect(res.suggestions[0]!.citedSpan).toEqual({ line: 4, end: 5 });
+    expect(res.suggestions[0]!.confidence).toBe("high"); // certain with the range; the first line only is not the exact place
     expect(run(["עיין סימן ב"], tgt, { target: "heading", sectionRanges: true }).suggestions[0]!.citedSpan).toBeUndefined();
   });
 

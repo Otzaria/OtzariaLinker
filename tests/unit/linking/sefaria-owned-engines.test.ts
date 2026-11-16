@@ -98,6 +98,10 @@ describe("one rule for 'Sefaria book' in the engines and the export (audit F1)",
     expect(r.suggestions[0]!.target.end).toBeUndefined();
     // the chapter stays as citedSpan (withoutRange): the merge reads it, the export never writes it
     expect(r.suggestions[0]!.citedSpan).toEqual({ line: 2, end: 5 });
+    // the chapter's first line is not the exact place: never "certain" (capSpanned)
+    expect(before.suggestions[0]!.confidence).toBe("certain");
+    expect(r.suggestions[0]!.confidence).toBe("high");
+    expect(r.suggestions[0]!.warnings.map((x) => x.code)).toContain("range/sefaria-not-exact");
     expect(r.suggestions[0]!.reasons.map((x) => x.code)).toContain("heading/range-sefaria");
     expect(rangeErrors(r.suggestions, owned)).toEqual([]);
     expect(r.suggestions.flatMap((s) => s.alternatives).every((c) => c.target.end === undefined)).toBe(true);

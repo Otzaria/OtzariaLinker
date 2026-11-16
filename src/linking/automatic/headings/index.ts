@@ -2,6 +2,7 @@ import type { LinkSide } from "../../../core/links/model";
 import { sefariaOwnedOf, withoutRange, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { toGematria } from "../../../core/text/gematria";
 import {
+  capSpanned,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -276,6 +277,8 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
     // on a Sefaria base: the section's first line, with the section kept as citedSpan (withoutRange)
     const whole = sideOf(base, chosen.start, chosen.end);
     const { target, citedSpan } = baseRanges ? { target: whole, citedSpan: undefined } : withoutRange(whole);
+    const capped = capSpanned(confidence, citedSpan);
+    if (capped.warning) warnings.push(capped.warning);
     const source: LinkSide = { book: commentary.book, line: srcIndex };
     suggestions.push({
       id: suggestionId(commentary, srcIndex, target),
@@ -286,7 +289,7 @@ export function runHeadingsEngine(commentary: EngineBook, base: EngineBook, opti
       declaredType: opts.declaredType,
       heRef2: heRefOf(base, chosen),
       score: round(score),
-      confidence,
+      confidence: capped.confidence,
       reasons,
       rules,
       alternatives: cands
