@@ -243,18 +243,23 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .link-item.deleted .muted { color: inherit; }
 .link-item .ends { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; min-width: 0; }
 .link-item .ends span { min-width: 0; overflow-wrap: anywhere; }
-.link-item .acts { grid-row: span 2; display: flex; align-items: center; }
+/* two lines (V5 UX audit U17, the owner's choice A): the source, then "← the target"; the actions span both */
+.link-item .ends { grid-column: 1; }
+.link-item .ends.to { color: var(--on-surface-variant); }
+.link-item .ends.to .t { color: var(--on-surface); }
+.link-item .ends.to .arrow { flex: none; color: var(--on-surface-variant); }
+.link-item .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; }
 /* the links table: a scroll box that renders only the rows in view (links-panel.tsx VirtualList, ROW = 64px) */
 .vlist { height: clamp(260px, 60vh, 900px); overflow: auto; contain: strict; }
 .vlist .link-list { position: relative; padding: 0; }
-.vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: start; }
+.vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: center; }
 .vlist .link-item .ends { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
 /* one row with no wrapping: each end shortens with "…" instead of painting over the next one (the
    spans may shrink below their text, and their overflow was visible — the two book names overlapped) */
 .vlist .link-item .ends > .end { display: inline-flex; gap: 0.3em; min-width: 0; overflow: hidden; }
 .vlist .link-item .end > * { flex: none; }
 .vlist .link-item .end > .t { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
-.vlist .link-item .ends > :is(.status, input, .icon) { flex: none; }
+.vlist .link-item .ends > :is(.status, input, .icon, .arrow, .lt-error, .lt-warning) { flex: none; }
 .vlist .link-item .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; padding-top: 6px; }
 .lt-grid label, .lt-head { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
