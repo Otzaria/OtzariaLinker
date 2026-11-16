@@ -184,6 +184,65 @@ describe("A3: a saved project's copy of a library file is a snapshot until verif
   });
 });
 
+/*
+ * Review C4: the confirmation is about ONE copy of the file. It used to be a title in a signal outside
+ * the undoable state, checked before "unverified", so it carried over to any copy opened later.
+ */
+describe("C4: confirming a project's copy holds for that copy only, and is undoable", () => {
+  const projectWith = (records: object[]) => {
+    const a = makeStore();
+    a.exchange.importLinksFile(FILE, JSON.stringify(records));
+    return a.projectText();
+  };
+  const THREE = [REC, OTHER, { ...REC, line_index_1: 324, start: 12 }];
+
+  it("a confirmation of one project's copy does not let an older project's copy replace the library file", async () => {
+    const store = await opened();
+    store.openProject("p1.json", projectWith(THREE));
+    expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
+    store.dbLinks.confirmNewFile(BOOK);
+    expect(store.dbLinks.linksFile(BOOK)).toBe("confirmed-new");
+    store.openProject("p0.json", projectWith([REC])); // an old autosave with one record of the same file
+    expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
+    const plan = (await store.exchange.prepareExport())!;
+    expect(plan.files).toEqual([]);
+    expect(codes(plan)).toContain("export/file-unverified");
+  });
+
+  it("\"no file in the library\" does not carry over to a project that holds a copy of the file", async () => {
+    const store = await opened();
+    await copyOneDbLink(store);
+    store.dbLinks.confirmNewFile(BOOK);
+    expect(store.dbLinks.linksFile(BOOK)).toBe("confirmed-new");
+    store.openProject("p0.json", projectWith([REC]));
+    expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
+  });
+
+  it("the confirmation is an action: it marks the project changed, Ctrl+Z takes it back, and undoing the import does not leave it", async () => {
+    const store = await opened();
+    store.openProject("p1.json", projectWith(THREE));
+    expect(store.dirty.value).toBe(false);
+    store.dbLinks.confirmNewFile(BOOK);
+    expect(store.dirty.value).toBe(true);
+    store.undo();
+    expect(store.dbLinks.linksFile(BOOK)).toBe("unverified");
+    store.redo();
+    expect(store.dbLinks.linksFile(BOOK)).toBe("confirmed-new");
+    store.undo(); // the confirmation
+    store.undo(); // opening the project
+    expect(store.dbLinks.linksFile(BOOK)).toBe("missing");
+  });
+
+  it("a saved project does not carry the confirmation: reopened, the copy is unverified again", async () => {
+    const store = await opened();
+    store.openProject("p1.json", projectWith(THREE));
+    store.dbLinks.confirmNewFile(BOOK);
+    const again = await opened();
+    again.openProject("p1.json", store.projectText());
+    expect(again.dbLinks.linksFile(BOOK)).toBe("unverified");
+  });
+});
+
 describe("A3: a new link of a book the database says has links waits for the book's library file", () => {
   it("export/library-file-not-loaded holds the file until it is loaded or the user confirms", async () => {
     const book = (key: string, title: string, extra = {}) => ({ key, title, origin: "otzaria", lineCount: 10, ...extra });

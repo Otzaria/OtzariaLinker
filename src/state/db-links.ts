@@ -7,7 +7,9 @@ import { adoptDbLink } from "../core/links/from-db";
 import type { BookRef, Link } from "../core/links/model";
 import { problemText, type LinksFileState, type Problem } from "../core/links/validate";
 import { sourceTitleFromLinksFileName } from "../core/links/titles";
-import { addChanges, commit, deleteChange, linksCount, type Change, type LinkState } from "./history";
+import { linkToRecord } from "../formats/links-json/convert";
+import { recordToObject } from "../formats/links-json/serialize";
+import { addChanges, commit, deleteChange, fileChange, fileFingerprint, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
 import { CHUNK, type LineStore } from "./lines";
 import type { BooksService, CallOptions, InputFile } from "./services";
 import type { ExchangeState } from "./exchange";
@@ -52,6 +54,9 @@ export interface DbLinkFilter {
 
 export const DB_PAGE = 100;
 
+/** the fingerprint of "the library has no file" (LibraryFile.confirmed "none"): not one that fileFingerprint gives */
+const NO_LIBRARY_FILE = "none";
+
 export class DbLinksState {
   /** which list the links tab shows */
   readonly tab = signal<LinksTabView>("project");
@@ -62,11 +67,6 @@ export class DbLinksState {
   readonly list = signal<{ query: string; total: number; links: Link[]; loading: boolean } | null>(null);
   /** database link ids the user ticked for copying */
   readonly selected = signal<ReadonlySet<string>>(new Set());
-  /**
-   * titles the user confirmed in the export dialog: the library has no links file for the book, or the
-   * project's copy of it is the current one — the export may write the book's file without loading it
-   */
-  readonly newFileOk = signal<ReadonlySet<string>>(new Set());
 
   readonly bookKey = computed(() => this.host.view[this.side.value].value);
 
@@ -256,24 +256,47 @@ export class DbLinksState {
    * the undoable state only: a file counts as loaded when an import that PARSED put it in
    * LinkState.files in this session; undoing the import forgets it (security review A2). A file
    * restored from a saved project — or "file" links with no record of their file — is only a
-   * snapshot: "unverified" until it is loaded again or confirmed (A3).
+   * snapshot: "unverified" until it is loaded again or confirmed (A3). The confirmation is part of that
+   * record (LibraryFile.confirmed), so it holds for the copy it was given to and nothing else (C4).
    */
   linksFile(title: string): LinksFileState {
     const s = this.host.linkState.value;
     const f = s.files.get(title);
     if (f?.verified) return "imported";
-    if (this.newFileOk.value.has(title)) return "confirmed-new";
+    if (f?.confirmed) return "confirmed-new";
     if (f) return "unverified";
     for (const l of s.links.values()) if (l.provenance === "file" && l.source.book.title === title) return "unverified";
     return "missing";
   }
 
-  /** The user says the library has no links file for this book: copied links may start a new one. */
+  /**
+   * The user confirms in the export dialog that the project's copy of the book's links file is the
+   * library's current one, or (when the project holds none) that the library has no file for the book.
+   * One undoable action, on the book's library-file record — so it is bound to the copy it was given
+   * to: opening another project, undoing the import or reloading asks again (review C4).
+   * `ok = false` takes the confirmation back.
+   */
   confirmNewFile(title: string, ok = true): void {
-    const next = new Set(this.newFileOk.value);
-    if (ok) next.add(title);
-    else next.delete(title);
-    this.newFileOk.value = next;
+    const s = this.host.linkState.value;
+    const f = s.files.get(title);
+    if (!ok) {
+      if (!f?.confirmed) return;
+      const { confirmed: _c, ...unconfirmed } = f;
+      this.host.linkState.value = commit(s, `ביטול האישור של ${title}_links.json`, [], Date.now(), [], [fileChange(s, title, f.confirmed === "none" ? null : unconfirmed)]);
+      return;
+    }
+    const state = this.linksFile(title);
+    if (state === "imported" || state === "confirmed-new") return;
+    let after: LibraryFile;
+    if (state === "missing") after = { title, records: 0, hash: NO_LIBRARY_FILE, verified: false, confirmed: "none" };
+    else if (f) after = { ...f, confirmed: "current" };
+    else {
+      // "file" links with no record of their file (a project saved before records were kept): the copy is those links
+      const held = [...s.links.values()].filter((l) => l.provenance === "file" && l.source.book.title === title);
+      after = { title, records: held.length, hash: fileFingerprint(JSON.stringify(held.map((l) => recordToObject(linkToRecord(l))))), verified: false, confirmed: "current" };
+    }
+    const label = state === "missing" ? `אישור שאין ל"${title}" קובץ קישורים בספרייה` : `אישור שהעותק של ${title}_links.json בפרויקט עדכני`;
+    this.host.linkState.value = commit(s, label, [], Date.now(), [], [fileChange(s, title, after)]);
   }
 
   /**

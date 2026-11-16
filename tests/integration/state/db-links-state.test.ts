@@ -99,6 +99,8 @@ describe("database links in the links tab", () => {
     expect(rec).toMatchObject(same);
     expect(rec.heRef_2).toBe("המאיר לארץ על ארצות החיים 1307"); // the database's reference, not the file's
 
+    store.undo(); // the confirmation is an action of its own (review C4)
+    expect(store.dbLinks.linksFile("ארצות החיים")).toBe("missing");
     store.undo(); // the copy goes away as one action
     expect(store.allLinks.value).toEqual([]);
   });

@@ -43,6 +43,13 @@ export interface LibraryFile {
    * user confirms it (export/file-unverified).
    */
   readonly verified: boolean;
+  /**
+   * The user's explicit confirmation in the export dialog, in this session, for THIS record only (review
+   * C4): "current" — this unverified copy is the library's current file; "none" — the library has no
+   * file for the book (records 0, no copy). Part of the undoable state like the record itself: another
+   * project's copy, an undo or a reload brings it back to unverified. Never saved in a project.
+   */
+  readonly confirmed?: "current" | "none";
   /** the file's text layout, reused when it is written back (minimal library diff) */
   readonly layout?: JsonLayout;
 }

@@ -966,7 +966,8 @@ export class AppStore {
         view: { source: titleOf(this.view.source.value), target: titleOf(this.view.target.value) },
         altToc: this.altToc.list.value,
         dbMappings: [...this.dbMappings.value.values()],
-        libraryFiles: [...this.linkState.value.files.values()].map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
+        // a confirmation is for this session only (C4): "no file in the library" is not a copy of a file at all
+        libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
       },
       APP_VERSION,
     );
