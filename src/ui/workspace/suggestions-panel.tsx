@@ -10,7 +10,8 @@ import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
-import { MaxLinkJobView } from "./maxlink-job";
+import { BulkApprove } from "./bulk-approve";
+import { jobStateText, jobWantsAttention, MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
 /*
@@ -27,6 +28,8 @@ export function SuggestionsPanel() {
   const store = useStore();
   const run = store.suggestions.run.value;
   const [setup, setSetup] = useState(false);
+  /** max-link's job card, merge notes and report, opened from the summary line ("דוח העבודה") */
+  const [report, setReport] = useState(false);
   // the address "#/maxlink" asks for the max-link form even when the last run was of another kind
   const wantsMaxLink = store.suggestMode.value === "maxlink" && !run?.maxlink;
   if (!run || setup || wantsMaxLink)
@@ -47,6 +50,7 @@ export function SuggestionsPanel() {
           <div class="muted" style="font-size:var(--fs-sm)">
             {run.result.suggestions.length.toLocaleString("he")} הצעות · {c.pending.toLocaleString("he")} ממתינות · {c.approved.toLocaleString("he")} אושרו
             {run.result.unmatched.length > 0 && ` · ${run.result.unmatched.length.toLocaleString("he")} שורות בלי התאמה`}
+            {run.maxlink && <MaxLinkSummary open={report} onToggle={() => setReport(!report)} />}
           </div>
         </div>
         <button class="btn text" onClick={() => setSetup(true)}>
@@ -61,7 +65,8 @@ export function SuggestionsPanel() {
           </button>
         ))}
       </div>
-      {run.result.notes.length > 0 && (
+      {/* after max-link the suggestions come first (V5 UX audit U15): its notes, job and report are in "דוח העבודה" */}
+      {run.result.notes.length > 0 && (!run.maxlink || report) && (
         <ul class="problems" style="padding:0 6px 6px">
           {run.result.notes.map((n, i) => (
             <li key={i} class="info">
@@ -82,9 +87,32 @@ export function SuggestionsPanel() {
           </li>
         </ul>
       ) : null}
-      {run.maxlink ? <><MaxLinkJobView /><MaxLinkReportView /></> : <BatchSummary />}
+      {run.maxlink ? (
+        <div id="ml-work-report" hidden={!report && !jobWantsAttention(store.maxLink)}>
+          {(report || jobWantsAttention(store.maxLink)) && <MaxLinkJobView />}
+          {report && <MaxLinkReportView />}
+        </div>
+      ) : (
+        <BatchSummary />
+      )}
       {view === "table" ? <TableView /> : <StepView card={view === "card"} />}
     </div>
+  );
+}
+
+/** After max-link, one line instead of four summaries: how many books, the job's state, and the report on request. */
+function MaxLinkSummary({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const store = useStore();
+  const job = store.maxLink.job.value;
+  const state = jobStateText(store.maxLink);
+  return (
+    <>
+      {job && ` · ${job.books.length.toLocaleString("he")} ספרים · ${state}`}
+      {" · "}
+      <button class="link-btn" aria-expanded={open} aria-controls="ml-work-report" onClick={onToggle}>
+        דוח העבודה {open ? "▾" : "◂"}
+      </button>
+    </>
   );
 }
 
@@ -294,6 +322,7 @@ function TableView() {
           </>
         )}
       </div>
+      <BulkApprove />
       <table class="sug-table" aria-label="הצעות">
         <thead>
           <tr>

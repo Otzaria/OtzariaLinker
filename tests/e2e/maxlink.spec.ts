@@ -62,8 +62,14 @@ test("max-link: a folder of a commentary and a notes book against the database �
   await expect(run).toBeEnabled();
 
   await run.click();
+  // one line above the suggestions; the report opens on request (V5 UX audit U15)
+  const toggle = page.getByRole("button", { name: /^דוח העבודה/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false", { timeout: 30_000 });
+  await expect(page.locator(".sug-head")).toContainText("ספרים · הסתיים");
+  await expect(page.getByRole("region", { name: "עבודת הקישור המרבי" })).toHaveCount(0);
+  await toggle.click();
   const report = page.locator("details.ml-report");
-  await expect(report).toBeVisible({ timeout: 30_000 });
+  await expect(report).toBeVisible();
   await expect(report.locator("summary").first()).toContainText("דוח הקישור המרבי");
   await expect(page.getByRole("table", { name: "הצעות" }).locator("tbody tr").first()).toBeVisible();
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/maxlink-report.png` });

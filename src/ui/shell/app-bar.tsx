@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { PRESETS, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
+import { chooseLayout, PRESETS, resetLayout, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import { remainingText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -18,6 +18,8 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const eta = task ? remainingText(task.startedAt, task.done, task.total, Date.now()) : null;
   const inWorkspace = store.screen.value === "workspace";
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
+  const layout = prefs.layout.value;
+  const hidden = layout.hidden;
 
   return (
     <header class={`app-bar${inWorkspace ? " ws" : ""}`}>
@@ -36,26 +38,29 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           </button>
           <HistoryMenu />
           <span class="sep" />
-          <Menu icon="fl_layout_column_four" label="פריסת סביבת העבודה">
+          <Menu icon="fl_layout_column_four" label="פריסת סביבת העבודה" badge={hidden.length} badgeLabel={hidden.length === 1 ? "פאנל אחד מוסתר" : `${hidden.length.toLocaleString("he")} פאנלים מוסתרים`}>
             {(close) => (
               <>
                 <MenuGroup label="תבניות פריסה">
                   {(Object.keys(PRESETS) as LayoutPreset[]).map((p) => (
-                    <MenuItem key={p} checked={prefs.layout.value.preset === p} onSelect={() => ((prefs.layout.value = structuredClone(PRESETS[p])), close())}>
+                    <MenuItem key={p} checked={layout.preset === p} onSelect={() => (chooseLayout(prefs, structuredClone(PRESETS[p])), close())}>
                       {PRESET_LABELS[p]}
                     </MenuItem>
                   ))}
                 </MenuGroup>
-                {prefs.layout.value.hidden.length > 0 && (
+                {hidden.length > 0 && (
                   <MenuGroup label="פאנלים מוסתרים">
-                    {prefs.layout.value.hidden.map((p) => (
-                      <MenuItem key={p} icon="fl_add" onSelect={() => ((prefs.layout.value = { ...prefs.layout.value, hidden: prefs.layout.value.hidden.filter((x) => x !== p), order: prefs.layout.value.order.includes(p) ? prefs.layout.value.order : [...prefs.layout.value.order, p] }), close())}>
+                    {hidden.map((p) => (
+                      <MenuItem key={p} icon="fl_add" onSelect={() => (chooseLayout(prefs, showPanel(layout, p)), close())}>
                         הצגת {PANEL_LABELS[p]}
                       </MenuItem>
                     ))}
                   </MenuGroup>
                 )}
-                <div class="label">גוררים כותרת של פאנל כדי להחליף מקומות, וגבול בין פאנלים כדי לשנות רוחב.</div>
+                <MenuItem icon="fl_arrow_undo" onSelect={() => (resetLayout(prefs, innerWidth), (store.missingSourcesFolded.value = false), close())}>
+                  איפוס הפריסה (כל הפאנלים מוצגים)
+                </MenuItem>
+                <div class="label">גוררים כותרת של פאנל כדי להחליף מקומות, וגבול בין פאנלים כדי לשנות רוחב.{prefs.layoutAuto.value ? " החלון צר, ולכן הפריסה עברה לבד ל\"שני טקסטים וחלונית צד\"; בחלון רחב הקודמת חוזרת." : ""}</div>
               </>
             )}
           </Menu>
@@ -69,7 +74,8 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       <TaskAnnouncer />
-      {task && (
+      {/* the guided run step shows the task's one bar itself (V5 UX audit U16): not a second one here */}
+      {task && !(store.screen.value === "guided" && store.guided.step.value === "run") && (
         <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
           {task.total > 0 && <progress max={task.total} value={task.done} />}
@@ -137,6 +143,13 @@ export function AppBar({ onExport }: { onExport: () => void }) {
       )}
     </header>
   );
+}
+
+/** A hidden panel shown again: back in its place; in "source above target" the target shares the source's column. */
+function showPanel(layout: Layout, p: PanelId): Layout {
+  const hidden = layout.hidden.filter((x) => x !== p);
+  const inline = layout.preset === "stack" && p === "target";
+  return { ...layout, hidden, order: inline || layout.order.includes(p) ? layout.order : [...layout.order, p] };
 }
 
 /**

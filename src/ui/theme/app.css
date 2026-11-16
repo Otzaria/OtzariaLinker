@@ -59,6 +59,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); outlin
 .app-bar .task .btn { flex-shrink: 0; }
 progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .menu { position: relative; }
+.menu > .icon-btn { position: relative; }
+/* how many panels the layout menu brings back (hidden ones): physical corner, a badge is not text */
+.menu-badge { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); background: var(--primary); color: var(--on-primary); font: 600 10px/16px var(--font-ui); text-align: center; }
 .menu-pop { position: absolute; inset-block-start: calc(100% + 4px); inset-inline-end: 0; z-index: 30; min-width: 240px; background: var(--surface-container); border: 1px solid var(--outline-variant); border-radius: var(--radius); box-shadow: var(--elev-3); padding: 6px; display: grid; gap: 2px; }
 .menu-pop .item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius); border: 0; background: none; cursor: pointer; text-align: start; }
 .menu-pop .item:hover, .menu-pop .item[aria-checked="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
@@ -121,6 +124,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .reopen-sources .name { font-weight: 600; overflow-wrap: anywhere; }
 .reopen-sources .muted { color: var(--on-surface-variant); overflow-wrap: anywhere; }
 .panel-body > .reopen-sources { margin: 12px; }
+.reopen-folded { justify-self: start; color: var(--primary); }
 /* where a book comes from (several sources open) */
 .src-badge { display: inline-block; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface-container-highest); color: var(--on-surface-variant); white-space: nowrap; font-weight: 600; vertical-align: 1px; }
 .src-badge.otzaria { border-color: color-mix(in srgb, var(--primary) 60%, transparent); color: var(--primary); background: color-mix(in srgb, var(--primary-container) 40%, var(--surface)); }
@@ -165,6 +169,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .book-list .side-btn[aria-pressed="true"] { background: var(--primary-container); color: var(--on-primary-container); border-color: var(--primary); }
 .empty { padding: 24px 16px; text-align: center; color: var(--on-surface-variant); display: grid; gap: 10px; justify-items: center; }
 .empty .icon { color: var(--outline); }
+.ws-all-hidden { grid-column: 1 / -1; align-self: center; }
 
 /* reader */
 .reader { background: var(--reader-bg); }
@@ -199,6 +204,17 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .mark.file { background: var(--secondary-container); color: var(--on-secondary-container); }
 .mark.deleted { background: var(--error-container); color: var(--on-error-container); }
 .mark.db { background: var(--surface-container-highest); color: var(--on-surface-variant); }
+/* the counts are one button that opens the line's links (line-links.tsx) */
+.marks-btn { display: flex; gap: 3px; padding: 2px; margin: -2px; border: 0; border-radius: var(--radius-full); background: none; cursor: pointer; color: inherit; }
+.marks-btn:hover, .marks-btn[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--primary); }
+.line-links { position: fixed; z-index: 40; width: min(340px, calc(100vw - 16px)); max-height: min(420px, calc(100vh - 16px)); overflow: auto; display: grid; gap: 6px; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-container-high); color: var(--on-surface); border: 1px solid var(--outline-variant); box-shadow: var(--elev-3); font: var(--fs-sm) / 1.45 var(--font-ui); text-align: start; }
+.line-links ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ll-item { display: grid; gap: 1px; width: 100%; text-align: start; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius); background: color-mix(in srgb, var(--tertiary-container) 55%, transparent); color: inherit; cursor: pointer; font: inherit; }
+.ll-item:hover:not(:disabled) { border-color: var(--tertiary); }
+.ll-item:disabled { cursor: default; opacity: 0.7; }
+.ll-item.deleted .ll-where { text-decoration: line-through; }
+.ll-text { font-family: var(--font-book); font-size: 15px; overflow-wrap: anywhere; }
+.ll-kind, .ll-hint { font-size: 11px; color: var(--on-surface-variant); }
 .anchor-hl { background: var(--highlight); border-radius: 2px; }
 
 /* builder */
@@ -217,6 +233,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .problems li.info { background: var(--surface-container); color: var(--on-surface-variant); }
 .stored-as { margin: 0; display: flex; gap: 6px; align-items: start; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .adv-link { justify-self: start; font-size: var(--fs-sm); color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.link-btn { font: inherit; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 
 /* links list */
 .tabs { display: flex; gap: 0; padding: 0 4px; overflow-x: auto; scrollbar-width: thin; border-bottom: 1px solid var(--outline-variant); background: var(--surface-container-high); }
@@ -241,18 +258,23 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .link-item.deleted .muted { color: inherit; }
 .link-item .ends { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; min-width: 0; }
 .link-item .ends span { min-width: 0; overflow-wrap: anywhere; }
-.link-item .acts { grid-row: span 2; display: flex; align-items: center; }
+/* two lines (V5 UX audit U17, the owner's choice A): the source, then "← the target"; the actions span both */
+.link-item .ends { grid-column: 1; }
+.link-item .ends.to { color: var(--on-surface-variant); }
+.link-item .ends.to .t { color: var(--on-surface); }
+.link-item .ends.to .arrow { flex: none; color: var(--on-surface-variant); }
+.link-item .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; }
 /* the links table: a scroll box that renders only the rows in view (links-panel.tsx VirtualList, ROW = 64px) */
 .vlist { height: clamp(260px, 60vh, 900px); overflow: auto; contain: strict; }
 .vlist .link-list { position: relative; padding: 0; }
-.vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: start; }
+.vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: center; }
 .vlist .link-item .ends { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
 /* one row with no wrapping: each end shortens with "…" instead of painting over the next one (the
    spans may shrink below their text, and their overflow was visible — the two book names overlapped) */
 .vlist .link-item .ends > .end { display: inline-flex; gap: 0.3em; min-width: 0; overflow: hidden; }
 .vlist .link-item .end > * { flex: none; }
 .vlist .link-item .end > .t { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
-.vlist .link-item .ends > :is(.status, input, .icon) { flex: none; }
+.vlist .link-item .ends > :is(.status, input, .icon, .arrow, .lt-error, .lt-warning) { flex: none; }
 .vlist .link-item .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; padding-top: 6px; }
 .lt-grid label, .lt-head { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
@@ -331,14 +353,22 @@ details.held { border: 1px solid var(--outline-variant); border-radius: var(--ra
 details.held summary { cursor: pointer; font-weight: 600; }
 
 /* ---------- notices ---------- */
-.notices { position: fixed; inset-block-end: 16px; inset-inline-start: 16px; z-index: 50; display: grid; gap: 8px; width: min(440px, calc(100vw - 32px)); }
-.notice { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: start; padding: 10px 12px; border-radius: var(--radius); background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); font-size: var(--fs-sm); }
-.notice.error { background: var(--error-container); color: var(--on-error-container); }
+/* the newest notice on one line (V5 UX audit U18, the owner's choice A); opened (hover, focus, a click on its
+   text, its details open) it shows the whole text and its details */
+.notices { position: fixed; inset-block-end: 16px; inset-inline-start: 16px; z-index: 50; display: grid; gap: 6px; width: min(520px, calc(100vw - 32px)); }
+.notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center; padding: 4px 6px; padding-inline-start: 10px; border-radius: var(--radius); background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); font-size: var(--fs-sm); }
+/* an error stays until closed, and is marked by more than its colour: a thick edge on its start side */
+.notice.error { background: var(--error-container); color: var(--on-error-container); border-inline-start: 4px solid var(--error); }
 .notice.warning { background: var(--warning-container); color: var(--on-warning-container); }
-.notice details { grid-column: 2 / -1; max-height: 180px; overflow: auto; }
+.notice-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.notice:is(:hover, :focus-within, .open, :has(details[open])) .notice-text { white-space: normal; overflow-wrap: anywhere; }
+.notice details { grid-column: 2 / -1; max-height: 180px; overflow: auto; display: none; }
+.notice:is(:hover, :focus-within, .open, :has(details[open])) details { display: block; }
 .notice details ul { margin: 4px 0 0; padding-inline-start: 18px; }
+.notice > .btn { min-height: 28px; padding: 2px 8px; color: inherit; text-decoration: underline; }
 .notice .icon-btn { width: 26px; height: 26px; color: inherit; }
-.notices-more { justify-self: start; background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); }
+.notices-more { justify-self: start; min-height: 28px; padding: 2px 10px; background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); }
+.notices-more.has-error { background: var(--error-container); color: var(--on-error-container); }
 
 /* full-window drop target */
 .drop-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--primary-container) 70%, transparent); border: 3px dashed var(--primary); font-size: 22px; font-weight: 600; color: var(--on-primary-container); pointer-events: none; }
@@ -392,6 +422,13 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .steps .opened { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .steps .opened .icon { color: var(--tertiary); }
 .steps .db-hint { margin-top: 8px; }
+/* the app bar on a tablet (820px): the brand keeps its icon in the workspace, without "מנהל הקישורים" — with "חזרה
+   להדרכה" or a running task, "ייצוא" fell to a row of its own (V5 UX audit U19, the owner's choice A). The button's
+   name stays for a screen reader (its aria-label). */
+@media (max-width: 899.98px) {
+  .app-bar.ws .brand-name { display: none; }
+  .app-bar.ws .brand { margin-inline-end: 4px; }
+}
 /* the app bar on a phone: one row. The advanced switch moves into the settings menu, the brand keeps its icon in
    the workspace, and a running task gets a row of its own */
 .narrow-only { display: none !important; }
@@ -465,6 +502,8 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
 .guided-issues { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; }
 .guided-issues li { display: flex; gap: 6px; align-items: center; }
 .guided-card progress { width: 100%; }
+.guided-run .row { margin-top: 2px; }
+.guided-run details summary { cursor: pointer; color: var(--primary); font-size: var(--fs-sm); }
 .guided-foot { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 0 16px; background: var(--app-bg); }
 /* the notices sit above the flow's buttons, not on them ("חזרה" and "פתיחה בסביבת העבודה" were hidden
    under them for 5–15 seconds after every step that opens files or runs; V5 UX audit) */
@@ -475,4 +514,18 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
   .app-bar .guided-back span { display: none; }
 }
 .guided-card label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
+/* approving many suggestions together (bulk-approve.tsx): closed by default, the count before the button */
+.bulk-approve { display: grid; gap: 8px; margin: 0 6px 6px; }
+.bulk-approve[open] { padding-bottom: 10px; }
+.bulk-approve > :not(summary) { margin-top: 6px; }
+.bulk-approve .small { margin-bottom: 0; font-size: var(--fs-sm); }
+.bulk-scope, .bulk-levels { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-sm); }
+.bulk-levels { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 4px 10px 8px; margin-inline: 0; }
+.bulk-levels legend { padding-inline: 4px; color: var(--on-surface-variant); }
+.bulk-scope .check, .bulk-levels .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.bulk-approve label.field { display: grid; gap: 4px; font-size: var(--fs-sm); }
+.bulk-preview { margin-bottom: 0; font-size: var(--fs-sm); }
+.bulk-approve .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bulk-done { font-size: var(--fs-sm); }
+main.guided .bulk-approve { margin: 0; }
 .stat.text b { font-size: 17px; line-height: 1.6; }

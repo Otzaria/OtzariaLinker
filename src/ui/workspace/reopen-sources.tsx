@@ -9,7 +9,8 @@ import { OtzariaDbHint, SOURCE_OPTIONS, type SourceOption } from "./add-sources"
  * A reopened project's sources that are not open yet (audit F10). A browser cannot reopen a file by
  * itself, so the list names each source — the database file, the folder, the text files — with the
  * books its links wait for, and a button that opens the matching picker. It stays until every source
- * is back (the links then bind to the books by title) or the user hides it.
+ * is back (the links then bind to the books by title). Hiding folds it to one line whose button shows
+ * it again (nothing hidden is out of reach).
  */
 const MAX_NAMES = 6;
 type MissingSource = AppStore["missingSources"]["value"][number];
@@ -39,6 +40,13 @@ export function ReopenSources() {
   const store = useStore();
   const missing = store.missingSources.value;
   if (!missing.length) return null;
+  if (store.missingSourcesFolded.value)
+    return (
+      <button class="btn text reopen-folded" onClick={() => (store.missingSourcesFolded.value = false)} aria-expanded="false" title="הצגת המקורות של הפרויקט שעוד לא נפתחו">
+        <Icon name="fl_history" size={16} />
+        מקורות לפתוח מחדש ({missing.length.toLocaleString("he")})
+      </button>
+    );
   const reopen = async (s: MissingSource) => {
     const files = await pickFiles(pickerOf(s).pick);
     if (files.length) await store.openFiles(files);
@@ -48,7 +56,7 @@ export function ReopenSources() {
       <header>
         <Icon name="fl_history" size={18} />
         <b class="grow">מקורות לפתוח מחדש</b>
-        <button class="icon-btn" onClick={() => store.dismissMissingSources()} title="הסתרת הרשימה. הקישורים שבפרויקט נשארים." aria-label="הסתרת רשימת המקורות לפתוח מחדש">
+        <button class="icon-btn" onClick={() => (store.missingSourcesFolded.value = true)} title="הסתרת הרשימה (נשארת שורה אחת שמציגה אותה שוב). הקישורים שבפרויקט נשארים." aria-label="הסתרת רשימת המקורות לפתוח מחדש">
           <Icon name="fl_dismiss" size={16} />
         </button>
       </header>

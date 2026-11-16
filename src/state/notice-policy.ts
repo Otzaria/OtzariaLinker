@@ -8,8 +8,8 @@ import type { Notice } from "./store";
  */
 export const NOTICE_SHORT_MS = 5_000;
 export const NOTICE_LONG_MS = 15_000;
-/** notices shown at once; older ones fold into "N more" */
-export const NOTICES_SHOWN = 3;
+/** notices shown at once: the newest, on one line (V5 UX audit U18); older ones fold into "N more" */
+export const NOTICES_SHOWN = 1;
 
 export function noticeLifetimeMs(n: Pick<Notice, "kind" | "details" | "action">): number | null {
   if (n.kind === "error" || n.action) return null;
