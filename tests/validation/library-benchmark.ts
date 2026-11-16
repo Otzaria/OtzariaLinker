@@ -457,3 +457,53 @@ export function excerpt(html: string | undefined, span?: [number, number] | null
   const [a, b] = span;
   return `${units.slice(Math.max(0, a - width), a).join("")}[${units.slice(a, b).join("")}]${units.slice(b, b + width).join("")}`.trim();
 }
+
+/**
+ * One JSON row per structural suggestion the merge touched (BENCH_MODE=replay, merge-replay.test.ts): ambiguous, in a conflict, or
+ * with a member that the merge did not take as is — what an analysis of the merge's tiers reads.
+ */
+export async function detailRows(
+  book: number,
+  all: readonly ScoredSuggestion[],
+  written: readonly ScoredSuggestion[],
+  byLine: Map<number, DbEnd[]>,
+  out: string[],
+  text: { every: number; seed: string; at: (bookId: number, line: number) => Promise<string> } | null,
+): Promise<void> {
+  const w = new Map(written.map((x) => [x.s.id, x.verdict]));
+  for (const x of all) {
+    if (x.group !== "structural") continue;
+    const s = x.s as Suggestion & { engines: readonly string[]; members: readonly { suggestion: Suggestion; focus: string }[] };
+    const touched = s.confidence === "ambiguous" || s.rules.some((r) => r.startsWith("maxlink/") && r !== "maxlink/agree" && !r.startsWith("maxlink/engine:")) || s.members.some((m) => m.suggestion.confidence === "ambiguous");
+    if (!touched) continue;
+    const otherEnd = (m: { suggestion: Suggestion; focus: string }) => (m.suggestion.target.book.key === m.focus && m.suggestion.source.book.key !== m.focus ? m.suggestion.source : m.suggestion.target);
+    const db = (byLine.get(x.bLine) ?? []).filter((e) => e.other === x.other).map((e) => [e.oFrom, e.oTo, e.type] as const);
+    // the words, for one row in TEXT_EVERY (by rank): this line, the line chosen, and the database's line
+    const t = text && rankOf(text.seed, s.id) % text.every === 0 ? { here: await text.at(book, x.bLine), chosen: await text.at(x.other, x.oFrom), db: db[0] ? await text.at(x.other, db[0][0]) : null } : undefined;
+    out.push(
+      JSON.stringify({
+        t,
+        b: book,
+        id: s.id,
+        c: s.confidence,
+        va: x.verdict,
+        vw: w.get(s.id),
+        pt: x.pairType,
+        e: s.engines,
+        l: x.bLine,
+        o: x.other,
+        ol: x.oFrom,
+        oe: x.oTo,
+        cs: s.citedSpan,
+        r: s.rules.filter((r) => r.startsWith("maxlink/") || r.startsWith("dh/")),
+        w: s.warnings.map((r) => r.code),
+        m: s.members.map((m) => {
+          const o = otherEnd(m);
+          return [m.suggestion.engine, m.suggestion.confidence, o.line, o.end ?? o.line, m.suggestion.citedSpan?.line ?? null, m.suggestion.citedSpan?.end ?? null, Number(m.suggestion.score.toFixed(3)), m.suggestion.rules.filter((r) => !r.startsWith("maxlink/")).slice(0, 6)];
+        }),
+        alt: s.alternatives.slice(0, 4).map((a) => [a.target.book.key === s.target.book.key || a.target.book.key === s.source.book.key ? a.target.line : -1, a.reasons[0]?.code ?? ""]),
+        db,
+      }),
+    );
+  }
+}
