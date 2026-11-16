@@ -18,12 +18,15 @@ export const DIFF_KIND_LABELS: Readonly<Record<LinkDiffKind, string>> = {
   added: "נוסף",
 };
 
+/** "רק במסד", "רק בפרויקט", "רק ב־x_links.json" */
+const only = (name: string) => (name.startsWith("ה") && !name.includes(".") ? `רק ב${name.slice(1)}` : `רק ב־${name}`);
+
 export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffGroup, string>> => ({
   identical: "זהים",
   conflict: "סותרים",
   overlap: "טווחים חופפים",
-  onlyA: `רק ב${a}`,
-  onlyB: `רק ב${b}`,
+  onlyA: only(a),
+  onlyB: only(b),
 });
 
 const place = (s: LinkSide) => `${s.line + 1}${s.end !== undefined && s.end > s.line ? `–${s.end + 1}` : ""}`;

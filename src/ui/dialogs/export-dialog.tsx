@@ -225,6 +225,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             {/* one span: a .btn is a flex row, and loose text and <bdi> would become items with gaps between them */}
             <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
           </button>
+          <button class="btn text" onClick={() => (store.dialog.value = "compare")} title="מה ישתנה בקובץ של כל ספר מול קובץ שבידיכם (למשל הקובץ שבספרייה)">השוואה לפני ייצוא</button>
           <button class="btn text" onClick={() => ref.current?.close()}>סגירה</button>
           <button
             class="btn filled"

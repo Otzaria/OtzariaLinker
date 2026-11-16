@@ -12,7 +12,7 @@ const book = (key: string, title: string): BookRef => ({ key, title, origin: "ot
 const BOOKS = [book("s1:1", "ארצות החיים"), book("s1:2", "המאיר לארץ על ארצות החיים"), book("s1:3", "ארץ יהודה על ארצות החיים"), book("s1:4", "בראשית")];
 const link = (i: number, over: Partial<Link> = {}): Link => ({
   id: `l${i}`,
-  status: (["new", "existing", "edited", "deleted"] as const)[i % 4],
+  status: (["new", "existing", "edited", "deleted"] as const)[i % 4]!,
   provenance: "file",
   source: { book: BOOKS[i % 2]!, line: (i * 7919) % 50_000 },
   target: { book: BOOKS[2 + (i % 2)]!, line: i % 3000 },

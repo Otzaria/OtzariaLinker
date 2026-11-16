@@ -199,7 +199,7 @@ export class LinkCompareState {
     this.host.linkState.value = commit(s, `מיזוג ${sources.length} מקורות של "${title}" (${linksCount(added.length)} נוספו)`, changes, Date.now(), [], files);
     this.host.notify(
       merge.conflicts.length && !keepConflicts ? "warning" : "success",
-      `המיזוג הוחל: ${linksCount(added.length)} נוספו, ${merge.duplicates.toLocaleString("he")} כפילויות אוחדו${merge.conflicts.length ? `, ${merge.conflicts.length.toLocaleString("he")} סתירות ${keepConflicts ? "נוספו גם הן" : "לא נוספו (נשמר המקור המועדף)"}` : ""}. Ctrl+Z מבטל.`,
+      `המיזוג הוחל. נוספו: ${linksCount(added.length)}; כפילויות שאוחדו: ${merge.duplicates.toLocaleString("he")}${merge.conflicts.length ? `; סתירות ${keepConflicts ? "שנוספו גם הן" : "שלא נוספו (נשמר המקור המועדף)"}: ${merge.conflicts.length.toLocaleString("he")}` : ""}. Ctrl+Z מבטל.`,
     );
     return added.length;
   }
