@@ -90,9 +90,10 @@ test("max-link job: a failing book, pause → reload → continue → run the fa
 
   // only the failed book runs again (it reads in the new session)
   await panel.getByRole("button", { name: "הרצה חוזרת של 1 שנכשלו" }).click();
-  await expect(panel.locator(".ml-job-counts li.st-failed")).toHaveCount(0, { timeout: 60_000 });
+  // the job is "done" again once that book ran (the failed count drops as soon as it starts)
+  await expect.poll(async () => { const j = await job(page); return j?.state === "done" ? settled(j) : -1; }, { timeout: 60_000 }).toBe(BOOKS + 1);
+  await expect(panel.locator(".ml-job-counts li.st-failed")).toHaveCount(0);
   done = (await job(page))!;
-  expect(settled(done)).toBe(BOOKS + 1);
   for (const b of finished) expect(done.books.find((x) => x.title === b.title)!.ms).toBe(b.ms);
   await expect(page.locator("details.ml-report .tile-booksChecked dd")).toHaveText(String(BOOKS + 1));
   const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
