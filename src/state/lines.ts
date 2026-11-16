@@ -1,6 +1,7 @@
 import { signal } from "@preact/signals";
 import type { SourceLine } from "../core/books";
 import type { Link } from "../core/links/model";
+import type { LineFacts } from "../core/links/validate";
 import type { BooksService } from "./services";
 
 /*
@@ -17,13 +18,23 @@ type ChunkState<T> = { status: "loading"; promise: Promise<void> } | { status: "
 
 class ChunkCache<T> {
   private readonly chunks = new Map<string, ChunkState<T>>();
+  /**
+   * The chunks a check read (LineStore.beginCheck), kept out of the eviction until the next check or
+   * until their source goes: a check of more chunks than MAX_CHUNKS must not lose the first ones
+   * before it reads them (review C7). Null when no check kept anything.
+   */
+  private kept: Map<string, T[]> | null = null;
   constructor(
     private readonly fetch: (bookKey: string, from: number, to: number) => Promise<T[]>,
     private readonly onChange: () => void,
   ) {}
 
   state(bookKey: string, chunk: number): ChunkState<T> | undefined {
-    return this.chunks.get(`${bookKey}#${chunk}`);
+    const key = `${bookKey}#${chunk}`;
+    const s = this.chunks.get(key);
+    if (s || !this.kept) return s;
+    const items = this.kept.get(key);
+    return items && { status: "ready", items };
   }
 
   /** Marks a chunk most recently used (a view showed it), so the eviction takes older ones first. */
@@ -38,7 +49,7 @@ class ChunkCache<T> {
   ensure(bookKey: string, chunk: number): Promise<void> {
     const key = `${bookKey}#${chunk}`;
     const hit = this.chunks.get(key);
-    if (hit?.status === "ready") return Promise.resolve();
+    if (hit?.status === "ready") return (this.kept?.set(key, hit.items), Promise.resolve());
     if (hit?.status === "loading") return hit.promise;
     const loading: ChunkState<T> = {
       status: "loading",
@@ -51,8 +62,14 @@ class ChunkCache<T> {
     return loading.promise;
   }
 
+  /** Starts a check's snapshot: what ensure() reads from now on is kept until the next one (see `kept`). */
+  beginKeep(): void {
+    this.kept = new Map();
+  }
+
   drop(bookKeyPrefix: string): void {
     for (const k of [...this.chunks.keys()]) if (k.startsWith(bookKeyPrefix)) this.chunks.delete(k);
+    if (this.kept) for (const k of [...this.kept.keys()]) if (k.startsWith(bookKeyPrefix)) this.kept.delete(k);
     this.onChange();
   }
 
@@ -65,6 +82,7 @@ class ChunkCache<T> {
     if (this.chunks.get(key) !== loading) return;
     this.chunks.delete(key); // re-insert = most recently used
     this.chunks.set(key, s);
+    if (s.status === "ready") this.kept?.set(key, s.items);
     while (this.chunks.size > MAX_CHUNKS) this.chunks.delete(this.chunks.keys().next().value!);
     this.onChange();
   }
@@ -72,6 +90,11 @@ class ChunkCache<T> {
 
 /** Whether a view should (re)load a chunk: never asked, or it failed long enough ago to try again. */
 const wanted = (s: ChunkState<unknown> | undefined): boolean => !s || (s.status === "error" && Date.now() - s.at >= RETRY_MS);
+
+/** What the rules (core/links/validate.ts) need of a line. */
+export function lineFacts(l: SourceLine): LineFacts {
+  return { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') };
+}
 
 /**
  * The line count of a book shorter than `below` lines, when it does not say (text files): a binary
@@ -98,6 +121,12 @@ export class LineStore {
   private readonly counts = new Map<string, number>();
   private readonly lines: ChunkCache<SourceLine>;
   private readonly existing: ChunkCache<Link>;
+  /**
+   * The facts of the lines a check read (loadFacts), by book and line — never evicted, so the export
+   * and the quality check judge every link on its real line however many chunks they read (review C7).
+   * Small: four fields per link end, forgotten with the source.
+   */
+  private readonly facts = new Map<string, Map<number, LineFacts>>();
 
   constructor(service: BooksService) {
     const bump = () => (this.tick.value = this.tick.peek() + 1);
@@ -177,13 +206,54 @@ export class LineStore {
     return s?.status === "ready" ? s.items : undefined;
   }
 
+  /**
+   * Starts a check (the export, the quality check): the existing database links it loads from now on
+   * stay readable through existingPeek until the next check, whatever the views load meanwhile.
+   */
+  beginCheck(): void {
+    this.existing.beginKeep();
+  }
+
+  /** Loads the given lines of a book chunk by chunk and keeps their facts for factsAt (see `facts`). */
+  async loadFacts(bookKey: string, indexes: Iterable<number>, opts: { signal?: AbortSignal | undefined; onChunk?: () => void } = {}): Promise<void> {
+    const byChunk = new Map<number, number[]>();
+    for (const i of indexes) {
+      const c = Math.floor(i / CHUNK);
+      const list = byChunk.get(c);
+      if (list) list.push(i);
+      else byChunk.set(c, [i]);
+    }
+    let book = this.facts.get(bookKey);
+    if (!book) this.facts.set(bookKey, (book = new Map()));
+    for (const [c, list] of byChunk) {
+      opts.signal?.throwIfAborted();
+      await this.lines.ensure(bookKey, c);
+      opts.onChunk?.();
+      // read at once: the chunk was just loaded (or found), and nothing ran in between to evict it
+      const s = this.lines.state(bookKey, c);
+      if (s?.status !== "ready") continue; // a failed chunk: its lines stay "not verified"
+      for (const i of list) {
+        const l = s.items[i - c * CHUNK];
+        if (l) book.set(i, lineFacts(l));
+      }
+    }
+  }
+
+  /** The facts of a line: from the cache, else as the last check read them; undefined when never read. */
+  factsAt(bookKey: string, index: number): LineFacts | undefined {
+    const l = this.peek(bookKey, index);
+    return l ? lineFacts(l) : this.facts.get(bookKey)?.get(index);
+  }
+
   forgetAll(): void {
     this.counts.clear();
+    this.facts.clear();
     this.lines.drop("");
     this.existing.drop("");
   }
 
   forgetSource(sourceId: string): void {
+    for (const k of [...this.facts.keys()]) if (k.startsWith(`${sourceId}:`)) this.facts.delete(k);
     this.lines.drop(`${sourceId}:`);
     this.existing.drop(`${sourceId}:`);
   }

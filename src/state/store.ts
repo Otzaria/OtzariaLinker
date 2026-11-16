@@ -790,7 +790,12 @@ export class AppStore {
    * the builder must not depend on the export to check a link, and the three must never disagree.
    */
 
-  /** Loads the lines at both ends of every link, so the rules can be checked on real lines. */
+  /**
+   * Loads the lines at both ends of every link, so the rules can be checked on real lines. Their facts
+   * are kept apart from the views' bounded cache (LineStore.loadFacts), and so are the database links
+   * read around them (beginCheck): a project that needs more chunks than the cache holds is still
+   * checked on every link, never passed as "not verified" because its lines were evicted (review C7).
+   */
   async loadLinkLines(label: string): Promise<boolean> {
     const need = new Map<string, Set<number>>();
     for (const l of this.allLinks.value) {
@@ -799,21 +804,18 @@ export class AppStore {
         const b = this.bookOf(side.book);
         if (!b) continue;
         const set = need.get(b.key) ?? new Set<number>();
-        set.add(Math.floor(side.line / CHUNK)).add(Math.floor((side.end ?? side.line) / CHUNK));
+        set.add(side.line).add(side.end ?? side.line);
         need.set(b.key, set);
       }
     }
-    const total = [...need.values()].reduce((n, s) => n + s.size, 0);
+    const chunks = (lines: Set<number>) => new Set([...lines].map((i) => Math.floor(i / CHUNK))).size;
+    const total = [...need.values()].reduce((n, s) => n + chunks(s), 0);
     const ok = await this.runTask(label, async (opts) => {
+      this.lines.beginCheck();
       // database links around the project's own links: validation reports "already in the database"
       await this.dbLinks.loadAround(this.allLinks.value);
       let done = 0;
-      for (const [key, chunks] of need)
-        for (const c of chunks) {
-          opts.signal?.throwIfAborted();
-          await this.lines.load(key, c * CHUNK, c * CHUNK);
-          opts.onProgress?.(++done, total);
-        }
+      for (const [key, lines] of need) await this.lines.loadFacts(key, lines, { signal: opts.signal, onChunk: () => opts.onProgress?.(++done, total) });
       return true;
     });
     return ok === true;
@@ -915,8 +917,7 @@ export class AppStore {
       },
       line: (ref, index): LineFacts | undefined => {
         const b = this.bookOf(ref);
-        const l = b && this.lines.peek(b.key, index);
-        return l ? { exists: l.existsInDb, heading: l.heading, anchorLength: l.anchorText.length, hasNotes: l.anchorText !== l.text || l.text.includes('class="footnote"') } : undefined;
+        return b && this.lines.factsAt(b.key, index);
       },
       linksFile: (title) => this.dbLinks.linksFile(title),
       sefariaOwned: (book) => this.isSefariaOwned(book),
