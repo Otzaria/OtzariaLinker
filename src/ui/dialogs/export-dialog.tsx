@@ -6,6 +6,7 @@ import type { ExportBundle } from "../../state/exchange";
 import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable } from "../keyboard";
 import { DbCopyFiles } from "./db-copy-files";
 import { FileName, ltr } from "../shell/file-name";
 
@@ -176,7 +177,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <summary>מבני הכותרות של {alt.heldBack.length} ספרים לא ייוצאו, ולמה</summary>
                   <ul class="problems" style="margin-top:8px">
                     {alt.heldBack.map((b) => (
-                      <li key={b.title} class="error" style="cursor:pointer" onClick={() => ((store.dialog.value = "alt-toc"), ref.current?.close())}>
+                      <li key={b.title} class="error" style="cursor:pointer" {...activatable(() => ((store.dialog.value = "alt-toc"), ref.current?.close()))}>
                         <span>
                           <b>{b.title}</b>: {b.problems.filter((p) => p.severity === "error").slice(0, 5).map((p) => problemText(p, advanced)).join(" ")}
                         </span>
@@ -190,7 +191,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <summary>{plan.heldBack.length} קישורים לא ייוצאו, ולמה</summary>
                   <ul class="problems" style="margin-top:8px">
                     {plan.heldBack.slice(0, 200).map(({ link, problems }) => (
-                      <li key={link.id} class="error" style="cursor:pointer" onClick={() => (store.revealLink(link), ref.current?.close())}>
+                      <li key={link.id} class="error" style="cursor:pointer" {...activatable(() => (store.revealLink(link), ref.current?.close()))} title="הצגת שני צדי הקישור">
                         <span>
                           <b>{link.source.book.title} {link.source.line + 1} → {link.heRef2}</b>: {problems.filter((p) => p.severity === "error").map((p) => problemText(p, advanced)).join(" ")}
                         </span>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { rovingKeys, rovingTabIndex } from "../keyboard";
 import { ENGINES, type EngineId } from "../../linking/automatic";
 import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
@@ -76,9 +77,9 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
       <p class="muted" style="margin:0;font-size:var(--fs-sm)">
         הכלי מזהה לבד אילו ספרים קשורים זה לזה — פירוש וספר הבסיס שלו, ספר הערות והספר שעליו נכתב — מריץ על כל אחד את כל השיטות שמתאימות לו, ומאחד את התוצאות לרשימה אחת בלי כפילויות.
       </p>
-      <div class="filters" style="padding:0" role="radiogroup" aria-label="אילו ספרים לקשר">
+      <div class="filters" style="padding:0" role="radiogroup" aria-label="אילו ספרים לקשר" onKeyDown={rovingKeys}>
         {(["book", "source", "all"] as const).map((k) => (
-          <button key={k} class="chip" role="radio" aria-checked={kind === k} aria-pressed={kind === k} disabled={k === "book" && !current} onClick={() => setKind(k)}>
+          <button key={k} class="chip" role="radio" aria-checked={kind === k} tabIndex={rovingTabIndex(kind === k)} disabled={k === "book" && !current} onClick={() => setKind(k)}>
             {SCOPE_LABEL[k]}
           </button>
         ))}

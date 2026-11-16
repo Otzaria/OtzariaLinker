@@ -6,6 +6,7 @@ import type { SuggestionsView } from "../../state/preferences";
 import type { SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
@@ -46,9 +47,9 @@ export function SuggestionsPanel() {
           הרצה חדשה
         </button>
       </div>
-      <div class="filters" role="radiogroup" aria-label="תצוגת ההצעות">
+      <div class="filters" role="radiogroup" aria-label="תצוגת ההצעות" onKeyDown={rovingKeys}>
         {(["table", "inline", "card"] as const).map((v) => (
-          <button key={v} class="chip" role="radio" aria-checked={view === v} aria-pressed={view === v} onClick={() => (store.prefs.suggestionsView.value = v)}>
+          <button key={v} class="chip" role="radio" aria-checked={view === v} tabIndex={rovingTabIndex(view === v)} onClick={() => (store.prefs.suggestionsView.value = v)}>
             {VIEW_LABEL[v]}
           </button>
         ))}
@@ -118,10 +119,10 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   return (
     <div class="builder">
       <h3 style="margin:0">קישור אוטומטי</h3>
-      <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר">
-        <button class="chip" role="radio" aria-checked={mode === "pair"} aria-pressed={mode === "pair"} onClick={() => setMode("pair")}>שני ספרים</button>
-        <button class="chip" role="radio" aria-checked={mode === "batch"} aria-pressed={mode === "batch"} onClick={() => (setMode("batch"), (info.noBatch || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים ותבנית מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
-        <button class="chip" role="radio" aria-checked={mode === "maxlink"} aria-pressed={mode === "maxlink"} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
+      <div class="filters" style="padding:0" role="radiogroup" aria-label="מה לקשר" onKeyDown={rovingKeys}>
+        <button class="chip" role="radio" aria-checked={mode === "pair"} tabIndex={rovingTabIndex(mode === "pair")} onClick={() => setMode("pair")}>שני ספרים</button>
+        <button class="chip" role="radio" aria-checked={mode === "batch"} tabIndex={rovingTabIndex(mode === "batch")} onClick={() => (setMode("batch"), (info.noBatch || single) && setEngine("headings"))} title="אצווה מתאימה לפירושים ('X על Y'); הערות שוליים ותבנית מקשרים זוג אחד בכל פעם">ספרים רבים (אצווה)</button>
+        <button class="chip" role="radio" aria-checked={mode === "maxlink"} tabIndex={rovingTabIndex(mode === "maxlink")} onClick={() => setMode("maxlink")} title="כל השיטות המתאימות על כל הספרים שבחרתם, בתוצאה אחת">קישור מרבי</button>
       </div>
       {mode === "maxlink" ? <MaxLinkForm onDone={onDone} onCancel={onCancel} /> : <>
       <label class="field">
@@ -431,7 +432,7 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
           <summary>מועמדים חלופיים ({s.alternatives.length})</summary>
           <ul class="link-list" style="padding:6px 0 0">
             {s.alternatives.map((a, i) => (
-              <li key={i} class="link-item" onClick={() => store.reveal("target", a.target.book.key, a.target.line)}>
+              <li key={i} class="link-item" {...activatable(() => store.reveal("target", a.target.book.key, a.target.line))}>
                 <span>שורה {a.target.line + 1}{a.target.end !== undefined ? `–${a.target.end + 1}` : ""} · ציון {Math.round(a.score * 100)}</span>
                 <span class="muted" style="grid-column:1/-1">{a.reasons.map((r) => r.text).join(" · ")}</span>
               </li>

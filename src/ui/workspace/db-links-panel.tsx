@@ -5,6 +5,7 @@ import { isRange, type Link } from "../../core/links/model";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { rovingKeys, rovingTabIndex } from "../keyboard";
 import { LinkItem } from "./links-panel";
 import "./db-links.css";
 
@@ -128,11 +129,11 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
           רק השורה הנבחרת{pick ? ` (${pick.line + 1})` : ""}
         </button>
       </div>
-      <div class="filters" role="tablist" aria-label="קיבוץ">
-        <button role="tab" class="chip" aria-selected={groupBy === "book"} aria-pressed={groupBy === "book"} onClick={() => setGroupBy("book")}>
+      <div class="filters" role="tablist" aria-label="קיבוץ" onKeyDown={rovingKeys}>
+        <button role="tab" class="chip" aria-selected={groupBy === "book"} tabIndex={rovingTabIndex(groupBy === "book")} onClick={() => setGroupBy("book")}>
           <Icon name="oz_book_links" size={14} /> לפי ספר
         </button>
-        <button role="tab" class="chip" aria-selected={groupBy === "type"} aria-pressed={groupBy === "type"} onClick={() => setGroupBy("type")}>
+        <button role="tab" class="chip" aria-selected={groupBy === "type"} tabIndex={rovingTabIndex(groupBy === "type")} onClick={() => setGroupBy("type")}>
           <Icon name="fl_filter" size={14} /> לפי סוג
         </button>
       </div>

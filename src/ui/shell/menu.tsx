@@ -2,16 +2,33 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon, type IconName } from "../icons/icon";
 
-/** A button that opens a small popup menu; closes on outside click and Escape. */
+const ITEM = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+/** the menu's items that are shown, in order */
+const items = (menu: HTMLElement | null): HTMLElement[] => [...(menu?.querySelectorAll<HTMLElement>(`.menu-pop :is(${ITEM})`) ?? [])].filter((el) => el.getClientRects().length > 0);
+
+/**
+ * A button that opens a small popup menu (WAI-ARIA menu button). Opening moves focus to the first
+ * item; the arrows, Home and End move between items (only the focused item takes focus — items are
+ * not Tab stops); Escape closes and returns focus to the button; Tab closes and moves on from the
+ * button; a click outside closes.
+ */
 export function Menu({ icon, label, children }: { icon: IconName; label: string; children: (close: () => void) => ComponentChildren }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  /** closes; focus goes back to the button when it was inside the menu (an item that closes the menu removes itself) */
+  const close = () => {
+    const inside = !!ref.current?.querySelector(".menu-pop")?.contains(document.activeElement);
+    setOpen(false);
+    if (inside || !document.activeElement || document.activeElement === document.body) trigger.current?.focus();
+  };
   useEffect(() => {
     if (!open) return;
     // keyboard: focus moves into the menu; arrows move between items (UX review #6)
-    ref.current?.querySelector<HTMLElement>(".menu-pop .item")?.focus();
+    // (the first one shown: the settings menu starts with an item that exists only on a phone)
+    items(ref.current)[0]?.focus();
     const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -21,22 +38,30 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
   }, [open]);
   return (
     <div class="menu" ref={ref}>
-      <button class="icon-btn" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button ref={trigger} class="icon-btn" title={label} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name={icon} />
       </button>
       {open && (
         <div
           class="menu-pop"
           role="menu"
+          aria-label={label}
           onKeyDown={(e) => {
-            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+            if (e.key === "Tab") {
+              // the button takes focus back, and Tab moves on from there
+              setOpen(false);
+              trigger.current?.focus();
+              return;
+            }
+            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
             e.preventDefault();
-            const items = [...(ref.current?.querySelectorAll<HTMLElement>(".menu-pop .item") ?? [])];
-            const at = items.indexOf(document.activeElement as HTMLElement);
-            items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+            const all = items(ref.current);
+            const at = all.indexOf(document.activeElement as HTMLElement);
+            const to = e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + all.length) % all.length;
+            all[to]?.focus();
           }}
         >
-          {children(() => setOpen(false))}
+          {children(close)}
         </div>
       )}
     </div>
@@ -45,10 +70,20 @@ export function Menu({ icon, label, children }: { icon: IconName; label: string;
 
 export function MenuItem({ icon, children, checked, onSelect, class: cls }: { icon?: IconName; children: ComponentChildren; checked?: boolean; onSelect: () => void; class?: string }) {
   return (
-    <button class={`item${cls ? ` ${cls}` : ""}`} role={checked === undefined ? "menuitem" : "menuitemradio"} {...(checked !== undefined && { "aria-checked": checked })} onClick={onSelect}>
+    <button class={`item${cls ? ` ${cls}` : ""}`} tabIndex={-1} role={checked === undefined ? "menuitem" : "menuitemradio"} {...(checked !== undefined && { "aria-checked": checked })} onClick={onSelect}>
       {icon && <Icon name={icon} size={18} />}
       <span class="grow">{children}</span>
       {checked && <Icon name="oz_check" size={16} />}
     </button>
+  );
+}
+
+/** Items under a heading inside a menu ("ערכת צבעים"): the heading names the group for a screen reader. */
+export function MenuGroup({ label, children }: { label: string; children: ComponentChildren }) {
+  return (
+    <div class="menu-group" role="group" aria-label={label}>
+      <div class="label" aria-hidden="true">{label}</div>
+      {children}
+    </div>
   );
 }

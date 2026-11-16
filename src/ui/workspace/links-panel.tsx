@@ -3,6 +3,7 @@ import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-ty
 import type { Link, LinkStatus } from "../../core/links/model";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { DbLinksPanel } from "./db-links-panel";
 
 /*
@@ -20,11 +21,11 @@ export function LinksPanel() {
   const tab = store.dbLinks.tab.value;
   return (
     <>
-      <div class="filters" role="tablist" aria-label="אילו קישורים">
-        <button role="tab" class="chip" aria-selected={tab === "project"} aria-pressed={tab === "project"} onClick={() => (store.dbLinks.tab.value = "project")}>
+      <div class="filters" role="tablist" aria-label="אילו קישורים" onKeyDown={rovingKeys}>
+        <button role="tab" class="chip" aria-selected={tab === "project"} tabIndex={rovingTabIndex(tab === "project")} onClick={() => (store.dbLinks.tab.value = "project")}>
           <Icon name="oz_links" size={14} /> קישורי הפרויקט <span class="count">{store.allLinks.value.length.toLocaleString("he")}</span>
         </button>
-        <button role="tab" class="chip" aria-selected={tab === "db"} aria-pressed={tab === "db"} onClick={() => (store.dbLinks.tab.value = "db")} title="הקישורים שכבר יש במסד הפתוח לספר שבקורא — לקריאה, לבדיקה ולהעתקה לפרויקט">
+        <button role="tab" class="chip" aria-selected={tab === "db"} tabIndex={rovingTabIndex(tab === "db")} onClick={() => (store.dbLinks.tab.value = "db")} title="הקישורים שכבר יש במסד הפתוח לספר שבקורא — לקריאה, לבדיקה ולהעתקה לפרויקט">
           <Icon name="oz_library_link" size={14} /> קישורים מהמסד
         </button>
       </div>
@@ -167,7 +168,7 @@ export function LinkItem({ l }: { l: Link }) {
   const type = parseConnectionType(l.declaredType);
   const where = (line: number, end?: number) => (end !== undefined ? `${line + 1}–${end + 1}` : `${line + 1}`);
   return (
-    <li class={`link-item${l.status === "deleted" ? " deleted" : ""}`} onClick={() => store.revealLink(l)} title="הצגת שני צדי הקישור">
+    <li class={`link-item${l.status === "deleted" ? " deleted" : ""}`} {...activatable(() => store.revealLink(l))} title="הצגת שני צדי הקישור">
       <div class="ends">
         <span class={`status ${l.status}`} title={l.provenance === "db-copy" ? "קישור שהועתק מהמסד ושוחזר ממנו לקובץ קישורים. אפשר לערוך ולייצא אותו" : undefined}>{statusLabel(l)}</span>
         <span>
