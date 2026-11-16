@@ -5,7 +5,11 @@ import { LinkerError } from "../../../core/errors";
 export type SqlValue = null | number | bigint | string | Uint8Array;
 export type TextEncodingId = 1 | 2 | 3; // UTF-8, UTF-16le, UTF-16be
 
-/** Reads a SQLite varint (1–9 bytes, big-endian, 7 bits per byte, 9th byte full). Returns [value, bytesRead]. */
+/**
+ * Reads a SQLite varint (1–9 bytes, big-endian, 7 bits per byte, 9th byte full). Returns [value, bytesRead].
+ * The value is a signed 64-bit two's-complement integer: a negative rowid is a 9-byte varint with
+ * the top bit set (review C19). Values beyond ±2^53 come back as the nearest double.
+ */
 export function readVarint(b: Uint8Array, at: number): [number, number] {
   if (at < 0 || at >= b.length) throw corrupt("varint outside the page");
   let v = 0;
@@ -17,7 +21,9 @@ export function readVarint(b: Uint8Array, at: number): [number, number] {
   }
   const last = b[at + 8];
   if (last === undefined) throw corrupt("varint runs past the end");
-  return [v * 256 + last, 9];
+  let big = 0n;
+  for (let i = 0; i < 8; i++) big = (big << 7n) | BigInt(b[at + i]! & 0x7f);
+  return [Number(BigInt.asIntN(64, (big << 8n) | BigInt(last))), 9];
 }
 
 /** SQLite's own limit on columns per table (SQLITE_MAX_COLUMN). */
@@ -48,6 +54,7 @@ export function decodeRecord(p: Uint8Array, enc: TextEncodingId): SqlValue[] {
   const types: number[] = [];
   for (let at = n0; at < headerSize; ) {
     const [t, n] = readVarint(p, at);
+    if (t < 0) throw corrupt("negative serial type");
     types.push(t);
     if (types.length > MAX_COLUMNS) throw corrupt("too many columns in a record");
     at += n;

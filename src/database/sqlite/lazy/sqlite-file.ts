@@ -426,7 +426,7 @@ export class SqliteFile {
     const U = this.header.usableSize;
     const X = index ? Math.floor(((U - 12) * 64) / 255) - 23 : U - 35;
     // a record can never be larger than the file; a hostile size would allocate gigabytes (review #8)
-    if (size > Math.min(MAX_RECORD_BYTES, this.header.pageCount * U)) throw new SqliteFormatError("רשומה במסד מצהירה על גודל בלתי אפשרי — המסד פגום.");
+    if (size < 0 || size > Math.min(MAX_RECORD_BYTES, this.header.pageCount * U)) throw new SqliteFormatError("רשומה במסד מצהירה על גודל בלתי אפשרי — המסד פגום.");
     if (size <= X) return page.subarray(at, at + size);
     const M = Math.floor(((U - 12) * 32) / 255) - 23;
     const K = M + ((size - M) % (U - 4));
