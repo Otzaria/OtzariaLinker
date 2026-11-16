@@ -1,4 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
+import { heldDeletionsText, heldLinksText } from "../../state/history";
 import { problemText } from "../../core/links/validate";
 import { QA_CATEGORIES, qaAction, redundantDuplicates, suggestedFix, type QaCategory } from "../../linking/qa";
 import { useStore } from "../context";
@@ -55,7 +56,7 @@ export function QaPanel() {
           {/* the same blocked set as the export dialog's "לא ייוצאו" (validate.ts exportVerdicts) */}
           {(report.blocked.length > 0 || report.deletionsHeld.length > 0) && (
             <div class="qa-blocked" data-blocked={report.blocked.length} data-deletions-held={report.deletionsHeld.length} style="font-size:var(--fs-sm);color:var(--error)">
-              {[report.blocked.length > 0 && `${report.blocked.length.toLocaleString("he")} קישורים לא ייוצאו`, report.deletionsHeld.length > 0 && `${report.deletionsHeld.length.toLocaleString("he")} מחיקות לא יגיעו לספרייה`].filter(Boolean).join(" · ")}
+              {[report.blocked.length > 0 && heldLinksText(report.blocked.length), report.deletionsHeld.length > 0 && heldDeletionsText(report.deletionsHeld.length)].filter(Boolean).join(" · ")}
             </div>
           )}
           <div class="muted" style="font-size:var(--fs-sm)">

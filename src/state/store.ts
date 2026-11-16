@@ -1279,10 +1279,12 @@ export class AppStore {
     this.saver.save(diagnosticsFileName(), diagnosticsFile(header, this.log.entries()), "application/x-ndjson");
   }
 
-  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): void {
+  /** shows a notice; its id lets the module that raised it take it back when it no longer holds (U20) */
+  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): number {
     logNotice(this.log, kind, text, details);
     const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }) };
     this.notices.value = [...this.notices.value, n].slice(-6);
+    return n.id;
   }
 
   dismiss(id: number): void {

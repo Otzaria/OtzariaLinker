@@ -58,7 +58,7 @@ test("browse a book's database links, filter, copy one, export it with the repla
   await page.getByRole("button", { name: /ייצוא/ }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.locator(".dbcopy-files")).toContainText("ארצות החיים_links.json");
-  await expect(dialog).toContainText("1 קישורים לא ייוצאו");
+  await expect(dialog).toContainText("קישור אחד לא ייוצא");
   await expect(dialog.getByRole("button", { name: /הורדת/ }).last()).toBeDisabled();
   await dialog.getByRole("button", { name: "אין לספר קובץ בספרייה" }).click();
   await expect(dialog.locator(".dbcopy-files")).toHaveCount(0);

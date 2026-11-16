@@ -116,6 +116,13 @@ test("guided flow: folder → books → database → plan → run → approve �
   const stats = main.getByRole("status", { name: "התוכנית" });
   await expect(stats).toContainText("6ספרים");
   await expect(stats).toContainText("זמן משוער");
+  // the estimate in words reads on one line, not broken over three (V5 UX audit U23)
+  const estimateLines = await stats.locator(".stat.text b").evaluate((b) => {
+    const r = document.createRange();
+    r.selectNodeContents(b);
+    return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size;
+  });
+  expect(estimateLines).toBe(1);
   await expect(main.getByRole("group", { name: "בשביל מה הקישורים?" }).getByRole("radio", { name: /לשלוח לספריית אוצריא/ })).toBeChecked();
   await expect(main).toContainText("לא ידועה מראש אף בעיה");
   await shot(page, "4-plan");

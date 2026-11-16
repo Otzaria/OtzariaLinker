@@ -63,5 +63,16 @@ describe("notices of links loaded before their books (F20)", () => {
     expect(after).toHaveLength(1);
     expect(after[0]!.text).toContain("ספר שלא קיים");
     expect(after[0]!.text).not.toContain("בראשית\"");
+    // V5 UX audit U20: the "not open yet" notice does not outlive the books opening
+    expect(store.notices.value.some((n) => n.text.includes("עוד לא פתוחים"))).toBe(false);
+  });
+
+  it("U20: when every book they point to opens, the 'not open yet' notice goes", async () => {
+    const store = new AppStore(registryService(), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([LINKS]);
+    expect(store.notices.value.some((n) => n.text.includes("עוד לא פתוחים"))).toBe(true);
+    await store.openFiles([file("books/בראשית.txt", BASE.join("\n")), file("books/ביאור קצר על בראשית.txt", COMM.join("\n"))]);
+    expect(store.notices.value.some((n) => n.text.includes("עוד לא פתוחים"))).toBe(false);
+    expect(store.notices.value.at(-1)?.text).toContain("נפתחו 2 ספרים");
   });
 });

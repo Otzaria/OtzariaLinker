@@ -528,4 +528,6 @@ ul.guided-books[aria-label] { list-style: none; padding: 0; }
 .bulk-approve .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bulk-done { font-size: var(--fs-sm); }
 main.guided .bulk-approve { margin: 0; }
+/* a tile of words ("פחות מ־5 שניות") takes two columns, so it reads on one line (V5 UX audit U23) */
+.stat.text { grid-column: span 2; }
 .stat.text b { font-size: 17px; line-height: 1.6; }

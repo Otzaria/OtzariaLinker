@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { ENGINES, type EngineId } from "../../linking/automatic";
 import { GUIDED_STEPS, GUIDED_STEP_TITLES, ISSUE_ACTION_LABEL, durationText, nextStep, prevStep, stepSkipped } from "../../state/guided-flow";
 import { remainingText } from "../../state/task-progress";
+import { heldLinksText } from "../../state/history";
 import { useStore } from "../context";
 import { NextSteps } from "../dialogs/export-dialog";
 import { fromDataTransfer, pickFiles } from "../files";
@@ -503,7 +504,7 @@ function FinishStep() {
       ) : (
         <div class="guided-card warn" role="status">
           <b>
-            {errors.length ? `${n(c.heldBack)} קישורים לא ייוצאו` : "הכול ייוצא"}
+            {errors.length ? heldLinksText(c.heldBack) : "הכול ייוצא"}
             {warnings.length ? `${errors.length ? "; " : ", "}${n(warnings.reduce((s, w) => s + w.count, 0))} עם הערה` : ""}. מה לעשות:
           </b>
           <ul class="guided-issues">

@@ -4,6 +4,7 @@ import type { Link } from "../../core/links/model";
 import { problemText, type Problem } from "../../core/links/validate";
 import { qaAction } from "../../linking/qa";
 import type { ExportBundle } from "../../state/exchange";
+import { heldLinksText } from "../../state/history";
 import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -141,10 +142,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                         <Icon name="oz_document_links" size={18} />
                         <span class="grow"><FileName name={f.name} /></span>
                         <span class="muted">
-                          {f.records.toLocaleString("he")} רשומות
-                          {f.movedIn && `, מהן ${f.movedIn.map((m) => `${m.records.toLocaleString("he")} של "${m.from}"`).join(", ")} כפירוש`}
+                          {f.records === 1 ? "רשומה אחת" : `${f.records.toLocaleString("he")} רשומות`}
+                          {f.movedIn && (f.records === 1 ? `, של "${f.movedIn[0]!.from}" כפירוש` : `, מהן ${f.movedIn.map((m) => `${m.records.toLocaleString("he")} של "${m.from}"`).join(", ")} כפירוש`)}
                         </span>
                         {f.isNewFile && !onlyMoved(f) && <span class="status edited">קובץ חדש</span>}
+                        {/* the file bears the base's name, not the commentary's the user exported (V5 UX audit U24) */}
+                        {f.movedIn && <span class="status">קישורי הפירוש נכתבים כאן</span>}
                       </li>
                     ))}
                   </ul>
@@ -195,7 +198,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   </ul>
                 </details>
               )}
-              <Blocked list={plan.heldBack} summary={(n) => `${n.toLocaleString("he")} קישורים לא ייוצאו, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
+              <Blocked list={plan.heldBack} summary={(n) => `${heldLinksText(n)}, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
               <Blocked list={plan.heldDeletions} summary={(n) => `${n.toLocaleString("he")} רשומות שמחקתם יישארו בספרייה, ולמה`} advanced={advanced} onPick={(l) => (store.revealLink(l), ref.current?.close())} />
               {plan.warned.length > 0 && (
                 <details class="held">

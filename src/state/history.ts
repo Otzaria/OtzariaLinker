@@ -353,3 +353,7 @@ export const linksCount = (n: number): string => (n === 1 ? "קישור אחד" 
 export const booksCount = (n: number): string => (n === 1 ? "ספר אחד" : `${n.toLocaleString("he")} ספרים`);
 /** "קובץ אחד" / "1,200 קבצים" */
 export const filesCount = (n: number): string => (n === 1 ? "קובץ אחד" : `${n.toLocaleString("he")} קבצים`);
+/** "קישור אחד לא ייוצא" / "3 קישורים לא ייוצאו" — the verb agrees too (V5 UX audit U13) */
+export const heldLinksText = (n: number): string => (n === 1 ? "קישור אחד לא ייוצא" : `${n.toLocaleString("he")} קישורים לא ייוצאו`);
+/** "מחיקה אחת לא תגיע לספרייה" / "3 מחיקות לא יגיעו לספרייה" */
+export const heldDeletionsText = (n: number): string => (n === 1 ? "מחיקה אחת לא תגיע לספרייה" : `${n.toLocaleString("he")} מחיקות לא יגיעו לספרייה`);

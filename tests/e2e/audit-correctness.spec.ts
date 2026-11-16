@@ -48,6 +48,8 @@ test("F2 + F9: a link to the user's own בראשית is held back for the librar
   // private use: the commentary→base "source" link is written in the base's file as "commentary" (owner decision
   // 2026-11-16), so Otzaria's personal import shows it in בראשית's commentators panel
   await expect(dialog.getByText("בראשית_links.json", { exact: true })).toBeVisible();
+  // the file is named for the base, not the commentary: its row says so (V5 UX audit U24)
+  await expect(dialog.locator("ul.files li", { hasText: "בראשית_links.json" })).toContainText("קישורי הפירוש נכתבים כאן");
   const download = page.waitForEvent("download");
   await dialog.getByRole("button", { name: "הורדת הקובץ" }).click();
   const records = JSON.parse(readFileSync((await (await download).path())!, "utf8"));

@@ -47,7 +47,9 @@ export interface ExchangeHost {
   isSefariaOwned(book: { readonly title: string }): boolean;
   validation(): ValidationContext;
   loadLinkLines(label: string): Promise<boolean>;
-  notify(kind: NoticeKind, text: string, details?: string[]): void;
+  /** the notice's id, when the host gives one: a "not open yet" notice is taken back once the books open (U20) */
+  notify(kind: NoticeKind, text: string, details?: string[]): number | void;
+  dismiss(id: number): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
 }
 
@@ -132,13 +134,19 @@ export class ExchangeState {
     const details = issues.slice(0, 200).map((i) => `${i.index >= 0 ? `רשומה ${i.index + 1}: ` : ""}${i.message}`);
     if (parsed.generatorRejectsFile)
       host.notify("error", `"${path}": אוצריא הייתה דוחה את הקובץ הזה כולו כמו שהוא (${new Set(errors.map((e) => e.index)).size} רשומות פגומות). הרשומות התקינות נטענו; בייצוא הקובץ ייכתב מחדש תקין.`, details);
-    else if (issues.length) host.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.${later}`, details);
-    else host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".${later}`);
+    else {
+      const id = issues.length
+        ? host.notify("warning", `"${path}": נטענו ${links.length} קישורים, עם ${issues.length} הערות.${later}`, details)
+        : host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".${later}`);
+      if (early && typeof id === "number") this.earlyNotices.push(id);
+    }
     if (sourceRef.origin === "unknown" && !early) host.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
   }
 
   /** titles that links files loaded before any book named: reported once books open (booksOpened) */
   private readonly awaitingBooks = new Set<string>();
+  /** the notices that said "the books are not open yet": taken back when they open (V5 UX audit U20) */
+  private earlyNotices: number[] = [];
 
   /**
    * Books were opened and the links attached to them (AppStore.attachLinks): of the books that links
@@ -148,6 +156,8 @@ export class ExchangeState {
     if (!this.awaitingBooks.size) return;
     const missing = [...this.awaitingBooks].filter((t) => !this.host.resolveTitle(t));
     this.awaitingBooks.clear();
+    for (const id of this.earlyNotices) this.host.dismiss(id);
+    this.earlyNotices = [];
     if (!missing.length) return;
     this.host.notify(
       "warning",

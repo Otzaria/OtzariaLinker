@@ -47,12 +47,12 @@ test("the check and the export dialog hold back the same links and deletions, ea
   await page.getByRole("button", { name: "בדיקת הקישורים" }).click();
   await expect(page.getByText("2 קישורים נבדקו")).toBeVisible();
   const blocked = page.locator(".qa-blocked");
-  await expect(blocked).toHaveText("1 קישורים לא ייוצאו · 1 מחיקות לא יגיעו לספרייה");
+  await expect(blocked).toHaveText("קישור אחד לא ייוצא · מחיקה אחת לא תגיע לספרייה");
   await expect(page.getByText(/מחקתם את הרשומה הזו .* תישאר בספרייה/)).toBeVisible();
 
   await page.getByRole("button", { name: /^ייצוא/ }).click();
   const dialog = page.getByRole("dialog", { name: "ייצוא קובצי קישורים" });
-  await expect(dialog.getByText("1 קישורים לא ייוצאו, ולמה")).toBeVisible({ timeout: 30_000 });
+  await expect(dialog.getByText("קישור אחד לא ייוצא, ולמה")).toBeVisible({ timeout: 30_000 });
   await expect(dialog.getByText("1 רשומות שמחקתם יישארו בספרייה, ולמה")).toBeVisible();
   await expect(dialog.getByText(/שורה 1 ב?ספר המקור היא שורת כותרת/)).toBeVisible();
   // the dialog's held set is the check's: the same numbers, by the same rule
@@ -65,6 +65,6 @@ test("the check and the export dialog hold back the same links and deletions, ea
   await dialog.getByRole("button", { name: "העותק בפרויקט הוא העדכני" }).click();
   await expect(dialog.locator(".files").getByText("ספר שלי_links.json")).toBeVisible();
   await expect(dialog.getByText(/רשומות שמחקתם יישארו בספרייה/)).toHaveCount(0);
-  await expect(dialog.getByText("1 קישורים לא ייוצאו, ולמה")).toBeVisible();
+  await expect(dialog.getByText("קישור אחד לא ייוצא, ולמה")).toBeVisible();
   expect(seen.errors).toEqual([]);
 });

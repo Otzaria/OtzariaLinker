@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { Link } from "../../../src/core/links/model";
 import type { AltTocBook } from "../../../src/core/alt-toc/model";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, booksCount, filesCount, historyPosition, linksCount, redo, restoreChange, timeline, travel, undo, type LinkState } from "../../../src/state/history";
+import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, booksCount, filesCount, heldDeletionsText, heldLinksText, historyPosition, linksCount, redo, restoreChange, timeline, travel, undo, type LinkState } from "../../../src/state/history";
 
 const book = { key: "s1:1", title: "א", origin: "otzaria" as const };
 const mk = (id: string, over: Partial<Link> = {}): Link => ({
@@ -157,6 +157,11 @@ describe("the history list", () => {
     expect(booksCount(8185)).toBe("8,185 ספרים");
     expect(filesCount(1)).toBe("קובץ אחד");
     expect(filesCount(200)).toBe("200 קבצים");
+    // U13: "1 קישורים לא ייוצאו" — the verb agrees too
+    expect(heldLinksText(1)).toBe("קישור אחד לא ייוצא");
+    expect(heldLinksText(1200)).toBe("1,200 קישורים לא ייוצאו");
+    expect(heldDeletionsText(1)).toBe("מחיקה אחת לא תגיע לספרייה");
+    expect(heldDeletionsText(3)).toBe("3 מחיקות לא יגיעו לספרייה");
   });
 });
 
