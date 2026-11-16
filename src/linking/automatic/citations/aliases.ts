@@ -199,6 +199,8 @@ const wordsKey = (w: readonly AliasWord[]): string => w.map((x) => `${x.key}${x.
 
 export class AliasIndex {
   private readonly byFirst = new Map<string, AliasEntry[]>();
+  /** byFirst narrowed by the next word of the text (candidates()): cleared whenever byFirst changes */
+  private readonly pairs = new Map<string, readonly AliasEntry[]>();
   private readonly byKey = new Map<string, AliasEntry>();
   readonly collections = new Map<string, Collection>();
   /** "תוספות על כתובות" → by base title → commentary books, for "תוס' (כתובות ב.)" */
@@ -284,6 +286,7 @@ export class AliasIndex {
     ix.dropAuthorNames();
     ix.prune();
     for (const list of ix.byFirst.values()) list.sort((a, b) => b.words.length - a.words.length);
+    ix.pairs.clear();
     for (const c of catalog) {
       const coll = ix.collections.get(c.book.key)!;
       const tractate = tractateOf(normTitle(c.book.title), coll);
@@ -322,6 +325,7 @@ export class AliasIndex {
       const list = this.byFirst.get(words[0]!.key) ?? [];
       list.push(entry);
       this.byFirst.set(words[0]!.key, list);
+      this.pairs.clear();
     }
     const slotKey = `${target.book.key}|${target.section ?? ""}`;
     let slots = this.targetSlots?.get(entry);
@@ -405,6 +409,7 @@ export class AliasIndex {
         this.byKey.delete(key);
         const list = this.byFirst.get(e.words[0]!.key)!;
         list.splice(list.indexOf(e), 1);
+        this.pairs.clear();
         continue;
       }
       if (books.size <= MAX_SHARED) continue;
@@ -416,6 +421,7 @@ export class AliasIndex {
         this.byKey.delete(key);
         const list = this.byFirst.get(e.words[0]!.key)!;
         list.splice(list.indexOf(e), 1);
+        this.pairs.clear();
       }
     }
   }
@@ -477,9 +483,10 @@ export class AliasIndex {
     const t = toks[i];
     if (!t || t.kind !== "word") return [];
     const out: AliasMatch[] = [];
+    const second = nextWordKey(toks, i);
     for (const prefix of prefixesOf(t)) {
       const first = t.key.slice(prefix.length);
-      for (const e of this.byFirst.get(first) ?? []) {
+      for (const e of this.candidates(first, second)) {
         // "כפסחים ח' ע"ב" is a title with כ, "כאה"ע" a quoted name; "כתלים" is "walls", not כ + a spelling of
         // תהילים: with כ only a title or a quoted name
         if (prefix.endsWith("כ") && !e.targets.some((x) => x.tier === "title") && !e.words.some((w) => w.gershayimFromEnd || w.geresh)) continue;
@@ -494,6 +501,26 @@ export class AliasIndex {
       }
     }
     return out.sort((a, b) => b.to - a.to || a.prefix.length - b.prefix.length);
+  }
+
+  /**
+   * The names starting with `first` that can match when the text's next word is `second`: the one-word
+   * names, and those whose second word is it (matchWords compares keys exactly), in byFirst's order — so
+   * a word that starts thousands of names ("שו\"ת", "ספר") is not tried against all of them at every
+   * position. Profiled: matchAt was 24% of the citations engine's CPU on אספקלריה.
+   */
+  private candidates(first: string, second: string | null): readonly AliasEntry[] {
+    const list = this.byFirst.get(first);
+    if (!list) return [];
+    if (list.length < 8) return list;
+    const k = `${first}\u0000${second ?? ""}`;
+    let hit = this.pairs.get(k);
+    if (!hit) {
+      if (this.pairs.size > 200_000) this.pairs.clear();
+      hit = list.filter((e) => e.words.length === 1 || (second !== null && e.words[1]!.key === second));
+      this.pairs.set(k, hit);
+    }
+    return hit;
   }
 
   /** A whole name as written (for "ibid" book words and tests). */
@@ -597,6 +624,14 @@ function prefixesOf(t: Tok): string[] {
     if (PREFIX_RE.test(p)) out.push(p);
   }
   return out;
+}
+
+/** the key of the word after toks[i] as matchWords reads a name's second word (commas and hyphens skipped), or null */
+function nextWordKey(toks: readonly Tok[], i: number): string | null {
+  let j = i + 1;
+  while (toks[j]?.kind === "punct" && (toks[j]!.text === "," || toks[j]!.text === "-")) j++;
+  const t = toks[j];
+  return t && t.kind === "word" ? t.key : null;
 }
 
 function matchWords(words: readonly AliasWord[], toks: readonly Tok[], i: number, prefixLen: number): number | null {
