@@ -45,11 +45,13 @@ test("F2 + F9: a link to the user's own בראשית is held back for the librar
   await expect(dialog.getByText(/ספר שלכם/)).toBeVisible();
   await expect(dialog.getByText(/ציון ספריא באנגלית/)).toHaveCount(0);
   await dialog.getByRole("button", { name: "ייצוא לשימוש פרטי" }).click();
-  await expect(dialog.getByText("ביאור חדש על בראשית_links.json")).toBeVisible();
+  // private use: the commentary→base "source" link is written in the base's file as "commentary" (owner decision
+  // 2026-11-16), so Otzaria's personal import shows it in בראשית's commentators panel
+  await expect(dialog.getByText("בראשית_links.json", { exact: true })).toBeVisible();
   const download = page.waitForEvent("download");
   await dialog.getByRole("button", { name: "הורדת הקובץ" }).click();
   const records = JSON.parse(readFileSync((await (await download).path())!, "utf8"));
-  expect(records).toEqual([expect.objectContaining({ line_index_1: 3, path_2: "בראשית.txt", line_index_2: 3 })]);
+  expect(records).toEqual([expect.objectContaining({ line_index_1: 3, path_2: "ביאור חדש על בראשית.txt", line_index_2: 3, "Conection Type": "commentary" })]);
   expect(records[0].ref_2).toBeUndefined();
   expect(seen.errors).toEqual([]);
 });
