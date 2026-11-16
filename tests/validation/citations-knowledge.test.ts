@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../src/sources/registry";
 import { AliasIndex, CitationScanner, NamedUnitIndex, type CatalogBook } from "../../src/linking/automatic/citations";
-import { RAMBAM_TOPIC_NAMES } from "../../src/linking/automatic/citations/knowledge";
+import { BOOK_NAMES, RAMBAM_TOPIC_NAMES } from "../../src/linking/automatic/citations/knowledge";
 import { DB, fileBlob, fingerprint } from "./env";
 
 /*
@@ -42,6 +42,31 @@ describe.runIf(DB)("citations knowledge vs the real seforim.db (read-only)", () 
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  it("every mined book name is a title of the database, and names that book alone", () => {
+    const wrong: string[] = [];
+    for (const n of BOOK_NAMES) {
+      expect(titles.has(n.title), n.title).toBe(true);
+      const got = aliases.lookup(n.written)?.targets.map((x) => x.book.title) ?? [];
+      if (!got.includes(n.title) || new Set(got).size !== 1) wrong.push(`${n.written} → ${got.join(" | ")}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it.runIf(process.env.KNOWLEDGE_NAMES)("what the scanner reads for each mined name's example span", () => {
+    const phrases = JSON.parse(readFileSync(process.env.KNOWLEDGE_NAMES!, "utf8")) as Record<string, { by: Record<string, number>; example: Record<string, string> }>;
+    const out: Record<string, string> = {};
+    for (const [p, v] of Object.entries(phrases)) {
+      const n = Object.values(v.by).reduce((a, b) => a + b, 0);
+      if (n < 3) continue;
+      for (const [t, span] of Object.entries(v.example)) {
+        const sc = new CitationScanner(aliases, "src", {}, "ספר", NamedUnitIndex.build([]));
+        sc.scanLine(0, `עיין ${span} ושם`, null);
+        out[`${p}|${t}`] = sc.citations.flatMap((c) => c.candidates.map((x) => x.book.title)).join(" | ");
+      }
+    }
+    writeFileSync(process.env.KNOWLEDGE_READINGS!, JSON.stringify(out));
   });
 
   it.runIf(process.env.KNOWLEDGE_PHRASES)("what the scanner reads for each mined phrase", () => {

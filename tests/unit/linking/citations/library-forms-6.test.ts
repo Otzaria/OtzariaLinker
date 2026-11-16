@@ -201,3 +201,13 @@ describe("a page of the Zohar with the amud as a lone letter", () => {
     expect(resolveAltDaf(ds, [{ kind: "chelek", n: 2, explicit: true, numeral: num(2, "gershayim") }, { kind: "?", n: 48, explicit: false, numeral: num(48, "gershayim") }, { kind: "?", n: 1, explicit: false, numeral: num(1, "gershayim") }], null)).toBeNull();
   });
 });
+
+describe("book names as books write them (knowledge/book-names.json)", () => {
+  const CH = ref("chas", "ספר חסידים");
+  const chRefs: RefLine[] = [{ index: 0, heRef: null }, ...Array.from({ length: 30 }, (_, i) => ({ index: i + 1, heRef: `ספר חסידים, ${G(i + 1)}, א` }))];
+  const runCh = (line: string) => runCitationsEngine(source([line]), { catalog: [{ book: CH }], index: (b) => buildRefIndex(b, chRefs) }).suggestions;
+  it('"בספר החסידים סי\' י"ח" (חמדת ימים ב) and "ס\' החסידים (סי\' כ"ט)": ספר חסידים', () => {
+    expect(runCh('כמ"ש בספר החסידים סי\' י"ח ושם')[0]?.target.line).toBe(18);
+    expect(runCh('וכמ"ש ס\' החסידים (סי\' כ"ט) ושם')[0]?.target.line).toBe(29);
+  });
+});

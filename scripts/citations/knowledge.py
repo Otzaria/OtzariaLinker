@@ -5,6 +5,19 @@ The database is opened read-only (immutable) and never written; output goes to t
     py -I scripts/citations/knowledge.py rambam-mine   <seforim.db> <phrases.json> [per_topic=800]
     py -I scripts/citations/knowledge.py rambam-select <phrases.json> <readings.json> <out.json>
     py -I scripts/citations/knowledge.py chapters      <seforim.db> <out.json>
+    py -I scripts/citations/knowledge.py names-mine    <seforim.db> <phrases.json> [per_book=150]
+    py -I scripts/citations/knowledge.py names-select  <phrases.json> <readings.json> <out.json>
+
+names-mine: for every book LINKER links to (at least 20 links), up to `per_book` of its LINKER citations (sha1 of the
+link id): the words of the citing span before its first location word ("בב"ר פי"ו" → "בב"ר"; "בספר החסידים סי' י"ח" →
+"בספר החסידים") — how books write the book's name — counted per book the link points to, with one example span each.
+
+names-select: the written names the engine does NOT already read as that book (readings.json: what the scanner reads
+for each name's example span, written by tests/validation/citations-knowledge.test.ts with KNOWLEDGE_NAMES), kept when
+LINKER agrees (at least 5 links, at least 95% to one book), the name is not an everyday word (two words, or quote
+marks, or one word of 5 letters or more) and its letters come from the title in order (LinkerToOtzaria's own
+misreadings fail that). The prefix letters books glue to a name (ו, ב, ד, ל, מ, ה, כ, ש) are peeled when the rest is
+written so too.
 
 rambam-mine: for every topic book "משנה תורה, הלכות X", up to `per_topic` of its LINKER links (LinkerToOtzaria's
 citations, chosen by sha1 of the link id), the words of the citing span after a word for "הלכות" or after a chapter
@@ -260,6 +273,128 @@ def chapters(db_path, out_path):
     print(f"{len(books)} books", file=sys.stderr)
 
 
+# where a citation's name ends: a marker, a compact chapter / halacha, "שם", "דף", "ד"ה", a position word
+LOC_WORD = re.compile(r"^(?:[ובדל]{0,2}(?:פרק|פר'|פ'|פרשה|פרשת|סי'|סימן|סימ'|סעיף|סע'|סעי'|ס\"ק|סק'|הל'|הלכה|הלכות|דף|ד'|עמוד|משנה|מש'|אות|מצוה|מצות|רמז|שער|מאמר|כלל|חלק|ח\"[א-ת]|ד\"ה|שם|ריש|סוף|רפ\"[א-ת]|ספ\"[א-ת])|פ[א-ת]?\"[א-ת]|ה[א-ת]?\"[א-ת])$")
+
+
+def name_part(span):
+    """the words of a citing span before its first location word (with their quote marks), or None"""
+    words = []
+    for w in re.findall(r"[א-ת\"']+|[()\[\],;:.]", span):
+        if not re.match(r"[א-ת]", w):
+            break
+        bare = re.sub(r"[\"']", "", w)
+        if LOC_WORD.match(w) or (words and len(bare) <= 3 and numeral(bare)) or (words and w.endswith("'") and len(bare) <= 2):
+            break
+        words.append(w)
+        if len(words) > 4:
+            return None
+    return " ".join(words) if words else None
+
+
+def names_mine(db_path, out_path, per=150):
+    db = connect(db_path)
+    codec = Codec(db)
+    linker = db.execute("select id from connection_type where name='LINKER'").fetchone()[0]
+    titles = dict(db.execute("select id,title from book"))
+    books = [b for b, n in db.execute("select targetBookId, count(*) from link where connectionTypeId=? group by targetBookId", (linker,)) if n >= 20]
+    found = defaultdict(Counter)
+    example = {}
+    for k, bid in enumerate(books):
+        rows = db.execute("""select l.id, l.sourceLineId, a.charStart, a.charEnd from link l join link_anchor a on a.linkId=l.id and a.side=0
+            where l.targetBookId=? and l.connectionTypeId=? and l.sourceBookId<>l.targetBookId""", (bid, linker)).fetchall()
+        rows = sorted(rows, key=lambda r: hashlib.sha1(f"n{r[0]}".encode()).hexdigest())[:per]
+        for _, lid, cs, ce in rows:
+            r = db.execute("select content from line_content where id=?", (lid,)).fetchone()
+            if not r or ce is None or ce <= cs:
+                continue
+            span = visible(codec.text(r[0]))[cs:ce].replace("״", '"').replace("׳", "'")
+            name = name_part(span)
+            if name:
+                found[name][titles[bid]] += 1
+                example.setdefault((name, titles[bid]), span)
+        if k % 500 == 0:
+            print(f"{k}/{len(books)}", file=sys.stderr)
+    out = {n: {"by": dict(c), "example": {t: example[(n, t)] for t in c}} for n, c in found.items()}
+    json.dump(out, open(out_path, "w", encoding="utf-8"), ensure_ascii=False)
+    print(f"{len(out)} phrases", file=sys.stderr)
+
+
+def title_letters_fit(written, title):
+    """every written word opens at a word of the title, its letters in order within it and the words after it
+    ("ערוך השלחן" — ערוך השולחן; 'וי"ר' — ויקרא רבה; "ספר החסידים" — ספר חסידים: an article ה may be added;
+    a ו / י the title lacks may be written)"""
+    tw = [letters(w) for w in re.split(r"[\s,;]+", title) if letters(w)]
+    ww = [letters(w) for w in written.split() if letters(w)]
+
+    def go(i, j):
+        if i == len(ww):
+            return True
+        for k in range(j, len(tw)):
+            w = ww[i]
+            if w[:1] != tw[k][:1] and not (w[:1] == "ה" and w[1:2] == tw[k][:1]):
+                continue
+            rest, pos, ok = "".join(tw[k:]), 0, True
+            for ch in (w if w[:1] == tw[k][:1] else w[1:]):
+                f = rest.find(ch, pos)
+                if f < 0:
+                    if ch in "וי":
+                        continue
+                    ok = False
+                    break
+                pos = f + 1
+            if ok and go(i + 1, k + 1):
+                return True
+        return False
+    return bool(ww) and go(0, 0)
+
+
+PEEL = "ובדלמהכש"
+# read by hand, rejected: the name of one of several books ("רבינו חננאל" — on Shabbat only by LINKER's share, "רד"ק
+# מלכים" — Kings I only, "ילקו"ש" — the Torah's only); an abbreviation of something else too ('ס"ע' — סוף עמוד /
+# סעיף, 'מנ"ח' — ספר החינוך / מנחת חינוך)
+NOT_NAMES = {"רבינו חננאל", 'רד"ק מלכים', 'ילקו"ש', 'ס"ע', 'מנ"ח'}
+
+
+def names_select(phrases_path, readings_path, out_path):
+    phrases = json.load(open(phrases_path, encoding="utf-8"))
+    readings = json.load(open(readings_path, encoding="utf-8"))
+    # peel the glued prefix letters: "בב"ר" and "וב"ר" are "ב"ר" when "ב"ר" is written so too
+    merged = defaultdict(Counter)
+    members = defaultdict(list)
+    for name, v in phrases.items():
+        base = name
+        for cut in (1, 2):
+            if len(name) > cut + 1 and all(ch in PEEL for ch in name[:cut]) and name[cut:] in phrases:
+                base = name[cut:]
+        members[base].append(name)
+        for t, n in v["by"].items():
+            merged[base][t] += n
+    names = []
+    for written, by in sorted(merged.items()):
+        n = sum(by.values())
+        title = max(by, key=by.get)
+        if n < 5 or by[title] / n < 0.95:
+            continue
+        # one plain word is an everyday word too ("גבורות", "שמחות", "עבדים", "מידות") or a name several books share
+        # ("תנחומא", "פסיקתא", "מכילתא"): never
+        if " " not in written and '"' not in written and "'" not in written:
+            continue
+        # an edition's title ("תוספתא גיטין (ליברמן)"): its plain names are derived by aliases.ts
+        if re.search(r"\(.+\)$", title) or written in NOT_NAMES:
+            continue
+        if numeral(letters(written)) or not title_letters_fit(written, title):
+            continue
+        # what the scanner reads for the spans of the name (with its prefixes): only a name it reads as nothing — one it
+        # reads as this title is known already, and one it reads as another book would make the two ambiguous
+        seen = [readings.get(f"{m}|{title}") for m in members[written]]
+        if not any(r is not None for r in seen) or any(r for r in seen):
+            continue
+        names.append({"written": written, "title": title, "linker": by[title]})
+    write_names(out_path, "scripts/citations/knowledge.py names-select (LINKER citations of seforim.db)", names)
+    print(f"{len(names)} names", file=sys.stderr)
+
+
 GEMATRIA = [(400, "ת"), (300, "ש"), (200, "ר"), (100, "ק"), (90, "צ"), (80, "פ"), (70, "ע"), (60, "ס"), (50, "נ"), (40, "מ"), (30, "ל"), (20, "כ"), (10, "י"), (9, "ט"), (8, "ח"), (7, "ז"), (6, "ו"), (5, "ה"), (4, "ד"), (3, "ג"), (2, "ב"), (1, "א")]
 
 
@@ -280,6 +415,10 @@ if __name__ == "__main__":
         rambam_mine(sys.argv[2], sys.argv[3], int(sys.argv[4]) if len(sys.argv) > 4 else 800)
     elif cmd == "rambam-select":
         rambam_select(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif cmd == "names-mine":
+        names_mine(sys.argv[2], sys.argv[3], int(sys.argv[4]) if len(sys.argv) > 4 else 150)
+    elif cmd == "names-select":
+        names_select(sys.argv[2], sys.argv[3], sys.argv[4])
     elif cmd == "chapters":
         chapters(sys.argv[2], sys.argv[3])
     else:
