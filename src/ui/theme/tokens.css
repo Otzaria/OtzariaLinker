@@ -37,6 +37,9 @@
   --warning: #8a5a00;               --on-warning-container: #4a3000;
   --warning-container: #ffdfa8;
   --highlight: #ffe08a;
+  /* secondary text that must still read at 4.5:1 on every surface, the picked line included (line numbers,
+     placeholders, rejected rows): halfway between on-surface-variant and outline. Resolved per theme. */
+  --on-surface-faint: color-mix(in srgb, var(--on-surface-variant) 50%, var(--outline));
   --scrim: rgb(0 0 0 / 0.32);
   --outline-card: var(--outline-variant);
   --elev-3: 0 6px 16px rgb(0 0 0 / 0.18), 0 2px 4px rgb(0 0 0 / 0.1);
