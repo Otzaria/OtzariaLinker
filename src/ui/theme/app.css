@@ -338,14 +338,22 @@ details.held { border: 1px solid var(--outline-variant); border-radius: var(--ra
 details.held summary { cursor: pointer; font-weight: 600; }
 
 /* ---------- notices ---------- */
-.notices { position: fixed; inset-block-end: 16px; inset-inline-start: 16px; z-index: 50; display: grid; gap: 8px; width: min(440px, calc(100vw - 32px)); }
-.notice { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: start; padding: 10px 12px; border-radius: var(--radius); background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); font-size: var(--fs-sm); }
-.notice.error { background: var(--error-container); color: var(--on-error-container); }
+/* the newest notice on one line (V5 UX audit U18, the owner's choice A); opened (hover, focus, a click on its
+   text, its details open) it shows the whole text and its details */
+.notices { position: fixed; inset-block-end: 16px; inset-inline-start: 16px; z-index: 50; display: grid; gap: 6px; width: min(520px, calc(100vw - 32px)); }
+.notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 4px 8px; align-items: center; padding: 4px 6px; padding-inline-start: 10px; border-radius: var(--radius); background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); font-size: var(--fs-sm); }
+/* an error stays until closed, and is marked by more than its colour: a thick edge on its start side */
+.notice.error { background: var(--error-container); color: var(--on-error-container); border-inline-start: 4px solid var(--error); }
 .notice.warning { background: var(--warning-container); color: var(--on-warning-container); }
-.notice details { grid-column: 2 / -1; max-height: 180px; overflow: auto; }
+.notice-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.notice:is(:hover, :focus-within, .open, :has(details[open])) .notice-text { white-space: normal; overflow-wrap: anywhere; }
+.notice details { grid-column: 2 / -1; max-height: 180px; overflow: auto; display: none; }
+.notice:is(:hover, :focus-within, .open, :has(details[open])) details { display: block; }
 .notice details ul { margin: 4px 0 0; padding-inline-start: 18px; }
+.notice > .btn { min-height: 28px; padding: 2px 8px; color: inherit; text-decoration: underline; }
 .notice .icon-btn { width: 26px; height: 26px; color: inherit; }
-.notices-more { justify-self: start; background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); }
+.notices-more { justify-self: start; min-height: 28px; padding: 2px 10px; background: var(--inverse-surface); color: var(--on-inverse-surface); box-shadow: var(--elev-3); }
+.notices-more.has-error { background: var(--error-container); color: var(--on-error-container); }
 
 /* full-window drop target */
 .drop-veil { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--primary-container) 70%, transparent); border: 3px dashed var(--primary); font-size: 22px; font-weight: 600; color: var(--on-primary-container); pointer-events: none; }
