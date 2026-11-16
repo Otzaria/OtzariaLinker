@@ -1208,6 +1208,17 @@ export function runDiburHamatchilEngine(commentary: EngineBook, base: EngineBook
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    /*
+     * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts.
+     * Measured against the library's own links of such quotes (LIBRARY_BENCHMARK.md §0.6): where they
+     * link exactly one end of the span, it is the first line 1,138 times and the last 387; the line
+     * holding most of the quoted words was right less often than the first (282 vs 371 where they
+     * differ). The span is named in the reason, for the reviewer.
+     */
+    if (!baseRanges && p.baseEnd !== undefined && p.baseEnd > p.base) {
+      rules.push("dh/range-sefaria");
+      reasons.push(r("dh/range-sefaria", `הציטוט נמשך בשורות ${p.base + 1}–${p.baseEnd + 1} בספר הבסיס. זה ספר ספריא, והסנכרון של הספרייה אינו שומר טווח בצד שלו, ולכן הקישור לשורה ${p.base + 1}, שבה מתחיל הדיבור המתחיל.`));
+    }
     let confidence = p.confidence;
     if (unaddressed?.has(p.cLine) && (confidence === "certain" || confidence === "high")) {
       confidence = "possible";

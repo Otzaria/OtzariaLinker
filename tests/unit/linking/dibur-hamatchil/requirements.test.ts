@@ -175,6 +175,13 @@ describe("§7 \"ד\"ה X … עד ד\"ה Y\": a range", () => {
     expect(s.reasons[0]).toEqual({ code: "dh/boundary-range", text: 'הדיבור המתחיל מסתיים לפני "עד ד"ה"' });
   });
 
+  it("on a Sefaria base (no range there) the link keeps the ד\"ה's own line, not the range end", () => {
+    const s = byLine(run(comm, TOS, TOSAFOT, { sefariaOwned: [TOSAFOT.key] }), 1)!;
+    expect(baseSide(s)).toEqual({ book: TOSAFOT, line: 4 });
+    expect(s.rules).toEqual(expect.arrayContaining(["dh/range", "dh/range-sefaria"]));
+    expect(s.reasons.find((x) => x.code === "dh/range-sefaria")!.text).toContain("בשורות 5–6");
+  });
+
   it("negative: an end that is not there gives the start only, with a warning", () => {
     const s = byLine(run(["<h2>דף ב.</h2>", "<b>תוס'</b> ד\"ה וצריך לעצים עד ד\"ה שבת הגדול כו' ועיין"], TOS, TOSAFOT), 1)!;
     expect(baseSide(s).end).toBeUndefined();
