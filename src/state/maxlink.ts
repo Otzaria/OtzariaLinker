@@ -221,7 +221,7 @@ export class MaxLinkState {
     const notes: Reason[] = [
       {
         code: "maxlink/summary",
-        text: `${st.input.toLocaleString("he")} הצעות מ־${outcomes.length.toLocaleString("he")} שלבים אוחדו ל־${st.output.toLocaleString("he")}: ${st.duplicates.toLocaleString("he")} כפילויות אוחדו, ${st.agreements.toLocaleString("he")} קישורים ששתי שיטות או יותר הגיעו אליהם, ${st.conflicts.toLocaleString("he")} סתירות בין שיטות (מסומנות "עמומה").`,
+        text: `${st.input.toLocaleString("he")} הצעות מ־${outcomes.length.toLocaleString("he")} שלבים אוחדו ל־${st.output.toLocaleString("he")}: ${(st.duplicates - st.outweighed).toLocaleString("he")} כפילויות אוחדו, ${st.agreements.toLocaleString("he")} קישורים ששתי שיטות או יותר הגיעו אליהם, ${st.settled.toLocaleString("he")} סתירות בין שיטות הוכרעו לפי הראיות (${st.outweighed.toLocaleString("he")} הצעות שנדחו מוצגות כמועמדים חלופיים), ${st.conflicts.toLocaleString("he")} לא הוכרעו (מסומנות "עמומה").`,
       },
       ...(st.contradictedPairs
         ? [{ code: "maxlink/contradicts-library", text: `ב־${st.contradictedPairs} זוגות ספרים ההצעות סותרות את הקישורים שכבר יש בספרייה ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה אינה "ודאית"; הן מסומנות לבדיקה.` }]

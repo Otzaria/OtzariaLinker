@@ -104,7 +104,8 @@ function count(c: ReportCounts, s: MergedSuggestion, st: LiveState): void {
   else c.review++;
   if (st === "approved") c.approved++;
   if (s.engines.length > 1) c.agreements++;
-  if (s.rules.includes("maxlink/conflict")) c.conflicts++;
+  // a conflict nobody won (every side ambiguous) or one the merge settled (the winner, merge.ts settle)
+  if (s.rules.includes("maxlink/conflict") || s.rules.includes("maxlink/outweighs")) c.conflicts++;
   c.duplicates += s.members.length - 1;
 }
 

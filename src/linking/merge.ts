@@ -22,8 +22,13 @@ import { capSpanned, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence,
  *     line in it) is CONSISTENT: the coarse one is folded into the precise one, which may rise from
  *     "possible" to "high" — never to "certain".
  *   - different, non-nested targets for the same position (focus line and anchor, same target book)
- *     from different engines are a CONFLICT: every side drops to "ambiguous", with the others as
- *     alternatives. Ambiguous suggestions are never approved in bulk.
+ *     from different engines are a CONFLICT. It is SETTLED when the evidence says who is right (step
+ *     4c, `settle`): the only "certain" side, or else the only side placed by the line's own words
+ *     (a quote of the base, a reference it writes out) against sides placed by the books' layout. The
+ *     winner pays one step for being contradicted (certain → high, high → possible, never above its
+ *     own level), and every other side is folded into it as an alternative with the reason — kept
+ *     among its members, not dropped. An unsettled conflict sends every side to "ambiguous", with the
+ *     others as alternatives. Ambiguous suggestions are never approved in bulk.
  * Only "certain" is approved in bulk (store.suggestions.pendingAtLeast("certain")); nothing here changes that.
  *
  * Single-book engines (citations) say something of another kind: a commentary line on verse 1 that
@@ -74,8 +79,12 @@ export interface MergeStats {
   raised: number;
   /** outputs that absorbed a coarser suggestion */
   consistent: number;
-  /** outputs lowered to "ambiguous" by a conflict */
+  /** outputs lowered to "ambiguous" by a conflict nobody won */
   conflicts: number;
+  /** outputs that won a conflict (settle): the only certain side, or the only one placed by the line's words */
+  settled: number;
+  /** suggestions that lost a conflict and were folded into the winner as its alternatives */
+  outweighed: number;
   /** outputs that already exist (db / project) at merge time */
   existing: number;
   /** book pairs where the engines disagree on most lines (PAIR_DISAGREEMENT): no single-engine "certain" there */
@@ -156,6 +165,10 @@ interface Group {
   inner: Raw[];
   folded: boolean;
   conflictWith: Group[];
+  /** the sides this one won a conflict against (settle), folded into it as alternatives */
+  outweighs: Group[];
+  /** why it won: the only certain side, or the only one placed by the line's words */
+  wonBy?: "certain" | "words";
   /** made only of single-book engines (citations): outside the structural statistics */
   single: boolean;
 }
@@ -179,11 +192,44 @@ function makeGroup(id: string, exact: Raw[]): Group {
   // a citation's span is in its id ("…@start-end>…") even without an anchor: two mentions, two positions
   const span = single ? (rep.fAnchor ? `@${rep.fAnchor.rawStart}` : /@\d+-\d+>/.exec(rep.s.id)?.[0] ?? `@${rep.s.id}`) : rep.fAnchor ? `@${rep.fAnchor.rawStart}` : "";
   const position = `${single ? "single:" : ""}${endKey(rep.fEnd)}${span}>${rep.oEnd.book.key}`;
-  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [], single };
+  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [], outweighs: [], single };
 }
 
 /** an engine that reads one book and links into all open books (ENGINES[].singleBook) */
 const isSingleBook = (e: EngineId) => ENGINES.find((x) => x.id === e)?.singleBook === true;
+/** an engine that places a line by its own words: a quote, a written reference (ENGINES[].evidence) */
+const byWords = (e: EngineId) => ENGINES.find((x) => x.id === e)?.evidence === "words";
+
+/**
+ * A group's confidence before any conflict: its best member, one step up when two engines agree on the
+ * exact link (each at least "possible"), "high" at most when a coarser range of another engine contains it.
+ */
+function supportLevel(g: Group): number {
+  let level = Math.min(...g.exact.map((x) => rank(x.s.confidence)));
+  const support = g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE);
+  if (new Set(support.map((x) => x.s.engine)).size > 1) level = Math.max(0, Math.min(...support.map((x) => rank(x.s.confidence))) - 1);
+  if (g.consistent.length && level === POSSIBLE && g.consistent.some((x) => rank(x.s.confidence) <= rank("high"))) level = rank("high");
+  return level;
+}
+
+/**
+ * Who wins a conflict at one position (the sides are pairwise in conflict), or null. Measured on the
+ * library benchmark's development books (AUTOMATION_ENGINE.md §5.3.1), where nearly every conflict is
+ * headings against dibur-hamatchil:
+ *   1. the only "certain" side — unless the book pair is suspect or contradicts the library (steps 4, 4b):
+ *      there a "certain" heading is the very thing in doubt (the Rif's own dapim read as the Talmud's);
+ *   2. otherwise, the only side placed by the line's own words (a quote of the base) against
+ *      sides placed by the layout alone — at every level of either side, even an "ambiguous" quote
+ *      against a "high" heading: a commentary's heading numbers are read as the base's far more often
+ *      than its quote is found in the wrong place.
+ * Two certain sides, or not exactly one side placed by the words, stay a conflict.
+ */
+function settle(sides: readonly Group[], structureInDoubt: boolean): { winner: Group; by: "certain" | "words" } | null {
+  const certain = structureInDoubt ? [] : sides.filter((g) => supportLevel(g) === 0);
+  if (certain.length) return certain.length === 1 ? { winner: certain[0]!, by: "certain" } : null;
+  const words = sides.filter((g) => g.exact.some((x) => byWords(x.s.engine)));
+  return words.length === 1 ? { winner: words[0]!, by: "words" } : null;
+}
 
 /**
  * When, between the same two books, the lines on which two engines both spoke conflict this often, the
@@ -326,8 +372,24 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
     }
   const contradicted = new Map([...versus].filter(([, v]) => v.judged >= REFERENCE_DISAGREEMENT.minJudged && v.contradicted / v.judged >= REFERENCE_DISAGREEMENT.ratio));
 
+  // 4c. conflicts the evidence settles (settle): the losers are folded into the winner as its alternatives.
+  //     After 4 and 4b, which count every conflict: a book pair whose structure does not fit stays suspect.
+  for (const at of byPos.values()) {
+    const sides = at.filter((g) => !g.folded && g.conflictWith.length);
+    if (sides.length < 2) continue;
+    const settled = settle(sides, suspect.has(bookPair(sides[0]!)) || contradicted.has(bookPair(sides[0]!)));
+    if (!settled) continue;
+    const { winner } = settled;
+    winner.wonBy = settled.by;
+    for (const g of sides)
+      if (g !== winner && winner.conflictWith.includes(g)) {
+        winner.outweighs.push(g);
+        g.folded = true;
+      }
+  }
+
   // 5. one suggestion per live group
-  const stats: MergeStats = { input: raws.length, output: 0, duplicates: 0, agreements: 0, raised: 0, consistent: 0, conflicts: 0, existing: 0, suspectPairs: suspect.size, contradictedPairs: contradicted.size };
+  const stats: MergeStats = { input: raws.length, output: 0, duplicates: 0, agreements: 0, raised: 0, consistent: 0, conflicts: 0, settled: 0, outweighed: 0, existing: 0, suspectPairs: suspect.size, contradictedPairs: contradicted.size };
   const out: MergedSuggestion[] = [];
   for (const g of groups) {
     if (g.folded) continue;
@@ -353,22 +415,18 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   const warnings: Reason[] = [...rep.warnings];
   const rules: string[] = [...rep.rules];
 
-  let level = Math.min(...g.exact.map((x) => rank(x.s.confidence)));
-  const support = g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE);
-  const supportEngines = new Set(support.map((x) => x.s.engine));
+  let level = supportLevel(g);
   if (g.engines.length > 1) {
     stats.agreements++;
     rules.push("maxlink/agree", ...g.engines.map((e) => `maxlink/engine:${e}`));
     reasons.push(r("maxlink/agree", `${g.engines.length} שיטות הגיעו לאותו קישור: ${g.engines.map(engineTitle).join(", ")}.`));
   }
   const own = rank(rep.confidence);
-  if (supportEngines.size > 1) level = Math.max(0, Math.min(...support.map((x) => rank(x.s.confidence))) - 1);
   if (g.consistent.length) {
     stats.consistent++;
     const ce = [...new Set(g.consistent.map((x) => x.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
     rules.push("maxlink/consistent");
     reasons.push(r("maxlink/consistent", `גם ${ce.length > 1 ? "השיטות" : "השיטה"} ${ce.map(engineTitle).join(", ")} ${ce.length > 1 ? "מצביעות" : "מצביעה"} על המקום הזה, בטווח רחב יותר שמכיל אותו.`));
-    if (level === POSSIBLE && g.consistent.some((x) => rank(x.s.confidence) <= rank("high"))) level = rank("high");
   }
   const alternatives: Candidate[] = [];
   const seenAlt = new Set<string>([endKey(g.rep.oEnd)]);
@@ -393,7 +451,23 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     rules.push("maxlink/contradicts-library");
     warnings.push(r("maxlink/contradicts-library", `הספרייה כבר מקשרת ${against.judged} שורות בין שני הספרים האלה, וההצעות כאן מצביעות על מקום אחר ב־${against.contradicted} מהן. כנראה שהמבנה של הספר (למשל מספור דפים משלו) אינו של ספר הבסיס, ולכן אף הצעה כאן אינה "ודאית".`));
   }
-  if (g.conflictWith.length) {
+  if (g.outweighs.length) {
+    // a won conflict costs one step and never lifts the winner: certain → high, high → possible
+    stats.settled++;
+    const others = [...g.outweighs].sort((a, b) => cmp(a.id, b.id));
+    stats.outweighed += others.length;
+    const why =
+      g.wonBy === "certain"
+        ? "ההצעה הזו ודאית, והאחרות אינן"
+        : "ההצעה הזו נמצאה לפי המילים של השורה (ציטוט מהבסיס), והאחרות רק לפי הכותרות או המספור, שמתבלבלים במקרים כאלה הרבה יותר";
+    if (level < POSSIBLE) level = level === 0 ? rank("high") : POSSIBLE;
+    rules.push("maxlink/outweighs");
+    warnings.push(r("maxlink/outweighs", `שיטות אחרות הציעו לשורה הזו יעדים אחרים: ${others.map((o) => `${o.engines.map(engineTitle).join(", ")} ← שורה ${o.rep.oEnd.line + 1}`).join("; ")}. ${why}, ולכן היא נבחרה. בגלל הסתירה היא לבדיקה ולא לאישור בקבוצה, והיעדים האחרים מוצגים כמועמדים חלופיים.`));
+    for (const o of others) {
+      seenAlt.add(endKey(o.rep.oEnd));
+      alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/outweighed", `הצעה של ${o.engines.map(engineTitle).join(", ")}, שנדחתה מפני ההצעה הזו: ${why}.`)] });
+    }
+  } else if (g.conflictWith.length) {
     stats.conflicts++;
     rules.push("maxlink/conflict");
     const others = [...g.conflictWith].sort((a, b) => cmp(a.id, b.id));
@@ -427,7 +501,8 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   const score = Math.max(...g.exact.map((x) => x.s.score));
   // a raw suggestion can reach a group by more than one path (containment is transitive): list it once
   const seen = new Set<string>();
-  const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner].filter((x) => !seen.has(x.s.id) && seen.add(x.s.id)).map((x) => ({ suggestion: x.s, focus: x.focus }));
+  const lost = g.outweighs.flatMap((o) => [...o.exact, ...o.consistent, ...o.inner]);
+  const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner, ...lost].filter((x) => !seen.has(x.s.id) && seen.add(x.s.id)).map((x) => ({ suggestion: x.s, focus: x.focus }));
   const merged: MergedSuggestion = { ...rep, id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
   const where = opts.existing?.(merged) ?? null;
   if (!where) return merged;
