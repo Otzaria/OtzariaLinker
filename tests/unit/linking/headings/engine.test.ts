@@ -180,6 +180,20 @@ describe("headings engine — numbering, missing levels, ambiguity", () => {
     expect(runHeadingsEngine(c, base, { numbering: "strict" }).suggestions.map((s) => s.target.line)).toEqual([]);
   });
 
+  it("a chapter NAME that sums to a number is not that chapter: no certain link to it (review C5)", () => {
+    // a commentary on משנה יומא names its chapters; פרק ז is "בא לו" (= 3 if read as a numeral)
+    const base = book("b", "משנה יומא", ["<h1>משנה יומא</h1>", ...[1, 2, 3, 4, 5, 6, 7, 8].flatMap((p) => [`<h2>פרק ${"אבגדהוזח"[p - 1]}</h2>`, `<h3>משנה א</h3>`, `תוכן ${p}-1`, `<h3>משנה ב</h3>`, `תוכן ${p}-2`])]);
+    const c = book("c", "פירוש על משנה יומא", ["<h1>פירוש על משנה יומא</h1>", "<h2>פרק א</h2>", "<h3>משנה א</h3>", "על א-א", "<h2>פרק בא לו</h2>", "<h3>משנה א</h3>", "על ז-א", "<h3>משנה ב</h3>", "על ז-ב"]);
+    const r = runHeadingsEngine(c, base);
+    expect(at(r, 3)).toMatchObject({ confidence: "certain", target: { line: 3 } });
+    for (const line of [6, 8]) {
+      const s = at(r, line);
+      expect(s === undefined || (s.confidence !== "certain" && s.confidence !== "high")).toBe(true);
+      // never into chapter 3 (base lines 11..15)
+      if (s) expect(s.target.line < 11 || s.target.line > 15).toBe(true);
+    }
+  });
+
   it("levels are matched by kind, not by tag depth; a base grouping level absent from the commentary is skipped", () => {
     const base = book("b", "משנה תורה", ["<h1>משנה תורה</h1>", "<h2>הלכות שבת</h2>", "<h3>פרק א</h3>", "(א) שביתה ממלאכה", "<h3>פרק ב</h3>", "(א) דחויה היא"]);
     const c = book("c", "כסף משנה", ["<h1>כסף משנה</h1>", "<h4>פרק ב</h4>", "<h5>הלכה א</h5>", "דחויה. כתב"]);
