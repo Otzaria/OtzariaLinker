@@ -181,6 +181,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .ln { display: grid; grid-template-columns: 3.4em 1fr auto; align-items: start; padding: 1px 6px 1px 0; border-inline-start: 3px solid transparent; cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 2em; }
 .ln:hover { background: color-mix(in srgb, var(--on-surface) 5%, transparent); }
 .ln .no { font: 11px/2.2 var(--font-mono); color: var(--on-surface-faint); text-align: center; user-select: none; }
+/* on a picked line (with the hover tint: 4.0:1 in dark with the faint colour) the number takes the full secondary colour */
+.ln.picked .no { color: var(--on-surface-variant); }
 .ln .tx { min-width: 0; overflow-wrap: anywhere; padding-inline-end: 6px; }
 .ln .tx :is(h1, h2, h3, h4, h5, h6) { font-size: 1.12em; margin: 0.2em 0; font-weight: 700; }
 .ln .tx x-uncounted { color: var(--on-surface-faint); }
