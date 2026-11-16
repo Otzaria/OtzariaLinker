@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { canonicalTypeString, parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { diffGroup, type LinkDiffGroup, type LinkDiffRow } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
 import { DIFF_KIND_LABELS, diffGroupLabels } from "../../formats/report/link-diff-report";
@@ -122,11 +123,22 @@ export function CompareDialog({ onClose }: { onClose: () => void }) {
 /** a file name as one left-to-right unit in the Hebrew line ("המסד" and "הפרויקט" as they are) */
 const fname = (name: string) => (name.includes(".") ? ltr(name) : name);
 const place = (s: LinkSide) => `${s.book.title} ${s.line + 1}${s.end !== undefined && s.end > s.line ? `–${s.end + 1}` : ""}`;
-const linkText = (l?: Link) => (l ? `${place(l.source)} ← ${place(l.target)} · ${l.declaredType || "—"}${l.anchor ? ` · עוגן ${l.anchor.rawStart}` : ""}` : "—");
+/**
+ * The type in Hebrew ("פירוש", not "commentary": audit V5, simple mode names no field value of the file);
+ * the string as written when it is not the canonical one — a difference of spelling is a difference
+ * here — and always in advanced mode.
+ */
+const typeText = (raw: string, advanced: boolean) => {
+  const t = parseConnectionType(raw);
+  const he = TYPE_LABELS[t.type].he;
+  return advanced || !t.known || raw !== canonicalTypeString(t.type) ? `${he} (${raw || "—"})` : he;
+};
+const linkText = (l: Link | undefined, advanced: boolean) => (l ? `${place(l.source)} ← ${place(l.target)} · ${typeText(l.declaredType, advanced)}${l.anchor ? ` · עוגן ${l.anchor.rawStart}` : ""}` : "—");
 
 function DiffView() {
   const store = useStore();
   const r = store.compare.result.value!;
+  const advanced = store.prefs.advanced.value;
   const labels = diffGroupLabels(fname(r.a.name), fname(r.b.name));
   const counts = useMemo(() => {
     const n = Object.fromEntries(GROUPS.map((g) => [g, 0])) as Record<LinkDiffGroup, number>;
@@ -136,7 +148,7 @@ function DiffView() {
   const [group, setGroup] = useState<LinkDiffGroup>(GROUPS.find((g) => counts[g]) ?? "identical");
   const [q, setQ] = useState("");
   const [shown, setShown] = useState(PAGE);
-  const rows = useMemo(() => r.diff.rows.filter((x) => diffGroup(x) === group && (!q || linkText(x.a).includes(q) || linkText(x.b).includes(q))), [r, group, q]);
+  const rows = useMemo(() => r.diff.rows.filter((x) => diffGroup(x) === group && (!q || linkText(x.a, advanced).includes(q) || linkText(x.b, advanced).includes(q))), [r, group, q, advanced]);
   return (
     <section class="cmp-diff" aria-label="תוצאת ההשוואה">
       <div class="filters" style="padding:0">
@@ -160,8 +172,8 @@ function DiffView() {
           {rows.slice(0, shown).map((x: LinkDiffRow, i) => (
             <tr key={i} class={`k-${x.kind}`}>
               <td>{DIFF_KIND_LABELS[x.kind]}</td>
-              <td>{linkText(x.a)}</td>
-              <td>{linkText(x.b)}</td>
+              <td>{linkText(x.a, advanced)}</td>
+              <td>{linkText(x.b, advanced)}</td>
             </tr>
           ))}
         </tbody>
@@ -176,6 +188,7 @@ function DiffView() {
 function MergePanel({ title }: { title: string }) {
   const store = useStore();
   const c = store.compare;
+  const advanced = store.prefs.advanced.value;
   const sets = c.setsOf(title).filter((s) => s.kind !== "db");
   const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set(sets.map((s) => s.id)));
   const [pref, setPref] = useState(sets[0]?.id ?? "");
@@ -228,9 +241,9 @@ function MergePanel({ title }: { title: string }) {
                 {plan.merge.conflicts.slice(0, 200).map((x, i) => (
                   <tr key={i}>
                     <td>{DIFF_KIND_LABELS[x.kind]}</td>
-                    <td>{linkText(x.kept)}</td>
+                    <td>{linkText(x.kept, advanced)}</td>
                     <td>{fname(x.origin)}</td>
-                    <td>{linkText(x.other)}</td>
+                    <td>{linkText(x.other, advanced)}</td>
                   </tr>
                 ))}
               </tbody>
