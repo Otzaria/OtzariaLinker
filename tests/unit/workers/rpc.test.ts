@@ -6,6 +6,7 @@ type Api = {
   add(a: number, b: number): number;
   slow(): string;
   fail(): never;
+  partial(): string[];
 };
 
 /** An in-process pair of ports with asynchronous delivery, like postMessage. */
@@ -27,6 +28,16 @@ function pair() {
       fail() {
         throw Object.assign(new Error("בעיה"), { code: "db/wal" });
       },
+      // like the engines: on a cancel it stops and returns what it found so far
+      async partial(ctx) {
+        const found: string[] = [];
+        for (let i = 0; i < 50 && !ctx.signal.aborted; i++) {
+          found.push(`#${i}`);
+          ctx.progress(i, 50);
+          await new Promise((r) => setTimeout(r, 2));
+        }
+        return found;
+      },
     },
     post,
   );
@@ -47,6 +58,17 @@ describe("rpc", () => {
     setTimeout(() => ac.abort(), 15);
     await expect(p).rejects.toMatchObject({ code: "cancelled" });
     expect(seen[0]).toBe(0);
+  });
+  it("keepPartial: a cancel stops the call and hands back what it found; without it the cancel rejects", async () => {
+    const client = pair();
+    const ac = new AbortController();
+    const p = client.call("partial", [], { signal: ac.signal, keepPartial: true, onProgress: (d) => d >= 3 && ac.abort() });
+    const found = await p;
+    expect(found.length).toBeGreaterThanOrEqual(3);
+    expect(found.length).toBeLessThan(50);
+    const ac2 = new AbortController();
+    const q = client.call("partial", [], { signal: ac2.signal, onProgress: (d) => d >= 3 && ac2.abort() });
+    await expect(q).rejects.toMatchObject({ code: "cancelled" });
   });
   it("unknown operations fail clearly", async () => {
     await expect(pair().call("nope" as "add", [1, 1])).rejects.toMatchObject({ code: "rpc/unknown-op" });

@@ -28,3 +28,11 @@
 .ml-table-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; margin-top: 6px; }
 .ml-table tr { cursor: default; }
 .ml-table td:not(:first-child), .ml-table th:not(:first-child) { text-align: end; font-variant-numeric: tabular-nums; }
+
+/* the max-link job (maxlink-job.tsx): progress per book and per engine, and its actions */
+.ml-job { display: grid; gap: 6px; margin: 0 6px 6px; padding: 8px 10px; border: 1px solid var(--outline-variant); border-radius: var(--radius); font-size: var(--fs-sm); }
+.ml-job progress { width: 100%; }
+.ml-job .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ml-job-counts { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ml-job-counts li { padding: 1px 10px; border-radius: var(--radius-full); background: var(--surface-container); font-variant-numeric: tabular-nums; }
+.ml-job-counts li.st-failed { background: var(--error-container); color: var(--on-error-container); }

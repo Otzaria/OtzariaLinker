@@ -1,6 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceLine } from "../core/books";
-import type { DbMapping } from "../core/db-mapping";
+import type { DbMapping, MappingTest } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
@@ -22,6 +22,8 @@ export interface SourcesApi {
   open(files: InputFile[]): OpenResult;
   /** opens a database from OpenResult.needsMapping through the user's mapping (may scan: progress, cancel) */
   openMapped(token: string, mapping: DbMapping): OpenedSource;
+  /** the first lines of the first books through a mapping, before it is confirmed (bounded read) */
+  testMapping(token: string, mapping: DbMapping): MappingTest;
   lines(bookKey: string, from: number, to: number): SourceLine[];
   existingLinks(bookKey: string, from: number, to: number): Link[];
   close(sourceId: string): void;
@@ -41,4 +43,6 @@ export interface SourcesApi {
   dbLinksPage(bookKey: string, query: DbLinkQuery): DbLinkPage;
   /** runs a max-link plan's steps (progress over all steps; one pair in memory at a time) */
   runMaxLink(steps: PlanStep[], options: MaxLinkJobOptions): MaxLinkJobResult;
+  /** the fingerprints of books' text, by key (an unreadable book is left out); progress counts books */
+  fingerprints(bookKeys: string[]): Record<string, string>;
 }

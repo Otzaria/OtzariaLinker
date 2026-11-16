@@ -56,3 +56,42 @@ describe("a BLOB text column of such values, end to end (review C14)", () => {
     expect(r.undecodable).toBe(0);
   });
 });
+
+describe("BLOB text in other encodings (wizard round V5)", () => {
+  const he = "<h1>ספר הדוגמה</h1> בראשית ברא";
+  const le = (s: string, bom = false) => {
+    const out = new Uint8Array(s.length * 2 + (bom ? 2 : 0));
+    let at = 0;
+    if (bom) (out[0] = 0xff), (out[1] = 0xfe), (at = 2);
+    for (let i = 0; i < s.length; i++) (out[at + 2 * i] = s.charCodeAt(i) & 0xff), (out[at + 2 * i + 1] = s.charCodeAt(i) >> 8);
+    return out;
+  };
+  const be = (s: string) => le(s).map((_, i, a) => a[i ^ 1]!);
+
+  it("UTF-16 with and without a byte-order mark, little- and big-endian", () => {
+    const codec = new GenericTextCodec();
+    expect(blobKind(le(he, true))).toBe("utf16le");
+    expect(blobKind(le(he))).toBe("utf16le");
+    expect(blobKind(be(he))).toBe("utf16be");
+    expect(codec.decode(le(he, true))).toBe(he);
+    expect(codec.decode(le(he))).toBe(he);
+    expect(codec.decode(be(he))).toBe(he);
+  });
+
+  it("Windows-1255 Hebrew decodes; random high bytes stay binary", () => {
+    const cp = new Uint8Array([0xf9, 0xec, 0xe5, 0xed, 0x20, 0xf2, 0xe5, 0xec, 0xed]); // שלום עולם
+    expect(blobKind(cp)).toBe("cp1255");
+    expect(new GenericTextCodec().decode(cp)).toBe("שלום עולם");
+    expect(blobKind(new Uint8Array([0x81, 0x8d, 0x90, 0x9d, 0x41]))).toBe("binary");
+  });
+
+  it("a known binary format is named in the message", () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    expect(() => new GenericTextCodec().decode(png)).toThrow(/תמונת PNG/);
+    expect(() => new GenericTextCodec().decode(new Uint8Array([0x42, 0x5a, 0x68, 0x39, 0x31, 0, 0x41, 0x59]))).toThrow(/bzip2/);
+  });
+
+  it("binary that merely has zero bytes is not UTF-16", () => {
+    expect(blobKind(new Uint8Array([0, 255, 3, 0x89, 0x50, 0x4e, 0x47, 0]))).toBe("binary");
+  });
+});

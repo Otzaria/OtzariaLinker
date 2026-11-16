@@ -27,16 +27,20 @@ export interface BatchItem {
   error?: string;
 }
 
-/** Runs one engine over many pairs, one pair in memory at a time. Progress counts pairs. */
+/**
+ * Runs one engine over many pairs, one pair in memory at a time. Progress counts pairs. Cancelled, it
+ * stops and returns the pairs done, the last one with what its engine found until then (the engines stop
+ * with an "engine/aborted" note); the pairs not reached are not in the list.
+ */
 export async function batchJob(registry: SourceRegistry, engine: EngineId, pairs: readonly { source: BookRef; target: BookRef }[], options: Record<string, unknown>, ctx: EngineContext): Promise<BatchItem[]> {
   const out: BatchItem[] = [];
   for (const [i, p] of pairs.entries()) {
-    ctx.signal?.throwIfAborted();
+    if (ctx.signal?.aborted) break;
     ctx.progress?.(i, pairs.length);
     try {
       out.push({ ...p, result: await engineJob(registry, engine, p.source, p.target, options, { ...(ctx.signal && { signal: ctx.signal }) }) });
     } catch (err) {
-      if (ctx.signal?.aborted) throw err;
+      if (ctx.signal?.aborted) break;
       out.push({ ...p, error: err instanceof Error ? err.message : String(err) });
     }
   }

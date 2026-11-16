@@ -69,7 +69,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
     if (!plan || !scope) return;
     const engineOptions: Partial<Record<EngineId, Record<string, unknown>>> = {};
     for (const [e, c] of checks) if (Object.keys(c.options).length) engineOptions[e] = c.options;
-    if (await store.maxLink.run(plan, store.maxLink.scopeLabel(scope), { engineOptions })) onDone();
+    if (await store.maxLink.run(plan, store.maxLink.scopeLabel(scope), { engineOptions, ...(prefer && { preferSource: prefer }) })) onDone();
   };
 
   return (

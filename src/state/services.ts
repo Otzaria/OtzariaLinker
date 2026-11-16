@@ -1,6 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
-import type { DbMapping, PendingDb } from "../core/db-mapping";
+import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
@@ -37,11 +37,15 @@ export interface OpenResult {
 export interface CallOptions {
   signal?: AbortSignal;
   onProgress?: (done: number, total: number) => void;
+  /** a cancel waits for what the call found so far instead of rejecting (workers/rpc.ts CallOptions.keepPartial) */
+  keepPartial?: boolean;
 }
 
 export interface BooksService {
   open(files: InputFile[], opts?: CallOptions): Promise<OpenResult>;
   openMapped(token: string, mapping: DbMapping, opts?: CallOptions): Promise<OpenedSource>;
+  /** the wizard's "test the mapping": first lines of the first books (optional for test fakes) */
+  testMapping?(token: string, mapping: DbMapping, opts?: CallOptions): Promise<MappingTest>;
   lines(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<SourceLine[]>;
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
@@ -66,6 +70,8 @@ export interface BooksService {
    * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
    */
   runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>>; sefariaOwned?: readonly string[] }, opts?: CallOptions): Promise<MaxLinkJobResult>;
+  /** The fingerprints of books' text (core/text/fingerprint.ts), by key: the batch job skips unchanged books by them. Optional like runMaxLink. */
+  fingerprints?(bookKeys: string[], opts?: CallOptions): Promise<Record<string, string>>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */

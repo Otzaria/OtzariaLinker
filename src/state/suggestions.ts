@@ -52,6 +52,8 @@ export interface SuggestionRun {
   maxlink?: MaxLinkRunInfo;
   /** a pair run: the book the user chose as the source — the table reads every row from it (audit F18) */
   from?: string;
+  /** the run was cancelled: its suggestions are what the engine found until then ("engine/aborted") */
+  partial?: boolean;
   /**
    * Books whose database links could not be read (review C13): their suggestions cannot be compared with
    * the library, so one that exists there shows as pending — a bulk approval waits for retryDbLinks().
@@ -153,16 +155,19 @@ export class SuggestionsState {
   async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
     const target = this.host.refOf(targetKey);
-    const result = await this.host.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, this.withSefaria(options, [source.key, target.key]), opts));
+    // a cancel keeps what the engine found until then (keepPartial), shown as partial
+    const result = await this.host.runTask(`מחפש התאמות: ${source.title} ← ${target.title}…`, (opts) => this.service.runEngine(engine, source, target, this.withSefaria(options, [source.key, target.key]), { ...opts, keepPartial: true }));
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
+    const partial = isPartial(result);
     batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }) };
+      this.run.value = { engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
     const c = this.counts.value;
-    this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
+    if (partial) this.host.notify("warning", partialNotice(result.suggestions.length));
+    else this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
     return true;
   }
 
@@ -172,15 +177,17 @@ export class SuggestionsState {
    */
   async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
-    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), opts));
+    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), { ...opts, keepPartial: true }));
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
+    const partial = isPartial(result);
     batch(() => {
-      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }) };
+      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
     const c = this.counts.value;
+    if (partial) return this.host.notify("warning", partialNotice(result.suggestions.length)), true;
     this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
     return true;
   }
@@ -200,12 +207,15 @@ export class SuggestionsState {
       this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
-    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), opts));
+    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }));
     if (!items) return false;
     const unread = await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
     const suggestions: Suggestion[] = [];
     const notes: Reason[] = [];
-    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.reason && { problem: p.reason }), suggestions: 0, certain: 0, high: 0, review: 0 }));
+    // a cancel keeps the books done and what the last one found (keepPartial); the rest say they did not run
+    const reached = new Set(items.map((it) => it.source.key));
+    const partial = items.length < runnable.length || items.some((it) => it.result && isPartial(it.result));
+    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 }));
     for (const it of items) {
       const row = rows.find((r) => r.source.key === it.source.key)!;
       if (it.error) row.problem = it.error;
@@ -219,10 +229,11 @@ export class SuggestionsState {
       for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
     batch(() => {
-      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }) };
+      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
       this.current.value = suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
+    if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;
     const failed = rows.filter((r) => r.problem).length;
     this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
     return true;
@@ -426,6 +437,11 @@ export class SuggestionsState {
 function recordAt(s: Suggestion, line: number): { source: LinkSide; target: LinkSide } {
   return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
 }
+
+/** An engine result cut short by a cancel: the engines stop with an "engine/aborted" note and return what they found. */
+export const isPartial = (r: EngineResult): boolean => r.notes.some((n) => n.code === "engine/aborted");
+const PARTIAL_LABEL = " (חלקי: הריצה נעצרה)";
+const partialNotice = (n: number) => `הריצה נעצרה לפני הסוף: מוצגות ${n.toLocaleString("he")} ההצעות שנמצאו עד העצירה, והן חלקיות — לא כל הספר נבדק. הריצו שוב כדי לקבל את כולן.`;
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {

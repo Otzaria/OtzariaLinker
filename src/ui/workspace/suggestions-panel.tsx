@@ -10,6 +10,7 @@ import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
 /*
@@ -28,7 +29,13 @@ export function SuggestionsPanel() {
   const [setup, setSetup] = useState(false);
   // the address "#/maxlink" asks for the max-link form even when the last run was of another kind
   const wantsMaxLink = store.suggestMode.value === "maxlink" && !run?.maxlink;
-  if (!run || setup || wantsMaxLink) return <RunForm onDone={() => setSetup(false)} onCancel={run ? () => setSetup(false) : undefined} />;
+  if (!run || setup || wantsMaxLink)
+    return (
+      <>
+        <MaxLinkJobView />
+        <RunForm onDone={() => setSetup(false)} onCancel={run ? () => setSetup(false) : undefined} />
+      </>
+    );
   const c = store.suggestions.counts.value;
   const view = store.prefs.suggestionsView.value;
   const engine = ENGINES.find((e) => e.id === run.engine);
@@ -75,7 +82,7 @@ export function SuggestionsPanel() {
           </li>
         </ul>
       ) : null}
-      {run.maxlink ? <MaxLinkReportView /> : <BatchSummary />}
+      {run.maxlink ? <><MaxLinkJobView /><MaxLinkReportView /></> : <BatchSummary />}
       {view === "table" ? <TableView /> : <StepView card={view === "card"} />}
     </div>
   );

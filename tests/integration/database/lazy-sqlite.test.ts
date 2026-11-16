@@ -183,6 +183,16 @@ describe("parseCreateTable", () => {
       ["q", "TEXT", false, "a,b"],
     ]);
     expect(t.primaryKey).toEqual(["id"]);
+    expect(t.foreignKeys).toEqual([{ columns: ["q"], table: "z", to: ["w"] }]);
+  });
+  it("FOREIGN KEYs: column-level REFERENCES (with and without a column list) and table-level", () => {
+    const t = parseCreateTable("CREATE TABLE line (id INTEGER PRIMARY KEY, book_id INTEGER NOT NULL REFERENCES book(id) ON DELETE CASCADE, v VARCHAR(10) REFERENCES \"other table\", a INT, b INT, CONSTRAINT f FOREIGN KEY (a, b) REFERENCES pair (x, y))");
+    expect(t.columns.map((c) => c.name)).toEqual(["id", "book_id", "v", "a", "b"]);
+    expect(t.foreignKeys).toEqual([
+      { columns: ["book_id"], table: "book", to: ["id"] },
+      { columns: ["v"], table: "other table", to: [] },
+      { columns: ["a", "b"], table: "pair", to: ["x", "y"] },
+    ]);
   });
   it("INTEGER PRIMARY KEY DESC is not a rowid alias (SQLite quirk)", () => {
     expect(parseCreateTable("CREATE TABLE t (id INTEGER PRIMARY KEY DESC, v TEXT)").columns[0]!.rowidAlias).toBe(false);

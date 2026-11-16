@@ -101,8 +101,9 @@
        → Worker: SourceRegistry.openMapped(token, mapping) → MappedDbSource (סריקה אחת אם אין אינדקס)
 ```
 
-הטיפוסים של המיפוי (`DbMapping`, `SchemaPreview`, `PendingDb`) והכללים הטהורים שלו (ניחוש, בדיקה, קריאה
-מ־JSON) נמצאים ב־`core/db-mapping.ts`, כדי שגם `state`, `ui` ו־`projects` יוכלו להחזיק אותם.
+הטיפוסים של המיפוי (`DbMapping`, `SchemaPreview`, `PendingDb`, `DbAnalysis`) והכללים הטהורים שלו (בדיקה, קריאה
+מ־JSON) נמצאים ב־`core/db-mapping.ts`, הניחוש המוסבר ב־`core/db-guess.ts` ויחידות הטקסט ב־`core/db-text-units.ts`,
+כדי שגם `state`, `ui` ו־`projects` יוכלו להחזיק אותם.
 
 ### 4.2 קריאת שורות
 
@@ -148,8 +149,13 @@ SuggestionsPanel → AppStore.suggestions.runEngine(engine, sourceKey, targetKey
 קישור מרבי: AppStore.maxLink.plan(scope) (MaxLinkState) → planMaxLink (linking/plan.ts, טהור)
   קשר לכל ספר: book_base_text של המסד (SourceBook.bases) ← "הערות … על Y" ← "X על Y"
   שלבים: pair (headings, dibur-hamatchil לפירוש; footnotes לספר הערות) ו־single (מנוע ספר אחד)
-→ AppStore.maxLink.run(plan) → BooksService.runMaxLink → Worker: maxlinkJob (זוג אחד בזיכרון; כשל בשלב לא עוצר)
-  ← StepResult לכל שלב, ומפתחות הקישורים שבמסד לספרים שנקראו
+→ AppStore.maxLink.run(plan): עבודה (linking/batch-job.ts) — ספר אחר ספר, קריאה אחת ל־Worker לכל ספר:
+  BooksService.runMaxLink(שלבי הספר) → Worker: maxlinkJob (זוג אחד בזיכרון, ועד 4 ספרים במטמון בין קריאות; כשל בשלב לא עוצר)
+  ← StepResult לכל שלב, מפתחות הקישורים שבמסד, וטביעת אצבע (core/text/fingerprint.ts) לכל ספר שנקרא
+  מצב כל ספר (ממתין / הסתיים / בלי התאמה / נכשל / לא השתנה / לא קושר) ותוצאתו נשמרים ב־IndexedDB ליד השמירה
+  האוטומטית (maxLink.startPersist): השהיה, עצירה, המשך אחרי טעינה מחדש, הרצה רק של מה שנכשל, והרצה מחדש
+  שמדלגת על ספרים שטביעת האצבע שלהם (הספר, הבסיסים, השלבים) לא השתנתה. מזהי ההצעות בלי מפתחות הסשן (stableId),
+  כדי שאישור, עריכה ודחייה יזוהו גם אחרי פתיחה מחדש של התיקייה
 → mergeSuggestions (linking/merge.ts, טהור): כפילויות, הסכמה, הכלה, סתירה, כיול זוג ספרים מול קישורי המסד, "כבר קיים"
   ← run אחד עם run.maxlink; הדוח (buildReport) מחושב חי מול suggestions.state
 ```

@@ -73,7 +73,9 @@ export function serve<A extends Api>(handlers: Handlers<A>, post: (m: FromWorker
     Promise.resolve()
       .then(() => (handler as (c: CallContext, ...a: unknown[]) => unknown)(ctx, ...m.args))
       .then(
-        (value) => post(ac.signal.aborted ? { kind: "error", id: m.id, error: { code: "cancelled", message: "הפעולה בוטלה." } } : { kind: "result", id: m.id, value }),
+        // a handler that returns after a cancel returns what it found so far (the engines stop with an
+        // "engine/aborted" note): it is posted, and a caller that asked for it (keepPartial) gets it
+        (value) => post({ kind: "result", id: m.id, value }),
         (err) => post({ kind: "error", id: m.id, error: ac.signal.aborted ? { code: "cancelled", message: "הפעולה בוטלה." } : toRpcError(err) }),
       )
       .finally(() => running.delete(m.id));
@@ -83,7 +85,17 @@ export function serve<A extends Api>(handlers: Handlers<A>, post: (m: FromWorker
 export interface CallOptions {
   signal?: AbortSignal;
   onProgress?: (done: number, total: number) => void;
+  /**
+   * A cancel asks the worker to stop and waits for what the call found so far (the engines return a
+   * partial result with an "engine/aborted" note) instead of rejecting at once — at most PARTIAL_WAIT_MS,
+   * and the watchdog still replaces a worker that does not answer. A call that throws on the cancel
+   * still rejects with "cancelled".
+   */
+  keepPartial?: boolean;
 }
+
+/** How long a cancelled keepPartial call may take to hand back its partial result before it is rejected. */
+export const PARTIAL_WAIT_MS = 10_000;
 
 export class RpcFailure extends Error {
   constructor(readonly code: string, message: string) {
@@ -116,6 +128,9 @@ interface PendingCall {
   started: boolean;
   /** removes the abort listener from the caller's signal (a signal may serve many calls) */
   off: () => void;
+  keepPartial?: boolean;
+  /** cancelled with keepPartial: the worker was asked to stop, and its partial result is awaited */
+  stopping?: boolean;
 }
 
 /** UI side. */
@@ -145,7 +160,7 @@ export class RpcClient<A extends Api> {
       const onAbort = () => this.cancel(id);
       signal?.addEventListener("abort", onAbort, { once: true });
       const off = () => signal?.removeEventListener("abort", onAbort);
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, started: false, off, ...(opts.onProgress && { onProgress: opts.onProgress }) });
+      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, started: false, off, ...(opts.onProgress && { onProgress: opts.onProgress }), ...(opts.keepPartial && { keepPartial: true }) });
       this.port.postMessage({ kind: "call", id, op, args: args as unknown[] });
     });
   }
@@ -164,6 +179,16 @@ export class RpcClient<A extends Api> {
   private cancel(id: number): void {
     const p = this.pending.get(id);
     if (!p) return;
+    if (p.keepPartial && p.started && !p.stopping) {
+      // ask the worker to stop and wait for what it found — never longer than PARTIAL_WAIT_MS
+      p.stopping = true;
+      this.cancelled.set(id, true);
+      this.port.postMessage({ kind: "cancel", id });
+      setTimeout(() => this.pending.get(id) === p && (this.pending.delete(id), p.off(), p.reject(new RpcFailure("cancelled", "הפעולה בוטלה.")), this.judge()), PARTIAL_WAIT_MS);
+      this.watch();
+      this.judge();
+      return;
+    }
     this.pending.delete(id);
     this.cancelled.set(id, p.started);
     this.port.postMessage({ kind: "cancel", id });
@@ -221,7 +246,8 @@ export class RpcClient<A extends Api> {
   /** Stuck = the probe is overdue, a started call was cancelled, and nothing the user still waits for runs. */
   private judge(): void {
     if (!this.probe?.overdue || !this.startedCancelled()) return;
-    for (const p of this.pending.values()) if (p.started) return;
+    // a call stopping to hand back its partial result is not one the user still waits for to run
+    for (const p of this.pending.values()) if (p.started && !p.stopping) return;
     clearTimeout(this.recheck);
     this.probe = null;
     // the host replaces the worker and fails what is still queued (failAll) with its own message

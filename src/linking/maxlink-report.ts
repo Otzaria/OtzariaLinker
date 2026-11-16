@@ -22,6 +22,8 @@ export interface StepResult {
   error?: string;
   /** wall time of the step, ms */
   ms: number;
+  /** the job was cancelled while this step ran: its result is what the engine found until then */
+  stopped?: boolean;
 }
 
 export interface MaxLinkJobResult {
@@ -34,6 +36,13 @@ export interface MaxLinkJobResult {
    * Absent when every book was read.
    */
   dbLinksUnread?: { key: string; why: string }[];
+  /**
+   * The fingerprint (core/text/fingerprint.ts) of every book the steps depend on — the books linked and
+   * their bases — by key. The batch job keeps them to skip unchanged books in a later run (V5 P1-8).
+   */
+  fingerprints?: Record<string, string>;
+  /** cancelled: `items` holds only the steps that ran, the last of them perhaps `stopped` (partial) */
+  stopped?: boolean;
 }
 
 export interface StepOutcome {

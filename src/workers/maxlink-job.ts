@@ -1,4 +1,5 @@
 import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection-type";
+import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef } from "../core/links/model";
 import { runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
@@ -170,11 +171,22 @@ export async function maxlinkJob(
   const total = (steps.length + focusBooks.length) * UNIT;
   const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }) });
   const items: StepResult[] = [];
+  /** the fingerprint of every book read (MaxLinkJobResult.fingerprints) */
+  const fps = new Map<string, string>();
 
   let loaded = null as { key: string; source: EngineBook; target: EngineBook } | null;
   let loadError = null as { key: string; message: string } | null;
+  /**
+   * Cancelled: the job stops and returns what it found — the steps that ran, the one that was running with
+   * what its engine found until then (engines stop with an "engine/aborted" note) marked `stopped` — never
+   * throws it away (the batch job keeps it as a partial book).
+   */
+  let stopped = false;
   for (const [i, step] of sorted.entries()) {
-    ctx.signal?.throwIfAborted();
+    if (ctx.signal?.aborted) {
+      stopped = true;
+      break;
+    }
     ctx.progress?.(i * UNIT, total);
     const inner: EngineContext = {
       ...(ctx.signal && { signal: ctx.signal }),
@@ -186,7 +198,7 @@ export async function maxlinkJob(
       if (step.kind === "pair" && step.relation.through) {
         loaded = null;
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks);
+        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks, fps);
       } else if (step.kind === "pair") {
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
@@ -197,8 +209,8 @@ export async function maxlinkJob(
           loaded = null;
           const reuse = (b: BookRef) => kept.find((x) => x.book.key === b.key);
           try {
-            const source = reuse(step.source) ?? (await load(registry, step.source));
-            const target = reuse(step.target) ?? (await load(registry, step.target));
+            const source = reuse(step.source) ?? (await load(registry, step.source, fps));
+            const target = reuse(step.target) ?? (await load(registry, step.target, fps));
             loaded = { key, source, target };
           } catch (err) {
             if (ctx.signal?.aborted) throw err;
@@ -220,9 +232,17 @@ export async function maxlinkJob(
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);
         result = await run(registry, step.source, optionsOf(step.engine), inner);
       }
-      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0 });
+      const cut = ctx.signal?.aborted === true;
+      items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...(cut && { stopped: true }) });
+      if (cut) {
+        stopped = true;
+        break;
+      }
     } catch (err) {
-      if (ctx.signal?.aborted) throw err;
+      if (ctx.signal?.aborted) {
+        stopped = true;
+        break;
+      }
       items.push({ stepId: step.id, unmatched: 0, error: messageOf(err), ms: Date.now() - t0 });
     }
   }
@@ -233,21 +253,28 @@ export async function maxlinkJob(
   // failure, and the run must say so — its suggestions may already be in the library (review C13, M7)
   const keys = new Set<string>();
   const unread: { key: string; why: string }[] = [];
+  // read also after a cancel (from the links table's book indexes: quick), so what was found is judged "already exists" too
   for (const [j, key] of focusBooks.entries()) {
-    ctx.signal?.throwIfAborted();
     ctx.progress?.((steps.length + j) * UNIT, total);
     try {
       for (const l of await registry.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
     } catch (err) {
-      if (ctx.signal?.aborted) throw err;
       unread.push({ key, why: messageOf(err) });
     }
   }
+  if (ctx.signal?.aborted) stopped = true;
+  // the fingerprint of every book the steps depend on (V5 P1-8): the ones a single-book engine read by
+  // itself are hashed here (a text book is in its source's cache; a failing read leaves it out)
+  const wanted = new Set<string>(focusBooks);
+  for (const s of steps) if (s.kind === "pair") wanted.add(s.target.key);
+  // a stopped book runs again from its start, and gets its fingerprints then
+  const missing = stopped ? [] : [...wanted].filter((k) => !fps.has(k));
+  if (missing.length) Object.entries(await fingerprintsJob(registry, missing, { ...(ctx.signal && { signal: ctx.signal }) })).forEach(([k, v]) => fps.set(k, v));
   ctx.progress?.(total, total);
   // back in the plan's order
   const pos = new Map(steps.map((s, i) => [s.id, i]));
   items.sort((a, b) => pos.get(a.stepId)! - pos.get(b.stepId)!);
-  return { items, dbLinkKeys: [...keys], ...(unread.length && { dbLinksUnread: unread }) };
+  return { items, dbLinkKeys: [...keys], ...(unread.length && { dbLinksUnread: unread }), ...(stopped && { stopped: true }), fingerprints: Object.fromEntries([...fps].filter(([k]) => wanted.has(k))) };
 }
 
 /**
@@ -257,17 +284,17 @@ export async function maxlinkJob(
  * base. A place in the intermediate with no such link gives nothing; one whose links spread over more
  * than THROUGH_SPAN lines of the base is too vague to carry, and is counted in the notes.
  */
-async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext, partLinks: Map<string, Map<string, number[]>>): Promise<EngineResult> {
+async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext, partLinks: Map<string, Map<string, number[]>>, fps: Map<string, string>): Promise<EngineResult> {
   const out = new Map<string, Suggestion>();
   const notes: Reason[] = [];
   for (const via of step.relation.through ?? []) {
     let r = results.get(`${step.engine}|${step.source.key}>${via.book.key}`);
     if (!r) {
       const inner: Extract<PlanStep, { kind: "pair" }> = { ...step, target: via.book, relation: { ...step.relation, base: via.book, through: undefined, ...(via.scope ? { scope: via.scope } : { scope: undefined }) } };
-      const source = await load(registry, step.source);
+      const source = await load(registry, step.source, fps);
       // the part of the dependant on this intermediate, by the library's links when no part is named after it
       const byLinks = via.scope && !sectionFor(source, via.scope.section) ? await partByLinks(registry, source, via.book.key, partLinks) : null;
-      r = await runScoped(inner, source, await load(registry, via.book), options, ctx, byLinks);
+      r = await runScoped(inner, source, await load(registry, via.book, fps), options, ctx, byLinks);
     }
     const toBase = await linkedLines(registry, via.book.key, step.target.key);
     let carried = 0;
@@ -347,9 +374,68 @@ async function linkedLines(registry: SourceRegistry, a: string, b: string): Prom
   return structural.size ? structural : any;
 }
 
-async function load(registry: SourceRegistry, book: BookRef): Promise<EngineBook> {
+/*
+ * The books the last calls read, per registry (the batch job calls runMaxLink once per book, V5 P1-8:
+ * 200 commentaries on one base would read the base 200 times). Bounded in books and lines; a key names
+ * one open book of one source and is never reused for another (sourceIdPrefix), so an entry cannot go stale.
+ */
+const CACHE_BOOKS = 4;
+const CACHE_LINES = 120_000;
+const bookCache = new WeakMap<SourceRegistry, Map<string, { book: EngineBook; fingerprint: string }>>();
+
+async function loadEntry(registry: SourceRegistry, book: BookRef): Promise<{ book: EngineBook; fingerprint: string }> {
+  let cache = bookCache.get(registry);
+  if (!cache) bookCache.set(registry, (cache = new Map()));
+  const hit = cache.get(book.key);
+  if (hit) {
+    cache.delete(book.key);
+    cache.set(book.key, hit);
+    return { book: { ...hit.book, book }, fingerprint: hit.fingerprint };
+  }
   // anchorText: the line as the generator counts anchor offsets (schema 7: with footnote bodies)
-  return { book, lines: (await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef })) };
+  const lines = (await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef }));
+  const entry = { book: { book, lines }, fingerprint: linesFingerprint(lines.map((l) => l.text)) };
+  cache.set(book.key, entry);
+  let total = 0;
+  for (const e of cache.values()) total += e.book.lines.length;
+  for (const [k, e] of cache) {
+    if (cache.size <= 1 || (cache.size <= CACHE_BOOKS && total <= CACHE_LINES)) break;
+    cache.delete(k);
+    total -= e.book.lines.length;
+  }
+  return entry;
+}
+
+/** A book as the engines read it; `fps` collects the fingerprint of every book a job read. */
+async function load(registry: SourceRegistry, book: BookRef, fps?: Map<string, string>): Promise<EngineBook> {
+  const e = await loadEntry(registry, book);
+  fps?.set(book.key, e.fingerprint);
+  return e.book;
+}
+
+/**
+ * The fingerprints of books (core/text/fingerprint.ts over their anchor text): the batch job compares
+ * them with the last run's to skip the books that did not change (V5 P1-8). A book that cannot be read
+ * is left out: it is run again, and its error is reported there.
+ */
+export async function fingerprintsJob(registry: SourceRegistry, keys: readonly string[], ctx: EngineContext): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const [i, key] of keys.entries()) {
+    ctx.signal?.throwIfAborted();
+    ctx.progress?.(i, keys.length);
+    const cached = bookCache.get(registry)?.get(key);
+    if (cached) {
+      out[key] = cached.fingerprint;
+      continue;
+    }
+    try {
+      out[key] = linesFingerprint((await registry.lines(key, 0, Number.MAX_SAFE_INTEGER)).map((l) => l.anchorText));
+    } catch (err) {
+      if (ctx.signal?.aborted) throw err;
+    }
+  }
+  ctx.progress?.(keys.length, keys.length);
+  return out;
 }
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));

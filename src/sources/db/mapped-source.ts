@@ -1,4 +1,4 @@
-import type { DbMapping } from "../../core/db-mapping";
+import type { DbMapping, MappingTest } from "../../core/db-mapping";
 import { canonicalTypeString, connectionTypeFromId, parseConnectionType } from "../../core/links/connection-type";
 import type { BookRef, Link } from "../../core/links/model";
 import { MappedDbReader, type MappedLink, type ReadContext } from "../../database/generic/mapped-reader";
@@ -78,6 +78,34 @@ export class MappedDbSource implements BookSource {
   private nOf(bookKey: string): number {
     return Number(bookKey.slice(this.info.id.length + 1));
   }
+}
+
+/** rows of each table the wizard's "test the mapping" reads at most: enough for the first books, fast on any size */
+const TEST_ROWS = 20_000;
+const TEST_BOOKS = 3;
+const TEST_LINES = 6;
+
+/**
+ * The wizard's "בדיקת המיפוי": opens the database through a mapping that is not confirmed yet and
+ * returns the first lines of the first books. Reads at most TEST_ROWS rows of each table, and no
+ * links table, so it answers quickly even when opening would scan a large table.
+ */
+export async function testMapping(src: ByteSource, mapping: DbMapping, ctx: ReadContext = {}): Promise<MappingTest> {
+  const file = await SqliteFile.open(bufferedSource(src));
+  const { links: _links, ...m } = mapping;
+  const reader = await MappedDbReader.open(file, m, { ...ctx, limitRows: TEST_ROWS });
+  const sample: MappingTest["sample"] = [];
+  for (const b of reader.books.slice(0, TEST_BOOKS)) {
+    const lines = (await reader.lines(b.n, 0, TEST_LINES - 1)).map((l) => ({ text: l.text, heading: l.heading }));
+    sample.push({ title: b.title, lineCount: reader.partial ? null : await reader.lineCount(b.n), lines });
+  }
+  return {
+    books: reader.books.length,
+    partial: reader.partial,
+    sample,
+    warnings: reader.warnings.filter((w) => w.code !== "db/mapping-no-books").map((w) => w.message),
+    undecodable: reader.undecodable,
+  };
 }
 
 /** A type column may hold a generator type id (1-based) or a type name; anything else is "other". */

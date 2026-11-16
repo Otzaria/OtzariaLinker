@@ -11,6 +11,7 @@ export function booksService(call: SourcesCall): BooksService {
   return {
     open: (files, opts) => call("open", [files], opts),
     openMapped: (token, mapping, opts) => call("openMapped", [token, mapping], opts),
+    testMapping: (token, mapping, opts) => call("testMapping", [token, mapping], opts),
     lines: (key, from, to, opts) => call("lines", [key, from, to], opts),
     existingLinks: (key, from, to, opts) => call("existingLinks", [key, from, to], opts),
     close: async (id) => void (await call("close", [id])),
@@ -24,5 +25,6 @@ export function booksService(call: SourcesCall): BooksService {
     dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
     dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
     runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
+    fingerprints: (keys, opts) => call("fingerprints", [keys], opts),
   };
 }
