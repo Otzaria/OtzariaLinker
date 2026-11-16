@@ -294,12 +294,13 @@ export function LinkItem({ l, row, top, selected, onSelect }: { l: Link; row?: T
       <div class="ends">
         {onSelect && <input type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={onSelect} aria-label="בחירה" />}
         <span class={`status ${pending ? "new" : l.status}`} title={l.provenance === "db-copy" ? "קישור שהועתק מהמסד ושוחזר ממנו לקובץ קישורים. אפשר לערוך ולייצא אותו" : undefined}>{pending ? STATUS_LABEL.pending : statusLabel(l)}</span>
-        <span>
-          {l.source.book.title} {where(l.source.line, l.source.end)}
+        {/* in the narrow table row the name shortens, never the line number (V5 UX audit) */}
+        <span class="end">
+          <span class="t">{l.source.book.title}</span> {where(l.source.line, l.source.end)}
         </span>
         <Icon name="oz_link" size={14} />
-        <span>
-          {l.heRef2 || l.target.book.title} <span class="muted">({where(l.target.line, l.target.end)})</span>
+        <span class="end">
+          <span class="t">{l.heRef2 || l.target.book.title}</span> <span class="muted">({where(l.target.line, l.target.end)})</span>
         </span>
       </div>
       <div class="acts" onClick={(e) => e.stopPropagation()}>

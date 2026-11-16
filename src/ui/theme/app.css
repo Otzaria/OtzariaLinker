@@ -244,6 +244,12 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .vlist .link-list { position: relative; padding: 0; }
 .vlist .link-item { position: absolute; inset-inline: 6px; height: 60px; box-sizing: border-box; overflow: hidden; align-content: start; }
 .vlist .link-item .ends { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+/* one row with no wrapping: each end shortens with "…" instead of painting over the next one (the
+   spans may shrink below their text, and their overflow was visible — the two book names overlapped) */
+.vlist .link-item .ends > .end { display: inline-flex; gap: 0.3em; min-width: 0; overflow: hidden; }
+.vlist .link-item .end > * { flex: none; }
+.vlist .link-item .end > .t { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
+.vlist .link-item .ends > :is(.status, input, .icon) { flex: none; }
 .vlist .link-item .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; padding-top: 6px; }
 .lt-grid label, .lt-head { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
