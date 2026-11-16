@@ -1,4 +1,4 @@
-import type { PanelId } from "../../state/preferences";
+import { chooseLayout, type PanelId } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 
@@ -11,7 +11,7 @@ export function HideButton({ id, label }: { id: PanelId; label: string }) {
       class="icon-btn"
       title={`הסתרת ${label} (מחזירים מתפריט הפריסה בסרגל העליון)`}
       aria-label={`הסתרת ${label}`}
-      onClick={() => (store.prefs.layout.value = { ...layout, hidden: [...layout.hidden, id] })}
+      onClick={() => chooseLayout(store.prefs, { ...layout, hidden: [...layout.hidden, id] })}
     >
       <Icon name="fl_eye_off" size={18} />
     </button>

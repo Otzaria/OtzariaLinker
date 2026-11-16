@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useRef } from "preact/hooks";
-import type { Layout, PanelId } from "../../state/preferences";
+import { chooseLayout, resetLayout, type Layout, type PanelId } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { rovingKeys, rovingTabIndex, useFocusOnMount } from "../keyboard";
@@ -22,7 +22,9 @@ const PANEL_DRAG = "application/x-otzaria-panel";
 export function Workspace() {
   const store = useStore();
   const layout = store.prefs.layout.value;
-  const visible = layout.order.filter((p) => !layout.hidden.includes(p));
+  // "source above target" puts both readers in the source's column: it stays while either is shown
+  const stacked = layout.preset === "stack";
+  const visible = layout.order.filter((p) => !layout.hidden.includes(p) || (stacked && p === "source" && !layout.hidden.includes("target")));
   const grid = useRef<HTMLDivElement>(null);
   const columns = visible.map((p) => `minmax(160px, ${layout.sizes[p]}fr)`).join(" 8px ");
   // arriving from the home screen or the guided flow, focus starts at the workspace, not at the top of the page
@@ -37,7 +39,7 @@ export function Workspace() {
     const b = order.indexOf(target);
     if (a < 0 || b < 0) return;
     [order[a], order[b]] = [order[b]!, order[a]!];
-    store.prefs.layout.value = { ...layout, order };
+    chooseLayout(store.prefs, { ...layout, order });
   };
 
   const cells: ComponentChildren[] = [];
@@ -45,7 +47,7 @@ export function Workspace() {
     if (i > 0) cells.push(<Splitter key={`s${i}`} left={visible[i - 1]!} right={p} grid={grid} />);
     cells.push(
       <PanelSlot key={p} id={p} onDrop={onPanelDrop}>
-        {p === "source" && layout.preset === "stack" ? <StackedReaders /> : <PanelContent id={p} />}
+        {p === "source" && stacked ? <StackedReaders hidden={layout.hidden} /> : <PanelContent id={p} />}
       </PanelSlot>,
     );
   });
@@ -53,6 +55,7 @@ export function Workspace() {
   return (
     <main class="workspace focus-target" ref={grid} tabIndex={-1} aria-label="סביבת העבודה" style={{ gridTemplateColumns: columns }}>
       {cells}
+      {!visible.length && <AllHidden />}
     </main>
   );
 }
@@ -64,12 +67,30 @@ function PanelContent({ id }: { id: PanelId }) {
   return <SidePanel />;
 }
 
-function StackedReaders() {
+/** The preset "source above target": the two readers in one column, each hidden on its own. */
+function StackedReaders({ hidden }: { hidden: readonly PanelId[] }) {
+  const source = !hidden.includes("source");
+  const target = !hidden.includes("target");
   return (
     <div class="stack-col">
-      <Reader side="source" />
-      <div style="height:8px" />
-      <Reader side="target" />
+      {source && <Reader side="source" />}
+      {source && target && <div style="height:8px" />}
+      {target && <Reader side="target" />}
+    </div>
+  );
+}
+
+/** Every panel hidden: say so, and bring them back from here (not only from the layout menu). */
+function AllHidden() {
+  const store = useStore();
+  return (
+    <div class="empty ws-all-hidden">
+      <Icon name="fl_eye_off" size={40} />
+      <span>כל הפאנלים מוסתרים.</span>
+      <button class="btn filled" onClick={() => resetLayout(store.prefs, innerWidth)}>
+        <Icon name="fl_layout_column_four" size={18} />
+        הצגת כל הפאנלים
+      </button>
     </div>
   );
 }
@@ -172,7 +193,7 @@ function Splitter({ left, right, grid }: { left: PanelId; right: PanelId; grid: 
       const dx = (ev.clientX - x0) * (rtl ? -1 : 1);
       const a = Math.min(Math.max(wPrev + dx, 160), wPrev + wNext - 160);
       const sizes = { ...start.sizes, [left]: (fr * a) / (wPrev + wNext), [right]: (fr * (wPrev + wNext - a)) / (wPrev + wNext) };
-      store.prefs.layout.value = { ...start, sizes };
+      chooseLayout(store.prefs, { ...start, sizes });
     };
     const up = () => {
       el.classList.remove("active");
@@ -188,7 +209,7 @@ function Splitter({ left, right, grid }: { left: PanelId; right: PanelId; grid: 
     const step = 0.1 * (e.key === "ArrowLeft" ? 1 : -1);
     const a = Math.max(0.3, l.sizes[left] + step);
     const b = Math.max(0.3, l.sizes[right] - step);
-    store.prefs.layout.value = { ...l, sizes: { ...l.sizes, [left]: a, [right]: b } };
+    chooseLayout(store.prefs, { ...l, sizes: { ...l.sizes, [left]: a, [right]: b } });
   };
   return <div class="splitter" role="separator" aria-orientation="vertical" tabIndex={0} aria-label="שינוי רוחב הפאנלים" onPointerDown={onDown} onKeyDown={onKey} />;
 }
