@@ -95,15 +95,13 @@ export async function partByLinks(registry: SourceRegistry, source: EngineBook, 
   let byOther = cache.get(source.book.key);
   if (!byOther) {
     byOther = new Map<string, number[]>();
-    try {
-      for (const l of await registry.existingLinks(source.book.key, 0, Number.MAX_SAFE_INTEGER)) {
-        const [mine, other] = l.source.book.key === source.book.key ? [l.source, l.target] : [l.target, l.source];
-        const list = byOther.get(other.book.key) ?? [];
-        list.push(mine.line);
-        byOther.set(other.book.key, list);
-      }
-    } catch {
-      /* a source without links: no part by links */
+    // a source without links answers []; a throw fails the step (its message is in the report), never
+    // a silent "no part": the whole book would then be linked by dibur-hamatchil alone (review C13, M7)
+    for (const l of await registry.existingLinks(source.book.key, 0, Number.MAX_SAFE_INTEGER)) {
+      const [mine, other] = l.source.book.key === source.book.key ? [l.source, l.target] : [l.target, l.source];
+      const list = byOther.get(other.book.key) ?? [];
+      list.push(mine.line);
+      byOther.set(other.book.key, list);
     }
     cache.set(source.book.key, byOther);
   }
@@ -208,22 +206,26 @@ export async function maxlinkJob(
   }
   loaded = null;
 
-  // the links the library already has, for every book a step read from (both directions: atLines)
+  // the links the library already has, for every book a step read from (both directions: atLines).
+  // A source without links answers [] (text files, databases without link tables): a throw is a real
+  // failure, and the run must say so — its suggestions may already be in the library (review C13, M7)
   const keys = new Set<string>();
+  const unread: { key: string; why: string }[] = [];
   for (const [j, key] of focusBooks.entries()) {
     ctx.signal?.throwIfAborted();
     ctx.progress?.((steps.length + j) * UNIT, total);
     try {
       for (const l of await registry.existingLinks(key, 0, Number.MAX_SAFE_INTEGER)) keys.add(linePairKey(l));
-    } catch {
-      /* a source without links (text files) or a read error: nothing to compare with */
+    } catch (err) {
+      if (ctx.signal?.aborted) throw err;
+      unread.push({ key, why: messageOf(err) });
     }
   }
   ctx.progress?.(total, total);
   // back in the plan's order
   const pos = new Map(steps.map((s, i) => [s.id, i]));
   items.sort((a, b) => pos.get(a.stepId)! - pos.get(b.stepId)!);
-  return { items, dbLinkKeys: [...keys] };
+  return { items, dbLinkKeys: [...keys], ...(unread.length && { dbLinksUnread: unread }) };
 }
 
 /**
@@ -313,15 +315,12 @@ async function linkedLines(registry: SourceRegistry, a: string, b: string): Prom
       out.set(x, list);
     }
   };
-  try {
-    for (const l of await registry.existingLinks(a, 0, Number.MAX_SAFE_INTEGER)) {
-      const sides = l.source.book.key === a && l.target.book.key === b ? ([l.source, l.target] as const) : l.target.book.key === a && l.source.book.key === b ? ([l.target, l.source] as const) : null;
-      if (!sides) continue;
-      add(any, sides[0], sides[1]);
-      if (SOURCE_VIEW_TYPES.has(parseConnectionType(l.declaredType).type)) add(structural, sides[0], sides[1]);
-    }
-  } catch {
-    /* a source without links: nothing to carry */
+  // a source without links answers []; a throw fails the step (the report shows it) instead of carrying nothing in silence (review C13, M7)
+  for (const l of await registry.existingLinks(a, 0, Number.MAX_SAFE_INTEGER)) {
+    const sides = l.source.book.key === a && l.target.book.key === b ? ([l.source, l.target] as const) : l.target.book.key === a && l.source.book.key === b ? ([l.target, l.source] as const) : null;
+    if (!sides) continue;
+    add(any, sides[0], sides[1]);
+    if (SOURCE_VIEW_TYPES.has(parseConnectionType(l.declaredType).type)) add(structural, sides[0], sides[1]);
   }
   return structural.size ? structural : any;
 }

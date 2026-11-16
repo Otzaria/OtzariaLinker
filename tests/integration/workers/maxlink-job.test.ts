@@ -81,6 +81,17 @@ describe("maxlinkJob", () => {
     const plan = planMaxLink({ selected: [byTitle("תרגום אונקלוס על בראשית").key], library: all, singleEngines: [] });
     const res = await maxlinkJob(reg, plan.steps, {}, {});
     expect(res.dbLinkKeys.length).toBeGreaterThan(100);
+    expect(res.dbLinksUnread).toBeUndefined();
+  });
+
+  it("a failed read of the database's links is reported with the book, never taken for 'no links' (review C13, M7)", async () => {
+    const { reg, all, byTitle } = await setup();
+    const onkelos = byTitle("תרגום אונקלוס על בראשית").key;
+    const plan = planMaxLink({ selected: [onkelos], library: all, singleEngines: [] });
+    vi.spyOn(reg, "existingLinks").mockRejectedValue(Object.assign(new Error("דף פגום במסד"), { code: "db/corrupt" }));
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    expect(res.dbLinksUnread).toEqual([{ key: onkelos, why: "דף פגום במסד" }]);
+    expect(res.dbLinkKeys).toEqual([]);
   });
 
   it("single-book engines run through their registered runner; one without a runner fails alone", async () => {
