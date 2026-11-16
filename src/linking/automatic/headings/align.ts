@@ -60,6 +60,15 @@ export const COST = {
 
 const NAME_MIN = 0.85;
 
+/*
+ * Kind words that name the same unit: a psalm IS a chapter of תהילים ("מזמור ל" of מדרש תהילים is פרק ל of
+ * the base, which heads its chapters "פרק"). Read as different kinds, "מזמור ל" could only land on the bare
+ * "(ל)" verse of every chapter long enough — 464 ambiguous and 343 high suggestions of מדרש תהילים, all but
+ * a handful wrong against the library's links (AUTOMATION_ENGINE.md §2, "מספר בלבד").
+ */
+const SAME_UNIT: ReadonlyMap<string, string> = new Map([["mizmor", "perek"], ["perek", "mizmor"]]);
+export const sameUnit = (a: string, b: string): boolean => a === b || SAME_UNIT.get(a) === b;
+
 function compat(c: PathElement, b: PathElement): { cost: number; ev: AlignEvent } | null {
   if (c.kind === "name" || b.kind === "name") {
     if (c.kind !== "name" || b.kind !== "name") return null;
@@ -76,7 +85,7 @@ function compat(c: PathElement, b: PathElement): { cost: number; ev: AlignEvent 
     return null;
   }
   if (c.n !== b.n) return null;
-  if (c.kind === b.kind) return { cost: 0, ev: { code: "same-number", c, b } };
+  if (sameUnit(c.kind, b.kind)) return { cost: 0, ev: { code: "same-number", c, b } };
   if (c.kind === "?" || b.kind === "?") return { cost: COST.inlineNumber, ev: { code: "inline-number", c, b } };
   return null;
 }
@@ -90,13 +99,13 @@ function compat(c: PathElement, b: PathElement): { cost: number; ev: AlignEvent 
 function skipCommentary(c: PathElement, ctx: AlignContext): number | null {
   if (c.kind === "name") return ctx.baseHasNamed ? COST.skip : COST.skipNamedNoise;
   if (c.kind === "?" || ctx.baseHasUnnamed) return null;
-  return ctx.baseKinds.has(c.kind) ? null : COST.skip;
+  return ctx.baseKinds.has(c.kind) || ctx.baseKinds.has(SAME_UNIT.get(c.kind) ?? "") ? null : COST.skip;
 }
 
 function skipBase(b: PathElement, ctx: AlignContext): number | null {
   if (b.kind === "name") return ctx.commentaryHasNamed ? COST.skip : COST.skipNamedNoise;
   if (b.kind === "?") return null;
-  return ctx.commentaryKinds.has(b.kind) ? null : COST.skip;
+  return ctx.commentaryKinds.has(b.kind) || ctx.commentaryKinds.has(SAME_UNIT.get(b.kind) ?? "") ? null : COST.skip;
 }
 
 interface Cell { readonly penalty: number; readonly events: readonly AlignEvent[] }
