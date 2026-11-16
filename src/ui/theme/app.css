@@ -394,6 +394,13 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .steps .opened { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .steps .opened .icon { color: var(--tertiary); }
 .steps .db-hint { margin-top: 8px; }
+/* the app bar on a tablet (820px): the brand keeps its icon in the workspace, without "מנהל הקישורים" — with "חזרה
+   להדרכה" or a running task, "ייצוא" fell to a row of its own (V5 UX audit U19, the owner's choice A). The button's
+   name stays for a screen reader (its aria-label). */
+@media (max-width: 899.98px) {
+  .app-bar.ws .brand-name { display: none; }
+  .app-bar.ws .brand { margin-inline-end: 4px; }
+}
 /* the app bar on a phone: one row. The advanced switch moves into the settings menu, the brand keeps its icon in
    the workspace, and a running task gets a row of its own */
 .narrow-only { display: none !important; }
