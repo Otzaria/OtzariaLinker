@@ -13,7 +13,7 @@ import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTit
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -285,7 +285,7 @@ export class AppStore {
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
     const opened = res.sources.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${opened.length.toLocaleString("he")} ספרים מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
+      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
       this.chooseRoles(opened);
       this.toWorkspace();
     } else if (res.documents.length) this.toWorkspace();
@@ -444,12 +444,22 @@ export class AppStore {
     });
   }
 
-  /** Shows both ends of a link. */
+  /**
+   * Shows both ends of a link, and keeps them marked as a suggestion's ends are (suggestions.show): a
+   * flash alone faded after a second and left nothing to say which line goes with which (V5 UX audit).
+   * Not while a link is open in the builder — the picks are its draft.
+   */
   revealLink(l: Link): void {
     const s = this.bookOf(l.source.book);
     const t = this.bookOf(l.target.book);
-    if (s) this.reveal("source", s.key, l.source.line);
-    if (t) this.reveal("target", t.key, l.target.line);
+    const at = (bookKey: string, e: Link["source"]): Pick => ({ bookKey, line: e.line, ...(e.end !== undefined && e.end > e.line && { end: e.end }) });
+    batch(() => {
+      if (s) this.reveal("source", s.key, l.source.line);
+      if (t) this.reveal("target", t.key, l.target.line);
+      if (this.editing.peek()) return;
+      if (s) this.pick.source.value = at(s.key, l.source);
+      if (t) this.pick.target.value = at(t.key, l.target);
+    });
   }
 
   showBook(side: Side, bookKey: string): void {
@@ -690,7 +700,7 @@ export class AppStore {
     });
     this.attachLinks();
     if (src.books.length) {
-      this.notify("success", `נפתחו ${src.books.length.toLocaleString("he")} ספרים מ־"${src.info.label}".`);
+      this.notify("success", `נפתחו ${booksCount(src.books.length)} מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
     }
     this.toWorkspace();

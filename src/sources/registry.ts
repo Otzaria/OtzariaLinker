@@ -52,6 +52,8 @@ export interface OpenResult {
 
 const HEAD = 4096;
 const MAX_TEXT_DOC = 256 * 1024 ** 2;
+/** how much of a book is read to tell its encoding when it opens */
+const SNIFF = 64 * 1024;
 /** a ZIP is read whole into memory to be inflated, so its size is capped first */
 const MAX_ZIP = 512 * 1024 ** 2;
 
@@ -207,7 +209,7 @@ export class SourceRegistry {
       case "text":
         if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
           texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()) });
-          const enc = decodeText(new Uint8Array(await f.blob.slice(0, 64 * 1024).arrayBuffer())).encoding;
+          const enc = decodeText(new Uint8Array(await f.blob.slice(0, SNIFF).arrayBuffer()), { partial: f.blob.size > SNIFF }).encoding;
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
         } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
         return;

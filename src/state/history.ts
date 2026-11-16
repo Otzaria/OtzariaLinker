@@ -349,3 +349,7 @@ export function travel(s: LinkState, position: number): LinkState {
 
 /** "קישור אחד" / "12 קישורים" — counts in action labels. */
 export const linksCount = (n: number): string => (n === 1 ? "קישור אחד" : `${n.toLocaleString("he")} קישורים`);
+/** "ספר אחד" / "200 ספרים" — and not "נפתחו 1 ספרים" (V5 UX audit) */
+export const booksCount = (n: number): string => (n === 1 ? "ספר אחד" : `${n.toLocaleString("he")} ספרים`);
+/** "קובץ אחד" / "1,200 קבצים" */
+export const filesCount = (n: number): string => (n === 1 ? "קובץ אחד" : `${n.toLocaleString("he")} קבצים`);

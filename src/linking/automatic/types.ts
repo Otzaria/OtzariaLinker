@@ -53,6 +53,13 @@ export interface Suggestion {
    * never written; the merge reads it so that a precise line inside the span agrees with it (merge.ts).
    */
   readonly citedSpan?: { readonly line: number; readonly end: number };
+  /**
+   * The single-line records a span on a Sefaria side is written as, when more than one (withoutRange: every
+   * line of `citedSpan` that can carry a ref_2, for a span of at most SPAN_EACH_LINE_MAX lines); the first
+   * is `target`, with `heRef2`. The reviewer sees ONE suggestion; approving makes one link per record, and
+   * rejecting removes them all (state/suggestions.ts). Absent: the suggestion is written as `target` alone.
+   */
+  readonly spanLines?: readonly { readonly line: number; readonly heRef2: string }[];
   /** canonical lower-case connection type, e.g. "commentary" */
   readonly declaredType: string;
   /** heRef_2 for the target, built from the target book's title and headings */
@@ -114,7 +121,7 @@ export interface ConfidenceThresholds {
 export const DEFAULT_THRESHOLDS: ConfidenceThresholds = { certain: 0.95, high: 0.85, possible: 0.6, ambiguityMargin: 0.05 };
 
 /**
- * A link that stands for a whole span but writes only its first line (a range collapsed on a Sefaria side:
+ * A link that stands for a whole span but is written as single lines (a range collapsed on a Sefaria side:
  * `citedSpan`, core/links/sefaria-owned.ts withoutRange) is not the exact place, so it is never "certain" —
  * only "certain" is approved in bulk. Measured on 16 commentaries (LIBRARY_BENCHMARK.md §0.6): such links
  * left "certain" agreed with the library's own line in 82.3% of the judged ones, the rest in 99.8%.
@@ -124,8 +131,13 @@ export function capSpanned(confidence: Confidence, citedSpan: { readonly line: n
   if (!citedSpan || confidence !== "certain") return { confidence };
   return {
     confidence: "high",
-    warning: { code: "range/sefaria-not-exact", text: `הקישור עומד לשורות ${citedSpan.line + 1}–${citedSpan.end + 1}, אבל בספר ספריא נכתבת רק הראשונה שבהן. זה אינו המקום המדויק, ולכן הוא לבדיקה ולא לאישור בקבוצה.` },
+    warning: { code: "range/sefaria-not-exact", text: `הקישור עומד לשורות ${citedSpan.line + 1}–${citedSpan.end + 1}, אבל בספר ספריא אין טווח, והוא נכתב כשורות בודדות. זה אינו המקום המדויק, ולכן הוא לבדיקה ולא לאישור בקבוצה.` },
   };
+}
+
+/** The single-line records a suggestion is written as: its `spanLines`, else its target alone. */
+export function recordsOf(s: Suggestion): readonly { readonly line: number; readonly heRef2: string }[] {
+  return s.spanLines?.length ? s.spanLines : [{ line: s.target.line, heRef2: s.heRef2 }];
 }
 
 export function confidenceOf(score: number, runnerUp: number | null, t: ConfidenceThresholds = DEFAULT_THRESHOLDS): Confidence {

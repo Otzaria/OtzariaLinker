@@ -63,8 +63,9 @@ describe("mergeSuggestions — the same link from several engines", () => {
 });
 
 describe("mergeSuggestions — conflicts and coarser agreement", () => {
-  it("different targets for the same commentary line from different engines → ambiguous, each with the other as alternative", () => {
-    const { suggestions, stats } = mergeSuggestions([H(5, 10, "certain"), D(5, 14, "high")]);
+  it("different targets for the same commentary line that the evidence does not settle → ambiguous, each with the other as alternative", () => {
+    // two certain sides: nothing tells them apart
+    const { suggestions, stats } = mergeSuggestions([H(5, 10, "certain"), D(5, 14, "certain")]);
     expect(suggestions).toHaveLength(2);
     for (const s of suggestions) {
       expect(s.confidence).toBe("ambiguous");
@@ -73,7 +74,7 @@ describe("mergeSuggestions — conflicts and coarser agreement", () => {
     }
     const h = suggestions.find((s) => s.engine === "headings")!;
     expect(h.alternatives[0]!.target).toEqual(side(B, 14));
-    expect(stats.conflicts).toBe(2);
+    expect(stats).toMatchObject({ conflicts: 2, settled: 0, outweighed: 0 });
   });
 
   it("different lines of the commentary are not a conflict", () => {
@@ -102,6 +103,56 @@ describe("mergeSuggestions — conflicts and coarser agreement", () => {
   });
 });
 
+describe("mergeSuggestions — a conflict the evidence settles", () => {
+  it("the only certain side wins, one step down; the other is folded into it as an alternative, with the reason", () => {
+    const { suggestions, stats } = mergeSuggestions([H(5, 10, "certain"), D(5, 14, "high")]);
+    expect(suggestions).toHaveLength(1);
+    const s = suggestions[0]!;
+    expect(s).toMatchObject({ engine: "headings", confidence: "high" });
+    expect(s.rules).toContain("maxlink/outweighs");
+    expect(s.rules).not.toContain("maxlink/conflict");
+    expect(s.warnings.map((w) => w.code)).toContain("maxlink/outweighs");
+    expect(s.alternatives[0]).toMatchObject({ target: side(B, 14) });
+    expect(s.alternatives[0]!.reasons[0]!.code).toBe("maxlink/outweighed");
+    // the loser is not dropped: it stays among the members, and a re-merge decides the same
+    expect(s.members.map((m) => m.suggestion.engine).sort()).toEqual(["dibur-hamatchil", "headings"]);
+    expect(stats).toMatchObject({ input: 2, output: 1, conflicts: 0, settled: 1, outweighed: 1 });
+  });
+
+  it("without a certain side, the quote (dibur-hamatchil) outweighs the headings at any level — and is never raised by winning", () => {
+    const win = (h: Confidence, d: Confidence) => mergeSuggestions([H(5, 10, h), D(5, 14, d)]).suggestions;
+    for (const [h, d, out] of [
+      ["high", "high", "possible"],
+      ["ambiguous", "high", "possible"],
+      ["high", "possible", "possible"],
+      ["high", "ambiguous", "ambiguous"],
+      ["ambiguous", "ambiguous", "ambiguous"],
+    ] as const) {
+      const list = win(h, d);
+      expect(list).toHaveLength(1);
+      expect(list[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: out });
+      expect(list[0]!.alternatives.map((a) => a.target)).toContainEqual(side(B, 10));
+    }
+    // the quote is certain, the heading not: certain → high
+    expect(win("high", "certain")[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: "high" });
+  });
+
+  it("in a book pair whose structure is in doubt, a certain heading does not win by its certainty: the quote does", () => {
+    // as in "a book pair whose engines mostly disagree": the Rif's own dapim read as the Talmud's
+    const pair = Array.from({ length: 12 }, (_, i) => [H(i, i, "certain"), D(i, i + 40, "high")]).flat();
+    const { suggestions, stats } = mergeSuggestions(pair);
+    expect(stats.suspectPairs).toBe(1);
+    expect(suggestions).toHaveLength(12);
+    for (const s of suggestions) expect(s).toMatchObject({ engine: "dibur-hamatchil", confidence: "possible" });
+  });
+
+  it("is a function of the raw suggestions: merging the merged list again settles the same way", () => {
+    const once = mergeSuggestions([H(5, 10, "high"), D(5, 14, "possible"), H(6, 11, "certain"), D(6, 20, "high")]);
+    expect(mergeSuggestions(once.suggestions).suggestions).toEqual(once.suggestions);
+    expect(mergeSuggestions([D(6, 20, "high"), H(5, 10, "high"), D(5, 14, "possible"), H(6, 11, "certain")]).suggestions).toEqual(once.suggestions);
+  });
+});
+
 describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its span (citedSpan)", () => {
   // headings on a Sefaria base: the section's first line is written, the section stays in citedSpan
   const Hs = (c: number, b: number, end: number, conf: Confidence): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B, b), conf, { citedSpan: { line: b, end } }), focus: C.key });
@@ -116,8 +167,9 @@ describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its spa
     expect(suggestions[0]!.rules).toContain("maxlink/consistent");
     expect(stats).toMatchObject({ consistent: 1, conflicts: 0 });
     // the bug it fixes: without the span the section's first line and the ד"ה line conflicted, both ambiguous
+    // (now settled for the quote, settle in merge.ts — but a conflict all the same, not an agreement)
     const bare = mergeSuggestions([{ suggestion: sg("headings", side(C, 5), side(B, 10), "high"), focus: C.key }, Dc(5, 15, "possible")]);
-    expect(bare.stats.conflicts).toBe(2);
+    expect(bare.stats).toMatchObject({ consistent: 0, settled: 1, outweighed: 1 });
   });
 
   it("a ד\"ה on the section's first line is inside it, not the same link: consistent (at most high), never raised to certain", () => {
@@ -131,7 +183,7 @@ describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its spa
 
   it("a collapsed ד\"ה span inside the section agrees too; one reaching past the section's end conflicts, as the ranges did", () => {
     expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 15, "high", { line: 15, end: 16 })]).stats).toMatchObject({ consistent: 1, conflicts: 0 });
-    expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 19, "high", { line: 19, end: 22 })]).stats.conflicts).toBe(2);
+    expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 19, "high", { line: 19, end: 22 })]).stats).toMatchObject({ consistent: 0, settled: 1, outweighed: 1 });
   });
 
   it("a link that writes only the first line of its span is never certain: not by itself, not by agreement", () => {

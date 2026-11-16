@@ -23,8 +23,11 @@ export function RelinkDialog({ onClose }: { onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const books = [...store.books.value.values()];
   const withLinks = useMemo(() => books.filter((b) => store.linksOfBook(b.key).length > 0), [books]);
-  const [oldKey, setOld] = useState(withLinks[0]?.key ?? "");
-  const [newKey, setNew] = useState(() => books.find((b) => b.key !== oldKey && b.title === store.refOf(oldKey).title)?.key ?? "");
+  // the old edition is the book with links that is open twice (old and new); the first book with links
+  // was often the other end of those links — the base the old edition's links point to
+  const twin = (key: string) => books.find((b) => b.key !== key && b.title === store.refOf(key).title);
+  const [oldKey, setOld] = useState((withLinks.find((b) => twin(b.key)) ?? withLinks[0])?.key ?? "");
+  const [newKey, setNew] = useState(() => twin(oldKey)?.key ?? "");
   const [filter, setFilter] = useState<RelinkVerdict>("review");
   const [view, setView] = useState<"links" | "lines">("links");
   const r = store.relink.value;

@@ -232,6 +232,25 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
     expect(through.notes[0]!.text).toContain("דרך");
   });
 
+  it("a place linked to a span of a Sefaria base: a record per line with a ref_2, never a range (sefaria-owned.ts withoutRange)", async () => {
+    // the intermediate's line 3 is linked to the base's lines 2–4; the base is a Sefaria book with heRefs
+    const heb = ["", "א", "ב", "ג"];
+    const withRefs: Record<string, { index: number; text: string; anchorText: string; heading: number | null; heRef: string | null }[]> = {
+      ...BOOKS,
+      "d:1": BOOKS["d:1"]!.map((l) => (l.heading === null ? { ...l, heRef: `בראשית, א, ${heb[l.index - 1]}` } : l)),
+    };
+    const spanLinks = [{ id: "s1", source: { book: base, line: 2, end: 4 }, target: { book: mid, line: 3 }, declaredType: "commentary" }, links[1]!];
+    const reg = { lines: async (key: string) => withRefs[key]!, existingLinks: async (key: string) => spanLinks.filter((l) => l.source.book.key === key || l.target.book.key === key) } as unknown as SourceRegistry;
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    const res = await maxlinkJob(reg, plan.steps, { sefariaOwned: ["d:1"] }, {});
+    const one = res.items[1]!.result!.suggestions.find((s) => s.source.line === 3)!;
+    expect(one.target.end).toBeUndefined();
+    expect(one.citedSpan).toEqual({ line: 2, end: 4 });
+    expect(one.spanLines?.map((x) => x.line)).toEqual([2, 3, 4]);
+    expect(one.spanLines?.every((x) => x.heRef2.startsWith("בראשית"))).toBe(true);
+    expect(one.confidence).not.toBe("certain");
+  });
+
   it("a citation inside the intermediate (REFERENCE, LINKER) is not where its line stands on the base", async () => {
     const far: Record<string, ReturnType<typeof lines>> = { ...BOOKS, "d:1": lines(["<h1>בסיס</h1>", "<h2>סימן א</h2>", "סעיף ראשון", "סעיף שני", "סעיף שלישי", "שורה", "שורה", "שורה", "שורה", "סימן אחר"]) };
     const cited = [...links, { id: "l3", source: { book: mid, line: 3 }, target: { book: base, line: 9 }, declaredType: "reference" }];

@@ -99,6 +99,24 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     store.undo();
     expect(store.linkState.value.links.get(id)!.status).toBe("existing");
   });
+
+  it("showing a link keeps both its lines marked in the readers; not while a link is edited (V5 UX audit)", async () => {
+    const { store } = makeStore();
+    const text = JSON.stringify([{ line_index_1: 2, heRef_2: "x", path_2: "בראשית.txt", line_index_2: 3, line_index_2_end: 5, "Conection Type": "commentary" }], null, 2);
+    await store.openFiles([DB, COMMENTARY, { path: "פירוש על בראשית_links.json", blob: new Blob([strToU8(text)]) }]);
+    const link = store.allLinks.value[0]!;
+    const comm = store.bookOf(link.source.book)!;
+    const base = store.bookOf(link.target.book)!;
+    store.revealLink(link);
+    expect(store.pick.source.value).toEqual({ bookKey: comm.key, line: 1 });
+    expect(store.pick.target.value).toEqual({ bookKey: base.key, line: 2, end: 4 });
+    expect(store.focus.target.value).toMatchObject({ line: 2 });
+    // a link open in the builder: its draft is the picks, showing another link must not change it
+    store.pickLine("source", comm.key, 0);
+    store.editing.value = link.id;
+    store.revealLink(link);
+    expect(store.pick.source.value).toEqual({ bookKey: comm.key, line: 0 });
+  });
 });
 
 describe("AppStore — which book goes in which reader", () => {

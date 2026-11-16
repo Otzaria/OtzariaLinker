@@ -13,7 +13,7 @@ const sg = (engine: EngineId, c: number, b: number, confidence: Confidence): Sug
 });
 
 describe("buildReport", () => {
-  const items = [sg("headings", 1, 1, "certain"), sg("dibur-hamatchil", 1, 1, "high"), sg("headings", 2, 2, "certain"), sg("headings", 3, 3, "possible"), sg("dibur-hamatchil", 3, 5, "high"), sg("headings", 4, 4, "certain")].map((suggestion) => ({ suggestion, focus: C.key }));
+  const items = [sg("headings", 1, 1, "certain"), sg("dibur-hamatchil", 1, 1, "high"), sg("headings", 2, 2, "certain"), sg("headings", 3, 3, "certain"), sg("dibur-hamatchil", 3, 5, "certain"), sg("headings", 4, 4, "certain")].map((suggestion) => ({ suggestion, focus: C.key }));
   const merged = mergeSuggestions(items);
   const info: MaxLinkRunInfo = {
     scope: "המקור",
@@ -33,7 +33,8 @@ describe("buildReport", () => {
 
   it("counts overall, with the live states", () => {
     expect(rep.overall).toMatchObject({ booksChecked: 2, booksIdentified: 1, steps: 3, links: 5, approved: 1, rejected: 1, existing: 1, duplicates: 1, agreements: 1, conflicts: 2, errors: 1 });
-    // line 1 (agreement → certain), line 2 certain + approved, line 3 two conflicting (ambiguous): one rejected,
+    // line 1 (agreement → certain), line 2 certain + approved, line 3 two conflicting certain (ambiguous: nothing
+    // settles it, merge.ts settle): one rejected,
     // one left for review; line 4 certain but already in the library
     expect(rep.overall.certain).toBe(2);
     expect(rep.overall.review).toBe(1);
@@ -46,6 +47,13 @@ describe("buildReport", () => {
     const h = rep.perEngine.find((r) => r.key === "headings")!;
     expect(h).toMatchObject({ steps: 1, links: 4, agreements: 1 });
     expect(rep.perEngine.find((r) => r.key === "footnotes")).toMatchObject({ errors: 1, links: 0 });
+  });
+
+  it("a conflict the merge settled still counts as a conflict, on the one suggestion that won it", () => {
+    const won = mergeSuggestions([sg("headings", 3, 3, "high"), sg("dibur-hamatchil", 3, 5, "high")].map((suggestion) => ({ suggestion, focus: C.key })));
+    expect(won.stats).toMatchObject({ settled: 1, outweighed: 1 });
+    const r = buildReport({ ...info, stats: won.stats }, won.suggestions, () => undefined);
+    expect(r.overall).toMatchObject({ links: 1, conflicts: 1, review: 1 });
   });
 
   it("CSV: BOM, CRLF, a header and one line per level", () => {

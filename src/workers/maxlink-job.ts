@@ -1,7 +1,8 @@
 import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection-type";
 import { linesFingerprint } from "../core/text/fingerprint";
-import type { BookRef } from "../core/links/model";
-import { runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import type { BookRef, LinkSide } from "../core/links/model";
+import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
+import { capSpanned, runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -287,6 +288,10 @@ export async function maxlinkJob(
 async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { kind: "pair" }>, results: ReadonlyMap<string, EngineResult>, options: Record<string, unknown>, ctx: EngineContext, partLinks: Map<string, Map<string, number[]>>, fps: Map<string, string>): Promise<EngineResult> {
   const out = new Map<string, Suggestion>();
   const notes: Reason[] = [];
+  // the base may be a Sefaria book: no range on its side — the one rule every engine follows (sefaria-owned.ts withoutRange)
+  const owned = sefariaOwnedOf(options.sefariaOwned as readonly string[] | undefined)(step.target);
+  const targetLines = owned ? (await load(registry, step.target, fps)).lines : null;
+  const block = targetLines ? refBlockOf(targetLines) : undefined;
   for (const via of step.relation.through ?? []) {
     let r = results.get(`${step.engine}|${step.source.key}>${via.book.key}`);
     if (!r) {
@@ -318,22 +323,29 @@ async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { ki
       const id = `${sg.engine}:through:${step.source.key}#${mine.line}>${step.target.key}#${from}`;
       if (out.has(id)) continue;
       carried++;
+      const whole: LinkSide = { book: step.target, line: from, ...(to > from && { end: to }) };
+      const { target, citedSpan, lines: each, reason: firstRef } = owned ? withoutRange(whole, block) : { target: whole, citedSpan: undefined, lines: undefined, reason: undefined };
+      const capped = capSpanned(sg.confidence, citedSpan);
+      const heRefAt = (l: number): string => targetLines?.[l]?.index === l ? (targetLines[l]!.heRef ?? "") : (targetLines?.find((x) => x.index === l)?.heRef ?? "");
       out.set(id, {
         id,
         engine: sg.engine,
         source: { book: step.source, line: mine.line, ...(mine.end !== undefined && mine.end !== mine.line && { end: mine.end }) },
-        target: { book: step.target, line: from, ...(to > from && { end: to }) },
+        target,
+        ...(citedSpan && { citedSpan }),
+        ...(each && { spanLines: each.map((l) => ({ line: l, heRef2: heRefAt(l) })) }),
         declaredType: "source",
-        heRef2: "",
+        heRef2: owned ? heRefAt(target.line) : "",
         score: sg.score,
-        confidence: sg.confidence,
+        confidence: capped.confidence,
         reasons: [
           { code: "maxlink/through", text: `השורה מפרשת את שורה ${mid.line + 1} ב־"${via.book.title}", והמסד מקשר את השורה ההיא ל־"${step.target.title}" כאן.` },
           ...sg.reasons,
+          ...(firstRef ? [firstRef] : []),
         ],
         rules: [...sg.rules, "maxlink/through"],
         alternatives: [],
-        warnings: sg.warnings,
+        warnings: capped.warning ? [...sg.warnings, capped.warning] : sg.warnings,
       });
     }
     notes.push({

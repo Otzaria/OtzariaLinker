@@ -44,7 +44,7 @@ import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./mark
 import { commentatorOfTitle, type Commentator } from "./addressee";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
 import { contextScore, contextWords, lineKeys, pickByContext, pickByOrder, type TieCandidate } from "./tie-break";
-import { sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { refBlockOf, sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
 export interface DhOptions extends SefariaOwnedOption {
   /** base line range (0-based, inclusive) to search for a commentary line; null → the engine's own default */
@@ -1362,16 +1362,23 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
   // ── shape the suggestions ────────────────────────────────────────────────────────────────
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
   const side = (book: BookRef, line: number, end?: number): LinkSide => (end !== undefined && end > line ? { book, line, end } : { book, line });
+  const block = baseRanges ? undefined : refBlockOf(base.lines);
   const suggestions: Suggestion[] = placements.map((p) => {
-    // on a Sefaria base: the first line, with the quote's whole span kept as citedSpan (withoutRange)
-    const { target: baseSide, citedSpan } = baseRanges ? { target: side(base.book, p.base, p.baseEnd), citedSpan: undefined } : withoutRange(side(base.book, p.base, p.baseEnd));
+    // on a Sefaria base: the first line that can carry a record, with the quote's whole span kept as citedSpan (withoutRange)
+    const { target: baseSide, citedSpan, lines: each, reason: firstRef } = baseRanges
+      ? { target: side(base.book, p.base, p.baseEnd), citedSpan: undefined, lines: undefined, reason: undefined }
+      : withoutRange(side(base.book, p.base, p.baseEnd), block);
     const cSide = side(commentary.book, p.cLine);
     const baseLine = bLines[posOf.get(p.base)!];
+    /** the line written: the quote's first, or the first after it that can carry a record (firstRef) */
+    const writtenLine = baseSide.line === p.base ? baseLine : bLines[posOf.get(baseSide.line)!];
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
     /*
-     * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts.
+     * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts —
+     * unless withoutRange writes it otherwise: a record per line for a short span, or the first line that
+     * can carry a record (a heading, or a line with no ref_2 from its heRef, cannot) — its reason says so.
      * Measured against the library's own links of such quotes (LIBRARY_BENCHMARK.md §0.6): where they
      * link exactly one end of the span, it is the first line 1,138 times and the last 387; the line
      * holding most of the quoted words was right less often than the first (282 vs 371 where they
@@ -1379,7 +1386,12 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
      */
     if (citedSpan) {
       rules.push("dh/range-sefaria");
-      reasons.push(r("dh/range-sefaria", `הציטוט נמשך בשורות ${citedSpan.line + 1}–${citedSpan.end + 1} בספר הבסיס. זה ספר ספריא, והסנכרון של הספרייה אינו שומר טווח בצד שלו, ולכן הקישור לשורה ${citedSpan.line + 1}, שבה מתחיל הדיבור המתחיל.`));
+      const lines = `הציטוט נמשך בשורות ${citedSpan.line + 1}–${citedSpan.end + 1} בספר הבסיס.`;
+      reasons.push(r("dh/range-sefaria", firstRef ? lines : `${lines} זה ספר ספריא, והסנכרון של הספרייה אינו שומר טווח בצד שלו, ולכן הקישור לשורה ${citedSpan.line + 1}, שבה מתחיל הדיבור המתחיל.`));
+    }
+    if (firstRef) {
+      rules.push(each ? "dh/each-line" : "dh/first-ref");
+      reasons.push(firstRef);
     }
     let confidence = p.confidence;
     if (unaddressed?.has(p.cLine) && (confidence === "certain" || confidence === "high")) {
@@ -1418,7 +1430,15 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     };
     return policy.anchors
       ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), target: cSide, declaredType: types.anchored, heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
-      : { ...common, source: cSide, target: baseSide, ...(citedSpan && { citedSpan }), declaredType: types.plain, heRef2: heRefOf(base, bPath, baseLine, p.base) };
+      : {
+          ...common,
+          source: cSide,
+          target: baseSide,
+          ...(citedSpan && { citedSpan }),
+          ...(each && { spanLines: each.map((l) => ({ line: l, heRef2: heRefOf(base, bPath, bLines[posOf.get(l)!], l) })) }),
+          declaredType: types.plain,
+          heRef2: heRefOf(base, bPath, writtenLine, baseSide.line),
+        };
   });
 
   return { suggestions, notes, unmatched };

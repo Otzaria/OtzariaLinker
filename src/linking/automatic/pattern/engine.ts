@@ -1,5 +1,5 @@
 import { parseConnectionType } from "../../../core/links/connection-type";
-import { sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { refBlockOf, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import { storedForm } from "../../../core/links/stored-form";
 import { anchorLabelFromHeRef, withAnchorLabel } from "../../../core/text/anchor-label";
@@ -177,6 +177,7 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
   const anchors = anchorDecision(source.book, target.book, declaredType, options.anchors ?? "auto", sefariaOwned);
   // no range on a Sefaria target: the sync remaps only the start line from ref_2 (validate.ts sefaria/range-side)
   const ranges = !sefariaOwned(target.book);
+  const block = ranges ? undefined : refBlockOf(target.lines);
   notes.push(anchors.reason);
 
   const suggestions: Suggestion[] = [];
@@ -189,10 +190,10 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
     }
     perTarget.set(p.target.line, (perTarget.get(p.target.line) ?? 0) + 1);
     // on a Sefaria target: the first line, with the whole place kept as citedSpan (withoutRange)
-    const { target: to, citedSpan } = ranges ? { target: p.target, citedSpan: undefined } : withoutRange(p.target);
+    const { target: to, citedSpan, lines: each, reason: firstRef } = ranges ? { target: p.target, citedSpan: undefined, lines: undefined, reason: undefined } : withoutRange(p.target, block);
     // the number as a label only when the link reads like a note ("אות יב"); a reference keeps its plain heRef
     const label = mode === "chapter-line" ? toGematria(m.num) : null;
-    const heRef2 = withAnchorLabel(heRefOf(p.target.line), label);
+    const heRef2 = withAnchorLabel(heRefOf(to.line), label);
     const keepLabel = label !== null && anchorLabelFromHeRef(heRef2) === label;
     const anchor: RawAnchor | undefined = anchors.allowed ? { rawStart: m.rawStart, rawEnd: m.rawEnd, ...(keepLabel ? { label } : {}) } : undefined;
     const runnerUp = p.alternatives.length ? p.alternatives[0]!.score : null;
@@ -205,12 +206,13 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
       ...(anchor ? { anchor } : {}),
       target: to,
       ...(citedSpan && { citedSpan }),
+      ...(each && { spanLines: each.map((l, i) => ({ line: l, heRef2: i === 0 ? heRef2 : heRefOf(l) })) }),
       declaredType,
       heRef2,
       score: p.score,
       confidence: capped.confidence,
-      reasons: [r("pattern/match", `בשורה נמצא "${m.shown.trim()}", ${read}.`), ...p.reasons],
-      rules: [`pattern.${mode}`, ...(preset ? [`pattern.preset.${preset.id}`] : []), ...p.rules],
+      reasons: [r("pattern/match", `בשורה נמצא "${m.shown.trim()}", ${read}.`), ...p.reasons, ...(firstRef ? [firstRef] : [])],
+      rules: [`pattern.${mode}`, ...(preset ? [`pattern.preset.${preset.id}`] : []), ...p.rules, ...(firstRef ? [each ? "pattern.each-line" : "pattern.first-ref"] : [])],
       alternatives: p.alternatives,
       warnings: capped.warning ? [...p.warnings, capped.warning] : p.warnings,
     });

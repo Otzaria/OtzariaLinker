@@ -26,11 +26,18 @@ export interface EngineInfo {
   singleBook?: boolean;
   /** a pair engine that never runs in a batch by title (it needs a pair the user chose, e.g. a pattern of their own) */
   noBatch?: boolean;
+  /**
+   * What the engine places a line by: "words" — the line's own text, a quote of the base (dibur-hamatchil)
+   * or a reference it writes out (citations, pattern); "structure" — the books' layout, headings or note
+   * numbers. The merge settles a conflict between the two kinds by it (merge.ts, AUTOMATION_ENGINE.md §5.3).
+   */
+  evidence: "words" | "structure";
 }
 
 export const ENGINES: readonly EngineInfo[] = [
   {
     id: "headings",
+    evidence: "structure",
     title: "לפי כותרות",
     sourceRole: "הפירוש",
     targetRole: "ספר הבסיס",
@@ -38,6 +45,7 @@ export const ENGINES: readonly EngineInfo[] = [
   },
   {
     id: "dibur-hamatchil",
+    evidence: "words",
     title: "לפי דיבור המתחיל",
     sourceRole: "הפירוש",
     targetRole: "ספר הבסיס",
@@ -45,6 +53,7 @@ export const ENGINES: readonly EngineInfo[] = [
   },
   {
     id: "footnotes",
+    evidence: "structure",
     title: "הערות שוליים",
     sourceRole: "הספר עם סימני ההערות",
     targetRole: "ספר ההערות",
@@ -53,6 +62,7 @@ export const ENGINES: readonly EngineInfo[] = [
   },
   {
     id: "citations",
+    evidence: "words",
     title: "מראי מקומות",
     sourceRole: "הספר שבו נמצאות ההפניות",
     targetRole: "כל הספרים הפתוחים",
@@ -61,6 +71,7 @@ export const ENGINES: readonly EngineInfo[] = [
   },
   {
     id: "pattern",
+    evidence: "words",
     title: "לפי תבנית",
     sourceRole: "הספר עם ההפניות",
     targetRole: "הספר שאליו מפנים",

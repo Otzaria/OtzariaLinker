@@ -94,15 +94,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 {alt && alt.heldBack.length > 0 && <Stat n={alt.heldBack.length} label="ספרים שמבני הכותרות שלהם לא ייוצאו" bad />}
               </div>
               <label style="display:grid;gap:4px">
-                <span class="muted">הייצוא מיועד ל…</span>
+                {/* the guided flow's words for the same choice (state/guided-flow.ts, the plan step) */}
+                <span class="muted">בשביל מה הקישורים?</span>
                 <select
                   value={store.exportPurpose.value}
                   onChange={(e) => ((store.exportPurpose.value = e.currentTarget.value as "submission" | "private"), replan())}
                   aria-label="למה מיועד הייצוא"
                   title={`ספרי ספריא נקבעים לפי ${store.sefariaTitles.value.label}`}
                 >
-                  <option value="submission">שליחה לספריית אוצריא (מומלץ): כללי הסנכרון של הספרייה מחייבים</option>
-                  <option value="private">{advanced ? "שימוש פרטי: חסר ref_1/ref_2 או טווח בספר ספריא — רק אזהרה" : "שימוש פרטי: ציון ספריא חסר או טווח בספר ספריא — רק אזהרה"}</option>
+                  <option value="submission">לשלוח לספריית אוצריא (מומלץ) — הכלי בודק לפי הכללים של הספרייה</option>
+                  <option value="private">{advanced ? "לשימוש שלי בלבד — חסר ref_1/ref_2 או טווח בספר ספריא: רק אזהרה" : "לשימוש שלי בלבד — כללי הספרייה לא עוצרים קישורים"}</option>
                 </select>
               </label>
               {advanced && (
