@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceBook } from "../../src/core/books";
@@ -12,6 +13,7 @@ import { maxlinkJob } from "../../src/workers/maxlink-job";
 import { DB, fileBlob, fingerprint, oracle, cleanupTmp } from "./env";
 import {
   addCounters,
+  detailRows,
   allocate,
   CONFIDENCES,
   count,
@@ -64,16 +66,27 @@ import {
  *   BENCH_STEP_S    a step that runs longer is stopped and its partial result kept (default 600)
  *   BENCH_DESIGN    the owners the report measures: sample | full (default: full only for BENCH_MODE=full)
  *   BENCH_RERUN_STOPPED=1  run again the books whose steps hit BENCH_STEP_S (give it more time)
- *   BENCH_ONLY      "<title>;<title>": run only these books, cached or not (into runs-~only-<k>of<n>.jsonl,
+ *   BENCH_ONLY      "<title or id>;<title or id>": run only these books, cached or not (into runs-~only-<k>of<n>.jsonl,
  *                   which is read after the other files and so replaces their records)
  *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
  *   BENCH_SPANS     all (default): a suggestion's citedSpan counts as its other end; citations: only a
  *                   citation's — a structural range collapsed on a Sefaria side is judged by its written line
+ *   BENCH_RAW=1     keep each run's raw engine output (before the merge) in <BENCH_DIR>/raw/<book id>.json.gz
+ *   BENCH_MODE=replay  run no engine: merge and score again the raw outputs BENCH_RAW kept (all of them, or
+ *                   BENCH_ONLY) — a change to merge.ts measured in minutes, not hours. Writes
+ *                   replay-<BENCH_TAG>.jsonl (one record per book, as runs-*.jsonl) and detail-<BENCH_TAG>.jsonl.gz
+ *                   (every structural suggestion the merge touched: ambiguous, in a conflict, or with an
+ *                   ambiguous member — its engines, members, rules and both verdicts; BENCH_TEXT_EVERY=k: one
+ *                   row in k with the words of its lines)
  *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
  *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
  *                   there), the oracle's population (oracle-*.json) and the reports
  */
-const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report";
+const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report" | "replay";
+const RAW = !!process.env.BENCH_RAW;
+const TAG = process.env.BENCH_TAG ?? "replay";
+/** BENCH_TEXT_EVERY=k: in a replay, one detail row in k (by rank) carries the words of its lines, for reading by hand */
+const TEXT_EVERY = Number(process.env.BENCH_TEXT_EVERY ?? 0);
 /** which owners the report measures: the sample (default) or all of them (default for BENCH_MODE=full) */
 const DESIGN = (process.env.BENCH_DESIGN ?? (MODE === "full" ? "full" : "sample")) as "sample" | "full";
 const RERUN_STOPPED = !!process.env.BENCH_RERUN_STOPPED;
@@ -291,9 +304,22 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
         const next = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id)).slice(0, 5).map((id) => `${byId.get(id)!.title} (${byId.get(id)!.lineCount} lines, ${(stepsOf.get(id) ?? []).map((s) => s.engine).join("+")})`);
         return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines, `next in this shard: ${next.join("; ")}`].join("\n"));
       }
+      if (MODE === "replay") {
+        const only = ONLY_BOOKS && new Set(books.filter((b) => (ONLY_BOOKS.includes(b.title) || ONLY_BOOKS.includes(String(idOf(b.key))))).map((b) => idOf(b.key)));
+        const ids = readdirSync(join(DIR, "raw")).map((f) => Number(f.split(".")[0])).filter((x) => !only || only.has(x)).sort((a, b) => a - b);
+        const out = join(DIR, `replay-${TAG}.jsonl`);
+        writeFileSync(out, "");
+        const detail: string[] = [];
+        for (const id of ids) {
+          const rec = await replayBook(id, isRelated, own, detail);
+          appendFileSync(out, JSON.stringify(rec) + "\n");
+        }
+        writeFileSync(join(DIR, `detail-${TAG}.jsonl.gz`), gzipSync(detail.join("\n")));
+        return void console.log(`[bench] replay ${TAG}: ${ids.length} books, ${detail.length} detail rows`);
+      }
       if (MODE !== "report") {
         // BENCH_ONLY: run (again) just these books, whatever the cache holds — into runs-~only.jsonl, read last
-        const only = ONLY_BOOKS && new Set(books.filter((b) => ONLY_BOOKS.includes(b.title)).map((b) => idOf(b.key)));
+        const only = ONLY_BOOKS && new Set(books.filter((b) => (ONLY_BOOKS.includes(b.title) || ONLY_BOOKS.includes(String(idOf(b.key))))).map((b) => idOf(b.key)));
         const mine = only
           ? [...only].filter((_, i) => i % SHARDS === SHARD)
           : order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id) || (RERUN_STOPPED && done.get(id)!.stopped.length > 0));
@@ -421,15 +447,42 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
       if (it.result?.notes.some((n) => n.code === "engine/aborted")) rec.stopped.push(it.stepId);
       for (const sg of it.result?.suggestions ?? []) items.push({ suggestion: sg, focus: step.source.key });
     }
+    rec.stepMs = res.items.map((i) => i.ms);
+    if (RAW) {
+      mkdirSync(join(DIR, "raw"), { recursive: true });
+      writeFileSync(join(DIR, "raw", `${id}.json.gz`), gzipSync(JSON.stringify({ rec, items, ref: res.dbLinkKeys })));
+    }
+    return scoreRun(rec, items, res.dbLinkKeys, isRelated, own, t0);
+  }
+
+  /** a raw output BENCH_RAW kept: merged and scored again with the current merge.ts (BENCH_MODE=replay) */
+  async function replayBook(id: number, isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner, detail: string[]): Promise<BookRecord> {
+    const t0 = Date.now();
+    const raw = JSON.parse(gunzipSync(readFileSync(join(DIR, "raw", `${id}.json.gz`))).toString("utf8")) as { rec: BookRecord; items: MergeItem[]; ref: string[] };
+    const rec: BookRecord = { ...raw.rec, counters: {}, matched: {} };
+    const out = await scoreRun(rec, raw.items, raw.ref, isRelated, own, t0, detail);
+    return { ...out, ms: raw.rec.ms };
+  }
+
+  async function scoreRun(
+    rec: BookRecord,
+    items: readonly MergeItem[],
+    ref: readonly string[],
+    isRelated: (a: number, b: number) => boolean,
+    own: (type: string, s: number, t: number) => Owner,
+    t0: number,
+    detail?: string[],
+  ): Promise<BookRecord> {
+    const id = rec.id;
+    const book = byId.get(id)!;
     // as the app merges (state/maxlink.ts): the database's links as the calibration reference
-    const merged = mergeSuggestions(items, { reference: new Set(res.dbLinkKeys) });
+    const merged = mergeSuggestions(items, { reference: new Set(ref) });
     rec.raw = merged.stats.input;
     rec.merged = merged.stats.output;
     rec.contradictedPairs = merged.stats.contradictedPairs ?? 0;
-    rec.stepMs = res.items.map((i) => i.ms);
     // examples are kept for one book in SAMPLE_EVERY — misses only where reading all its links is cheap
     // (a base book's are mostly incoming: בראשית took 150 s to read; its misses show up from the other ends)
-    const keep = rankOf(SEED, `book:${id}`) % SAMPLE_EVERY === 0;
+    const keep = !detail && rankOf(SEED, `book:${id}`) % SAMPLE_EVERY === 0;
     const keepMisses = keep && linkTotal(id) <= MAX_LINKS_FOR_MISSES;
     if (!merged.suggestions.length && !keepMisses) return { ...rec, ms: Date.now() - t0 };
 
@@ -446,12 +499,23 @@ describe.runIf(DB)("library benchmark: the tool on the books Otzaria already lin
     // a merged suggestion's id is "mx:…"; the citation's words are in its raw member's id
     const spanIdOf = (s: MergedSuggestion) => s.members.find((m) => m.suggestion.engine === "citations" && /@\d+-\d+>/.test(m.suggestion.id))?.suggestion.id ?? s.id;
     const score = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, SPANS);
+    if (detail) {
+      // what scoring needs at every line a raw suggestion touches, so merge-replay.test.ts can merge and score again without the database
+      const lines = new Set(items.flatMap((it) => [it.suggestion.source, it.suggestion.target].filter((x) => x.book.key === book.key).map((x) => x.line)));
+      const cache = { key: book.key, byLine: [...db.byLine].filter(([l]) => lines.has(l)), pairType: [...db.pairType], text: text ? [...text].filter(([l]) => lines.has(l)) : [] };
+      mkdirSync(join(DIR, "score"), { recursive: true });
+      writeFileSync(join(DIR, "score", `${id}.json.gz`), gzipSync(JSON.stringify(cache)));
+    }
     rec.counters = count(score.scored);
     for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
     if (SPANS === "all") {
       const w = scoreBook(book.key, merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) })), db, lineText, "citations");
       rec.written = { counters: count(w.scored), matched: {} };
       for (const [k, ids] of w.matched) rec.written.matched[k] = encodeIds(ids);
+      if (detail) {
+        const at = async (bookId: number, line: number) => excerpt((await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText, null, 160);
+        await detailRows(id, score.scored, w.scored, db.byLine, detail, TEXT_EVERY ? { every: TEXT_EVERY, seed: SEED, at } : null);
+      }
     }
     if (keep) {
       const otherLine = async (bookId: number, line: number) => (await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText;
