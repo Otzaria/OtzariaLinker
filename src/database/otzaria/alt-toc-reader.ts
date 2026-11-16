@@ -1,4 +1,5 @@
 import { rowsToEntries, type LibraryAltTocStructure } from "../../core/alt-toc/model";
+import { pushTo } from "../../core/collections";
 import type { SqliteFile, TableInfo } from "../sqlite/lazy/sqlite-file";
 
 /*
@@ -44,15 +45,13 @@ export async function readAltToc(file: SqliteFile, bookId: number, lineIndexOf: 
     const index = lineId === null || lineId === undefined ? undefined : lineIndexOf(Number(lineId));
     const t = texts.get(Number(v[eText!]))?.values[textAt];
     const sid = Number(v[eStructure!]);
-    rowsOf.set(sid, [
-      ...(rowsOf.get(sid) ?? []),
-      {
-        id: Number(r.rowid),
-        parentId: v[eParent!] === null || v[eParent!] === undefined ? null : Number(v[eParent!]),
-        line: index === undefined ? null : index + 1,
-        text: typeof t === "string" ? t : "",
-      },
-    ]);
+    // push, not spread: a spread per row made 26,609 entries take ~3 s (review C17)
+    pushTo(rowsOf, sid, {
+      id: Number(r.rowid),
+      parentId: v[eParent!] === null || v[eParent!] === undefined ? null : Number(v[eParent!]),
+      line: index === undefined ? null : index + 1,
+      text: typeof t === "string" ? t : "",
+    });
   }
 
   const [sKey, sTitle, sHeTitle] = ["key", "title", "heTitle"].map((n) => col(st, n));

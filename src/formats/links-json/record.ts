@@ -1,3 +1,5 @@
+import type { JsonLayout } from "./layout";
+
 /*
  * `<book>_links.json` records as the generator decodes them (docs/contracts/LINK_FORMATS.md §1.2).
  * File coordinates are 1-based; the conversion to the 0-based model happens only in convert.ts.
@@ -23,6 +25,22 @@ export interface LinksRecord {
   typeNull?: boolean;
   /** key order as it appeared in the file */
   keyOrder: string[];
+  /** parse only: where the record came from — its own text and the file's layout, read on demand (convert.ts) */
+  origin?: RecordOrigin;
+  /** export only: write these bytes for the record instead of serializing it (checked by convert.ts) */
+  verbatim?: string;
+}
+
+/**
+ * An imported record's place in its file. Everything is computed on first use and once per file: the
+ * common file needs none of it (convert.ts asks only for records the writer might spell differently).
+ */
+export interface RecordOrigin {
+  /** the record's exact text in the file, or null if the file could not be split into records */
+  text(): string | null;
+  layout(): JsonLayout;
+  /** false when nothing in the file's numbers or escapes could be spelled otherwise by the writer (layout.ts) */
+  spellingMayDiffer(): boolean;
 }
 
 /**

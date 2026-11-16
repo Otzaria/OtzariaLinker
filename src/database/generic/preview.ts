@@ -51,7 +51,12 @@ export async function previewSchema(file: SqliteFile): Promise<SchemaPreview> {
       rows.push(r.values);
       if (rows.length >= SAMPLE_ROWS) break;
     }
-    const columns = t.columns.map((c, i) => columnPreview(c.name, c.type, c.rowidAlias, rows.map((r) => r[i] ?? null), codec));
+    const columns = t.columns.map((c, i) => ({
+      ...columnPreview(c.name, c.type, c.rowidAlias, rows.map((r) => r[i] ?? null), codec),
+      ...(c.generated === "virtual" && { virtual: true }),
+    }));
+    const virtualCols = t.columns.filter((c) => c.generated === "virtual").map((c) => c.name);
+    if (virtualCols.length) notes.push(`בטבלה "${e.name}" עמודות מחושבות (GENERATED … VIRTUAL) שאינן שמורות בקובץ ולכן אינן נקראות: ${virtualCols.join(", ")}.`);
     for (const c of columns) {
       if (c.kind === "compressed") notes.push(`העמודה "${e.name}.${c.name}" מכילה טקסט דחוס (${c.compression}); הכלי פורס אותו בקריאה.`);
       if (c.kind === "binary") notes.push(`העמודה "${e.name}.${c.name}" מכילה נתונים בינאריים שאינם טקסט (למשל תמונה או דחיסה לא מוכרת); אי אפשר להציג אותם כטקסט.`);
@@ -60,6 +65,7 @@ export async function previewSchema(file: SqliteFile): Promise<SchemaPreview> {
       name: t.name,
       withoutRowid: t.withoutRowid,
       primaryKey: t.primaryKey,
+      ...(t.withoutRowid && { primaryKeySeekable: t.primaryKeySeekable }),
       columns,
       indexes: (await file.indexesOf(t.name)).map((ix) => ({ name: ix.name, columns: ix.columns, seekable: ix.seekable })),
       samples: rows.slice(0, SHOWN_ROWS).map((r) => r.map((v, i) => display(v, columns[i]!.kind, codec))),

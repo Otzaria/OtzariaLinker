@@ -45,4 +45,17 @@ describe.runIf(path)("alt_toc in the real seforim.db (read-only)", () => {
     expect(s!.entries).toHaveLength(307);
     expect(s!.entries.every((e) => e.line >= 1 && e.heTitle.length > 0)).toBe(true);
   });
+
+  it("ערוך השולחן: the largest structure (Seifim, 26,609 entries) is read in linear time (review C17)", async () => {
+    const reader = await OtzariaDbReader.open(source!);
+    const book = (await reader.books()).find((b) => b.title === "ערוך השולחן")!;
+    const index = new Map((await reader.lineEntries(book.id)).map((e) => [e.id, e.index]));
+    const t0 = performance.now();
+    const all = (await readAltToc(reader.file, book.id, (id) => index.get(id)))!;
+    const ms = performance.now() - t0;
+    console.log(`readAltToc ערוך השולחן: ${ms.toFixed(0)} ms`);
+    const seifim = all.find((x) => x.key === "Seifim")!;
+    expect(seifim.entries.length + seifim.skipped).toBe(26_609);
+    expect(ms).toBeLessThan(1500);
+  });
 });

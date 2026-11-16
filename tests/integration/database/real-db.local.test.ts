@@ -46,6 +46,24 @@ describe.runIf(path)("real seforim.db (read-only)", () => {
     expect(range.columns.map((c) => c.name)).not.toContain("for");
   });
 
+  it("automatic indexes get the key columns PRAGMA index_info reports (review C12)", async () => {
+    // from sqlite3: PRAGMA index_info on this database (schema 7)
+    const want: Record<string, string[]> = {
+      sqlite_autoindex_link_anchor_1: ["linkId", "side", "charStart"],
+      sqlite_autoindex_link_coverage_1: ["lineId", "linkId", "side"],
+      sqlite_autoindex_alt_toc_structure_1: ["bookId", "key"],
+      sqlite_autoindex_tocText_1: ["text"],
+      sqlite_autoindex_category_closure_1: ["ancestorId", "descendantId"],
+    };
+    const schema = await file.schema();
+    for (const [name, columns] of Object.entries(want)) {
+      const e = schema.find((x) => x.name === name);
+      if (!e) continue; // an older schema without this table
+      const ix = (await file.indexesOf(e.tblName)).find((x) => x.name === name)!;
+      expect([name, ix.columns, ix.seekable]).toEqual([name, columns, true]);
+    }
+  });
+
   it("a book's line ids and indexes via idx_line_book_index — few pages, fast (TD-H6)", async () => {
     const book = (await file.table("book"))!;
     const titleCol = book.columns.findIndex((c) => c.name === "title");

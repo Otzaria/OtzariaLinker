@@ -1,4 +1,4 @@
-import { ROWID, type DbMapping } from "../../core/db-mapping";
+import { ROWID, unsortedKeyMessage, virtualColumnMessage, type DbMapping } from "../../core/db-mapping";
 import { LinkerError } from "../../core/errors";
 import { headingLevel } from "../../core/text/html";
 import { compareValues, type SqlValue } from "../sqlite/lazy/record";
@@ -106,8 +106,10 @@ export class MappedDbReader {
       const pk = t.primaryKey.map((x) => x.toLowerCase());
       if (pk[0] !== m.lines.book.toLowerCase() || pk[1] !== m.lines.order.toLowerCase())
         throw new LinkerError("db/mapping-invalid", `הטבלה "${t.name}" היא WITHOUT ROWID, והכלי קורא אותה רק כשהמפתח הראשי שלה מתחיל ב(${m.lines.book}, ${m.lines.order}).`);
+      if (!t.primaryKeySeekable) throw new LinkerError("db/mapping-invalid", unsortedKeyMessage(t.name));
       if (m.links) throw new LinkerError("db/mapping-invalid", "קישורים נקראים לפי מזהה השורה (rowid), ולטבלת השורות אין rowid.");
     }
+    await refuseVirtualColumns(file, m);
     const ix = t.withoutRowid ? null : await bookIndex(file, t, m.lines.book, m.lines.order);
     const lazy = m.layout === "two-tables" && !m.links && (t.withoutRowid || ix !== null);
     const r = new MappedDbReader(file, m, t, lazy ? "index" : "scan", ix);
@@ -217,9 +219,10 @@ export class MappedDbReader {
       const bookVal = this.bookValue[n]!;
       const got = await this.file.seekPrimaryKeyMany(this.t, loc.orders.slice(a, b + 1).map((o) => [bookVal, o]));
       let k = 0;
+      const enc = this.file.header.encoding;
       for (let i = a; i <= b; i++) {
-        while (k < got.length && compareValues(got[k]!.values[this.col.order]!, loc.orders[i]!) < 0) k++;
-        rows.push(k < got.length && compareValues(got[k]!.values[this.col.order]!, loc.orders[i]!) === 0 ? got[k++] : undefined);
+        while (k < got.length && compareValues(got[k]!.values[this.col.order]!, loc.orders[i]!, enc) < 0) k++;
+        rows.push(k < got.length && compareValues(got[k]!.values[this.col.order]!, loc.orders[i]!, enc) === 0 ? got[k++] : undefined);
       }
     }
     return rows.map((row, i) => {
@@ -467,6 +470,23 @@ async function bookIndex(file: SqliteFile, t: TableInfo, bookColumn: string, ord
   const rank = (ix: IndexInfo) =>
     orderColumn === ROWID ? (ix.columns.length === 1 ? 0 : 1) : ix.columns[1]?.toLowerCase() === orderColumn.toLowerCase() ? 0 : 1;
   return all.sort((a, b) => rank(a) - rank(b) || a.columns.length - b.columns.length)[0] ?? null;
+}
+
+/** A mapping that names a VIRTUAL generated column would read NULL for every row: refuse it (review C12). */
+async function refuseVirtualColumns(file: SqliteFile, m: DbMapping): Promise<void> {
+  const uses: [string | undefined, (string | undefined)[]][] = [
+    [m.lines.table, [m.lines.book, m.lines.order, m.lines.text, m.lines.heading, m.lines.path]],
+    [m.books?.table, [m.books?.id, m.books?.title, m.books?.path, m.books?.category]],
+    [m.links?.table, [m.links?.source, m.links?.target, m.links?.type]],
+  ];
+  for (const [table, cols] of uses) {
+    const t = table ? await file.table(table) : null;
+    if (!t) continue;
+    for (const name of cols) {
+      const c = name ? t.columns.find((x) => x.name.toLowerCase() === name.toLowerCase()) : undefined;
+      if (c?.generated === "virtual") throw new LinkerError("db/mapping-invalid", virtualColumnMessage(t.name, c.name));
+    }
+  }
 }
 
 function colIndex(t: TableInfo, name: string): number {

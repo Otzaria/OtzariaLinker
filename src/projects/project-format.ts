@@ -1,6 +1,7 @@
 import type { AltTocBook, AltTocEntry, AltTocOrigin, AltTocStructure } from "../core/alt-toc/model";
 import { parseSavedDbMappings, type SavedDbMapping } from "../core/db-mapping";
 import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
+import { NUMERIC_KEYS } from "../formats/links-json/layout";
 
 /*
  * The saved project (stage 14): a portable JSON file. It never holds book text or file handles —
@@ -27,7 +28,7 @@ export interface ProjectLibraryFile {
   title: string;
   records: number;
   hash: string;
-  layout?: { indent: string; spaced?: boolean; finalNewline: boolean; escapeNonAscii: "lower" | "upper" | false };
+  layout?: { indent: string; spaced?: boolean; finalNewline: boolean; escapeNonAscii: "lower" | "upper" | false; floatKeys?: readonly string[] };
 }
 
 export interface ProjectSource {
@@ -183,7 +184,13 @@ function rebuildLibraryFiles(raw: unknown): ProjectLibraryFile[] {
     const l = x.layout as Record<string, unknown> | undefined;
     const layout =
       l && typeof l === "object" && str(l.indent) && /^[ \t]{0,16}$/.test(l.indent) && typeof l.finalNewline === "boolean" && (l.escapeNonAscii === false || l.escapeNonAscii === "lower" || l.escapeNonAscii === "upper")
-        ? { indent: l.indent, finalNewline: l.finalNewline, escapeNonAscii: l.escapeNonAscii as "lower" | "upper" | false, ...(l.spaced === true && { spaced: true }) }
+        ? {
+            indent: l.indent,
+            finalNewline: l.finalNewline,
+            escapeNonAscii: l.escapeNonAscii as "lower" | "upper" | false,
+            ...(l.spaced === true && { spaced: true }),
+            ...(Array.isArray(l.floatKeys) && l.floatKeys.length > 0 && { floatKeys: NUMERIC_KEYS.filter((k) => (l.floatKeys as unknown[]).includes(k)) }),
+          }
         : undefined;
     out.set(x.title, { title: x.title, records: x.records, hash: x.hash, ...(layout && { layout }) });
   }
@@ -250,6 +257,8 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(str(l.targetPath) && { targetPath: l.targetPath }),
     ...(isInt(l.fileIndex) && { fileIndex: l.fileIndex }),
     ...(l.status === "deleted" && RESTORE_STATUSES.has(l.restoreStatus as string) && { restoreStatus: l.restoreStatus }),
+    // checked again when written: used only while it decodes to this very record (convert.ts)
+    ...(str(l.fileText) && { fileText: l.fileText }),
   };
 }
 function copyData(o: Record<string, unknown>): Record<string, unknown> {

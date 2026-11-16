@@ -5,7 +5,11 @@ import { LinkerError } from "../../../core/errors";
 export type SqlValue = null | number | bigint | string | Uint8Array;
 export type TextEncodingId = 1 | 2 | 3; // UTF-8, UTF-16le, UTF-16be
 
-/** Reads a SQLite varint (1–9 bytes, big-endian, 7 bits per byte, 9th byte full). Returns [value, bytesRead]. */
+/**
+ * Reads a SQLite varint (1–9 bytes, big-endian, 7 bits per byte, 9th byte full). Returns [value, bytesRead].
+ * The value is a signed 64-bit two's-complement integer: a negative rowid is a 9-byte varint with
+ * the top bit set (review C19). Values beyond ±2^53 come back as the nearest double.
+ */
 export function readVarint(b: Uint8Array, at: number): [number, number] {
   if (at < 0 || at >= b.length) throw corrupt("varint outside the page");
   let v = 0;
@@ -17,7 +21,9 @@ export function readVarint(b: Uint8Array, at: number): [number, number] {
   }
   const last = b[at + 8];
   if (last === undefined) throw corrupt("varint runs past the end");
-  return [v * 256 + last, 9];
+  let big = 0n;
+  for (let i = 0; i < 8; i++) big = (big << 7n) | BigInt(b[at + i]! & 0x7f);
+  return [Number(BigInt.asIntN(64, (big << 8n) | BigInt(last))), 9];
 }
 
 /** SQLite's own limit on columns per table (SQLITE_MAX_COLUMN). */
@@ -48,6 +54,7 @@ export function decodeRecord(p: Uint8Array, enc: TextEncodingId): SqlValue[] {
   const types: number[] = [];
   for (let at = n0; at < headerSize; ) {
     const [t, n] = readVarint(p, at);
+    if (t < 0) throw corrupt("negative serial type");
     types.push(t);
     if (types.length > MAX_COLUMNS) throw corrupt("too many columns in a record");
     at += n;
@@ -87,19 +94,38 @@ function readValue(p: Uint8Array, view: DataView, at: number, t: number, enc: Te
   }
 }
 
-/** SQLite's cross-type ordering: NULL < numbers < text < blob. Text compares as BINARY (code units). */
-export function compareValues(a: SqlValue, b: SqlValue): number {
+/**
+ * SQLite's cross-type ordering: NULL < numbers < text < blob. Text compares as BINARY: memcmp of
+ * the stored bytes, so the order depends on the database's text encoding (review C12).
+ */
+export function compareValues(a: SqlValue, b: SqlValue, enc: TextEncodingId = 1): number {
   const rank = (v: SqlValue) => (v === null ? 0 : typeof v === "number" || typeof v === "bigint" ? 1 : typeof v === "string" ? 2 : 3);
   const ra = rank(a);
   const rb = rank(b);
   if (ra !== rb) return ra - rb;
   if (ra === 0) return 0;
   if (ra === 1) return (a as number) < (b as number) ? -1 : (a as number) > (b as number) ? 1 : 0;
-  if (ra === 2) return compareUtf8(a as string, b as string);
+  if (ra === 2) return enc === 1 ? compareUtf8(a as string, b as string) : compareUtf16(a as string, b as string, enc === 2);
   const x = a as Uint8Array;
   const y = b as Uint8Array;
   for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
   return x.length - y.length;
+}
+
+/**
+ * memcmp order of the UTF-16 encodings: code-unit order for big-endian; for little-endian each
+ * code unit compares by its low byte first ('é' U+00E9 sorts after 'א' U+05D0).
+ */
+function compareUtf16(a: string, b: string, littleEndian: boolean): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    let x = a.charCodeAt(i);
+    let y = b.charCodeAt(i);
+    if (x === y) continue;
+    if (littleEndian) (x = ((x & 0xff) << 8) | (x >> 8)), (y = ((y & 0xff) << 8) | (y >> 8));
+    return x - y;
+  }
+  return a.length - b.length;
 }
 
 /** memcmp order of the UTF-8 encodings == code-point order (not UTF-16 code-unit order). */

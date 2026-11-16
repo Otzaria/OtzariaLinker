@@ -3,14 +3,16 @@
  * large to load into sql.js (seforim.db is 4+ GB). Only the pages a query touches are read.
  *
  * Supports: page sizes 512–65536, reserved bytes, UTF-8/16 text, overflow pages, rowid tables,
- * WITHOUT ROWID tables, indexes, rowid-alias columns, ALTER TABLE ADD COLUMN defaults.
+ * WITHOUT ROWID tables, indexes, rowid-alias columns, ALTER TABLE ADD COLUMN defaults, STORED
+ * generated columns (VIRTUAL ones are not in the file and read as NULL).
  * Seeks: rowid lookup/range on tables, key-prefix equality on indexes and WITHOUT ROWID tables
- * (BINARY collation, ascending keys — anything else falls back to a filtered scan by the caller).
+ * (BINARY collation in the file's encoding, ascending keys, full — not partial — indexes; anything
+ * else is marked not seekable and the caller falls back to a scan).
  * Never writes. A database in WAL mode is reported, because uncheckpointed changes in the -wal
  * file are invisible to a page reader.
  */
 import type { ByteSource } from "./byte-source";
-import { parseCreateIndex, parseCreateTable, type ColumnDef, type IndexDef, type TableDef } from "./ddl";
+import { autoIndexes, indexDef, parseCreateIndex, parseCreateTable, type IndexDef, type TableDef } from "./ddl";
 import { compareValues, decodeRecord, readVarint, type SqlValue, type TextEncodingId } from "./record";
 
 export interface SqliteHeader {
@@ -125,18 +127,24 @@ export class SqliteFile {
 
   /**
    * Indexes of a table, including SQLite's automatic ones (sqlite_autoindex_<table>_<n>, stored with
-   * no SQL). An automatic index #1 of a table whose PRIMARY KEY is not the rowid covers the key
-   * columns; other automatic indexes (UNIQUE constraints) are listed but not seekable.
+   * no SQL), whose key columns follow from the table's PRIMARY KEY / UNIQUE constraints in DDL order
+   * (`autoIndexes`). An index is seekable only when it is a full, BINARY, ascending index of plain
+   * columns — a key's collation is its own COLLATE, else its column's (review C12).
    */
   async indexesOf(table: string): Promise<IndexInfo[]> {
     const t = await this.table(table);
+    const auto = t ? autoIndexes(t) : [];
     return (await this.schema())
       .filter((x) => x.type === "index" && x.tblName.toLowerCase() === table.toLowerCase() && x.rootPage)
       .map((x): IndexInfo => {
-        if (x.sql) return { name: x.name, rootPage: x.rootPage, ...parseCreateIndex(x.sql) };
-        const pkIsKey = !!t && !t.withoutRowid && t.primaryKey.length > 0 && !t.columns.some((c) => c.rowidAlias);
-        const first = /^sqlite_autoindex_.+_1$/.test(x.name);
-        return { name: x.name, rootPage: x.rootPage, table: x.tblName, columns: first && pkIsKey ? [...t!.primaryKey] : [], seekable: first && pkIsKey };
+        if (x.sql) {
+          const { table: on, parts, partial } = parseCreateIndex(x.sql);
+          return { name: x.name, rootPage: x.rootPage, ...indexDef(on, parts, partial, t) };
+        }
+        const n = /^sqlite_autoindex_.+_(\d+)$/.exec(x.name);
+        const parts = n ? auto[Number(n[1]) - 1] : undefined;
+        // an automatic index the DDL does not explain: listed, never used
+        return { name: x.name, rootPage: x.rootPage, ...(parts ? indexDef(x.tblName, parts, false, t) : { table: x.tblName, columns: [], seekable: false }) };
       });
   }
 
@@ -168,7 +176,7 @@ export class SqliteFile {
         while (k < hi && ids[k]! < rowid) k++;
         if (k < hi && ids[k] === rowid) {
           const payload = await this.payload(page.data, off + n1 + n2, size, false);
-          out.set(rowid, { rowid, values: this.alignRow(t.columns, rowid, decodeRecord(payload, this.header.encoding)) });
+          out.set(rowid, { rowid, values: this.alignRow(t, rowid, decodeRecord(payload, this.header.encoding)) });
           k++;
         }
       }
@@ -195,17 +203,18 @@ export class SqliteFile {
       for await (const rec of this.walkIndex(t.rootPage, null)) yield { rowid: null, values: this.withoutRowidRow(t, rec) };
       return;
     }
-    for await (const r of this.walkTable(t.rootPage, range.from ?? null, range.to ?? null)) yield { rowid: r.rowid, values: this.alignRow(t.columns, r.rowid, r.values) };
+    for await (const r of this.walkTable(t.rootPage, range.from ?? null, range.to ?? null)) yield { rowid: r.rowid, values: this.alignRow(t, r.rowid, r.values) };
   }
 
   async get(t: TableInfo, rowid: number): Promise<Row | null> {
-    for await (const r of this.walkTable(t.rootPage, rowid, rowid)) return { rowid: r.rowid, values: this.alignRow(t.columns, r.rowid, r.values) };
+    for await (const r of this.walkTable(t.rootPage, rowid, rowid)) return { rowid: r.rowid, values: this.alignRow(t, r.rowid, r.values) };
     return null;
   }
 
   /** Rows of a WITHOUT ROWID table whose primary key starts with `prefix`, in key order. */
   async *seekPrimaryKey(t: TableInfo, prefix: SqlValue[]): AsyncGenerator<Row> {
     if (!t.withoutRowid) throw new Error("seekPrimaryKey is for WITHOUT ROWID tables");
+    if (!t.primaryKeySeekable) throw new Error(`the primary key of ${t.name} is not seekable (collation/DESC)`);
     for await (const rec of this.walkIndex(t.rootPage, prefix)) yield { rowid: null, values: this.withoutRowidRow(t, rec) };
   }
 
@@ -232,12 +241,13 @@ export class SqliteFile {
   /** seekIndexMany for a WITHOUT ROWID table (its b-tree is an index keyed by the primary key). */
   async seekPrimaryKeyMany(t: TableInfo, prefixes: SqlValue[][]): Promise<Row[]> {
     if (!t.withoutRowid) throw new Error("seekPrimaryKeyMany is for WITHOUT ROWID tables");
+    if (!t.primaryKeySeekable) throw new Error(`the primary key of ${t.name} is not seekable (collation/DESC)`);
     return (await this.seekManyAt(t.rootPage, prefixes)).map((rec) => ({ rowid: null, values: this.withoutRowidRow(t, rec) }));
   }
 
   private async seekManyAt(root: number, prefixes: SqlValue[][]): Promise<SqlValue[][]> {
     if (prefixes.some((p) => p.length !== prefixes[0]!.length)) throw new Error("all prefixes of one seek must have the same length");
-    const keys = dedupeSorted(prefixes);
+    const keys = dedupeSorted(prefixes, this.header.encoding);
     const out: SqlValue[][] = [];
     if (keys.length) await this.seekManyInner(root, keys, 0, keys.length, out);
     return out;
@@ -246,6 +256,7 @@ export class SqliteFile {
   private async seekManyInner(pageNo: number, keys: SqlValue[][], lo: number, hi: number, out: SqlValue[][], depth = 0): Promise<void> {
     const page = await this.page(pageNo, depth);
     const leaf = page.type === PageType.IndexLeaf;
+    const enc = this.header.encoding;
     if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
     const record = async (i: number) => {
       const off = page.cells[i]!;
@@ -258,28 +269,38 @@ export class SqliteFile {
     let b = page.cells.length;
     while (a < b) {
       const mid = (a + b) >> 1;
-      if (comparePrefix(await record(mid), keys[lo]!) < 0) a = mid + 1;
+      if (comparePrefix(await record(mid), keys[lo]!, enc) < 0) a = mid + 1;
       else b = mid;
     }
     for (let i = a; i < page.cells.length && lo < hi; i++) {
       const rec = await record(i);
       let j = lo;
-      while (j < hi && comparePrefix(rec, keys[j]!) >= 0) j++; // keys[lo..j) are <= this entry
+      while (j < hi && comparePrefix(rec, keys[j]!, enc) >= 0) j++; // keys[lo..j) are <= this entry
       if (!leaf && j > lo) await this.seekManyInner(readU32(page.data, page.cells[i]!), keys, lo, j, out, depth + 1);
-      if (j > lo && comparePrefix(rec, keys[j - 1]!) === 0) out.push(rec);
-      while (lo < j && comparePrefix(rec, keys[lo]!) > 0) lo++; // keys below this entry are finished
+      if (j > lo && comparePrefix(rec, keys[j - 1]!, enc) === 0) out.push(rec);
+      while (lo < j && comparePrefix(rec, keys[lo]!, enc) > 0) lo++; // keys below this entry are finished
     }
     if (!leaf && lo < hi) await this.seekManyInner(page.rightChild, keys, lo, hi, out, depth + 1);
   }
 
-  private alignRow(columns: ColumnDef[], rowid: number, rec: SqlValue[]): SqlValue[] {
-    return columns.map((c, i) => (c.rowidAlias ? rowid : i < rec.length ? rec[i]! : c.defaultValue));
+  /**
+   * Record values → the table's declared columns. A VIRTUAL generated column is not stored: it
+   * takes no slot in the record (the columns after it would otherwise shift) and reads as NULL.
+   */
+  private alignRow(t: TableInfo, rowid: number, rec: SqlValue[]): SqlValue[] {
+    let at = 0;
+    return t.columns.map((c) => {
+      if (c.generated === "virtual") return null;
+      const i = at++;
+      return c.rowidAlias ? rowid : i < rec.length ? rec[i]! : c.defaultValue;
+    });
   }
 
-  /** WITHOUT ROWID records store the primary-key columns first, then the others in declared order. */
+  /** WITHOUT ROWID records store the primary-key columns first, then the other stored columns in declared order. */
   private withoutRowidRow(t: TableInfo, rec: SqlValue[]): SqlValue[] {
     const pk = t.primaryKey.map((n) => n.toLowerCase());
-    const order = [...pk.map((n) => t.columns.findIndex((c) => c.name.toLowerCase() === n)), ...t.columns.map((_, i) => i).filter((i) => !pk.includes(t.columns[i]!.name.toLowerCase()))];
+    const others = t.columns.map((_, i) => i).filter((i) => !pk.includes(t.columns[i]!.name.toLowerCase()) && t.columns[i]!.generated !== "virtual");
+    const order = [...pk.map((n) => t.columns.findIndex((c) => c.name.toLowerCase() === n)), ...others];
     const out = new Array<SqlValue>(t.columns.length).fill(null);
     order.forEach((colIdx, recIdx) => { out[colIdx] = recIdx < rec.length ? rec[recIdx]! : t.columns[colIdx]!.defaultValue; });
     return out;
@@ -345,6 +366,7 @@ export class SqliteFile {
   private async *walkIndexInner(pageNo: number, prefix: SqlValue[] | null, state: { done: boolean }, depth = 0): AsyncGenerator<SqlValue[]> {
     const page = await this.page(pageNo, depth);
     const leaf = page.type === PageType.IndexLeaf;
+    const enc = this.header.encoding;
     if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
     const record = async (i: number) => {
       const off = page.cells[i]!;
@@ -360,7 +382,7 @@ export class SqliteFile {
       let hi = page.cells.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (comparePrefix(await record(mid), prefix) < 0) lo = mid + 1;
+        if (comparePrefix(await record(mid), prefix, enc) < 0) lo = mid + 1;
         else hi = mid;
       }
       first = lo;
@@ -368,7 +390,7 @@ export class SqliteFile {
     for (let i = first; i < page.cells.length; i++) {
       const off = page.cells[i]!;
       const rec = await record(i);
-      const cmp = prefix ? comparePrefix(rec, prefix) : 0;
+      const cmp = prefix ? comparePrefix(rec, prefix, enc) : 0;
       if (!leaf && cmp >= 0) {
         // entries in the left child are <= this key, so they may still match
         yield* this.walkIndexInner(readU32(page.data, off), prefix, state, depth + 1);
@@ -426,7 +448,7 @@ export class SqliteFile {
     const U = this.header.usableSize;
     const X = index ? Math.floor(((U - 12) * 64) / 255) - 23 : U - 35;
     // a record can never be larger than the file; a hostile size would allocate gigabytes (review #8)
-    if (size > Math.min(MAX_RECORD_BYTES, this.header.pageCount * U)) throw new SqliteFormatError("רשומה במסד מצהירה על גודל בלתי אפשרי — המסד פגום.");
+    if (size < 0 || size > Math.min(MAX_RECORD_BYTES, this.header.pageCount * U)) throw new SqliteFormatError("רשומה במסד מצהירה על גודל בלתי אפשרי — המסד פגום.");
     if (size <= X) return page.subarray(at, at + size);
     const M = Math.floor(((U - 12) * 32) / 255) - 23;
     const K = M + ((size - M) % (U - 4));
@@ -451,10 +473,10 @@ function readU32(b: Uint8Array, at: number): number {
   return ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 }
 
-function dedupeSorted(prefixes: SqlValue[][]): SqlValue[][] {
+function dedupeSorted(prefixes: SqlValue[][], enc: TextEncodingId): SqlValue[][] {
   const cmp = (x: SqlValue[], y: SqlValue[]) => {
     for (let i = 0; i < Math.min(x.length, y.length); i++) {
-      const c = compareValues(x[i]!, y[i]!);
+      const c = compareValues(x[i]!, y[i]!, enc);
       if (c) return c;
     }
     return x.length - y.length;
@@ -463,9 +485,9 @@ function dedupeSorted(prefixes: SqlValue[][]): SqlValue[][] {
   return sorted.filter((k, i) => i === 0 || cmp(sorted[i - 1]!, k) !== 0);
 }
 
-function comparePrefix(rec: SqlValue[], prefix: SqlValue[]): number {
+function comparePrefix(rec: SqlValue[], prefix: SqlValue[], enc: TextEncodingId): number {
   for (let i = 0; i < prefix.length; i++) {
-    const c = compareValues(rec[i] ?? null, prefix[i]!);
+    const c = compareValues(rec[i] ?? null, prefix[i]!, enc);
     if (c) return c;
   }
   return 0;

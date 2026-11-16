@@ -26,6 +26,8 @@ export interface ColumnPreview {
   filled: number;
   /** e.g. "zstd", "gzip", "zlib" for compressed values */
   compression?: string;
+  /** a GENERATED … VIRTUAL column: not stored in the file, so it cannot be read or mapped */
+  virtual?: boolean;
 }
 
 export interface IndexPreview {
@@ -39,6 +41,8 @@ export interface TablePreview {
   name: string;
   withoutRowid: boolean;
   primaryKey: string[];
+  /** WITHOUT ROWID only: false when the key is not BINARY ascending (NOCASE, DESC…), so it cannot be read */
+  primaryKeySeekable?: boolean;
   columns: ColumnPreview[];
   indexes: IndexPreview[];
   /** the first rows, as short display strings aligned to `columns` */
@@ -101,6 +105,14 @@ export interface MappingProblem {
 
 const TEXTUAL = new Set<ColumnKind>(["text", "html", "compressed"]);
 
+/** A mapped GENERATED … VIRTUAL column: its value is not in the file (review C12). */
+export const virtualColumnMessage = (table: string, column: string): string =>
+  `העמודה "${column}" בטבלה "${table}" מחושבת (GENERATED … VIRTUAL): הערך שלה אינו שמור בקובץ, ו־SQLite מחשב אותו רק בשאילתה. הכלי קורא את הקובץ ישירות ואינו יכול לחשב אותו. בחרו את העמודה שממנה היא מחושבת.`;
+
+/** A WITHOUT ROWID lines table whose key is not BINARY ascending cannot be searched by key (review C12). */
+export const unsortedKeyMessage = (table: string): string =>
+  `המפתח הראשי של הטבלה "${table}" ממוין בסדר שהכלי לא יודע לחפש בו (COLLATE NOCASE או אחר, או DESC). הכלי קורא טבלת WITHOUT ROWID רק לפי מפתח רגיל (BINARY, בסדר עולה), ולכן אינו פותח אותה, כדי לא להציג ספרים עם שורות חסרות.`;
+
 /** Checks a mapping against the schema. Errors block opening; warnings and info explain. */
 export function mappingProblems(preview: SchemaPreview, m: DbMapping): MappingProblem[] {
   const out: MappingProblem[] = [];
@@ -123,6 +135,7 @@ export function mappingProblems(preview: SchemaPreview, m: DbMapping): MappingPr
     }
     const c = t.columns.find((x) => x.name === name);
     if (!c) return err(`העמודה "${name}" אינה קיימת בטבלה "${t.name}".`), null;
+    if (c.virtual) return err(virtualColumnMessage(t.name, name)), null;
     return c;
   };
 
@@ -155,6 +168,7 @@ export function mappingProblems(preview: SchemaPreview, m: DbMapping): MappingPr
       const pk = lines.primaryKey.map((x) => x.toLowerCase());
       if (pk[0] !== m.lines.book.toLowerCase() || pk[1] !== m.lines.order.toLowerCase())
         err(`הטבלה "${lines.name}" היא WITHOUT ROWID, והכלי קורא אותה רק כשהמפתח הראשי שלה מתחיל ב(${m.lines.book}, ${m.lines.order}).`);
+      else if (lines.primaryKeySeekable === false) err(unsortedKeyMessage(lines.name));
     }
     if (!out.some((p) => p.level === "error") && !lines.withoutRowid && !hasSeekableIndex(lines, m.lines.book))
       out.push({
