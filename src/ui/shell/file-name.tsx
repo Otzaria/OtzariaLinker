@@ -21,16 +21,23 @@ export const isFileName = (name: string): boolean => /\.[A-Za-z0-9]{1,8}$/.test(
 /**
  * A source's name (audit F19): a file name as one LTR unit — "אישי-פירושים.db", never
  * "db.אישי-פירושים" — and any other name (a folder) isolated in its own direction.
+ * `cls` goes on an outer isolate in the direction of the name's first letter: that box is the one that
+ * cuts a long name with "…", and it cuts at the end of the direction the name is read in. On the LTR
+ * unit itself a Hebrew name lost its first letters ("…רוש על בראשית" for "פירוש על בראשית.txt").
+ * The direction is set, not "auto": "auto" does not look inside the inner LTR isolate, and falls to LTR.
  */
 export function SourceName({ name, class: cls }: { name: string; class?: string }) {
-  return isFileName(name) ? (
-    <bdi dir="ltr" class={cls ? `fname ${cls}` : "fname"}>
+  if (!isFileName(name)) return <bdi class={cls}>{name}</bdi>;
+  const unit = (
+    <bdi dir="ltr" class="fname">
       {name}
     </bdi>
-  ) : (
-    <bdi class={cls}>{name}</bdi>
   );
+  return cls ? <bdi dir={startsRtl(name) ? "rtl" : "ltr"} class={cls}>{unit}</bdi> : unit;
 }
+
+/** Whether the first strong letter of a name is Hebrew (or another right-to-left script). */
+const startsRtl = (name: string): boolean => /^\P{L}*[\p{Script=Hebrew}\p{Script=Arabic}]/u.test(name);
 
 /** A source's name inside a plain string (an <option>): LTR-isolated when it is a file name. */
 export const sourceNameText = (name: string): string => (isFileName(name) ? ltr(name) : name);
