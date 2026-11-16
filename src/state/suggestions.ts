@@ -1,7 +1,7 @@
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
-import { CONFIDENCE_ORDER, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { CONFIDENCE_ORDER, recordsOf, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -81,6 +81,20 @@ export interface BatchRow {
   high: number;
   review: number;
 }
+/**
+ * The id of the link a suggestion's record is approved as: "auto:<suggestion id>" for its target line, and
+ * "auto:<suggestion id>~L<line>" for each further line of a span written a line at a time on a Sefaria side
+ * (Suggestion.spanLines). suggestionIdOfLink reads the suggestion back from either.
+ */
+export function recordLinkId(s: Suggestion, line: number): string {
+  return line === s.target.line ? `auto:${s.id}` : `auto:${s.id}~L${line}`;
+}
+
+/** The suggestion an "auto:" link was approved from (recordLinkId), or undefined for any other link. */
+export function suggestionIdOfLink(linkId: string): string | undefined {
+  return linkId.startsWith("auto:") ? linkId.slice(5).replace(/~L\d+$/, "") : undefined;
+}
+
 /** pending → the user has not decided; approved → a link exists for it; exists → the project already has that link */
 export type SuggestionState = "pending" | "approved" | "rejected" | "exists";
 
@@ -105,13 +119,18 @@ export class SuggestionsState {
     const rejected = this.rejected.value;
     // every other link counts — also one approved from ANOTHER run (another engine, a max-link run), which
     // would otherwise be approved twice; only this run's own approvals are left out
-    const ownIds = new Set(run.result.suggestions.map((s) => `auto:${s.id}`));
+    const ownIds = new Set(run.result.suggestions.flatMap((s) => recordsOf(s).map((r) => recordLinkId(s, r.line))));
     const existing = new Set<string>();
     for (const l of links.values()) if (l.status !== "deleted" && !ownIds.has(l.id)) existing.add(linePairKey(l));
     for (const k of this.dbLinkKeys.value) existing.add(k);
     for (const s of run.result.suggestions) {
-      const own = links.get(`auto:${s.id}`);
-      m.set(s.id, own && own.status !== "deleted" ? "approved" : rejectionKeys(s).some((k) => rejected.has(k)) ? "rejected" : existing.has(linePairKey(s)) ? "exists" : "pending");
+      const records = recordsOf(s);
+      // approved: a link of any of its records; exists: every record is already there (a span written a line at a time)
+      const own = records.some((r) => {
+        const l = links.get(recordLinkId(s, r.line));
+        return l !== undefined && l.status !== "deleted";
+      });
+      m.set(s.id, own ? "approved" : rejectionKeys(s).some((k) => rejected.has(k)) ? "rejected" : records.every((r) => existing.has(linePairKey(recordAt(s, r.line)))) ? "exists" : "pending");
     }
     return m;
   });
@@ -257,18 +276,37 @@ export class SuggestionsState {
   }
 
   /** The link approving a suggestion makes. */
-  private linkOf(s: Suggestion): Link {
-    return {
-      id: `auto:${s.id}`,
-      status: "new",
-      provenance: "auto",
-      source: s.source,
-      target: s.target,
-      declaredType: s.declaredType,
-      // every engine's reference, never blank (B3): the target's title and line otherwise
-      heRef2: s.heRef2.trim() ? s.heRef2 : `${s.target.book.title} ${s.target.line + 1}`,
-      ...(s.anchor && { anchor: s.anchor }),
-    };
+  /**
+   * The links approving a suggestion makes: one per record (recordsOf — one, or a line at a time for a
+   * short span on a Sefaria side), less the records the project or the database already has (`existing`:
+   * line-pair keys), so an identical record is never written twice.
+   */
+  private linksOf(s: Suggestion, existing: ReadonlySet<string>): Link[] {
+    const records = recordsOf(s);
+    return records
+      .map((r): Link => {
+        const at = recordAt(s, r.line);
+        return {
+          id: recordLinkId(s, r.line),
+          status: "new",
+          provenance: "auto",
+          source: at.source,
+          target: at.target,
+          declaredType: s.declaredType,
+          // every engine's reference, never blank (B3): the target's title and line otherwise
+          heRef2: r.heRef2.trim() ? r.heRef2 : `${at.target.book.title} ${at.target.line + 1}`,
+          ...(s.anchor && { anchor: s.anchor }),
+        };
+      })
+      .filter((l) => records.length === 1 || !existing.has(linePairKey(l)));
+  }
+
+  /** line-pair keys of the links the project and the open databases have, but not those of these suggestions' own records */
+  private existingKeys(own: readonly Suggestion[]): Set<string> {
+    const ownIds = new Set(own.flatMap((s) => recordsOf(s).map((r) => recordLinkId(s, r.line))));
+    const out = new Set<string>(this.dbLinkKeys.value);
+    for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted" && !ownIds.has(l.id)) out.add(linePairKey(l));
+    return out;
   }
 
   approve(ids: readonly string[]): number {
@@ -276,28 +314,36 @@ export class SuggestionsState {
     if (!run) return 0;
     const st = this.state.value;
     const want = new Set(ids);
-    const links = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists").map((s) => this.linkOf(s));
-    if (!links.length) return 0;
-    if (links.length > 1 && run.dbLinksUnread?.length) {
+    const chosen = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists");
+    if (!chosen.length) return 0;
+    const existing = this.existingKeys(chosen);
+    const links = chosen.flatMap((s) => this.linksOf(s, existing));
+    if (chosen.length > 1 && run.dbLinksUnread?.length) {
       this.host.notify("warning", `ההצעות לא אושרו: הקישורים שכבר יש במסד ל־${run.dbLinksUnread.map((u) => `"${u.title}"`).join(", ")} לא נקראו, וחלק מההצעות אולי כבר קיימות בספרייה. לחצו "קריאה חוזרת" בחלונית ההצעות, או אשרו הצעות אחת אחת אחרי בדיקה.`);
       return 0;
     }
-    const ids2 = new Set(links.map((l) => l.id.slice(5)));
     // an approval forgets a rejection of the same suggestion, in the same step: undo brings both back
-    const keys = run.result.suggestions.filter((x) => ids2.has(x.id)).flatMap(rejectionKeys);
-    this.commit(links.length === 1 ? "אישור הצעה" : `אישור ${links.length.toLocaleString("he")} הצעות`, addChanges(links), { remove: keys });
-    return links.length;
+    const keys = chosen.flatMap(rejectionKeys);
+    this.commit(chosen.length === 1 ? "אישור הצעה" : `אישור ${chosen.length.toLocaleString("he")} הצעות`, addChanges(links), { remove: keys });
+    return chosen.length;
   }
 
   /** Rejects suggestions — and removes the links of the approved ones among them — as ONE undoable action. */
   reject(ids: readonly string[]): void {
     const { links } = this.host.linkState.value;
-    const approved = ids.map((id) => `auto:${id}`).filter((id) => links.has(id));
+    const byId = new Map((this.run.value?.result.suggestions ?? []).map((s) => [s.id, s]));
+    // every record's link of an approved suggestion goes with it (a span written a line at a time)
+    const recordIds = (id: string) => {
+      const s = byId.get(id);
+      return s ? recordsOf(s).map((r) => recordLinkId(s, r.line)) : [`auto:${id}`];
+    };
+    const approvedIds = ids.filter((id) => recordIds(id).some((x) => links.has(x)));
+    const removed = ids.flatMap(recordIds).filter((x) => links.has(x));
     const n = ids.length;
-    const label = approved.length
-      ? approved.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approved.length.toLocaleString("he")} הצעות`
+    const label = approvedIds.length
+      ? approvedIds.length === 1 ? "ביטול אישור של הצעה" : `ביטול אישור של ${approvedIds.length.toLocaleString("he")} הצעות`
       : n === 1 ? "דחיית הצעה" : `דחיית ${n.toLocaleString("he")} הצעות`;
-    this.commit(label, approved.map((id) => ({ id, before: links.get(id)! })), { add: this.keysOf(ids) });
+    this.commit(label, removed.map((id) => ({ id, before: links.get(id)! })), { add: this.keysOf(ids) });
   }
 
   /** Back to "pending": forgets the rejection (undoable). */
@@ -374,6 +420,11 @@ export class SuggestionsState {
   private commit(label: string, changes: Change[], rejections?: { add?: Iterable<string>; remove?: Iterable<string> }): void {
     this.host.linkState.value = commit(this.host.linkState.value, label, changes, Date.now(), [], [], rejections);
   }
+}
+
+/** One record of a suggestion: the suggestion with its target moved to that line (recordsOf). */
+function recordAt(s: Suggestion, line: number): { source: LinkSide; target: LinkSide } {
+  return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
 }
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
