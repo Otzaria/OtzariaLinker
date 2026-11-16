@@ -224,7 +224,10 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
    scrolling out of sight with no hint (visual regression finding, 1280px: "בדיקה" was invisible) */
 .side-panel .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; }
 .tabs > [role="tablist"] { display: flex; flex: 0 1 auto; min-width: 0; }
-.side-panel .tabs > [role="tablist"] { flex-wrap: wrap; }
+/* the tab list fills the row between the grip and the hide button and wraps inside it; as an "auto" item
+   it was as wide as all its tabs, so the grip and the hide button each fell to a row of their own */
+.side-panel .tabs > [role="tablist"] { flex-wrap: wrap; flex: 1 1 0; }
+.side-panel .tabs > .grow { display: none; }
 .tabs button { flex: none; border: 0; background: none; padding: 10px 8px; cursor: pointer; border-bottom: 2px solid transparent; color: var(--on-surface-variant); display: inline-flex; gap: 6px; align-items: center; }
 .tabs button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .count { font-size: 11px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
