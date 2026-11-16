@@ -103,7 +103,31 @@ export const GENESIS = {
   totalLines: 1584,
   isBaseBook: true,
   /** 0-based lineIndex → line.heRef */
-  heRefs: { 2: "בראשית, א, א", 3: "בראשית, א, ב", 4: "בראשית, א, ג", 5: "בראשית, א, ד" } as Readonly<Record<number, string>>,
+  heRefs: { 2: "בראשית, א, א", 3: "בראשית, א, ב", 4: "בראשית, א, ג", 5: "בראשית, א, ד", 7: "בראשית, א, ו" } as Readonly<Record<number, string>>,
+} as const;
+
+/**
+ * An official COMMENTARY (not a base book), for the reversal case (reversed/): the personal import reverses
+ * a dependent link from a personal book into an official one (user_content_importer.dart:806-860). Lines
+ * as in seforim.db v38: 0-based 4 is "רש"י על בראשית, א, א, א".
+ */
+export const RASHI = {
+  title: 'רש"י על בראשית',
+  totalLines: 3141,
+  heRefs: { 4: 'רש"י על בראשית, א, א, א' } as Readonly<Record<number, string>>,
+} as const;
+
+/**
+ * A book of a PERSONAL database ("several databases", dbs/): in Otzaria a personal database is attached
+ * as a library of its own ("מסדי ספרים אישיים"), and the personal import finds a book there when neither
+ * the personal books nor the official library have its title (user_content_importer.dart:713-732,
+ * upstream/dev). The Dart check attaches a real slice (scripts/live-test/make-app-slice.py: book 8441
+ * of seforim.db v38, renamed, 216 lines; lines 5-7 are text, not headings).
+ */
+export const PERSONAL_DB = {
+  title: "בדיקת מקשר - ספר ממסד אישי",
+  totalLines: 216,
+  key: "db:personal-test:8441",
 } as const;
 
 /* ------------------------------------------------------------------ references */
@@ -111,6 +135,9 @@ export const GENESIS = {
 /** BookRef as the tool gives it: a .txt file is an Otzaria-style book (TextFilesSource), the DB book is Sefaria's. */
 function ref(title: string, edition = ""): BookRef {
   if (title === GENESIS.title) return { key: "db:official:1", title, origin: "sefaria", isBaseBook: true };
+  // a book of a personal database is "personal" in the tool (db-source.ts originOf)
+  if (title === PERSONAL_DB.title) return { key: PERSONAL_DB.key, title, origin: "personal" };
+  if (title === RASHI.title) return { key: "db:official:3695", title, origin: "sefaria", isBaseBook: false };
   return { key: `txt:${title}.txt${edition}`, title, origin: "otzaria" };
 }
 
@@ -216,6 +243,42 @@ function cases(): LiveCase[] {
   ];
 }
 
+/**
+ * Several databases (dbs/): a book of a personal database, the bundle's text books and the official
+ * library, linked both ways. The files go to a folder of their own and are imported through Settings
+ * ("ייבוא נתונים"), with the personal database attached.
+ */
+function dbCases(): LiveCase[] {
+  const p = (line1: number) => side(PERSONAL_DB.title, line1);
+  return [
+    link("D1", [14], "הפניה מספר במסד אישי אל ספר אישי (קובץ טקסט)", {
+      source: p(5), target: side(CITING, 2), declaredType: "reference", heRef2: autoHeRef(CITING, 2),
+    }),
+    link("D2", [11, 14], 'מספר אישי אל ספר במסד אישי בסוג "מקור"; לשימוש פרטי נכתב בקובץ של הספר שבמסד, כפירוש', {
+      source: side(CITING, 6), target: p(6), declaredType: "source", heRef2: `${PERSONAL_DB.title} 6`,
+    }),
+    link("D3", [12, 14], "הפניה מבראשית א, ו (הספרייה הרשמית) אל ספר במסד אישי", {
+      source: side(GENESIS.title, 8), target: p(7), declaredType: "reference", heRef2: `${PERSONAL_DB.title} 7`,
+      ...(sefariaRefFromHeRef(GENESIS.heRefs[7]) && { ref1: sefariaRefFromHeRef(GENESIS.heRefs[7])! }),
+    }),
+  ];
+}
+
+/**
+ * reversed/: a personal BASE book with an OFFICIAL commentary. By the library's rule the record is right
+ * (base → commentary, "commentary"), but the personal import stores it reversed, because its source is
+ * personal and its target official (user_content_importer.dart:806-860).
+ */
+function reversedCases(): LiveCase[] {
+  const ref2 = sefariaRefFromHeRef(RASHI.heRefs[4]);
+  return [
+    link("R1", [10, 14], 'מספר בסיס אישי אל פירוש רשמי (רש"י על בראשית), בסוג "פירוש"', {
+      source: side(BASE, 12), target: side(RASHI.title, 5), declaredType: "commentary", heRef2: RASHI.heRefs[4]!,
+      ...(ref2 && { ref2 }),
+    }),
+  ];
+}
+
 /** A record of a type the generator does not know (it stores OTHER) — the app's import rejects the whole file. */
 function negativeCases(): LiveCase[] {
   return [
@@ -234,7 +297,8 @@ function negativeCases(): LiveCase[] {
 export function validationContext(books: Readonly<Record<string, readonly string[]>> = BOOKS): ValidationContext {
   const lines = (b: BookRef) => books[b.title];
   return {
-    lineCount: (b) => (b.title === GENESIS.title ? GENESIS.totalLines : lines(b)?.length),
+    lineCount: (b) =>
+      b.title === GENESIS.title ? GENESIS.totalLines : b.title === PERSONAL_DB.title ? PERSONAL_DB.totalLines : b.title === RASHI.title ? RASHI.totalLines : lines(b)?.length,
     line: (b, i): LineFacts | undefined => {
       const text = lines(b)?.[i];
       if (text === undefined) return undefined; // the Sefaria book's lines are not loaded: "not verified"
@@ -246,6 +310,9 @@ export function validationContext(books: Readonly<Record<string, readonly string
     linksFile: () => "confirmed-new",
     libraryMayHaveFile: (title) => title === GENESIS.title,
     sefariaOwned: (b) => isSefariaOwned(b),
+    // the text books go into a personal-books folder; בראשית and רש"י are the library's, the
+    // personal database's book is in a database Otzaria attaches (AppStore.validation())
+    personalImportSide: (b) => (b.key.startsWith("txt:") ? "personal" : "other"),
     purpose: "private",
   };
 }
@@ -277,7 +344,7 @@ export interface LiveTestBundle {
   files: BundleFile[];
   cases: CaseReport[];
   /** the plans, for the tests */
-  plans: { main: ExportPlan; update: ExportPlan; negative: ExportPlan };
+  plans: { main: ExportPlan; update: ExportPlan; negative: ExportPlan; dbs: ExportPlan; reversed: ExportPlan };
   /** case id → where it lands after the content update (check 15) */
   relinked: Record<string, string>;
 }
@@ -351,6 +418,12 @@ export function buildLiveTestBundle(): LiveTestBundle {
   const negativeCtx: ValidationContext = { ...ctx, purpose: "submission" };
   const negativePlan = planExport(negative.map((c) => c.link), negativeCtx);
 
+  const dbs = dbCases();
+  const dbsPlan = planExport(dbs.map((c) => c.link), ctx);
+  const reversed = reversedCases();
+  // for private use the tool warns that the app will show it reversed (export/private-reversed)
+  const reversedPlan = planExport(reversed.map((c) => c.link), ctx);
+
   const files: BundleFile[] = [
     ...Object.entries(BOOKS).map(([title, lines]) => ({ path: `${BOOKS_DIR}/${title}.txt`, text: bookText(lines) })),
     ...mainPlan.files.map((f) => ({ path: `${BOOKS_DIR}/${f.name}`, text: f.text })),
@@ -360,12 +433,19 @@ export function buildLiveTestBundle(): LiveTestBundle {
       .filter((f) => mainPlan.files.find((m) => m.name === f.name)?.text !== f.text)
       .map((f) => ({ path: `update/${f.name}`, text: f.text })),
     ...negativePlan.files.map((f) => ({ path: `negative/${f.name}`, text: f.text })),
+    ...dbsPlan.files.map((f) => ({ path: `dbs/${f.name}`, text: f.text })),
+    ...reversedPlan.files.map((f) => ({ path: `reversed/${f.name}`, text: f.text })),
   ];
 
-  const report = [...reportCases(main, mainPlan, ctx, BOOKS_DIR), ...reportCases(negative, negativePlan, negativeCtx, "negative")];
+  const report = [
+    ...reportCases(main, mainPlan, ctx, BOOKS_DIR),
+    ...reportCases(negative, negativePlan, negativeCtx, "negative"),
+    ...reportCases(dbs, dbsPlan, ctx, "dbs"),
+    ...reportCases(reversed, reversedPlan, ctx, "reversed"),
+  ];
   files.push({ path: "manifest.json", text: `${JSON.stringify({ format: "otzaria-linker-live-test", version: 1, cases: report, relinked }, null, 2)}\n` });
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { files, cases: report, plans: { main: mainPlan, update: updatePlan, negative: negativePlan }, relinked };
+  return { files, cases: report, plans: { main: mainPlan, update: updatePlan, negative: negativePlan, dbs: dbsPlan, reversed: reversedPlan }, relinked };
 }
 
 /** The lines of a bundle book as both the tool and the app split them (TextFilesSource / `split('\n')`). */
