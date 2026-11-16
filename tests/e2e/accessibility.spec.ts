@@ -52,6 +52,8 @@ async function workspace(page: Page) {
 }
 
 test("keyboard only: the guided flow from the home card to the download", async ({ page }) => {
+  // a long walk by Tab; ~50 s alone, more beside other workers — triple the default rather than flake
+  test.slow();
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("הספרים שלי");
@@ -109,6 +111,8 @@ test("keyboard only: the guided flow from the home card to the download", async 
 });
 
 test("keyboard only: pick lines and link them, approve and reject suggestions, export", async ({ page }) => {
+  // a long walk by Tab; ~50 s alone, more beside other workers — triple the default rather than flake
+  test.slow();
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(distUrl);
   await tabTo(page, /^קבצים$/);
