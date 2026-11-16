@@ -828,6 +828,7 @@ npx vitest run --config vitest.validation.config.ts tests/validation/planner-unp
 | `BENCH_RAW` | — | `1`: גם הפלט הגולמי של המנועים לכל ספר, לפני האיחוד: `raw/<id>.json.gz` |
 | `BENCH_ONLY` | — | `"<כותרת או מזהה>;…"`: רק הספרים האלה (שוב), אל `runs-~only-*.jsonl` |
 | `BENCH_MODE=replay` | — | בלי מנועים: מאחד ומודד שוב את `raw/` עם `merge.ts` הנוכחי, ושומר ב־`score/<id>.json.gz` את מה שהמדידה צריכה בשורות שלהם. אחרי זה `tests/validation/merge-replay.test.ts` (`BENCH_DIR`, ‏`BENCH_TAG`, ‏`BENCH_ROWS=1`, ‏`BENCH_SETS`) מודד שינוי באיחוד בדקה, בלי המסד, לכל דרגה ולכל קבוצת ספרים, בשתי דרכי הספירה (AUTOMATION_ENGINE.md §5.3.1) |
+| `BENCH_RERUN` | — | עם `BENCH_MODE=replay`: `"<מנוע>,<מנוע>"` — השלבים של המנועים האלה רצים שוב בקוד הנוכחי ומחליפים את החלק שלהם בפלט הגולמי, והשאר מאוחד כמו שנשמר. כך שינוי במנוע אחד (כותרות) נמדד בלי להריץ שוב את דיבור המתחיל: 175 ספרים בכ־40 דקות במקום שעתיים וחצי. עם `BENCH_RAW=1` הפלט החדש נשמר ב־`raw-<BENCH_TAG>/` (AUTOMATION_ENGINE.md §2, "מספר בלבד") |
 | `BENCH_DIR` | `.bench/` (ב־`.gitignore`) | המטמון: `runs-<k>of<n>.jsonl` (שורת JSON לכל ספר: מונים, מזהי הקישורים שהופקו, דוגמאות), `oracle-*.json` (האוכלוסייה, לפי טביעת המסד), והדוחות `summary-<mode>.json` ו־`handcheck-<mode>.json` |
 
 **זמנים** (המכונה משותפת, 4 תהליכים): המדגם — 706 ספרים, 3.6 שעות CPU, 57 דקות; הרכבת האוכלוסייה מהאורקל בפעם
