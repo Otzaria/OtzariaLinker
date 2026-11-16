@@ -6,7 +6,7 @@ import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { rovingKeys, rovingTabIndex } from "../keyboard";
-import { LinkItem } from "./links-panel";
+import { LinkItem } from "./link-item";
 import "./db-links.css";
 
 /*

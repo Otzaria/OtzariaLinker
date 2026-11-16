@@ -7,7 +7,7 @@ import type { Pick, Side } from "../../state/store";
 import { TYPE_CHOICES } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
-import { LinkItem } from "./links-panel";
+import { LinkItem } from "./link-item";
 import { plainText } from "./plain-text";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { visibleSlice } from "../../matching/hebrew-tokens";
