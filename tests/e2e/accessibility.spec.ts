@@ -29,14 +29,40 @@ function folder(name: string): string {
   return dir;
 }
 
+/**
+ * Waits until nothing finite is animating for `quietMs` (at most 6 s): a shown line flashes (1.2 s from
+ * the highlight colour) and the flash starts some frames after the click that showed it (the card
+ * mounts, then each reader loads its line, then a frame; the two readers' flashes began 40 ms apart in
+ * Firefox) — a single look at getAnimations() right after the click could miss one of them, and the
+ * dark theme was then measured mid-flash (CI: 3.7–4.4:1 on a line number, chrome, edge and firefox).
+ * Measure the colours it settles on. Endless animations (a spinner) are not waited for.
+ */
+async function settled(page: Page, quietMs: number) {
+  await page.evaluate(async (quietMs) => {
+    const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+    const finite = () => document.getAnimations().filter((a) => a.playState === "running" && a.effect?.getComputedTiming().endTime !== Infinity);
+    const end = performance.now() + 6000;
+    let quietSince = performance.now();
+    while (performance.now() < end) {
+      await frame();
+      const running = finite();
+      if (running.length || document.querySelector(".ln.flash")) {
+        await Promise.race([Promise.all(running.map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 1500))]);
+        quietSince = performance.now();
+      } else if (performance.now() - quietSince >= quietMs) return;
+    }
+  }, quietMs);
+}
+
 /** No control without a name, and no text under AA contrast, in the light and the dark theme. */
 async function screenOk(page: Page, what: string) {
   const body = page.locator("body");
-  // a shown line flashes (1.2s from the highlight colour): measure the colours it settles on
-  await page.evaluate(() => Promise.race([Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 3000))]));
+  await settled(page, 400);
   expect(await unnamedControls(body), `${what}: controls without a name`).toEqual([]);
   for (const theme of ["light", "dark"]) {
     await page.evaluate((t) => (document.documentElement.dataset.theme = t), theme);
+    // (a theme change can start a transition, e.g. a switch's background)
+    await settled(page, 50);
     expect(await lowContrast(body), `${what} (${theme}): text under AA contrast`).toEqual([]);
   }
   await page.evaluate(() => (document.documentElement.dataset.theme = "light"));
