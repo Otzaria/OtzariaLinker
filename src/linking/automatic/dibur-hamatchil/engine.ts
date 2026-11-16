@@ -25,6 +25,7 @@ import { hebrewTokens, visibleSlice, type HebToken } from "../../../matching/heb
 import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, stepTable, type StepProfile, type StepTable } from "../../../matching/token-match";
 import { idfFactors, STOP_WORDS, wordWeight } from "../../../matching/word-weights";
 import {
+  capSpanned,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -37,12 +38,12 @@ import {
   type Suggestion,
 } from "../types";
 import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
-import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type ExtractedDh } from "./extract";
+import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
-import { sefariaByOrigin, sefariaOwnedOf, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 
 export interface DhOptions extends SefariaOwnedOption {
   /** base line range (0-based, inclusive) to search for a commentary line; null → the engine's own default */
@@ -106,11 +107,13 @@ export interface DhOptions extends SefariaOwnedOption {
 
 const r = (code: string, text: string): Reason => ({ code, text });
 
-const BOUNDARY_REASON: Readonly<Record<string, Reason>> = {
+/** one per boundary the extractor reports (typed by DhBoundary: a missing one left an undefined reason, "range") */
+const BOUNDARY_REASON: Readonly<Record<DhBoundary, Reason>> = {
   bold: r("dh/boundary-bold", "הדיבור המתחיל מודגש בשורת הפירוש"),
   etc: r("dh/boundary-etc", 'הדיבור המתחיל מסתיים ב"וכו\'"'),
   punctuation: r("dh/boundary-punctuation", "הדיבור המתחיל מסתיים בנקודה או בנקודתיים"),
   dash: r("dh/boundary-dash", "הדיבור המתחיל מסתיים במקף"),
+  range: r("dh/boundary-range", 'הדיבור המתחיל מסתיים לפני "עד ד"ה"'),
   none: r("dh/boundary-none", "בשורה אין סימן לסוף הדיבור המתחיל, ולכן נבדקו המילים הראשונות שלה"),
 };
 const COLOPHON_RE = /^(?:\s|<[^>]*>)*(?:סליק|סליקו|תם ונשלם|נשלם|תמו ונשלמו|ותשלם)(?![\u05d0-\u05ea])/;
@@ -1211,18 +1214,33 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
   const side = (book: BookRef, line: number, end?: number): LinkSide => (end !== undefined && end > line ? { book, line, end } : { book, line });
   const suggestions: Suggestion[] = placements.map((p) => {
-    const baseSide = side(base.book, p.base, baseRanges ? p.baseEnd : undefined);
+    // on a Sefaria base: the first line, with the quote's whole span kept as citedSpan (withoutRange)
+    const { target: baseSide, citedSpan } = baseRanges ? { target: side(base.book, p.base, p.baseEnd), citedSpan: undefined } : withoutRange(side(base.book, p.base, p.baseEnd));
     const cSide = side(commentary.book, p.cLine);
     const baseLine = bLines[posOf.get(p.base)!];
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    /*
+     * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts.
+     * Measured against the library's own links of such quotes (LIBRARY_BENCHMARK.md §0.6): where they
+     * link exactly one end of the span, it is the first line 1,138 times and the last 387; the line
+     * holding most of the quoted words was right less often than the first (282 vs 371 where they
+     * differ). The span stays as citedSpan (for the merge) and is named in the reason, for the reviewer.
+     */
+    if (citedSpan) {
+      rules.push("dh/range-sefaria");
+      reasons.push(r("dh/range-sefaria", `הציטוט נמשך בשורות ${citedSpan.line + 1}–${citedSpan.end + 1} בספר הבסיס. זה ספר ספריא, והסנכרון של הספרייה אינו שומר טווח בצד שלו, ולכן הקישור לשורה ${citedSpan.line + 1}, שבה מתחיל הדיבור המתחיל.`));
+    }
     let confidence = p.confidence;
     if (unaddressed?.has(p.cLine) && (confidence === "certain" || confidence === "high")) {
       confidence = "possible";
       rules.push("dh/not-addressed-cap");
       warnings.push(r("dh/not-addressed-cap", `השורה אינה מזכירה את ${baseIs!.name}, ולכן לא ברור שהיא מפרשת את דבריו ולא את הטקסט; לבדיקה.`));
     }
+    const capped = capSpanned(confidence, citedSpan);
+    if (capped.warning) warnings.push(capped.warning);
+    confidence = capped.confidence;
     let anchor: RawAnchor | undefined;
     if (policy.anchors && p.words) {
       if (baseLine && NOTE_RE.test(baseLine.text))
@@ -1251,7 +1269,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     };
     return policy.anchors
       ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), target: cSide, declaredType: types.anchored, heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
-      : { ...common, source: cSide, target: baseSide, declaredType: types.plain, heRef2: heRefOf(base, bPath, baseLine, p.base) };
+      : { ...common, source: cSide, target: baseSide, ...(citedSpan && { citedSpan }), declaredType: types.plain, heRef2: heRefOf(base, bPath, baseLine, p.base) };
   });
 
   return { suggestions, notes, unmatched };

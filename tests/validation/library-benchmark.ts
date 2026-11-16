@@ -193,12 +193,16 @@ export function suggestionSpan(id: string, lineText: string | undefined): [numbe
  *                 link of the line to that book says nothing about this mention (as measure.ts);
  *   unconfirmed — the database does not link that line to that book: a new link (or our error —
  *                 hand-checked, LIBRARY_BENCHMARK.md §4).
+ * `spans: "citations"` counts the whole cited unit for citations only: a structural engine's range
+ * collapsed on a Sefaria side (its citedSpan, sefaria-owned.ts withoutRange) is then judged by the line
+ * it writes — the "written line" measure of LIBRARY_BENCHMARK.md §0.6 (BENCH_SPANS=citations).
  */
 export function scoreBook(
   bookKey: string,
   suggestions: readonly { s: Suggestion; engines: readonly EngineId[]; spanId?: string }[],
   db: { byLine: Map<number, DbEnd[]>; pairType: Map<number, string> },
   lineText: (line: number) => string | undefined,
+  spans: "all" | "citations" = "all",
 ): BookScore {
   const matched = new Map<string, Set<number>>();
   const scored: ScoredSuggestion[] = [];
@@ -212,8 +216,9 @@ export function scoreBook(
     let first: [LinkSide, LinkSide] = sides[0]!;
     for (const [mine, other] of sides) {
       const oId = idOfKey(other.book.key);
-      const oFrom = Math.min(other.line, s.citedSpan?.line ?? other.line);
-      const oTo = Math.max(endOf(other), s.citedSpan?.end ?? endOf(other));
+      const cited = spans === "all" || engines.includes("citations") ? s.citedSpan : undefined;
+      const oFrom = Math.min(other.line, cited?.line ?? other.line);
+      const oTo = Math.max(endOf(other), cited?.end ?? endOf(other));
       const here: DbEnd[] = [];
       for (let l = mine.line; l <= Math.min(endOf(mine), mine.line + MAX_RANGE); l++) for (const e of db.byLine.get(l) ?? []) if (e.other === oId) here.push(e);
       if (!here.length) continue;

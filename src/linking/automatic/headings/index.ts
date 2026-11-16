@@ -1,8 +1,9 @@
 import { runToEnd, type EngineSteps } from "../steps";
 import type { LinkSide } from "../../../core/links/model";
-import { sefariaOwnedOf, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { sefariaOwnedOf, withoutRange, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { toGematria } from "../../../core/text/gematria";
 import {
+  capSpanned,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -283,17 +284,22 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     }
     if (chosen.alignment.missing) partial++;
     if (confidence === "certain" || confidence === "high") prevStart = chosen.start;
-    const target = sideAt(chosen.start, chosen.end);
+    // on a Sefaria base: the section's first line, with the section kept as citedSpan (withoutRange)
+    const whole = sideOf(base, chosen.start, chosen.end);
+    const { target, citedSpan } = baseRanges ? { target: whole, citedSpan: undefined } : withoutRange(whole);
+    const capped = capSpanned(confidence, citedSpan);
+    if (capped.warning) warnings.push(capped.warning);
     const source: LinkSide = { book: commentary.book, line: srcIndex };
     suggestions.push({
       id: suggestionId(commentary, srcIndex, target),
       engine: ENGINE,
       source,
       target,
+      ...(citedSpan && { citedSpan }),
       declaredType: opts.declaredType,
       heRef2: heRefOf(base, chosen),
       score: round(score),
-      confidence,
+      confidence: capped.confidence,
       reasons,
       rules,
       alternatives: cands

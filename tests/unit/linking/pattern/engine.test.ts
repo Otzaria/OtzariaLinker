@@ -106,6 +106,14 @@ describe("target = heading", () => {
     expect(pairs(run(["עיין סימן ב"], tgt, { target: "heading", sectionRanges: true }))).toEqual(["0>4-5"]);
   });
 
+  it("on a Sefaria target the section's first line, with the section kept as citedSpan (withoutRange)", () => {
+    const res = run(["עיין סימן ב"], tgt, { target: "heading", sectionRanges: true, sefariaOwned: ["t"] });
+    expect(pairs(res)).toEqual(["0>4"]);
+    expect(res.suggestions[0]!.citedSpan).toEqual({ line: 4, end: 5 });
+    expect(res.suggestions[0]!.confidence).toBe("high"); // certain with the range; the first line only is not the exact place
+    expect(run(["עיין סימן ב"], tgt, { target: "heading", sectionRanges: true }).suggestions[0]!.citedSpan).toBeUndefined();
+  });
+
   it("a kind the target does not number that way is reported, not guessed", () => {
     expect(unmatchedCodes(run(["עיין פרק ב"], tgt, { target: "heading", regex: "פרק ([א-ת]{1,4})" }))).toEqual(["pattern/heading-kind"]);
   });

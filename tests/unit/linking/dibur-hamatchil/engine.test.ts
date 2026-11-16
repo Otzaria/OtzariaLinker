@@ -87,6 +87,52 @@ describe("ד\"ה engine: finding the quoted line", () => {
   });
 });
 
+describe("a range on a Sefaria base: one line, where the ד\"ה starts", () => {
+  // the library's sync keeps no range on a Sefaria side (product audit F1), so a match over several
+  // base lines becomes a link to ONE of them. The library's own links of such quotes mostly point at
+  // the first (LIBRARY_BENCHMARK.md §0.6): the line holding most of the quoted words was measured and
+  // lost — these tests pin the first line, and the reason that names the whole span
+  const sefaria = { sefariaOwned: [BASE.key] };
+  const RAKIA = ["ויאמר אלהים יהי רקיע בתוך המים", "ויעש אלהים את הרקיע", "ויקרא אלהים לרקיע שמים ויהי ערב ויהי בקר ממחרת"];
+  const spanReason = (s: Suggestion) => s.reasons.find((x) => x.code === "dh/range-sefaria")?.text;
+
+  it('a continuation after "וכו׳" that holds most of the quote still links the line where the quote starts', () => {
+    const comm = ["ויאמר אלהים וכו׳ ויקרא אלהים לרקיע שמים ויהי ערב ויהי בקר. פירוש"];
+    expect(baseSide(run(comm, RAKIA).suggestions[0]!)).toMatchObject({ line: 0, end: 2 });
+    const s = run(comm, RAKIA, sefaria).suggestions[0]!;
+    expect(baseSide(s)).toEqual({ book: BASE, line: 0 });
+    expect(s.citedSpan).toEqual({ line: 0, end: 2 }); // the quote's span, for the merge (withoutRange)
+    // only its first line is written: not the exact place, never "certain" (capSpanned)
+    expect(s.confidence).not.toBe("certain");
+    if (run(comm, RAKIA).suggestions[0]!.confidence === "certain") expect(s.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
+    expect(s.rules).toEqual(expect.arrayContaining(["dh/continuation", "dh/range-sefaria"]));
+    expect(spanReason(s)).toContain("בשורות 1–3");
+    expect(spanReason(s)).toContain("לשורה 1, שבה מתחיל הדיבור המתחיל");
+  });
+
+  it("a quote that runs over the end of a base line links the line it starts on, even with more words on the next", () => {
+    const base = ["אחד שנים שלשה ארבעה חמשה ויאמר אלהים", "יהי אור ויהי אור", "וירא אלהים את האור"];
+    const s = run(["<b>ויאמר אלהים יהי אור ויהי אור.</b> פירוש"], base, sefaria).suggestions[0]!;
+    expect(s.rules).toContain("dh/span-next-line");
+    expect(baseSide(s)).toEqual({ book: BASE, line: 0 });
+    expect(spanReason(s)).toContain("בשורות 1–2");
+  });
+
+  it('a בא"ד line inherits the same line; a Sefaria origin without the library\'s answer collapses alike', () => {
+    const comm = ["ויאמר אלהים וכו׳ ויקרא אלהים לרקיע שמים ויהי ערב ויהי בקר. פירוש", 'בא"ד ועוד דבר'];
+    const r = run(comm, RAKIA, {}, "sefaria");
+    expect(r.suggestions.map((s) => [commentaryLine(s), baseSide(s).line, baseSide(s).end])).toEqual([[0, 0, undefined], [1, 0, undefined]]);
+    expect(r.suggestions[1]!.rules).toEqual(["dh/inherit-baad", "dh/range-sefaria"]);
+  });
+
+  it("a one-line match on a Sefaria base, and any match on another base, get no such reason", () => {
+    const one = run(["<b>ויעש אלהים את הרקיע.</b> פירוש"], RAKIA, sefaria).suggestions[0]!;
+    expect(one.rules).not.toContain("dh/range-sefaria");
+    expect(one.citedSpan).toBeUndefined();
+    expect(run(["ויאמר אלהים וכו׳ ויקרא אלהים לרקיע שמים. פירוש"], RAKIA).suggestions[0]!.rules).not.toContain("dh/range-sefaria");
+  });
+});
+
 describe("false-positive guards", () => {
   it("a common short phrase does not match alone", () => {
     const r = run(["<b>את כל.</b> פירוש"], ["ויעש את כל המלאכה", "ויקח את כל הכסף"]);

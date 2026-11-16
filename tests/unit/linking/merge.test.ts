@@ -102,6 +102,59 @@ describe("mergeSuggestions — conflicts and coarser agreement", () => {
   });
 });
 
+describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its span (citedSpan)", () => {
+  // headings on a Sefaria base: the section's first line is written, the section stays in citedSpan
+  const Hs = (c: number, b: number, end: number, conf: Confidence): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B, b), conf, { citedSpan: { line: b, end } }), focus: C.key });
+  /** dibur-hamatchil without an anchor (a Sefaria base): commentary line → base line */
+  const Dc = (c: number, b: number, conf: Confidence, citedSpan?: { line: number; end: number }): MergeItem => ({ suggestion: sg("dibur-hamatchil", side(C, c), side(B, b), conf, { declaredType: "commentary", ...(citedSpan && { citedSpan }) }), focus: C.key });
+
+  it("a ד\"ה line inside the collapsed section agrees with it, as it did with the range: folded, not a conflict", () => {
+    const { suggestions, stats } = mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 15, "possible")]);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: "high" });
+    expect(suggestions[0]!.target).toEqual(side(B, 15));
+    expect(suggestions[0]!.rules).toContain("maxlink/consistent");
+    expect(stats).toMatchObject({ consistent: 1, conflicts: 0 });
+    // the bug it fixes: without the span the section's first line and the ד"ה line conflicted, both ambiguous
+    const bare = mergeSuggestions([{ suggestion: sg("headings", side(C, 5), side(B, 10), "high"), focus: C.key }, Dc(5, 15, "possible")]);
+    expect(bare.stats.conflicts).toBe(2);
+  });
+
+  it("a ד\"ה on the section's first line is inside it, not the same link: consistent (at most high), never raised to certain", () => {
+    const { suggestions, stats } = mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 10, "high")]);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: "high" });
+    expect(stats).toMatchObject({ agreements: 0, consistent: 1 });
+    // as the range itself merged
+    expect(mergeSuggestions([H(5, 10, "high", 20), Dc(5, 10, "high")]).suggestions[0]!.confidence).toBe("high");
+  });
+
+  it("a collapsed ד\"ה span inside the section agrees too; one reaching past the section's end conflicts, as the ranges did", () => {
+    expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 15, "high", { line: 15, end: 16 })]).stats).toMatchObject({ consistent: 1, conflicts: 0 });
+    expect(mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 19, "high", { line: 19, end: 22 })]).stats.conflicts).toBe(2);
+  });
+
+  it("a link that writes only the first line of its span is never certain: not by itself, not by agreement", () => {
+    const alone = mergeSuggestions([Hs(5, 10, 20, "certain")]).suggestions[0]!;
+    expect(alone.confidence).toBe("high");
+    expect(alone.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
+    // headings and a ד"ה quote over the same span: one link, two engines — still high
+    const both = mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 10, "high", { line: 10, end: 20 })]);
+    expect(both.stats.agreements).toBe(1);
+    expect(both.suggestions[0]!.confidence).toBe("high");
+    // a precise line inside it keeps its own certainty
+    expect(mergeSuggestions([Hs(5, 10, 20, "certain"), Dc(5, 15, "certain")]).suggestions[0]!).toMatchObject({ engine: "dibur-hamatchil", confidence: "certain" });
+  });
+
+  it("the library's links inside the span do not count as contradicting it", () => {
+    const ours = Array.from({ length: 30 }, (_, i) => Hs(i, i * 10, i * 10 + 9, "certain"));
+    const inside = Array.from({ length: 30 }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i * 10 + 5) }));
+    expect(mergeSuggestions(ours, { reference: inside }).stats.contradictedPairs).toBe(0);
+    const outside = Array.from({ length: 30 }, (_, i) => linePairKey({ source: side(C, i), target: side(B, i * 10 + 50) }));
+    expect(mergeSuggestions(ours, { reference: outside }).stats.contradictedPairs).toBe(1);
+  });
+});
+
 describe("mergeSuggestions — a book pair whose engines mostly disagree", () => {
   // positions 0..11: headings and dibur-hamatchil point at different lines (the Rif's own dapim read as the Talmud's)
   const conflicting = Array.from({ length: 12 }, (_, i) => [H(i, i, "certain"), D(i, i + 40, "high")]).flat();

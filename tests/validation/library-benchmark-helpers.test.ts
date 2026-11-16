@@ -71,6 +71,17 @@ describe("library benchmark helpers", () => {
     expect(m.scored.map((x) => x.verdict)).toEqual(["unconfirmed"]);
   });
 
+  it("a range collapsed on a Sefaria side: its citedSpan counts by default, only the written line with spans 'citations'", () => {
+    const own = (type: string, s: number, t: number) => ownerOf(type, s, t, related);
+    const db = indexDbLinks("s1:2", [link(30, "commentary", [1, 7], [2, 0])], own);
+    const collapsed = { s: { ...sug("h", [2, 0], [1, 4]), engine: "headings" as const, citedSpan: { line: 4, end: 9 } }, engines: ["headings" as const] };
+    expect(scoreBook("s1:2", [collapsed], db, () => undefined).scored[0]!.verdict).toBe("correct");
+    expect(scoreBook("s1:2", [collapsed], db, () => undefined, "citations").scored[0]!.verdict).toBe("wrong");
+    // a citation's cited unit counts either way
+    const cited = { s: { ...sug("c", [2, 0], [1, 4]), citedSpan: { line: 4, end: 9 } }, engines: ["citations" as const] };
+    expect(scoreBook("s1:2", [cited], db, () => undefined, "citations").scored[0]!.verdict).toBe("correct");
+  });
+
   it("ids survive the compact encoding", () => {
     const ids = [5, 1_000_000, 3, 77, 77];
     expect(decodeIds(encodeIds(ids))).toEqual([3, 5, 77, 1_000_000]);
