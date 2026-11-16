@@ -190,7 +190,7 @@ function dump(engine: string, a: number, b: number, s: readonly Suggestion[], g:
   const aKey = `:${a}`;
   const sug = s.map((x) => {
     const [from, to] = x.source.book.key.endsWith(aKey) ? [x.source, x.target] : [x.target, x.source];
-    return { c: from.line, b: to.line, e: to.end ?? to.line, conf: x.confidence, score: x.score, rules: x.rules, alt: x.alternatives.map((y) => y.target.line) };
+    return { c: from.line, b: to.line, e: to.end ?? to.line, conf: x.confidence, score: x.score, rules: x.rules, alt: x.alternatives.map((y) => y.target.line), why: [...x.reasons.filter((r) => r.code.startsWith("dh/tie-")), ...x.alternatives.flatMap((y) => y.reasons.filter((r) => r.code.startsWith("dh/alt-")))].map((r) => r.text) };
   });
   const unmatched = (lastResult?.unmatched ?? []).map((u) => ({ c: u.line, why: u.reasons.map((r) => r.code) }));
   writeFileSync(join(DUMP!, `${engine}-${a}-${b}.json`), JSON.stringify({ a, b, sug, unmatched, notes: lastResult?.notes.map((n) => n.code) ?? [], gold: g.map((x) => [x.from, x.to, x.toEnd]) }));
