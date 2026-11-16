@@ -13,6 +13,30 @@ export interface ColumnDef {
   rowidAlias: boolean;
   /** literal DEFAULT, used for rows written before an ALTER TABLE ADD COLUMN */
   defaultValue: null | number | string;
+  /** declared collation, upper-cased ("BINARY" when none) — indexes on the column inherit it */
+  collation: string;
+  /**
+   * GENERATED column: a "stored" value is in the record like any other; a "virtual" one is not in
+   * the file at all (SQLite computes it on read), so it reads as NULL and must not be mapped.
+   */
+  generated: "virtual" | "stored" | null;
+}
+
+/** One key column of a PRIMARY KEY / UNIQUE constraint or of an index. */
+export interface KeyPart {
+  /** column name; for an expression key, the first word of the expression */
+  name: string;
+  /** explicit COLLATE of this key part, upper-cased; null = the column's own collation */
+  collation: string | null;
+  desc: boolean;
+  /** the key is an expression, not a plain column */
+  expr: boolean;
+}
+
+/** A PRIMARY KEY or UNIQUE constraint, column-level or table-level, in the order the DDL declares it. */
+export interface KeyConstraint {
+  primaryKey: boolean;
+  parts: KeyPart[];
 }
 
 export interface TableDef {
@@ -20,6 +44,13 @@ export interface TableDef {
   withoutRowid: boolean;
   /** primary-key column names in key order (column-level or table-level), [] when none */
   primaryKey: string[];
+  /** PRIMARY KEY and UNIQUE constraints in declaration order — they decide sqlite_autoindex numbering */
+  constraints: KeyConstraint[];
+  /**
+   * The b-tree of a WITHOUT ROWID table is ordered by its primary key. It can be seeked only when
+   * every key column compares BINARY and ascending (always true for a rowid table).
+   */
+  primaryKeySeekable: boolean;
 }
 
 type Tok = { kind: "word" | "str" | "num" | "punct"; text: string };
@@ -95,6 +126,7 @@ export function parseCreateTable(sql: string): TableDef {
   const withoutRowid = tail.includes("WITHOUT") && tail.includes("ROWID");
 
   const columns: ColumnDef[] = [];
+  const constraints: KeyConstraint[] = [];
   let primaryKey: string[] = [];
   let tableLevelPk = false;
   for (const d of defs) {
@@ -103,13 +135,21 @@ export function parseCreateTable(sql: string): TableDef {
     if (first.kind === "word" && TABLE_CONSTRAINT.has(first.text.toUpperCase()) && !isColumnNamedLikeKeyword(d)) {
       const words = d.map((t) => t.text.toUpperCase());
       const pk = words.findIndex((w, k) => w === "PRIMARY" && words[k + 1] === "KEY");
-      if (pk !== -1) { primaryKey = keyColumns(d.slice(pk + 2)); tableLevelPk = true; }
+      const uq = words.indexOf("UNIQUE");
+      if (pk !== -1) {
+        const parts = keyParts(d.slice(pk + 2));
+        primaryKey = parts.map((x) => x.name);
+        tableLevelPk = true;
+        constraints.push({ primaryKey: true, parts });
+      } else if (uq !== -1) constraints.push({ primaryKey: false, parts: keyParts(d.slice(uq + 1)) });
       continue;
     }
-    const col = parseColumn(d);
+    const { col, keys } = parseColumn(d);
     columns.push(col);
-    const words = d.map((t) => t.text.toUpperCase());
-    if (words.some((w, k) => w === "PRIMARY" && words[k + 1] === "KEY")) primaryKey = [col.name];
+    for (const k of keys) {
+      if (k.primaryKey) primaryKey = [col.name];
+      constraints.push({ primaryKey: k.primaryKey, parts: [{ name: col.name, collation: null, desc: k.desc, expr: false }] });
+    }
   }
   // A table-level PRIMARY KEY (x) on a single INTEGER column is also a rowid alias (even with DESC;
   // only the column-level "INTEGER PRIMARY KEY DESC" form is not — handled in parseColumn).
@@ -118,41 +158,105 @@ export function parseCreateTable(sql: string): TableDef {
     if (c && c.type === "INTEGER") c.rowidAlias = true;
   }
   if (withoutRowid) for (const c of columns) c.rowidAlias = false;
-  return { columns, withoutRowid, primaryKey };
+  const pkParts = constraints.find((k) => k.primaryKey)?.parts ?? [];
+  const primaryKeySeekable = !withoutRowid || pkParts.every((k) => !k.desc && !k.expr && collationOf(columns, k) === "BINARY");
+  return { columns, withoutRowid, primaryKey, constraints, primaryKeySeekable };
 }
 
-/** Column names inside "( a, b COLLATE x DESC )". */
-function keyColumns(toks: Tok[]): string[] {
-  const out: string[] = [];
-  let depth = 0;
-  let expectName = true;
-  for (const t of toks) {
-    if (t.text === "(") { depth++; if (depth === 1) expectName = true; continue; }
-    if (t.text === ")") { depth--; if (depth === 0) break; continue; }
-    if (depth === 1 && t.text === ",") { expectName = true; continue; }
-    if (depth === 1 && expectName && t.kind === "word") { out.push(t.text); expectName = false; }
+/** The collation a key part compares with: its own COLLATE, else its column's, else BINARY. */
+export function collationOf(columns: readonly ColumnDef[], k: KeyPart): string {
+  return k.collation ?? columns.find((c) => c.name.toLowerCase() === k.name.toLowerCase())?.collation ?? "BINARY";
+}
+
+/**
+ * The key columns of sqlite_autoindex_<table>_<n>, at position n − 1. SQLite creates the automatic
+ * indexes while it parses CREATE TABLE, one per PRIMARY KEY / UNIQUE constraint in declaration
+ * order, each numbered after the indexes the table already has, except:
+ *   - a PRIMARY KEY that is the rowid alias gets no index (and no number);
+ *   - a constraint with the same columns and collations as an index already created is merged
+ *     into it (no new index, no number), e.g. UNIQUE (a) next to PRIMARY KEY (a);
+ *   - the PRIMARY KEY of a WITHOUT ROWID table takes a number but has no sqlite_master entry of
+ *     its own: it is the table's b-tree.
+ * (build.c: sqlite3AddPrimaryKey, sqlite3CreateIndex.) Review C12: assuming "#1 is the PK" made a
+ * UNIQUE column declared before PRIMARY KEY (book, ord) read as the PK, and every book came out empty.
+ */
+export function autoIndexes(t: TableDef): KeyPart[][] {
+  const out: KeyPart[][] = [];
+  const same = (a: KeyPart[], b: KeyPart[]) =>
+    a.length === b.length && a.every((k, i) => k.name.toLowerCase() === b[i]!.name.toLowerCase() && collationOf(t.columns, k) === collationOf(t.columns, b[i]!));
+  for (const k of t.constraints) {
+    const only = k.parts.length === 1 ? t.columns.find((c) => c.name.toLowerCase() === k.parts[0]!.name.toLowerCase()) : undefined;
+    if (k.primaryKey && !t.withoutRowid && only?.rowidAlias) continue;
+    if (out.some((x) => same(x, k.parts))) continue;
+    out.push(k.parts);
   }
   return out;
+}
+
+/** Key parts inside "( a, b COLLATE x DESC, lower(c) )"; the tokens start at or before the "(". */
+function keyParts(toks: Tok[]): KeyPart[] {
+  const open = toks.findIndex((t) => t.text === "(");
+  if (open === -1) return [];
+  const items: Tok[][] = [[]];
+  let depth = 0;
+  for (const t of toks.slice(open + 1)) {
+    if (t.text === ")" && depth === 0) break;
+    if (t.text === "(") depth++;
+    if (t.text === ")") depth--;
+    if (t.text === "," && depth === 0) items.push([]);
+    else items.at(-1)!.push(t);
+  }
+  return items.filter((it) => it.length).map((it): KeyPart => {
+    const first = it[0]!;
+    let expr = first.kind !== "word" || it[1]?.text === "(";
+    let collation: string | null = null;
+    let desc = false;
+    for (let i = 1; i < it.length && !expr; i++) {
+      const w = it[i]!.text.toUpperCase();
+      if (w === "COLLATE" && it[i + 1]) collation = it[++i]!.text.toUpperCase();
+      else if (w === "DESC") desc = true;
+      else if (w !== "ASC") expr = true;
+    }
+    return { name: first.text, collation, desc, expr };
+  });
 }
 
 /** Index definition: target table and key columns, plus whether a simple ordered seek is valid. */
 export interface IndexDef {
   table: string;
   columns: string[];
-  /** false for expression keys, non-BINARY collation or DESC — those indexes are scanned, not seeked */
+  /**
+   * The index can be seeked, and walked as an ordered list of every row: plain column keys, all
+   * BINARY (their own COLLATE, else the column's) and ascending, and not partial. Anything else —
+   * expression keys, NOCASE/RTRIM, DESC, a WHERE clause — is never used (review C12).
+   */
   seekable: boolean;
 }
 
-export function parseCreateIndex(sql: string): IndexDef {
+/** An explicit CREATE INDEX: its key parts, and whether it is partial (has a WHERE). */
+export function parseCreateIndex(sql: string): { table: string; parts: KeyPart[]; partial: boolean } {
   const toks = tokenize(sql);
   const on = toks.findIndex((t) => t.kind === "word" && t.text.toUpperCase() === "ON");
   const table = toks[on + 1]?.text ?? "";
   const rest = toks.slice(on + 2);
-  const columns = keyColumns(rest);
-  const close = rest.findIndex((t) => t.text === ")");
-  const inner = rest.slice(1, close === -1 ? rest.length : close).map((t) => t.text.toUpperCase());
-  const seekable = !inner.includes("DESC") && !inner.some((w, k) => w === "COLLATE" && inner[k + 1] !== "BINARY") && !inner.includes("(");
-  return { table, columns, seekable };
+  let depth = 0;
+  let close = rest.length;
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i]!.text === "(") depth++;
+    if (rest[i]!.text === ")" && --depth === 0) {
+      close = i;
+      break;
+    }
+  }
+  const partial = rest.slice(close + 1).some((t) => t.kind === "word" && t.text.toUpperCase() === "WHERE");
+  return { table, parts: keyParts(rest), partial };
+}
+
+/** Columns and seekability of an index with known key parts, resolved against its table. */
+export function indexDef(table: string, parts: KeyPart[], partial: boolean, t: TableDef | null): IndexDef {
+  const cols = t?.columns ?? [];
+  const seekable = !partial && parts.length > 0 && parts.every((k) => !k.expr && !k.desc && collationOf(cols, k) === "BINARY");
+  return { table, columns: parts.map((k) => k.name), seekable };
 }
 
 /** `"primary" TEXT` is a column; `PRIMARY KEY (a, b)` is a constraint. */
@@ -166,17 +270,38 @@ function isColumnNamedLikeKeyword(d: Tok[]): boolean {
   return true;
 }
 
-function parseColumn(d: Tok[]): ColumnDef {
+function parseColumn(d: Tok[]): { col: ColumnDef; keys: { primaryKey: boolean; desc: boolean }[] } {
   const name = d[0]!.text;
   const typeWords: string[] = [];
   let i = 1;
   while (i < d.length && d[i]!.kind === "word" && !COLUMN_CONSTRAINT.has(d[i]!.text.toUpperCase())) typeWords.push(d[i++]!.text.toUpperCase());
   if (d[i]?.text === "(") { while (i < d.length && d[i]!.text !== ")") i++; i++; } // VARCHAR(255)
   const type = typeWords.join(" ");
-  const rest = d.slice(i).map((t) => t.text.toUpperCase());
-  const pk = rest.findIndex((w, k) => w === "PRIMARY" && rest[k + 1] === "KEY");
-  const desc = pk !== -1 && rest[pk + 2] === "DESC";
-  const rowidAlias = type === "INTEGER" && pk !== -1 && !desc;
+  // the constraints, top level only: an expression in DEFAULT, CHECK or AS may hold any word
+  const top: Tok[] = [];
+  let depth = 0;
+  for (let k = i; k < d.length; k++) {
+    const t = d[k]!;
+    if (t.text === "(") {
+      if (depth++ === 0) top.push(t);
+    } else if (t.text === ")") depth--;
+    else if (depth === 0) top.push(t);
+  }
+  const word = (k: number) => (top[k]?.kind === "word" ? top[k]!.text.toUpperCase() : "");
+  const keys: { primaryKey: boolean; desc: boolean }[] = [];
+  let collation = "BINARY";
+  let generated: ColumnDef["generated"] = null;
+  for (let k = 0; k < top.length; k++) {
+    const w = word(k);
+    if (w === "CONSTRAINT") k++; // its name
+    else if (w === "PRIMARY" && word(k + 1) === "KEY") keys.push({ primaryKey: true, desc: word(k + 2) === "DESC" });
+    else if (w === "UNIQUE") keys.push({ primaryKey: false, desc: false });
+    else if (w === "COLLATE" && top[k + 1]) collation = top[++k]!.text.toUpperCase();
+    else if (w === "AS" && top[k + 1]?.text === "(") generated = "virtual"; // GENERATED ALWAYS AS (…) [VIRTUAL]
+    else if (generated && w === "STORED") generated = "stored";
+  }
+  const pk = keys.find((k) => k.primaryKey);
+  const rowidAlias = type === "INTEGER" && !!pk && !pk.desc;
   let defaultValue: ColumnDef["defaultValue"] = null;
   const di = d.findIndex((t, k) => k >= i && t.kind === "word" && t.text.toUpperCase() === "DEFAULT");
   if (di !== -1) {
@@ -185,5 +310,5 @@ function parseColumn(d: Tok[]): ColumnDef {
     if (v?.kind === "num") defaultValue = Number(v.text);
     else if (v?.kind === "str") defaultValue = v.text;
   }
-  return { name, type, rowidAlias, defaultValue };
+  return { col: { name, type, rowidAlias, defaultValue, collation, generated }, keys };
 }

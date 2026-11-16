@@ -94,19 +94,38 @@ function readValue(p: Uint8Array, view: DataView, at: number, t: number, enc: Te
   }
 }
 
-/** SQLite's cross-type ordering: NULL < numbers < text < blob. Text compares as BINARY (code units). */
-export function compareValues(a: SqlValue, b: SqlValue): number {
+/**
+ * SQLite's cross-type ordering: NULL < numbers < text < blob. Text compares as BINARY: memcmp of
+ * the stored bytes, so the order depends on the database's text encoding (review C12).
+ */
+export function compareValues(a: SqlValue, b: SqlValue, enc: TextEncodingId = 1): number {
   const rank = (v: SqlValue) => (v === null ? 0 : typeof v === "number" || typeof v === "bigint" ? 1 : typeof v === "string" ? 2 : 3);
   const ra = rank(a);
   const rb = rank(b);
   if (ra !== rb) return ra - rb;
   if (ra === 0) return 0;
   if (ra === 1) return (a as number) < (b as number) ? -1 : (a as number) > (b as number) ? 1 : 0;
-  if (ra === 2) return compareUtf8(a as string, b as string);
+  if (ra === 2) return enc === 1 ? compareUtf8(a as string, b as string) : compareUtf16(a as string, b as string, enc === 2);
   const x = a as Uint8Array;
   const y = b as Uint8Array;
   for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
   return x.length - y.length;
+}
+
+/**
+ * memcmp order of the UTF-16 encodings: code-unit order for big-endian; for little-endian each
+ * code unit compares by its low byte first ('é' U+00E9 sorts after 'א' U+05D0).
+ */
+function compareUtf16(a: string, b: string, littleEndian: boolean): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    let x = a.charCodeAt(i);
+    let y = b.charCodeAt(i);
+    if (x === y) continue;
+    if (littleEndian) (x = ((x & 0xff) << 8) | (x >> 8)), (y = ((y & 0xff) << 8) | (y >> 8));
+    return x - y;
+  }
+  return a.length - b.length;
 }
 
 /** memcmp order of the UTF-8 encodings == code-point order (not UTF-16 code-unit order). */
