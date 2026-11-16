@@ -1,0 +1,50 @@
+name: Release
+
+# Publishing a GitHub Release builds the single HTML file from the tagged commit, runs every check
+# against it, and attaches:
+#   OtzariaLinker.html            (fixed name → .../releases/latest/download/OtzariaLinker.html)
+#   OtzariaLinker-<version>.html
+#   SHA256SUMS
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Tag matches package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "${{ github.event.release.tag_name }}"
+      - run: npm run typecheck
+      - name: Unit, integration and contract tests (property tests seeded from the commit)
+        run: FC_SEED=$((16#${GITHUB_SHA:0:7})) npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chrome msedge firefox
+      - name: E2E against the built file, offline
+        run: npx playwright test
+      - name: Build is reproducible from the tagged commit
+        run: |
+          sha1=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
+          rm -rf dist && npm run build
+          sha2=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
+          test "$sha1" = "$sha2"
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          gh release upload "$TAG" dist/OtzariaLinker.html "dist/OtzariaLinker-${version}.html" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --clobber

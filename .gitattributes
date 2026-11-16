@@ -1,0 +1,7 @@
+* text=auto eol=lf
+# The v3 tool is a byte-exact regression reference.
+legacy/*.html -text
+*.db binary
+*.png binary
+*.woff2 binary
+*.ttf binary

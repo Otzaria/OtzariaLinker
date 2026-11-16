@@ -1,0 +1,6 @@
+/* links in someone else's layout: the field-mapping dialog */
+dialog.records-dialog { width: min(820px, calc(100vw - 32px)); }
+.records-dialog .records-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
+.records-dialog label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.records-dialog .req { color: var(--error); }
+.records-dialog .table-wrap { overflow-x: auto; }

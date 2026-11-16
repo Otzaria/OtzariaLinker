@@ -1,0 +1,933 @@
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Session } from "node:inspector/promises";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { join, resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SourceBook } from "../../src/core/books";
+import { pushTo } from "../../src/core/collections";
+import type { Link } from "../../src/core/links/model";
+import type { EngineContext, EngineId, Suggestion } from "../../src/linking/automatic/types";
+import { mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../src/linking/merge";
+import { LINKED_MIN, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type PlanBook, type PlanStep } from "../../src/linking/plan";
+import { sefariaRefFromHeRef } from "../../src/core/links/sefaria-ref";
+import { SourceRegistry } from "../../src/sources/registry";
+import { maxlinkJob } from "../../src/workers/maxlink-job";
+import { DB, fileBlob, fingerprint, oracle, cleanupTmp } from "./env";
+import {
+  addCounters,
+  detailRows,
+  allocate,
+  CONFIDENCES,
+  count,
+  countBucket,
+  decodeIds,
+  encodeIds,
+  estimate,
+  excerpt,
+  indexDbLinks,
+  isSpanned,
+  ownerBooks,
+  ownerOf,
+  rankOf,
+  scoreBook,
+  sizeBucket,
+  SPAN_POLICIES,
+  spanBucket,
+  spanEnds,
+  spanRecords,
+  stratify,
+  suggestionSpan,
+  writtenRecords,
+  type Counters,
+  type DbEnd,
+  type Estimate,
+  type Owner,
+  type SpanPolicy,
+  type Stratum,
+  type Unit,
+} from "./library-benchmark";
+
+/*
+ * The library benchmark (docs/validation/LIBRARY_BENCHMARK.md): "if the tool runs on the books Otzaria
+ * already links, does it produce at least the links that exist?" — per stored connection type, over
+ * the whole library or a stratified sample of it.
+ *
+ * A RUN of a book = what max-link does for that book in the app: the planner's steps for its own
+ * relations (headings + dibur-hamatchil to its base, footnotes for a notes book; linking/plan.ts) and
+ * the citations engine on it, executed by the worker's own job (workers/maxlink-job.ts) on the real
+ * database opened read-only (a file-backed Blob, never copied, never written), and merged as the app
+ * merges them (linking/merge.ts, with the database's links as the calibration reference, as in the app).
+ * The run is then scored against EVERY link the database has at that book (library-benchmark.ts
+ * scoreBook), and the ids of the database links it regenerated are kept per owner, so that a link
+ * found from either end counts once.
+ *
+ *   OTZARIA_DB=C:/ProgramData/otzaria/books/seforim.db \
+ *   npx vitest run --config vitest.validation.config.ts tests/validation/library-benchmark.test.ts --silent=false
+ *
+ *   BENCH_MODE      sample (default): a stratified sample per type (owners: books for LINKER and
+ *                   dependant→base links, book PAIRS for the undirected layers); full: every owner of
+ *                   BENCH_TYPES; report: no runs, only the report of what the cache holds
+ *   BENCH_TYPES     types whose owners are run (default: all), e.g. COMMENTARY,LINKER
+ *   BENCH_N         sampled owners per type and kind (default 60 books / 60 pairs)
+ *   BENCH_SEED      the sample's seed (default "otzaria-bench-1")
+ *   BENCH_SHARD     k/n: this process runs every n-th book from k (run up to 4 in parallel)
+ *   BENCH_BUDGET_MIN  stop starting books after this many minutes (resume later)
+ *   BENCH_STEP_S    a step that runs longer is stopped and its partial result kept (default 600)
+ *   BENCH_DESIGN    the owners the report measures: sample | full (default: full only for BENCH_MODE=full)
+ *   BENCH_RERUN_STOPPED=1  run again the books whose steps hit BENCH_STEP_S (give it more time)
+ *   BENCH_ONLY      "<title or id>;<title or id>": run only these books, cached or not (into runs-~only-<k>of<n>.jsonl,
+ *                   which is read after the other files and so replaces their records)
+ *   BENCH_DRY=1     only print the design (owners and books per type), run nothing
+ *   BENCH_SPANS     all (default): a suggestion's citedSpan counts as its other end; citations: only a
+ *                   citation's — a structural range collapsed on a Sefaria side is judged by its written line
+ *   BENCH_SEFARIA_SPAN  first|firstRef|last|ends|all|learned: a run also keeps, for each of these, what a span cut on a
+ *                   Sefaria base (citedSpan) would score written that way (§0.8); the report reads the named one
+ *                   and prints them side by side (span-policies.json)
+ *   BENCH_CPUPROF   a folder: each book run is CPU-profiled from inside the test process (node:inspector,
+ *                   10 ms samples) into <folder>/<book id>.cpuprofile — NODE_OPTIONS=--cpu-prof misses it, since
+ *                   vitest ends its worker without the exit that writes the profile
+ *   BENCH_RAW=1     keep each run's raw engine output (before the merge) in <BENCH_DIR>/raw/<book id>.json.gz
+ *   BENCH_MODE=replay  run no engine: merge and score again the raw outputs BENCH_RAW kept (all of them, or
+ *                   BENCH_ONLY) — a change to merge.ts measured in minutes, not hours. Writes
+ *                   replay-<BENCH_TAG>.jsonl (one record per book, as runs-*.jsonl) and detail-<BENCH_TAG>.jsonl.gz
+ *                   (every structural suggestion the merge touched: ambiguous, in a conflict, or with an
+ *                   ambiguous member — its engines, members, rules and both verdicts; BENCH_TEXT_EVERY=k: one
+ *                   row in k with the words of its lines)
+ *   BENCH_RERUN     with BENCH_MODE=replay: "<engine>,<engine>" — these engines' steps run again with the current
+ *                   code and replace their part of the raw output (the others are replayed as kept): a change to
+ *                   one engine (headings) measured without running dibur-hamatchil again. With BENCH_RAW=1 the new
+ *                   raw output goes to raw-<BENCH_TAG>/
+ *   BENCH_DIR       cache and results (default .bench/ in the repository, git-ignored): the per-book
+ *                   results (runs-<k>of<n>.jsonl, one JSON line per book: resume skips books already
+ *                   there), the oracle's population (oracle-*.json) and the reports
+ */
+const MODE = (process.env.BENCH_MODE ?? "sample") as "sample" | "full" | "report" | "replay";
+const RAW = !!process.env.BENCH_RAW;
+const CPUPROF = process.env.BENCH_CPUPROF;
+
+/** BENCH_CPUPROF: run() under the V8 sampling profiler, the profile saved as <CPUPROF>/<name>.cpuprofile */
+async function profiled<T>(name: string, run: () => Promise<T>): Promise<T> {
+  if (!CPUPROF) return run();
+  const session = new Session();
+  session.connect();
+  await session.post("Profiler.enable");
+  await session.post("Profiler.setSamplingInterval", { interval: 10_000 });
+  await session.post("Profiler.start");
+  try {
+    return await run();
+  } finally {
+    const { profile } = await session.post("Profiler.stop");
+    mkdirSync(CPUPROF, { recursive: true });
+    writeFileSync(join(CPUPROF, `${name}.cpuprofile`), JSON.stringify(profile));
+    session.disconnect();
+  }
+}
+const TAG = process.env.BENCH_TAG ?? "replay";
+/** BENCH_TEXT_EVERY=k: in a replay, one detail row in k (by rank) carries the words of its lines, for reading by hand */
+const TEXT_EVERY = Number(process.env.BENCH_TEXT_EVERY ?? 0);
+/** BENCH_RERUN="headings": in a replay, these engines run again (their raw output is replaced) */
+const RERUN = process.env.BENCH_RERUN?.split(",").map((t) => t.trim()).filter(Boolean) ?? [];
+/** which owners the report measures: the sample (default) or all of them (default for BENCH_MODE=full) */
+const DESIGN = (process.env.BENCH_DESIGN ?? (MODE === "full" ? "full" : "sample")) as "sample" | "full";
+const RERUN_STOPPED = !!process.env.BENCH_RERUN_STOPPED;
+/** BENCH_ONLY="<title>;<title>": run only these books (again), for a before/after of a few owners */
+const ONLY_BOOKS = process.env.BENCH_ONLY?.split(";").map((t) => t.trim()).filter(Boolean);
+const ONLY_TYPES = process.env.BENCH_TYPES?.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
+const N = Number(process.env.BENCH_N ?? 60);
+const SEED = process.env.BENCH_SEED ?? "otzaria-bench-1";
+const [SHARD, SHARDS] = (process.env.BENCH_SHARD ?? "0/1").split("/").map(Number) as [number, number];
+const BUDGET_MS = Number(process.env.BENCH_BUDGET_MIN ?? 1e9) * 60_000;
+const STEP_MS = Number(process.env.BENCH_STEP_S ?? 600) * 1000;
+const DIR = resolve(process.env.BENCH_DIR ?? ".bench");
+/** BENCH_SPANS=citations: a structural range collapsed on a Sefaria side counts only at the line it writes (§0.6) */
+const SPANS = process.env.BENCH_SPANS === "citations" ? "citations" : "all";
+/** BENCH_SEFARIA_SPAN=<policy>: measure how a cut Sefaria-side span is written (§0.8); the report reads that policy */
+const SEFARIA_SPAN = SPAN_POLICIES.find((p) => p === process.env.BENCH_SEFARIA_SPAN);
+/** hand-check and miss examples are kept for one book in SAMPLE_EVERY (by rank), to keep the cache small */
+const SAMPLE_EVERY = 4;
+const PER_BUCKET = 2;
+const MAX_LINKS_FOR_MISSES = 60_000;
+
+interface OracleData {
+  /** id → [top category, lines] */
+  books: Record<string, [string, number]>;
+  rows: [string, number, number, number][];
+}
+
+/** One book's run, as one JSON line of the cache. */
+interface BookRecord {
+  id: number;
+  title: string;
+  ms: number;
+  steps: string[];
+  errors: string[];
+  /** steps stopped by BENCH_STEP_S (their partial result is kept) */
+  stopped: string[];
+  /** wall time of each step, in the plan's order (maxlinkJob's own measure) */
+  stepMs?: number[];
+  raw: number;
+  merged: number;
+  contradictedPairs: number;
+  counters: Counters;
+  /** "<type>|<owner>" → encoded ids of the database links this run regenerated */
+  matched: Record<string, string>;
+  /** the same two, counted by the line a cut Sefaria-side range writes (BENCH_SPANS=citations) — kept by every run
+   *  so one run reports both measures (§0.6); the report reads them with BENCH_SPANS=citations */
+  written?: { counters: Counters; matched: Record<string, string> };
+  /** BENCH_SEFARIA_SPAN: the same, per way of writing a cut Sefaria-side span (§0.8), with the records each writes */
+  policies?: Partial<Record<SpanPolicy, PolicyMeasure>>;
+  /** the cut spans of the run: how many, by length, and which end the database links per base (spanEnds) */
+  spans?: { n: number; buckets: Record<string, number>; over20Lines: number; ends: Record<string, { end: string; first: number; last: number }> };
+  /** the measure as run (citedSpan counts), kept by readRecords before a BENCH_SPANS / BENCH_SEFARIA_SPAN view replaces it */
+  asRun?: Record<string, string>;
+  /** suggestions the database does not have (unconfirmed) or contradicts (wrong), for the hand check */
+  fresh?: Sample[];
+  /** database links at this book this run did not regenerate */
+  misses?: Miss[];
+}
+
+interface PolicyMeasure {
+  counters: Counters;
+  matched: Record<string, string>;
+  /** records written by the whole run, and the verdicts of those written for the cut spans: [n, correct, wrong, new] */
+  records: number;
+  spanRecords: [number, number, number, number];
+  /** span records to a base line that cannot carry one: a heading line (the generator drops it) or no ref_2 from its heRef */
+  noRef: number;
+  /** span records that come from spans of more than 20 lines */
+  over20: number;
+}
+
+interface Sample {
+  verdict: string;
+  group: string;
+  confidence: string;
+  pairType: string;
+  engines: string[];
+  line: number;
+  text: string;
+  target: string;
+  tLine: number;
+  tEnd: number;
+  heRef2: string;
+  tText: string;
+  rank: number;
+}
+
+interface Miss {
+  id: number;
+  type: string;
+  owner: Owner;
+  line: number;
+  other: string;
+  oLine: number;
+  oEnd: number;
+  text: string;
+  oText: string;
+  /** the planner relates this book and the other one (pair steps ran between them) */
+  planned: boolean;
+  /** suggestions from this line: to the other book (at other lines), and to any book */
+  toOther: number[];
+  atLine: number;
+  rank: number;
+}
+
+const idOf = (key: string) => Number(key.slice(key.lastIndexOf(":") + 1));
+
+describe.runIf(DB)("library benchmark: the tool on the books Otzaria already links", () => {
+  const before = DB ? fingerprint(DB) : "";
+  let registry: SourceRegistry;
+  /**
+   * The same registry without the database's links, for a book whose run is the citations engine
+   * alone. maxlinkJob reads every link at the books it ran on, for the merge's calibration against the
+   * library — which never judges a citation (merge.ts: single-book groups are outside it) — and for a
+   * base book (בראשית: every incoming link) that read is most of the run. One proxy for all such books,
+   * so the citations job's per-registry caches are shared between them.
+   */
+  let citationsOnly: SourceRegistry;
+  let books: SourceBook[];
+  let byId: Map<number, SourceBook>;
+  let sourceId: string;
+  let data: OracleData;
+
+  beforeAll(async () => {
+    mkdirSync(DIR, { recursive: true });
+    registry = new SourceRegistry();
+    const opened = await registry.open([{ path: "seforim.db", blob: await fileBlob(DB!) }]);
+    books = opened.sources[0]!.books;
+    citationsOnly = new Proxy(registry, {
+      get(target, prop) {
+        if (prop === "existingLinks") return async () => [];
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    sourceId = opened.sources[0]!.info.id;
+    byId = new Map(books.map((b) => [idOf(b.key), b]));
+    data = loadOracle();
+  }, 600_000);
+
+  afterAll(() => {
+    cleanupTmp();
+    expect(fingerprint(DB!)).toBe(before);
+  });
+
+  /** The population: link counts per (type, source, target) and each book's top category, cached per database build. */
+  function loadOracle(): OracleData {
+    const file = join(DIR, `oracle-${before.replace(/[^0-9a-z]/gi, "_")}.json`);
+    if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as OracleData;
+    const b = JSON.parse(readFileSync(oracle("books", "books.json"), "utf8")) as { books: { id: number; categoryPath: string[]; lineCount: number }[] };
+    const t = JSON.parse(readFileSync(oracle("typepairs", "typepairs.json"), "utf8")) as { rows: [string, number, number, number][] };
+    const out: OracleData = { books: Object.fromEntries(b.books.map((x) => [String(x.id), [x.categoryPath[0] ?? "?", x.lineCount]])), rows: t.rows };
+    writeFileSync(file, JSON.stringify(out));
+    return out;
+  }
+
+  it(
+    `${MODE}${SHARDS > 1 ? ` shard ${SHARD}/${SHARDS}` : ""}`,
+    async () => {
+      const t0 = performance.now();
+      // the evidence the app's evidence pass reads per selected book (MaxLinkState.gatherEvidence →
+      // plan.ts evidenceFromCounts: COMMENTARY links, and TARGUM / MIDRASH ones from LINKED_MIN on — all
+      // stored base → dependant), here from the oracle for all books at once; plus default_commentator,
+      // which the source reads at open (SourceBook.linkedBases)
+      const keyOfId = (id: number) => byId.get(id)?.key;
+      const evidence: LinkedEvidence[] = books.flatMap((b) => (b.linkedBases ?? []).map((base) => ({ dependant: b.key, base })));
+      for (const [type, s, t, n] of data.rows) {
+        const base = keyOfId(s);
+        const dependant = keyOfId(t);
+        if (!base || !dependant || s === t) continue;
+        // the oracle counts every link of every book: each count is complete (evidenceFromCounts' "own summary")
+        if (type === "COMMENTARY") evidence.push({ dependant, base, count: n, complete: true });
+        else if ((type === "TARGUM" || type === "MIDRASH") && n >= LINKED_MIN) evidence.push({ dependant, base, kind: type === "TARGUM" ? "targum" : "midrash", count: n, complete: true });
+      }
+      const fields = linkedFields(evidence);
+      const library: PlanBook[] = books.map((b) => {
+        const f = fields.get(b.key);
+        return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.bases && { bases: b.bases }), ...(b.dependence && { dependence: b.dependence }), ...linkedProps(f) };
+      });
+      // every relation of the library at once: the planner's steps for "all books selected"
+      const plan = planMaxLink({ selected: books.map((b) => b.key), library, singleEngines: ["citations"] });
+      const stepsOf = new Map<number, PlanStep[]>();
+      const related = new Set<string>();
+      for (const s of plan.steps) {
+        const owner = s.kind === "pair" ? s.relation.dependant.key : s.source.key;
+        if (s.kind === "pair") related.add(`${idOf(s.relation.dependant.key)}>${idOf(s.relation.base.key)}`);
+        const list = stepsOf.get(idOf(owner));
+        if (list) list.push(s);
+        else stepsOf.set(idOf(owner), [s]);
+      }
+      const isRelated = (dep: number, base: number) => related.has(`${dep}>${base}`);
+      const own = (type: string, s: number, t: number) => ownerOf(type, s, t, isRelated);
+
+      // owners per type, and their link counts
+      const owned = new Map<string, Map<Owner, number>>();
+      for (const [type, s, t, n] of data.rows) {
+        const m = owned.get(type) ?? new Map<Owner, number>();
+        const o = own(type, s, t);
+        m.set(o, (m.get(o) ?? 0) + n);
+        owned.set(type, m);
+      }
+      const types = [...owned.keys()].filter((t) => !ONLY_TYPES || ONLY_TYPES.includes(t)).sort((a, b) => total(owned.get(b)!) - total(owned.get(a)!));
+      const top = (id: number) => data.books[String(id)]?.[0] ?? "?";
+      const lines = (id: number) => data.books[String(id)]?.[1] ?? 0;
+      const strataOf = (type: string, kind: "D" | "U"): Stratum[] => {
+        const units: Unit[] = [];
+        for (const [o, n] of owned.get(type)!) {
+          if (o[0] !== kind) continue;
+          const [a, b] = ownerBooks(o) as [number, number?];
+          const stratum = kind === "D" ? `${top(a)}|${sizeBucket(lines(a))}` : `${[top(a), top(b!)].sort().join("~")}|${countBucket(n)}`;
+          units.push({ id: o, stratum, links: n });
+        }
+        return stratify(units, `${SEED}|${type}|${kind}`);
+      };
+      /** the owners whose links are measured: all of them (full), or the stratified sample */
+      const chosen = (st: Stratum): Unit[] => (DESIGN === "full" ? st.units : st.units.slice(0, alloc.get(st)!));
+      const alloc = new Map<Stratum, number>();
+      const design = new Map<string, { kind: "D" | "U"; strata: Stratum[] }[]>();
+      for (const type of types) {
+        const kinds = (["D", "U"] as const).map((kind) => ({ kind, strata: strataOf(type, kind) })).filter((k) => k.strata.length);
+        for (const k of kinds) {
+          const a = allocate(k.strata, N);
+          for (const st of k.strata) alloc.set(st, a.get(st.name) ?? 0);
+        }
+        design.set(type, kinds);
+      }
+      const wanted = new Set<number>();
+      for (const kinds of design.values()) for (const k of kinds) for (const st of k.strata) for (const u of chosen(st)) for (const b of ownerBooks(u.id)) wanted.add(b);
+      const order = [...wanted].filter((id) => byId.has(id)).sort((a, b) => rankOf(SEED, `book:${a}`) - rankOf(SEED, `book:${b}`) || a - b);
+
+      const done = readRecords();
+      if (process.env.BENCH_DRY) {
+        const lines = [...design].map(([type, kinds]) => `${type}: ${kinds.map((k) => `${k.kind} ${k.strata.reduce((a, st) => a + chosen(st).length, 0)}/${k.strata.reduce((a, st) => a + st.units.length, 0)} units in ${k.strata.length} strata`).join(", ")}`);
+        const lineSum = order.reduce((a, id) => a + (byId.get(id)?.lineCount ?? 0), 0);
+        const next = order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id)).slice(0, 5).map((id) => `${byId.get(id)!.title} (${byId.get(id)!.lineCount} lines, ${(stepsOf.get(id) ?? []).map((s) => s.engine).join("+")})`);
+        return void console.log([`[bench] ${MODE}: ${order.length} books, ${lineSum.toLocaleString()} lines, ${order.filter((id) => done.has(id)).length} cached`, ...lines, `next in this shard: ${next.join("; ")}`].join("\n"));
+      }
+      if (MODE === "replay") {
+        const only = ONLY_BOOKS && new Set(books.filter((b) => (ONLY_BOOKS.includes(b.title) || ONLY_BOOKS.includes(String(idOf(b.key))))).map((b) => idOf(b.key)));
+        const ids = readdirSync(join(DIR, "raw")).map((f) => Number(f.split(".")[0])).filter((x) => !only || only.has(x)).sort((a, b) => a - b);
+        const out = join(DIR, `replay-${TAG}.jsonl`);
+        writeFileSync(out, "");
+        const detail: string[] = [];
+        for (const id of ids) {
+          const rec = await replayBook(id, stepsOf.get(id) ?? [], isRelated, own, detail);
+          appendFileSync(out, JSON.stringify(rec) + "\n");
+        }
+        writeFileSync(join(DIR, `detail-${TAG}.jsonl.gz`), gzipSync(detail.join("\n")));
+        return void console.log(`[bench] replay ${TAG}: ${ids.length} books, ${detail.length} detail rows`);
+      }
+      if (MODE !== "report") {
+        // BENCH_ONLY: run (again) just these books, whatever the cache holds — into runs-~only.jsonl, read last
+        const only = ONLY_BOOKS && new Set(books.filter((b) => (ONLY_BOOKS.includes(b.title) || ONLY_BOOKS.includes(String(idOf(b.key))))).map((b) => idOf(b.key)));
+        const mine = only
+          ? [...only].filter((_, i) => i % SHARDS === SHARD)
+          : order.filter((_, i) => i % SHARDS === SHARD).filter((id) => !done.has(id) || (RERUN_STOPPED && done.get(id)!.stopped.length > 0));
+        const out = join(DIR, only ? `runs-~only-${SHARD}of${SHARDS}.jsonl` : `runs-${SHARD}of${SHARDS}.jsonl`);
+        console.log(`[bench] ${MODE}: ${order.length} books in the design, ${done.size} cached; this shard runs ${mine.length}`);
+        for (const [i, id] of mine.entries()) {
+          if (performance.now() - t0 > BUDGET_MS) {
+            console.log(`[bench] time budget reached after ${i} books`);
+            break;
+          }
+          const rec = await profiled(String(id), () => runBook(id, stepsOf.get(id) ?? [], isRelated, own));
+          appendFileSync(out, JSON.stringify(rec) + "\n");
+          done.set(id, rec);
+          console.log(`[bench] ${i + 1}/${mine.length} ${rec.title}: ${(rec.ms / 1000).toFixed(1)} s, ${rec.merged} suggestions${rec.errors.length ? `, ${rec.errors.length} errors` : ""}${rec.stopped.length ? `, ${rec.stopped.length} stopped` : ""}`);
+        }
+      }
+      if (SHARDS === 1 || MODE === "report") report(types, design, chosen, done, owned, isRelated);
+      if (MODE === "report" && process.env.BENCH_DESIGN_DUMP) dumpDesign(design, chosen, done, own, stepsOf);
+      if (SEFARIA_SPAN && (SHARDS === 1 || MODE === "report")) spanPolicyReport(done, owned);
+    },
+    24 * 3_600_000,
+  );
+
+  /** The database's links at the given lines of a book (contiguous runs read together), or at every line. */
+  async function linksAt(key: string, at: readonly number[], all: boolean): Promise<Link[]> {
+    if (all) return registry.existingLinks(key, 0, Number.MAX_SAFE_INTEGER);
+    const sorted = [...new Set(at)].sort((a, b) => a - b);
+    const out: Link[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < sorted.length; ) {
+      let j = i;
+      while (j + 1 < sorted.length && sorted[j + 1]! - sorted[j]! <= 32) j++;
+      for (const l of await registry.existingLinks(key, sorted[i]!, sorted[j]!)) if (!seen.has(l.id)) seen.add(l.id), out.push(l);
+      i = j + 1;
+    }
+    return out;
+  }
+
+  /** every database link at a book, both directions (the oracle's counts) */
+  let totals: Map<number, number> | null = null;
+  function linkTotal(id: number): number {
+    if (!totals) {
+      totals = new Map();
+      for (const [, s, t, n] of data.rows) for (const b of s === t ? [s] : [s, t]) totals.set(b, (totals.get(b) ?? 0) + n);
+    }
+    return totals.get(id) ?? 0;
+  }
+
+  /** the dominant stored type of each book this one is linked with (both directions), from the oracle's counts */
+  let pairIndex: Map<number, [string, number, number][]> | null = null;
+  function pairTypesOf(id: number): Map<number, string> {
+    if (!pairIndex) {
+      pairIndex = new Map();
+      for (const [type, s, t, n] of data.rows)
+        for (const [a, b] of s === t ? [[s, t]] : [[s, t], [t, s]]) {
+          const list = pairIndex.get(a!);
+          if (list) list.push([type, b!, n]);
+          else pairIndex.set(a!, [[type, b!, n]]);
+        }
+    }
+    const counts = new Map<number, Map<string, number>>();
+    for (const [type, other, n] of pairIndex.get(id) ?? []) {
+      const m = counts.get(other) ?? new Map<string, number>();
+      m.set(type, (m.get(type) ?? 0) + n);
+      counts.set(other, m);
+    }
+    return new Map([...counts].map(([o, m]) => [o, [...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]![0]]));
+  }
+
+  function readRecords(): Map<number, BookRecord> {
+    const out = new Map<number, BookRecord>();
+    for (const f of readdirSync(DIR).filter((x) => /^runs-.*\.jsonl$/.test(x)).sort())
+      for (const line of readFileSync(join(DIR, f), "utf8").split("\n"))
+        if (line.trim()) {
+          const r = JSON.parse(line) as BookRecord;
+          r.asRun = r.matched;
+          // a way of writing a cut Sefaria-side span (§0.8), or the written-line measure (§0.6), when the run kept it
+          const policy = SEFARIA_SPAN && r.policies?.[SEFARIA_SPAN];
+          if (policy) Object.assign(r, { counters: policy.counters, matched: policy.matched });
+          else if (SPANS === "citations" && r.written) Object.assign(r, r.written);
+          // BENCH_ONLY's runs (runs-~only-*, read last) replace the book's record; otherwise a book run twice (a
+          // stopped step re-run with more time, BENCH_RERUN_STOPPED): the run with fewer stopped steps wins
+          const old = out.get(r.id);
+          if (!old || f.startsWith("runs-~only") || r.stopped.length <= old.stopped.length) out.set(r.id, r);
+        }
+    return out;
+  }
+
+  async function runBook(id: number, steps: PlanStep[], isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner): Promise<BookRecord> {
+    const book = byId.get(id)!;
+    const t0 = Date.now();
+    const rec: BookRecord = { id, title: book.title, ms: 0, steps: steps.map((s) => s.id), errors: [], stopped: [], raw: 0, merged: 0, contradictedPairs: 0, counters: {}, matched: {} };
+    if (!steps.length) return { ...rec, ms: Date.now() - t0 };
+    // BENCH_STEP_S: a step that runs longer stops with what it found, and the book's other steps still run
+    const ctx: EngineContext = {};
+    const res = await maxlinkJob(steps.some((s) => s.kind === "pair") ? registry : citationsOnly, steps, { stepBudgetMs: STEP_MS }, ctx);
+    const byStep = new Map(steps.map((s) => [s.id, s]));
+    const items: MergeItem[] = [];
+    for (const it of res.items) {
+      const step = byStep.get(it.stepId)!;
+      if (it.error !== undefined) rec.errors.push(`${it.stepId}: ${it.error}`);
+      if (it.result?.notes.some((n) => n.code === "engine/aborted")) rec.stopped.push(it.stepId);
+      for (const sg of it.result?.suggestions ?? []) items.push({ suggestion: sg, focus: step.source.key });
+    }
+    rec.stepMs = res.items.map((i) => i.ms);
+    if (RAW) {
+      mkdirSync(join(DIR, "raw"), { recursive: true });
+      writeFileSync(join(DIR, "raw", `${id}.json.gz`), gzipSync(JSON.stringify({ rec, items, ref: res.dbLinkKeys })));
+    }
+    return scoreRun(rec, items, res.dbLinkKeys, isRelated, own, t0);
+  }
+
+  /**
+   * a raw output BENCH_RAW kept: merged and scored again with the current merge.ts (BENCH_MODE=replay); with
+   * BENCH_RERUN, the steps of those engines (of the steps that run) run again and replace their part of it
+   */
+  async function replayBook(id: number, steps: readonly PlanStep[], isRelated: (a: number, b: number) => boolean, own: (type: string, s: number, t: number) => Owner, detail: string[]): Promise<BookRecord> {
+    const t0 = Date.now();
+    const raw = JSON.parse(gunzipSync(readFileSync(join(DIR, "raw", `${id}.json.gz`))).toString("utf8")) as { rec: BookRecord; items: MergeItem[]; ref: string[] };
+    const rec: BookRecord = { ...raw.rec, counters: {}, matched: {} };
+    let items = raw.items;
+    const again = steps.filter((s) => RERUN.includes(s.engine) && raw.rec.steps.includes(s.id));
+    if (again.length) {
+      const res = await maxlinkJob(again.some((s) => s.kind === "pair") ? registry : citationsOnly, again, { stepBudgetMs: STEP_MS }, {});
+      const byStep = new Map(again.map((s) => [s.id, s]));
+      const fresh: MergeItem[] = [];
+      for (const it of res.items) for (const sg of it.result?.suggestions ?? []) fresh.push({ suggestion: sg, focus: byStep.get(it.stepId)!.source.key });
+      items = [...raw.items.filter((it) => !RERUN.includes(it.suggestion.engine)), ...fresh];
+      if (RAW) {
+        mkdirSync(join(DIR, `raw-${TAG}`), { recursive: true });
+        writeFileSync(join(DIR, `raw-${TAG}`, `${id}.json.gz`), gzipSync(JSON.stringify({ rec: raw.rec, items, ref: raw.ref })));
+      }
+    }
+    const out = await scoreRun(rec, items, raw.ref, isRelated, own, t0, detail);
+    return { ...out, ms: raw.rec.ms };
+  }
+
+  async function scoreRun(
+    rec: BookRecord,
+    items: readonly MergeItem[],
+    ref: readonly string[],
+    isRelated: (a: number, b: number) => boolean,
+    own: (type: string, s: number, t: number) => Owner,
+    t0: number,
+    detail?: string[],
+  ): Promise<BookRecord> {
+    const id = rec.id;
+    const book = byId.get(id)!;
+    // as the app merges (state/maxlink.ts): the database's links as the calibration reference
+    const merged = mergeSuggestions(items, { reference: new Set(ref) });
+    rec.raw = merged.stats.input;
+    rec.merged = merged.stats.output;
+    rec.contradictedPairs = merged.stats.contradictedPairs ?? 0;
+    // examples are kept for one book in SAMPLE_EVERY — misses only where reading all its links is cheap
+    // (a base book's are mostly incoming: בראשית took 150 s to read; its misses show up from the other ends)
+    const keep = !detail && rankOf(SEED, `book:${id}`) % SAMPLE_EVERY === 0;
+    const keepMisses = keep && linkTotal(id) <= MAX_LINKS_FOR_MISSES;
+    if (!merged.suggestions.length && !keepMisses) return { ...rec, ms: Date.now() - t0 };
+
+    // the database's links at the lines the run speaks about (all of them for a book whose examples are kept)
+    const at = merged.suggestions.flatMap((s) => [s.source, s.target].filter((x) => x.book.key === book.key).map((x) => x.line));
+    const links = await linksAt(book.key, at, keepMisses || new Set(at).size > 0.3 * (book.lineCount ?? 0));
+    const db = indexDbLinks(book.key, links, own);
+    db.pairType = pairTypesOf(id);
+    let text: Map<number, string> | null = null;
+    const lineText = (l: number) => text?.get(l);
+    // the book's lines, only when a citation needs its words or examples are kept
+    if (keep || merged.suggestions.some((s) => s.engines.length === 1 && s.engines[0] === "citations" && db.byLine.has(s.source.line)))
+      text = new Map((await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => [l.index, l.anchorText] as const));
+    // a merged suggestion's id is "mx:…"; the citation's words are in its raw member's id
+    const spanIdOf = (s: MergedSuggestion) => s.members.find((m) => m.suggestion.engine === "citations" && /@\d+-\d+>/.test(m.suggestion.id))?.suggestion.id ?? s.id;
+    const entries = merged.suggestions.map((s) => ({ s, engines: s.engines as EngineId[], spanId: spanIdOf(s) }));
+    const score = scoreBook(book.key, entries, db, lineText, SPANS);
+    if (detail) {
+      // what scoring needs at every line a raw suggestion touches, so merge-replay.test.ts can merge and score again without the database
+      const lines = new Set(items.flatMap((it) => [it.suggestion.source, it.suggestion.target].filter((x) => x.book.key === book.key).map((x) => x.line)));
+      const cache = { key: book.key, byLine: [...db.byLine].filter(([l]) => lines.has(l)), pairType: [...db.pairType], text: text ? [...text].filter(([l]) => lines.has(l)) : [] };
+      mkdirSync(join(DIR, "score"), { recursive: true });
+      writeFileSync(join(DIR, "score", `${id}.json.gz`), gzipSync(JSON.stringify(cache)));
+    }
+    rec.counters = count(score.scored);
+    for (const [k, ids] of score.matched) rec.matched[k] = encodeIds(ids);
+    if (SPANS === "all") {
+      // by the written line: a short span on a Sefaria side is written a record per line (spanLines)
+      const w = scoreBook(book.key, entries.flatMap(writtenRecords), db, lineText, "citations");
+      rec.written = { counters: count(w.scored), matched: {} };
+      for (const [k, ids] of w.matched) rec.written.matched[k] = encodeIds(ids);
+      if (detail) {
+        const at = async (bookId: number, line: number) => excerpt((await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText, null, 160);
+        await detailRows(id, score.scored, w.scored, db.byLine, detail, TEXT_EVERY ? { every: TEXT_EVERY, seed: SEED, at } : null);
+      }
+    }
+    if (SEFARIA_SPAN) await measureSpanPolicies(rec, book.key, entries, db, lineText);
+    if (keep) {
+      const otherLine = async (bookId: number, line: number) => (await registry.lines(`${sourceId}:${bookId}`, line, line))[0]?.anchorText;
+      // new or contradicted suggestions: PER_BUCKET per (group, confidence, pair type), by rank
+      const buckets = new Map<string, typeof score.scored>();
+      for (const x of score.scored) {
+        if (x.verdict === "correct") continue;
+        const k = `${x.group}|${x.s.confidence}|${x.pairType}|${x.verdict}`;
+        pushTo(buckets, k, x);
+      }
+      rec.fresh = [];
+      for (const list of buckets.values())
+        for (const x of list.sort((a, b) => rankOf(SEED, a.s.id) - rankOf(SEED, b.s.id)).slice(0, PER_BUCKET))
+          rec.fresh.push({
+            verdict: x.verdict,
+            group: x.group,
+            confidence: x.s.confidence,
+            pairType: x.pairType,
+            engines: [...x.engines],
+            line: x.bLine,
+            text: excerpt(lineText(x.bLine), x.group === "citations" ? suggestionSpan(x.spanId, lineText(x.bLine)) : null),
+            target: byId.get(x.other)?.title ?? `#${x.other}`,
+            tLine: x.oFrom,
+            tEnd: x.oTo,
+            heRef2: x.s.heRef2,
+            tText: excerpt(await otherLine(x.other, x.oFrom), null, 70),
+            rank: rankOf(SEED, x.s.id),
+          });
+      // misses: links this book is responsible for (it owns them, or one end of an undirected pair), PER_BUCKET per type
+      if (keepMisses) {
+        const found = new Set([...score.matched.values()].flatMap((s) => [...s]));
+        const fromLine = new Map<number, typeof score.scored>();
+        for (const x of score.scored) pushTo(fromLine, x.bLine, x);
+        const byType = new Map<string, { line: number; e: DbEnd }[]>();
+        const seen = new Set<number>();
+        for (const [line, list] of db.byLine)
+          for (const e of list) {
+            if (found.has(e.id) || seen.has(e.id)) continue;
+            if (!(e.owner === `D:${id}` || (e.owner[0] === "U" && ownerBooks(e.owner).includes(id)))) continue;
+            seen.add(e.id);
+            pushTo(byType, e.type, { line, e });
+          }
+        rec.misses = [];
+        for (const [type, list] of byType)
+          for (const { line, e } of list.sort((a, b) => rankOf(SEED, `link:${a.e.id}`) - rankOf(SEED, `link:${b.e.id}`)).slice(0, PER_BUCKET)) {
+            const here = fromLine.get(line) ?? [];
+            rec.misses.push({
+              id: e.id,
+              type,
+              owner: e.owner,
+              line,
+              other: byId.get(e.other)?.title ?? `#${e.other}`,
+              oLine: e.oFrom,
+              oEnd: e.oTo,
+              text: excerpt(lineText(line), e.span ?? null),
+              oText: excerpt(await otherLine(e.other, e.oFrom), null, 70),
+              planned: isRelated(id, e.other) || isRelated(e.other, id),
+              toOther: here.filter((x) => x.other === e.other).map((x) => x.oFrom),
+              atLine: here.length,
+              rank: rankOf(SEED, `link:${e.id}`),
+            });
+          }
+      }
+    }
+    return { ...rec, ms: Date.now() - t0 };
+  }
+
+  /** §0.8: each way of writing the cut Sefaria-side spans of this run, scored by the lines it writes */
+  async function measureSpanPolicies(
+    rec: BookRecord,
+    bookKey: string,
+    entries: readonly { s: Suggestion; engines: EngineId[]; spanId: string }[],
+    db: Parameters<typeof scoreBook>[2],
+    lineText: (l: number) => string | undefined,
+  ): Promise<void> {
+    const spanned = entries.filter((x) => isSpanned(x.s, x.engines));
+    if (!spanned.length) return;
+    // the base lines the spans cover: a record can be written only to a non-heading line with a ref_2
+    const range = new Map<string, [number, number]>();
+    for (const x of spanned) {
+      const r = range.get(x.s.target.book.key);
+      range.set(x.s.target.book.key, [Math.min(r?.[0] ?? Infinity, x.s.citedSpan!.line), Math.max(r?.[1] ?? -1, x.s.citedSpan!.end)]);
+    }
+    const ok = new Map<string, Set<number>>();
+    for (const [key, [from, to]] of range) ok.set(key, new Set((await registry.lines(key, from, to)).filter((l) => l.heading === null && l.existsInDb && sefariaRefFromHeRef(l.heRef) !== null).map((l) => l.index)));
+    const writableIn = (key: string) => (l: number) => ok.get(key)?.has(l) ?? false;
+    const ends = spanEnds(bookKey, spanned.map((x) => x.s), db);
+    const spans: NonNullable<BookRecord["spans"]> = { n: spanned.length, buckets: {}, over20Lines: 0, ends: {} };
+    for (const [o, v] of ends) spans.ends[byId.get(o)?.title ?? `#${o}`] = v;
+    for (const x of spanned) {
+      const len = x.s.citedSpan!.end - x.s.citedSpan!.line + 1;
+      const b = spanBucket(len);
+      spans.buckets[b] = (spans.buckets[b] ?? 0) + 1;
+      if (b === ">20") spans.over20Lines += len;
+    }
+    rec.spans = spans;
+    rec.policies = {};
+    for (const p of SPAN_POLICIES) {
+      const fromSpans = new Set<Suggestion>();
+      let over20 = 0;
+      const list = entries.flatMap((x) => {
+        if (!isSpanned(x.s, x.engines)) return [x];
+        const q = p === "learned" ? (ends.get(idOf(x.s.target.book.key))?.end ?? "first") : p;
+        const recs = spanRecords(x.s, q, writableIn(x.s.target.book.key));
+        if (x.s.citedSpan!.end - x.s.citedSpan!.line + 1 > 20) over20 += recs.length;
+        return recs.map((s) => (fromSpans.add(s), { ...x, s }));
+      });
+      let noRef = 0;
+      for (const s of fromSpans) if (!writableIn(s.target.book.key)(s.target.line)) noRef++;
+      const sc = scoreBook(bookKey, list, db, lineText, "citations");
+      const spanRecs: [number, number, number, number] = [0, 0, 0, 0];
+      for (const x of sc.scored)
+        if (fromSpans.has(x.s)) {
+          spanRecs[0]++;
+          spanRecs[x.verdict === "correct" ? 1 : x.verdict === "wrong" ? 2 : 3]++;
+        }
+      const matched: Record<string, string> = {};
+      for (const [k, ids] of sc.matched) matched[k] = encodeIds(ids);
+      rec.policies[p] = { counters: count(sc.scored), matched, records: sc.scored.length, spanRecords: spanRecs, noRef, over20 };
+    }
+  }
+
+  /**
+   * §0.8: the ways of writing a cut Sefaria-side span, side by side, over every run that kept them —
+   * per book: its owned COMMENTARY links in the database, those regenerated with citedSpan counted ("as
+   * run") and by the lines each policy writes, the records written, and the verdicts of the span records.
+   */
+  function spanPolicyReport(done: Map<number, BookRecord>, owned: Map<string, Map<Owner, number>>): void {
+    const runs = [...done.values()].filter((r) => r.policies?.first);
+    if (!runs.length) return;
+    const size = (enc: string | undefined) => (enc ? decodeIds(enc).length : 0);
+    const judged = (c: Counters, conf: string): [number, number] => {
+      let ok = 0;
+      let bad = 0;
+      for (const [k, v] of Object.entries(c))
+        if (k.startsWith(`structural|${conf}|`)) (ok += v[1]), (bad += v[2]);
+      return [ok, bad];
+    };
+    const books = runs.map((r) => {
+      const key = `COMMENTARY|D:${r.id}`;
+      const per = Object.fromEntries(
+        SPAN_POLICIES.map((p) => {
+          const m = r.policies![p]!;
+          return [p, { commentary: size(m.matched[key]), records: m.records, spanRecords: m.spanRecords, noRef: m.noRef, over20: m.over20, high: judged(m.counters, "high"), certain: judged(m.counters, "certain") }];
+        }),
+      ) as Record<SpanPolicy, { commentary: number; records: number; spanRecords: PolicyMeasure["spanRecords"]; noRef: number; over20: number; high: [number, number]; certain: [number, number] }>;
+      return { id: r.id, title: r.title, dbCommentary: owned.get("COMMENTARY")?.get(`D:${r.id}`) ?? 0, asRun: size((r.asRun ?? r.matched)[key]), written: size(r.written?.matched[key]), spans: r.spans, policies: per };
+    });
+    const sum = (f: (b: (typeof books)[number]) => number) => books.reduce((a, b) => a + f(b), 0);
+    const db = sum((b) => b.dbCommentary);
+    const lines = [`span policies (§0.8) over ${books.length} books: owned DB COMMENTARY ${db}, regenerated with citedSpan counted ${sum((b) => b.asRun)}`];
+    const writtenMismatch = books.filter((b) => b.written !== b.policies.written.commentary).length;
+    if (writtenMismatch) lines.push(`  WARNING: policy "written" differs from the written-line measure in ${writtenMismatch} books`);
+    const decided = books.filter((b) => b.policies.written.commentary !== b.policies.all20.commentary || b.policies.written.records !== b.policies.all20.records);
+    if (decided.length) lines.push(`  WARNING: the product ("written") differs from "all20" in ${decided.length} books: ${decided.map((b) => `${b.title} ${b.policies.written.commentary}/${b.policies.all20.commentary} records ${b.policies.written.records}/${b.policies.all20.records}`).join("; ")}`);
+    const recs0 = sum((b) => b.policies.first.records);
+    for (const p of SPAN_POLICIES) {
+      const c = sum((b) => b.policies[p].commentary);
+      const recs = sum((b) => b.policies[p].records);
+      const sr = [0, 1, 2, 3].map((i) => sum((b) => b.policies[p].spanRecords[i]!));
+      const hi = [0, 1].map((i) => sum((b) => b.policies[p].high[i]!));
+      lines.push(
+        `  ${p.padEnd(8)} COMMENTARY ${String(c).padStart(7)} (${pct(db ? c / db : 0)})  records ${String(recs).padStart(7)} (x${(recs / recs0).toFixed(3)})` +
+          `  span records ${sr[0]}: correct ${sr[1]}, wrong ${sr[2]}, new ${sr[3]}, no ref_2 ${sum((b) => b.policies[p].noRef)}, from spans >20 ${sum((b) => b.policies[p].over20)}  structural|high judged ${pct(hi[0]! + hi[1]! ? hi[0]! / (hi[0]! + hi[1]!) : 0)}`,
+      );
+    }
+    const buckets: Record<string, number> = {};
+    for (const b of books) for (const [k, v] of Object.entries(b.spans?.buckets ?? {})) buckets[k] = (buckets[k] ?? 0) + v;
+    lines.push(`  spans ${sum((b) => b.spans?.n ?? 0)} by length: ${["2", "3-5", "6-20", ">20"].map((k) => `${k}: ${buckets[k] ?? 0}`).join(", ")}; lines in spans >20: ${sum((b) => b.spans?.over20Lines ?? 0)}`);
+    console.log(lines.join("\n"));
+    writeFileSync(join(DIR, "span-policies.json"), JSON.stringify({ at: new Date().toISOString(), db: before, books }, null, 1));
+  }
+
+  /**
+   * BENCH_DESIGN_DUMP=1 (with BENCH_MODE=report): the measured design as data, for the gap analysis of
+   * the misses (scripts/bench/coverage_gaps.py, docs/validation/COVERAGE_REPORT.md) — per type, kind and
+   * stratum: its links, its population and the chosen owners (links, whether all their books ran, how
+   * many links the runs regenerated); per chosen owner, the (stored source, stored target, links) book
+   * pairs its links are in; and the run books whose plan today differs from the steps their cached
+   * record ran (a stale record: run it again with BENCH_ONLY).
+   */
+  function dumpDesign(
+    design: Map<string, { kind: "D" | "U"; strata: Stratum[] }[]>,
+    chosen: (st: Stratum) => Unit[],
+    done: Map<number, BookRecord>,
+    own: (type: string, s: number, t: number) => Owner,
+    stepsOf: Map<number, PlanStep[]>,
+  ): void {
+    const matched = new Map<string, Set<number>>();
+    for (const r of done.values())
+      for (const [k, enc] of Object.entries(r.matched)) {
+        const set = matched.get(k) ?? new Set<number>();
+        for (const i of decodeIds(enc)) set.add(i);
+        matched.set(k, set);
+      }
+    const ran = (o: Owner) => ownerBooks(o).every((b) => done.has(b) || !byId.has(b));
+    const wanted = new Set<string>();
+    const types: Record<string, unknown> = {};
+    for (const [type, kinds] of design)
+      types[type] = kinds.map((k) => ({
+        kind: k.kind,
+        strata: k.strata.map((st) => ({
+          name: st.name,
+          links: st.links,
+          population: st.units.length,
+          owners: chosen(st).map((u) => {
+            wanted.add(`${type}|${u.id}`);
+            return { id: u.id, links: u.links, ran: ran(u.id), matched: matched.get(`${type}|${u.id}`)?.size ?? 0 };
+          }),
+        })),
+      }));
+    const pairs: Record<string, [number, number, number][]> = {};
+    for (const [type, s, t, n] of data.rows) {
+      const k = `${type}|${own(type, s, t)}`;
+      if (wanted.has(k)) (pairs[k] ??= []).push([s, t, n]);
+    }
+    const stale = [...done.values()]
+      .filter((r) => (stepsOf.get(r.id) ?? []).map((s) => s.id).join(",") !== r.steps.join(","))
+      .map((r) => ({ id: r.id, title: r.title, cached: r.steps, now: (stepsOf.get(r.id) ?? []).map((s) => s.id) }));
+    writeFileSync(join(DIR, `design-${MODE}-${DESIGN}.json`), JSON.stringify({ seed: SEED, n: N, db: before, types, pairs, stale }));
+    console.log(`[bench] design written: ${wanted.size} owners, ${stale.length} run books whose plan changed since their record`);
+  }
+
+  function report(
+    types: string[],
+    design: Map<string, { kind: "D" | "U"; strata: Stratum[] }[]>,
+    chosen: (st: Stratum) => Unit[],
+    done: Map<number, BookRecord>,
+    owned: Map<string, Map<Owner, number>>,
+    isRelated: (a: number, b: number) => boolean,
+  ): void {
+    // the union of what every run regenerated, per "<type>|<owner>"
+    const matched = new Map<string, Set<number>>();
+    for (const r of done.values())
+      for (const [k, enc] of Object.entries(r.matched)) {
+        const set = matched.get(k) ?? new Set<number>();
+        for (const i of decodeIds(enc)) set.add(i);
+        matched.set(k, set);
+      }
+    const ran = (o: Owner) => ownerBooks(o).every((b) => done.has(b) || !byId.has(b));
+    const perType: Record<string, unknown> = {};
+    const lines: string[] = [];
+    const runBooks = new Set<number>();
+    let libTotal = 0;
+    let libMatched = 0;
+    let libVar = 0;
+    const totals = new Map(types.map((t) => [t, total(owned.get(t)!)]));
+    const grand = [...totals.values()].reduce((a, b) => a + b, 0);
+    for (const type of types) {
+      const kinds = design.get(type)!;
+      const parts: Record<string, Estimate & { links: number; populationUnits: number }> = {};
+      // the measured owners that miss the most links (where engine or planner work pays most)
+      const worst: { owner: string; kind: string; links: number; matched: number }[] = [];
+      for (const k of kinds) {
+        const strata = k.strata.map((st) => {
+          const obs = chosen(st)
+            .filter((u) => ran(u.id))
+            .map((u) => {
+              for (const b of ownerBooks(u.id)) runBooks.add(b);
+              const m = matched.get(`${type}|${u.id}`)?.size ?? 0;
+              worst.push({ owner: ownerBooks(u.id).map((b) => byId.get(b)?.title ?? `#${b}`).join(" ↔ "), kind: k.kind, links: u.links, matched: m });
+              return { scope: u.links, matched: m };
+            });
+          return { links: st.links, population: st.units.length, obs };
+        });
+        parts[k.kind] = { ...estimate(strata), links: k.strata.reduce((a, s) => a + s.links, 0), populationUnits: k.strata.reduce((a, s) => a + s.units.length, 0) };
+      }
+      const L = Object.values(parts).reduce((a, p) => a + (p.units ? p.links : 0), 0);
+      const recall = L ? Object.values(parts).reduce((a, p) => a + (p.units ? (p.links / L) * p.recall : 0), 0) : 0;
+      const ci = L ? Math.sqrt(Object.values(parts).reduce((a, p) => a + (p.units ? ((p.links / L) * p.ci) ** 2 : 0), 0)) : 0;
+      const T = totals.get(type)!;
+      perType[type] = { dbLinks: T, recall: pct(recall), ci: pct(ci), parts, worst: worst.sort((a, b) => b.links - b.matched - (a.links - a.matched)).slice(0, 15) };
+      libTotal += T;
+      libMatched += recall * T;
+      libVar += ((T / grand) * ci) ** 2;
+      const d = parts.D;
+      const u = parts.U;
+      lines.push(
+        `${type.padEnd(18)} ${String(T).padStart(9)}  ${pct(recall).padStart(6)} ±${pct(ci).padStart(5)}` +
+          `   D: ${d ? `${pct(d.recall)} (${d.units}/${d.populationUnits} owners, ${d.matched}/${d.scope})` : "—"}` +
+          `   U: ${u ? `${pct(u.recall)} (${u.units}/${u.populationUnits} pairs, ${u.matched}/${u.scope})` : "—"}`,
+      );
+    }
+    // precision over the books whose runs were measured
+    const counters: Counters = {};
+    let ms = 0;
+    const errors: string[] = [];
+    const stopped: string[] = [];
+    for (const b of runBooks) {
+      const r = done.get(b);
+      if (!r) continue;
+      addCounters(counters, r.counters);
+      ms += r.ms;
+      errors.push(...r.errors.map((e) => `${r.title}: ${e}`));
+      stopped.push(...r.stopped.map((e) => `${r.title}: ${e}`));
+    }
+    const prec = (filter: (group: string, conf: string, pairType: string) => boolean) => {
+      const t = [0, 0, 0, 0];
+      for (const [k, v] of Object.entries(counters)) {
+        const [g, c, p] = k.split("|") as [string, string, string];
+        if (filter(g, c, p)) for (let i = 0; i < 4; i++) t[i]! += v[i]!;
+      }
+      const [n, c, w, u] = t as [number, number, number, number];
+      return { n, correct: c, wrong: w, unconfirmed: u, strict: pct(n ? c / n : 0), judged: pct(c + w ? c / (c + w) : 0) };
+    };
+    const precision: Record<string, unknown> = {};
+    for (const g of ["structural", "citations"]) for (const c of CONFIDENCES) precision[`${g}|${c}`] = prec((gg, cc) => gg === g && cc === c);
+    const pairTypes = [...new Set(Object.keys(counters).map((k) => k.split("|")[2]!))];
+    const byPairType: Record<string, unknown> = {};
+    for (const p of pairTypes) for (const g of ["structural", "citations"]) for (const c of ["certain", "high"]) {
+      const x = prec((gg, cc, pp) => gg === g && cc === c && pp === p);
+      if (x.n) byPairType[`${p}|${g}|${c}`] = x;
+    }
+    lines.unshift(`type                 db links  recall  ±95%   (D: owner books — LINKER source, dependant→base; U: undirected book pairs)`);
+    lines.push(`${"ALL".padEnd(18)} ${String(libTotal).padStart(9)}  ${pct(libMatched / libTotal).padStart(6)} ±${pct(Math.sqrt(libVar)).padStart(5)}`);
+    lines.push("", "precision over the measured books (strict = correct/all; judged = correct/(correct+wrong)):");
+    for (const [k, v] of Object.entries(precision) as [string, { n: number; strict: string; judged: string; unconfirmed: number }][]) if (v.n) lines.push(`  ${k.padEnd(22)} n=${String(v.n).padStart(8)}  strict ${v.strict.padStart(6)}  judged ${v.judged.padStart(6)}  new ${v.unconfirmed}`);
+    lines.push(`books run: ${runBooks.size} (${(ms / 3_600_000).toFixed(2)} CPU-hours), errors ${errors.length}, stopped steps ${stopped.length}`);
+    console.log(lines.join("\n"));
+
+    // hand-check material: new suggestions and misses of the measured books, by rank
+    const fresh = [...runBooks].flatMap((b) => (done.get(b)?.fresh ?? []).map((x) => ({ book: done.get(b)!.title, ...x })));
+    const misses = [...runBooks].flatMap((b) => (done.get(b)?.misses ?? []).map((x) => ({ book: done.get(b)!.title, ...x }))).filter((m) => !matched.get(`${m.type}|${m.owner}`)?.has(m.id));
+    const take = <T extends { rank: number }>(list: T[], key: (x: T) => string, n: number) => {
+      const by = new Map<string, T[]>();
+      for (const x of list) pushTo(by, key(x), x);
+      return Object.fromEntries([...by].map(([k, xs]) => [k, xs.sort((a, b) => a.rank - b.rank).slice(0, n)]));
+    };
+    writeFileSync(
+      join(DIR, `handcheck-${MODE}-${DESIGN}.json`),
+      JSON.stringify(
+        {
+          fresh: take(fresh.filter((x) => x.verdict === "unconfirmed" && (x.confidence === "certain" || x.confidence === "high")), (x) => `${x.pairType}|${x.group}`, 30),
+          wrong: take(fresh.filter((x) => x.verdict === "wrong" && (x.confidence === "certain" || x.confidence === "high")), (x) => `${x.pairType}|${x.group}`, 15),
+          misses: take(misses, (x) => x.type, 40),
+        },
+        null,
+        1,
+      ),
+    );
+    writeFileSync(
+      join(DIR, `summary-${MODE}-${DESIGN}.json`),
+      JSON.stringify({ mode: MODE, seed: SEED, n: N, at: new Date().toISOString(), db: before, books: runBooks.size, cpuMs: ms, errors, stopped, perType, precision, byPairType, missesByType: tallyMisses(misses, isRelated) }, null, 1),
+    );
+  }
+});
+
+function tallyMisses(misses: readonly Miss[], _isRelated: (a: number, b: number) => boolean): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const m of misses) {
+    const k = m.toOther.length ? "suggested elsewhere in that book" : m.atLine ? "line linked, to other books" : m.planned ? "pair planned, line not linked" : "nothing from this line";
+    const t = (out[m.type] ??= {});
+    t[k] = (t[k] ?? 0) + 1;
+  }
+  return out;
+}
+
+const total = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+const pct = (x: number) => `${(100 * x).toFixed(1)}%`;

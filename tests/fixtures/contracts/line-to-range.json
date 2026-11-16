@@ -1,0 +1,1145 @@
+{
+ "_comment": "Records with line_index_2_end (target-side range). Stored link sits on the start line; link_range holds the last line; link_coverage one row per covered line after the first (headings excluded). Side follows the STORED direction (flipped \"source\" records put the file's line_index_2_end on side 0).",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "shape": "L->R",
+   "file": "MoreBooks/links/שרח - ליקוטים מפי רסג והוספות_links.json",
+   "recordIndex": 301,
+   "record": {
+    "line_index_1": 371,
+    "line_index_2": 4374,
+    "line_index_2_end": 4375,
+    "heRef_2": "תרגום ותפסיר רסג 4374",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "שרח - ליקוטים מפי רסג והוספות",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 8033,
+     "source": "MoreBooks",
+     "totalLines": 761,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9337871,
+     "heRef": "שרח - ליקוטים מפי רסג והוספות 371"
+    },
+    "targetLine": {
+     "id": 9998758,
+     "heRef": "תרגום ותפסיר רסג 4374"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12545667,
+      "sourceBookId": 8034,
+      "targetBookId": 8033,
+      "sourceLineId": 9998758,
+      "targetLineId": 9337871,
+      "targetLineIndex": 370,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 0,
+       "endLineId": 9342636,
+       "endLineIndex": 4374
+      }
+     ],
+     "link_coverage_rows": {
+      "0": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R",
+   "file": "MoreBooks/links/שרח - ליקוטים מפי רסג והוספות_links.json",
+   "recordIndex": 451,
+   "record": {
+    "line_index_1": 563,
+    "line_index_2": 8416,
+    "line_index_2_end": 8417,
+    "heRef_2": "תרגום ותפסיר רסג 8416",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "שרח - ליקוטים מפי רסג והוספות",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 8033,
+     "source": "MoreBooks",
+     "totalLines": 761,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9338063,
+     "heRef": "שרח - ליקוטים מפי רסג והוספות 563"
+    },
+    "targetLine": {
+     "id": 10000751,
+     "heRef": "תרגום ותפסיר רסג 8416"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12545817,
+      "sourceBookId": 8034,
+      "targetBookId": 8033,
+      "sourceLineId": 10000751,
+      "targetLineId": 9338063,
+      "targetLineIndex": 562,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 0,
+       "endLineId": 9346678,
+       "endLineIndex": 8416
+      }
+     ],
+     "link_coverage_rows": {
+      "0": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R",
+   "file": "MoreBooks/links/שרח - ליקוטים מפי רסג והוספות_links.json",
+   "recordIndex": 601,
+   "record": {
+    "line_index_1": 760,
+    "line_index_2": 11883,
+    "line_index_2_end": 11884,
+    "heRef_2": "תרגום ותפסיר רסג 11883",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "שרח - ליקוטים מפי רסג והוספות",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 8033,
+     "source": "MoreBooks",
+     "totalLines": 761,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9338260,
+     "heRef": "שרח - ליקוטים מפי רסג והוספות 760"
+    },
+    "targetLine": {
+     "id": 10002466,
+     "heRef": "תרגום ותפסיר רסג 11883"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12545967,
+      "sourceBookId": 8034,
+      "targetBookId": 8033,
+      "sourceLineId": 10002466,
+      "targetLineId": 9338260,
+      "targetLineIndex": 759,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 0,
+       "endLineId": 9350145,
+       "endLineIndex": 11883
+      }
+     ],
+     "link_coverage_rows": {
+      "0": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/אסתר_links.json",
+   "recordIndex": 83,
+   "record": {
+    "line_index_1": 90,
+    "ref_1": "Esther 5:7",
+    "heRef_2": "תפסיר רסג למגילת אסתר 181",
+    "path_2": "תפסיר רסג למגילת אסתר.txt",
+    "line_index_2": 181,
+    "line_index_2_end": 182,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אסתר",
+    "targetTitle": "תפסיר רסג למגילת אסתר",
+    "sourceBook": {
+     "id": 34,
+     "source": "Sefaria",
+     "totalLines": 178,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8454,
+     "source": "MoreBooks",
+     "totalLines": 354,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6193193,
+     "heRef": "אסתר, ה, ז"
+    },
+    "targetLine": {
+     "id": 10588320,
+     "heRef": "תפסיר רסג למגילת אסתר 181"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13441961,
+      "sourceBookId": 34,
+      "targetBookId": 8454,
+      "sourceLineId": 6193193,
+      "targetLineId": 10588320,
+      "targetLineIndex": 180,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 10588321,
+       "endLineIndex": 181
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/אסתר_links.json",
+   "recordIndex": 125,
+   "record": {
+    "line_index_1": 135,
+    "ref_1": "Esther 8:11",
+    "heRef_2": "תפסיר רסג למגילת אסתר 268",
+    "path_2": "תפסיר רסג למגילת אסתר.txt",
+    "line_index_2": 268,
+    "line_index_2_end": 269,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אסתר",
+    "targetTitle": "תפסיר רסג למגילת אסתר",
+    "sourceBook": {
+     "id": 34,
+     "source": "Sefaria",
+     "totalLines": 178,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8454,
+     "source": "MoreBooks",
+     "totalLines": 354,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6193235,
+     "heRef": "אסתר, ח, יא"
+    },
+    "targetLine": {
+     "id": 10588407,
+     "heRef": "תפסיר רסג למגילת אסתר 268"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13442003,
+      "sourceBookId": 34,
+      "targetBookId": 8454,
+      "sourceLineId": 6193235,
+      "targetLineId": 10588407,
+      "targetLineIndex": 267,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 10588408,
+       "endLineIndex": 268
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/אסתר_links.json",
+   "recordIndex": 166,
+   "record": {
+    "line_index_1": 178,
+    "ref_1": "Esther 10:3",
+    "heRef_2": "תפסיר רסג למגילת אסתר 352",
+    "path_2": "תפסיר רסג למגילת אסתר.txt",
+    "line_index_2": 352,
+    "line_index_2_end": 353,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אסתר",
+    "targetTitle": "תפסיר רסג למגילת אסתר",
+    "sourceBook": {
+     "id": 34,
+     "source": "Sefaria",
+     "totalLines": 178,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8454,
+     "source": "MoreBooks",
+     "totalLines": 354,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6193276,
+     "heRef": "אסתר, י, ג"
+    },
+    "targetLine": {
+     "id": 10588491,
+     "heRef": "תפסיר רסג למגילת אסתר 352"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 13442044,
+      "sourceBookId": 34,
+      "targetBookId": 8454,
+      "sourceLineId": 6193276,
+      "targetLineId": 10588491,
+      "targetLineIndex": 351,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 10588492,
+       "endLineIndex": 352
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/במדבר_links.json",
+   "recordIndex": 644,
+   "record": {
+    "line_index_1": 663,
+    "ref_1": "Numbers 17:20",
+    "heRef_2": "תרגום ותפסיר רסג 8633",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 8633,
+    "line_index_2_end": 8634,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "במדבר",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 4,
+     "source": "Sefaria",
+     "totalLines": 1325,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6177124,
+     "heRef": "במדבר, יז, כ"
+    },
+    "targetLine": {
+     "id": 10000858,
+     "heRef": "תרגום ותפסיר רסג 8633"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12560792,
+      "sourceBookId": 4,
+      "targetBookId": 8034,
+      "sourceLineId": 6177124,
+      "targetLineId": 10000858,
+      "targetLineIndex": 8632,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9346895,
+       "endLineIndex": 8633
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/במדבר_links.json",
+   "recordIndex": 966,
+   "record": {
+    "line_index_1": 995,
+    "ref_1": "Numbers 27:17",
+    "heRef_2": "תרגום ותפסיר רסג 9287",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 9287,
+    "line_index_2_end": 9288,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "במדבר",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 4,
+     "source": "Sefaria",
+     "totalLines": 1325,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6177446,
+     "heRef": "במדבר, כז, יז"
+    },
+    "targetLine": {
+     "id": 10001182,
+     "heRef": "תרגום ותפסיר רסג 9287"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12561114,
+      "sourceBookId": 4,
+      "targetBookId": 8034,
+      "sourceLineId": 6177446,
+      "targetLineId": 10001182,
+      "targetLineIndex": 9286,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9347549,
+       "endLineIndex": 9287
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/במדבר_links.json",
+   "recordIndex": 1287,
+   "record": {
+    "line_index_1": 1325,
+    "ref_1": "Numbers 36:13",
+    "heRef_2": "תרגום ותפסיר רסג 9938",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 9938,
+    "line_index_2_end": 9939,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "במדבר",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 4,
+     "source": "Sefaria",
+     "totalLines": 1325,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6177767,
+     "heRef": "במדבר, לו, יג"
+    },
+    "targetLine": {
+     "id": 10001503,
+     "heRef": "תרגום ותפסיר רסג 9938"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12561435,
+      "sourceBookId": 4,
+      "targetBookId": 8034,
+      "sourceLineId": 6177767,
+      "targetLineId": 10001503,
+      "targetLineIndex": 9937,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9348200,
+       "endLineIndex": 9938
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/בראשית_links.json",
+   "recordIndex": 766,
+   "record": {
+    "line_index_1": 795,
+    "ref_1": "Genesis 27:39",
+    "heRef_2": "תרגום ותפסיר רסג 1563",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 1563,
+    "line_index_2_end": 1564,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "בראשית",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 1,
+     "source": "Sefaria",
+     "totalLines": 1584,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6173644,
+     "heRef": "בראשית, כז, לט"
+    },
+    "targetLine": {
+     "id": 9997376,
+     "heRef": "תרגום ותפסיר רסג 1563"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12579505,
+      "sourceBookId": 1,
+      "targetBookId": 8034,
+      "sourceLineId": 6173644,
+      "targetLineId": 9997376,
+      "targetLineIndex": 1562,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9339825,
+       "endLineIndex": 1563
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/בראשית_links.json",
+   "recordIndex": 1149,
+   "record": {
+    "line_index_1": 1189,
+    "ref_1": "Genesis 38:30",
+    "heRef_2": "תרגום ותפסיר רסג 2340",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 2340,
+    "line_index_2_end": 2341,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "בראשית",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 1,
+     "source": "Sefaria",
+     "totalLines": 1584,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6174027,
+     "heRef": "בראשית, לח, ל"
+    },
+    "targetLine": {
+     "id": 9997759,
+     "heRef": "תרגום ותפסיר רסג 2340"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12579888,
+      "sourceBookId": 1,
+      "targetBookId": 8034,
+      "sourceLineId": 6174027,
+      "targetLineId": 9997759,
+      "targetLineIndex": 2339,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9340602,
+       "endLineIndex": 2340
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/בראשית_links.json",
+   "recordIndex": 1532,
+   "record": {
+    "line_index_1": 1584,
+    "ref_1": "Genesis 50:26",
+    "heRef_2": "תרגום ותפסיר רסג 3118",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 3118,
+    "line_index_2_end": 3119,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "בראשית",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 1,
+     "source": "Sefaria",
+     "totalLines": 1584,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6174410,
+     "heRef": "בראשית, נ, כו"
+    },
+    "targetLine": {
+     "id": 9998142,
+     "heRef": "תרגום ותפסיר רסג 3118"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12580271,
+      "sourceBookId": 1,
+      "targetBookId": 8034,
+      "sourceLineId": 6174410,
+      "targetLineId": 9998142,
+      "targetLineIndex": 3117,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9341380,
+       "endLineIndex": 3118
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_1",
+   "file": "MoreBooks/links/דברים_links.json",
+   "recordIndex": 477,
+   "record": {
+    "line_index_1": 496,
+    "ref_1": "Deuteronomy 17:9",
+    "heRef_2": "תרגום ותפסיר רסג 10912",
+    "path_2": "תרגום ותפסיר רסג.txt",
+    "line_index_2": 10912,
+    "line_index_2_end": 10913,
+    "Conection Type": "targum"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "דברים",
+    "targetTitle": "תרגום ותפסיר רסג",
+    "sourceBook": {
+     "id": 5,
+     "source": "Sefaria",
+     "totalLines": 991,
+     "isBaseBook": 1
+    },
+    "targetBook": {
+     "id": 8034,
+     "source": "MoreBooks",
+     "totalLines": 11885,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 6178245,
+     "heRef": "דברים, יז, ט"
+    },
+    "targetLine": {
+     "id": 10001986,
+     "heRef": "תרגום ותפסיר רסג 10912"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12568423,
+      "sourceBookId": 5,
+      "targetBookId": 8034,
+      "sourceLineId": 6178245,
+      "targetLineId": 10001986,
+      "targetLineIndex": 10911,
+      "targetBookOrderIndex": 999,
+      "connectionType": "TARGUM",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 9349174,
+       "endLineIndex": 10912
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 1
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_2",
+   "file": "MoreBooks/links/תיבת גמא_links.json",
+   "recordIndex": 333,
+   "record": {
+    "line_index_1": 206,
+    "line_index_2": 3,
+    "heRef_2": "בראשית א, א",
+    "ref_2": "Genesis 1:1",
+    "path_2": "בראשית.txt",
+    "line_index_2_end": 153,
+    "Conection Type": "reference"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיבת גמא",
+    "targetTitle": "בראשית",
+    "sourceBook": {
+     "id": 3405,
+     "source": "MoreBooks",
+     "totalLines": 420,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 1,
+     "source": "Sefaria",
+     "totalLines": 1584,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9978893,
+     "heRef": "תיבת גמא 206"
+    },
+    "targetLine": {
+     "id": 6172878,
+     "heRef": "בראשית, א, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12512120,
+      "sourceBookId": 3405,
+      "targetBookId": 1,
+      "sourceLineId": 9978893,
+      "targetLineId": 6172878,
+      "targetLineIndex": 2,
+      "targetBookOrderIndex": 1,
+      "connectionType": "REFERENCE",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6173023,
+       "endLineIndex": 152
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 145
+     },
+     "link_suppressed_side": []
+    },
+    {
+     "link": {
+      "id": 12930565,
+      "sourceBookId": 3405,
+      "targetBookId": 1,
+      "sourceLineId": 9978893,
+      "targetLineId": 6172878,
+      "targetLineIndex": 2,
+      "targetBookOrderIndex": 1,
+      "connectionType": "LINKER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 983,
+       "charEnd": 994,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6173023,
+       "endLineIndex": 152
+      }
+     ],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_2",
+   "file": "MoreBooks/links/תיבת גמא_links.json",
+   "recordIndex": 421,
+   "record": {
+    "line_index_1": 260,
+    "line_index_2": 584,
+    "heRef_2": "דברים כא, י",
+    "ref_2": "Deuteronomy 21:10",
+    "path_2": "דברים.txt",
+    "line_index_2_end": 697,
+    "Conection Type": "other"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיבת גמא",
+    "targetTitle": "דברים",
+    "sourceBook": {
+     "id": 3405,
+     "source": "MoreBooks",
+     "totalLines": 420,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 5,
+     "source": "Sefaria",
+     "totalLines": 991,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9978947,
+     "heRef": "תיבת גמא 260"
+    },
+    "targetLine": {
+     "id": 6178329,
+     "heRef": "דברים, כא, י"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12512208,
+      "sourceBookId": 3405,
+      "targetBookId": 5,
+      "sourceLineId": 9978947,
+      "targetLineId": 6178329,
+      "targetLineIndex": 583,
+      "targetBookOrderIndex": 5,
+      "connectionType": "OTHER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6178438,
+       "endLineIndex": 696
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 109
+     },
+     "link_suppressed_side": []
+    },
+    {
+     "link": {
+      "id": 12930601,
+      "sourceBookId": 3405,
+      "targetBookId": 5,
+      "sourceLineId": 9978947,
+      "targetLineId": 6178329,
+      "targetLineIndex": 583,
+      "targetBookOrderIndex": 5,
+      "connectionType": "LINKER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [
+      {
+       "side": 0,
+       "charStart": 1855,
+       "charEnd": 1867,
+       "label": null
+      }
+     ],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6178438,
+       "endLineIndex": 696
+      }
+     ],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->R+ref_2",
+   "file": "MoreBooks/links/תיבת גמא_links.json",
+   "recordIndex": 527,
+   "record": {
+    "line_index_1": 409,
+    "line_index_2": 3,
+    "heRef_2": "שבת ב., א",
+    "ref_2": "Shabbat 2a:1",
+    "path_2": "שבת.txt",
+    "line_index_2_end": 421,
+    "Conection Type": "other"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "תיבת גמא",
+    "targetTitle": "שבת",
+    "sourceBook": {
+     "id": 3405,
+     "source": "MoreBooks",
+     "totalLines": 420,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 104,
+     "source": "Sefaria",
+     "totalLines": 4091,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9979096,
+     "heRef": "תיבת גמא 409"
+    },
+    "targetLine": {
+     "id": 6203025,
+     "heRef": "שבת, ב., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12512314,
+      "sourceBookId": 3405,
+      "targetBookId": 104,
+      "sourceLineId": 9979096,
+      "targetLineId": 6203025,
+      "targetLineIndex": 2,
+      "targetBookOrderIndex": 2,
+      "connectionType": "OTHER",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [
+      {
+       "side": 1,
+       "endLineId": 6203406,
+       "endLineIndex": 420
+      }
+     ],
+     "link_coverage_rows": {
+      "1": 381
+     },
+     "link_suppressed_side": []
+    }
+   ]
+  }
+ ]
+}

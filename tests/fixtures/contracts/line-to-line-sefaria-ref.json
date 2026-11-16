@@ -1,0 +1,942 @@
+{
+ "_comment": "line->line records whose target (ref_2) or source (ref_1) is a Sefaria-owned book. ref_* are pipeline-only fields; the DB build ignores them (ignoreUnknownKeys). Mostly \"source\" -> flipped COMMENTARY.",
+ "_provenance": {
+  "libraryRepo": "Otzaria/otzaria-library",
+  "libraryCommit": "17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10",
+  "db": "C:/ProgramData/otzaria/books/seforim.db (read-only)",
+  "dbVersion": "37",
+  "dbSchemaVersion": "7",
+  "generatorRepo": "Otzaria/SeforimLibrary@otzaria 23f1f8f16d2070d6b0459cc684722f4d029ad115",
+  "note": "The DB was built from an earlier library snapshot than libraryCommit; ref-managed line_index values may have drifted. line ids are DB-build specific. lineIndex in the DB is 0-based; line_index_* in the file is 1-based."
+ },
+ "examples": [
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/טופסי גיטין_links.json",
+   "recordIndex": 372,
+   "record": {
+    "line_index_1": 808,
+    "line_index_2": 1557,
+    "heRef_2": "גיטין נ:, א",
+    "ref_2": "Gittin 50b:1",
+    "path_2": "גיטין.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "טופסי גיטין",
+    "targetTitle": "גיטין",
+    "sourceBook": {
+     "id": 7991,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1328,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 120,
+     "source": "Sefaria",
+     "totalLines": 3171,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9158437,
+     "heRef": "טופסי גיטין 808"
+    },
+    "targetLine": {
+     "id": 6236452,
+     "heRef": "גיטין, נ:, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12258815,
+      "sourceBookId": 120,
+      "targetBookId": 7991,
+      "sourceLineId": 6236452,
+      "targetLineId": 9158437,
+      "targetLineIndex": 807,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/טופסי גיטין_links.json",
+   "recordIndex": 558,
+   "record": {
+    "line_index_1": 1016,
+    "line_index_2": 2161,
+    "heRef_2": "גיטין סו:, א",
+    "ref_2": "Gittin 66b:1",
+    "path_2": "גיטין.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "טופסי גיטין",
+    "targetTitle": "גיטין",
+    "sourceBook": {
+     "id": 7991,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1328,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 120,
+     "source": "Sefaria",
+     "totalLines": 3171,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9158645,
+     "heRef": "טופסי גיטין 1016"
+    },
+    "targetLine": {
+     "id": 6237024,
+     "heRef": "גיטין, סו:, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12259001,
+      "sourceBookId": 120,
+      "targetBookId": 7991,
+      "sourceLineId": 6237024,
+      "targetLineId": 9158645,
+      "targetLineIndex": 1015,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/טופסי גיטין_links.json",
+   "recordIndex": 744,
+   "record": {
+    "line_index_1": 1241,
+    "line_index_2": 3107,
+    "heRef_2": "גיטין פט., א",
+    "ref_2": "Gittin 89a:1",
+    "path_2": "גיטין.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "טופסי גיטין",
+    "targetTitle": "גיטין",
+    "sourceBook": {
+     "id": 7991,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 1328,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 120,
+     "source": "Sefaria",
+     "totalLines": 3171,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9158870,
+     "heRef": "טופסי גיטין 1241"
+    },
+    "targetLine": {
+     "id": 6237925,
+     "heRef": "גיטין, פט., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12259187,
+      "sourceBookId": 120,
+      "targetBookId": 7991,
+      "sourceLineId": 6237925,
+      "targetLineId": 9158870,
+      "targetLineIndex": 1240,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/מקל יעקב_links.json",
+   "recordIndex": 185,
+   "record": {
+    "line_index_1": 250,
+    "line_index_2": 3,
+    "heRef_2": "מכות ב., א",
+    "ref_2": "Makkot 2a:1",
+    "path_2": "מכות.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מקל יעקב",
+    "targetTitle": "מכות",
+    "sourceBook": {
+     "id": 7993,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 601,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 126,
+     "source": "Sefaria",
+     "totalLines": 756,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9162647,
+     "heRef": "מקל יעקב 250"
+    },
+    "targetLine": {
+     "id": 7857712,
+     "heRef": "מכות, ב., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12267944,
+      "sourceBookId": 126,
+      "targetBookId": 7993,
+      "sourceLineId": 7857712,
+      "targetLineId": 9162647,
+      "targetLineIndex": 249,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/מקל יעקב_links.json",
+   "recordIndex": 278,
+   "record": {
+    "line_index_1": 348,
+    "line_index_2": 75,
+    "heRef_2": "מכות ד:, א",
+    "ref_2": "Makkot 4b:1",
+    "path_2": "מכות.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מקל יעקב",
+    "targetTitle": "מכות",
+    "sourceBook": {
+     "id": 7993,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 601,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 126,
+     "source": "Sefaria",
+     "totalLines": 756,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9162745,
+     "heRef": "מקל יעקב 348"
+    },
+    "targetLine": {
+     "id": 6256409,
+     "heRef": "מכות, ד:, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12268037,
+      "sourceBookId": 126,
+      "targetBookId": 7993,
+      "sourceLineId": 6256409,
+      "targetLineId": 9162745,
+      "targetLineIndex": 347,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/מקל יעקב_links.json",
+   "recordIndex": 370,
+   "record": {
+    "line_index_1": 466,
+    "line_index_2": 2706,
+    "heRef_2": "בבא מציעא פה., א",
+    "ref_2": "Bava Metzia 85a:1",
+    "path_2": "בבא מציעא.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "מקל יעקב",
+    "targetTitle": "בבא מציעא",
+    "sourceBook": {
+     "id": 7993,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 601,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 123,
+     "source": "Sefaria",
+     "totalLines": 3896,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9162863,
+     "heRef": "מקל יעקב 466"
+    },
+    "targetLine": {
+     "id": 6247244,
+     "heRef": "בבא מציעא, פה., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12268129,
+      "sourceBookId": 123,
+      "targetBookId": 7993,
+      "sourceLineId": 6247244,
+      "targetLineId": 9162863,
+      "targetLineIndex": 465,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/עין הבדלח תנינא_links.json",
+   "recordIndex": 294,
+   "record": {
+    "line_index_1": 352,
+    "line_index_2": 340,
+    "heRef_2": "גיטין יג., א",
+    "ref_2": "Gittin 13a:1",
+    "path_2": "גיטין.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "עין הבדלח תנינא",
+    "targetTitle": "גיטין",
+    "sourceBook": {
+     "id": 7917,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 721,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 120,
+     "source": "Sefaria",
+     "totalLines": 3171,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9002343,
+     "heRef": "עין הבדלח תנינא 352"
+    },
+    "targetLine": {
+     "id": 6235310,
+     "heRef": "גיטין, יג., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12290440,
+      "sourceBookId": 120,
+      "targetBookId": 7917,
+      "sourceLineId": 6235310,
+      "targetLineId": 9002343,
+      "targetLineIndex": 351,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/עין הבדלח תנינא_links.json",
+   "recordIndex": 441,
+   "record": {
+    "line_index_1": 512,
+    "line_index_2": 896,
+    "heRef_2": "פסחים ל:, א",
+    "ref_2": "Pesachim 30b:1",
+    "path_2": "פסחים.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "עין הבדלח תנינא",
+    "targetTitle": "פסחים",
+    "sourceBook": {
+     "id": 7917,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 721,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 106,
+     "source": "Sefaria",
+     "totalLines": 3760,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9002503,
+     "heRef": "עין הבדלח תנינא 512"
+    },
+    "targetLine": {
+     "id": 6211285,
+     "heRef": "פסחים, ל:, א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12290587,
+      "sourceBookId": 106,
+      "targetBookId": 7917,
+      "sourceLineId": 6211285,
+      "targetLineId": 9002503,
+      "targetLineIndex": 511,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "BeitAharonVeYisraelToOtzaria/links/עין הבדלח תנינא_links.json",
+   "recordIndex": 588,
+   "record": {
+    "line_index_1": 689,
+    "line_index_2": 99,
+    "heRef_2": "ביצה ה., א",
+    "ref_2": "Beitzah 5a:1",
+    "path_2": "ביצה.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "עין הבדלח תנינא",
+    "targetTitle": "ביצה",
+    "sourceBook": {
+     "id": 7917,
+     "source": "BeitAharonVeYisraelToOtzaria",
+     "totalLines": 721,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 109,
+     "source": "Sefaria",
+     "totalLines": 1230,
+     "isBaseBook": 1
+    },
+    "sourceLine": {
+     "id": 9002680,
+     "heRef": "עין הבדלח תנינא 689"
+    },
+    "targetLine": {
+     "id": 6217690,
+     "heRef": "ביצה, ה., א"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12290734,
+      "sourceBookId": 109,
+      "targetBookId": 7917,
+      "sourceLineId": 6217690,
+      "targetLineId": 9002680,
+      "targetLineIndex": 688,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_2",
+   "file": "DictaToOtzaria/ערוך/links/אבן העוזר על בבא בתרא_links.json",
+   "recordIndex": 7,
+   "record": {
+    "line_index_1": 14,
+    "line_index_2": 2706,
+    "ref_2": "Rashbam on Bava Batra 86a:1:2",
+    "heRef_2": "רשב\"ם על בבא בתרא פו., א, ב",
+    "path_2": "רשב\"ם על בבא בתרא.txt",
+    "Conection Type": "source"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "אבן העוזר על בבא בתרא",
+    "targetTitle": "רשב\"ם על בבא בתרא",
+    "sourceBook": {
+     "id": 6432,
+     "source": "DictaToOtzaria",
+     "totalLines": 23,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 1959,
+     "source": "Sefaria",
+     "totalLines": 6582,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 4845462,
+     "heRef": "אבן העוזר על בבא בתרא 14"
+    },
+    "targetLine": {
+     "id": 6795915,
+     "heRef": "רשב\"ם על בבא בתרא, פו., א, ב"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11375781,
+      "sourceBookId": 1959,
+      "targetBookId": 6432,
+      "sourceLineId": 6795915,
+      "targetLineId": 4845462,
+      "targetLineIndex": 13,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "flipped"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/זוהר חדש_links.json",
+   "recordIndex": 15,
+   "record": {
+    "line_index_1": 2509,
+    "ref_1": "Zohar Chadash, Vaetchanan,  15",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1379,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "זוהר חדש",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3023,
+     "source": "Sefaria",
+     "totalLines": 4452,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 1633658,
+     "heRef": "זוהר חדש, פרשת ואתחנן,  טו"
+    },
+    "targetLine": {
+     "id": 7763680,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1379"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11394629,
+      "sourceBookId": 3023,
+      "targetBookId": 7461,
+      "sourceLineId": 1633658,
+      "targetLineId": 7763680,
+      "targetLineIndex": 1378,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/זוהר חדש_links.json",
+   "recordIndex": 22,
+   "record": {
+    "line_index_1": 2512,
+    "ref_1": "Zohar Chadash, Vaetchanan,  18",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1461,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "זוהר חדש",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3023,
+     "source": "Sefaria",
+     "totalLines": 4452,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 1633661,
+     "heRef": "זוהר חדש, פרשת ואתחנן,  יח"
+    },
+    "targetLine": {
+     "id": 9622622,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1461"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12560015,
+      "sourceBookId": 3023,
+      "targetBookId": 7461,
+      "sourceLineId": 1633661,
+      "targetLineId": 9622622,
+      "targetLineIndex": 1460,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/זוהר חדש_links.json",
+   "recordIndex": 29,
+   "record": {
+    "line_index_1": 42,
+    "ref_1": "Zohar Chadash, Bereshit,  40",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1665,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "זוהר חדש",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3023,
+     "source": "Sefaria",
+     "totalLines": 4452,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 1631191,
+     "heRef": "זוהר חדש, פרשת בראשית,  מ"
+    },
+    "targetLine": {
+     "id": 7763966,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1665"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11394643,
+      "sourceBookId": 3023,
+      "targetBookId": 7461,
+      "sourceLineId": 1631191,
+      "targetLineId": 7763966,
+      "targetLineIndex": 1664,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/ספר הזהר_links.json",
+   "recordIndex": 22,
+   "record": {
+    "line_index_1": 1472,
+    "ref_1": "Zohar, Noach,  16:126",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1409,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ספר הזהר",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3025,
+     "source": "Sefaria",
+     "totalLines": 18769,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 1637255,
+     "heRef": "ספר הזהר, נח,  טז, ה"
+    },
+    "targetLine": {
+     "id": 7763710,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1409"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11394666,
+      "sourceBookId": 3025,
+      "targetBookId": 7461,
+      "sourceLineId": 1637255,
+      "targetLineId": 7763710,
+      "targetLineIndex": 1408,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/ספר הזהר_links.json",
+   "recordIndex": 33,
+   "record": {
+    "line_index_1": 318,
+    "ref_1": "Zohar, Bereshit,  4:17",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1654,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ספר הזהר",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3025,
+     "source": "Sefaria",
+     "totalLines": 18769,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 1636101,
+     "heRef": "ספר הזהר, בראשית,  ד, א"
+    },
+    "targetLine": {
+     "id": 7763955,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1654"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 11394677,
+      "sourceBookId": 3025,
+      "targetBookId": 7461,
+      "sourceLineId": 1636101,
+      "targetLineId": 7763955,
+      "targetLineIndex": 1653,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  },
+  {
+   "shape": "L->L+ref_1",
+   "file": "MoreBooks/links/ספר הזהר_links.json",
+   "recordIndex": 44,
+   "record": {
+    "line_index_1": 299,
+    "ref_1": "Zohar, Bereshit,  1:1",
+    "heRef_2": "ביאור הגר\"א",
+    "path_2": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא.txt",
+    "line_index_2": 1673,
+    "Conection Type": "commentary"
+   },
+   "resolution": {
+    "status": "matched",
+    "sourceTitle": "ספר הזהר",
+    "targetTitle": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא",
+    "sourceBook": {
+     "id": 3025,
+     "source": "Sefaria",
+     "totalLines": 18769,
+     "isBaseBook": 0
+    },
+    "targetBook": {
+     "id": 7461,
+     "source": "MoreBooks",
+     "totalLines": 3840,
+     "isBaseBook": 0
+    },
+    "sourceLine": {
+     "id": 9001747,
+     "heRef": "ספר הזהר, בראשית,  א, א"
+    },
+    "targetLine": {
+     "id": 7763974,
+     "heRef": "ביאור הגרא על תיקונים מזוהר חדש - דפוס וילנא 1673"
+    }
+   },
+   "dbRows": [
+    {
+     "link": {
+      "id": 12287153,
+      "sourceBookId": 3025,
+      "targetBookId": 7461,
+      "sourceLineId": 9001747,
+      "targetLineId": 7763974,
+      "targetLineIndex": 1672,
+      "targetBookOrderIndex": 999,
+      "connectionType": "COMMENTARY",
+      "baseProvenance": 0,
+      "storedDirection": "as_file"
+     },
+     "link_anchor": [],
+     "link_range": [],
+     "link_coverage_rows": {},
+     "link_suppressed_side": []
+    }
+   ]
+  }
+ ]
+}

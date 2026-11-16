@@ -1,0 +1,32 @@
+name: Visual baselines
+
+# Manual only. Rewrites every Windows screenshot of the visual comparison (docs/TESTING.md §2a) on the
+# same runner image as ci.yml's "visual" job, and uploads them as an artifact; nothing is committed.
+# For the rare case where a baseline made on a desktop differs from the runner for a reason that is not
+# the UI (a Playwright upgrade that moves Chromium, a change of runner image): download the artifact,
+# LOOK at every changed image, and commit it under tests/visual/__screenshots__/win32/.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-baselines:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium-headless-shell
+      - name: Screenshots (rewrites all the baselines)
+        run: npx playwright test --config playwright.visual.config.ts --update-snapshots=all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-win32
+          path: tests/visual/__screenshots__/win32/
