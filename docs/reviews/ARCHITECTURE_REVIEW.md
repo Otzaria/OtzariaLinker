@@ -89,6 +89,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** שני המקרים שלמעלה. אחרי `restore` או עריכה "ריקה", ‏`planExport` כותב 2 רשומות, ו-`counts.kept === 2`.
 
+**סטטוס:** תוקן ב־71fd320, בדיקה: `tests/unit/formats/export.test.ts`, ‏`tests/unit/state/history.test.ts`
+
 ---
 
 ### C2 — High — מפתחות סשן ישנים אחרי הפעלה מחדש של ה-worker: עריכה מעבירה קישור לספר אחר
@@ -174,6 +176,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 **תיקון:** לקשור את האישור לטביעת האצבע (`LibraryFile.hash`) של העותק שאושר, ולשמור אותו כ-`FileChange` בתוך `LinkState` (כלומר עם undo). ‏`openProject` ינקה אישורים של כותרות שהעותק שלהן הוחלף.
 
 **בדיקת רגרסיה:** התרחיש שלמעלה מחזיר `unverified`, ו-`export/file-unverified` מחזיק את הקובץ.
+
+**סטטוס:** תוקן ב־843bd19, בדיקה: `tests/integration/state/library-file.test.ts`
 
 ---
 
@@ -334,6 +338,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** `reject` מסמן dirty, autosave נכתב, ו-`undo` מחזיר את ההצעה ל-pending.
 
+**סטטוס:** תוקן ב־c20f17d, בדיקה: `tests/integration/state/store.test.ts`
+
 ---
 
 ### C11 — Medium — `trimBefore` חותך טווח כך שהוא נגמר על כותרת
@@ -413,6 +419,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 
 **בדיקת רגרסיה:** service ש-`existingLinks` שלו זורק `db/corrupt`. ‏`runEngine` מציג אזהרה, ו-`approve` של הוודאיות נחסם או מזהיר.
 
+**סטטוס:** תוקן ב־6e9f06b (במצב, ובחלונית ההצעות; ה-workers של max-link וציטוטים לא בתחום הזה), בדיקה: `tests/integration/state/store.test.ts`
+
 ---
 
 ### C14 — Low — ‏BLOB של טקסט שמתחיל ב-"x " מזוהה כ-zlib
@@ -458,6 +466,8 @@ planExport([...s.links.values()], ctx).files[0].records  // 1, expected 2
 **תיקון:** רשימת משימות, או לפחות `if (this.task.peek()?.id === myId)` ב-`finally`. בנוסף, לחסום או לתזמן בתור משימה שנייה.
 
 **בדיקת רגרסיה:** התרחיש שלמעלה. B נשארת ב-`task` אחרי ש-A מסתיימת.
+
+**סטטוס:** תוקן ב־0f1f04d, בדיקה: `tests/integration/state/store.test.ts`
 
 ---
 
