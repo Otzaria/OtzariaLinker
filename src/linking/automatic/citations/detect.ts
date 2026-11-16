@@ -202,11 +202,11 @@ export class CitationScanner {
     this.partBases = this.base ? null : saPartBases(aliases, sourceTitle);
     this.structure = new StructureTracker(sourceTitle);
     this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
-    this.titleCommentator = titleCommentatorOf(sourceTitle);
+    this.glossary = glossaryOf(sourceTitle);
   }
 
   /** the commentator whose words this book is a glossary of ("אוצר לעזי רש"י" → רש"י), or null */
-  private readonly titleCommentator: string | null;
+  private readonly glossary: CommentatorGlossary | null;
 
   /** "<book> רבה" for books of the Tanakh, when the library has it */
   private midrashOf(targets: readonly AliasTarget[]): AliasTarget[] {
@@ -1268,6 +1268,8 @@ export class CitationScanner {
     const qualifier = qualifierBefore(toks, c.from);
     let commentator: string | undefined = c.commentator;
     let rule = c.rule;
+    /** a glossary that links the place itself too (CommentatorGlossary.alsoBase): the books as named */
+    let alsoBase: readonly AliasTarget[] | null = null;
     let diburWords: readonly string[] | null = c.dh ?? null;
     if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
@@ -1306,13 +1308,17 @@ export class CitationScanner {
       } else if (dh && !named) {
         this.drop("dibur-without-commentator");
         return c.to;
-      } else if (!who && this.titleCommentator && candidates.length && candidates.every((x) => x.collection === "bavli" || x.collection === "tanakh")) {
-        // a glossary of a commentator's words ("אוצר לעזי רש"י"): "(חולין פד:)" is where HE wrote it
-        const moved = this.toCommentary(candidates, this.titleCommentator);
+      } else if (!who && this.glossary && candidates.some((x) => this.glossary!.on.includes(x.collection))) {
+        // a glossary of a commentator's words ("אוצר לעזי רש"י"): "(חולין פד:)" is where HE wrote it. Only the
+        // collections he wrote on are moved — "חולין" is also the Mishna's name, which has no Rashi; a daf finds
+        // no place there anyway
+        const glossary = this.glossary;
+        const moved = this.toCommentary(candidates.filter((x) => glossary.on.includes(x.collection)), glossary.commentator);
         if (moved.length) {
+          if (glossary.alsoBase) alsoBase = candidates;
           movedFrom = candidates;
           candidates = moved;
-          commentator = this.titleCommentator;
+          commentator = glossary.commentator;
           rule = "title-commentator";
         }
       } else if (!who && candidates.length && candidates.every((x) => x.collection === "rambam")) {
@@ -1354,6 +1360,12 @@ export class CitationScanner {
       numericName: c.numericName,
     };
     this.citations.push(cit);
+    if (alsoBase) {
+      // ...and the place itself, as written (the library links both: LIBRARY_BENCHMARK §6.4). A citation of
+      // its own, so each is resolved and scored by itself; "שם" after them follows the commentator's (this.last)
+      const { commentator: _who, movedFrom: _from, dh: _dh, ...plain } = cit;
+      this.citations.push({ ...plain, seq: this.seq++, candidates: [...alsoBase].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]), rule: "title-commentator-base" });
+    }
     this.last = { c: cit, line, elems: c.elems };
     if (c.elems[0] && (c.elems[0].kind === "daf" || c.elems[0].amud !== undefined) && (cit.movedFrom ?? cit.candidates).some((x) => x.collection === "bavli" && !x.book.title.includes(" על "))) this.lastTalmud = { c: cit, line };
     return c.to;
@@ -1917,18 +1929,34 @@ function responsaWordBefore(toks: readonly Tok[], i: number): boolean {
   return false;
 }
 
+/** A book that is a glossary of one commentator's words, told by words in its title. */
+interface CommentatorGlossary {
+  /** words of the glossary's title */
+  readonly words: string;
+  /** the commentator whose words it explains, as the library's commentaries name their author */
+  readonly commentator: string;
+  /** the collections he wrote on: a citation of one of them is where he wrote the word */
+  readonly on: readonly Collection[];
+  /**
+   * the place itself is linked too, beside the commentator's words on it: an entry explains a word of the
+   * commentary AND the word of the verse or the daf it is on
+   */
+  readonly alsoBase: boolean;
+}
+
 /**
  * Glossaries of one commentator's words (data, from the library's titles): their citations of the Talmud and
  * the Tanakh are where HE wrote the word — "(חולין פד:)" in "אוצר לעזי רש"י" is Rashi on Chullin 84b
- * (LIBRARY_BENCHMARK §6.4: 6 of 30 REFERENCE misses).
+ * (LIBRARY_BENCHMARK §6.4: 6 of 30 REFERENCE misses). The database links each entry of אוצר לעזי רש"י to
+ * Rashi's line AND to the verse or the daf (3,790 of its 3,797 entries linked to Rashi, in Sefaria's
+ * REFERENCE/OTHER layers, plus LINKER), so the place is linked too (the owner's decision, 2026-11-16).
  */
-const COMMENTATOR_GLOSSARIES: readonly (readonly [string, string])[] = [['לעזי רש"י', 'רש"י']];
+const COMMENTATOR_GLOSSARIES: readonly CommentatorGlossary[] = [{ words: 'לעזי רש"י', commentator: 'רש"י', on: ["bavli", "tanakh"], alsoBase: true }];
 
-function titleCommentatorOf(title: string): string | null {
+function glossaryOf(title: string): CommentatorGlossary | null {
   const t = normTitle(title);
   if (/ על /.test(t)) return null;
-  for (const [words, who] of COMMENTATOR_GLOSSARIES) if (t.includes(words)) return who;
-  return null;
+  return COMMENTATOR_GLOSSARIES.find((g) => t.includes(g.words)) ?? null;
 }
 
 /**

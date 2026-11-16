@@ -139,4 +139,37 @@ describe("citations engine (in memory)", () => {
   });
 });
 
+describe("a glossary of a commentator's words (COMMENTATOR_GLOSSARIES)", () => {
+  // the real shapes (seforim.db): "רש"י על ברכות, ב., א, א" — daf, segment of the Gemara, Rashi's comment
+  const RASHI = ref("rashi-ber", 'רש"י על ברכות');
+  function rashiRefs(dapim: number): RefLine[] {
+    const out: RefLine[] = [{ index: 0, heRef: null }];
+    const g = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"];
+    for (let d = 2; d <= dapim; d++) for (const side of [".", ":"]) for (let s = 1; s <= 2; s++) out.push({ index: out.length, heRef: `רש"י על ברכות, ${g[d]}${side}, ${g[s]}, א` });
+    return out;
+  }
+  const glossary = (lines: string[]): EngineBook => ({ book: ref("laazei", 'אוצר לעזי רש"י', "otzaria"), lines: lines.map((text, index) => ({ index, text, heading: null })) });
+
+  it("an entry links to Rashi's words AND to the daf itself: two reference suggestions on the same words", () => {
+    const r = runCitationsEngine(glossary(["1 / (ברכות ג.) / מלה / לעז"]), library([{ book: RASHI, refs: rashiRefs(6) }]));
+    expect(r.suggestions).toHaveLength(2);
+    const toRashi = r.suggestions.find((s) => s.target.book.key === "rashi-ber")!;
+    const toBase = r.suggestions.find((s) => s.target.book.key === "ber")!;
+    expect(toRashi.rules).toContain("citations.title-commentator");
+    expect(toBase.target).toEqual({ book: BER, line: 10 });
+    expect(toBase.rules).toContain("citations.title-commentator-base");
+    expect(toBase.reasons.map((x) => x.code)).toContain("citations/title-commentator-base");
+    for (const s of r.suggestions) expect(s.declaredType).toBe("reference");
+    expect(toBase.id).not.toBe(toRashi.id);
+    // the place as written costs nothing; Rashi's words on it are inferred from the title
+    expect(toBase.confidence).toBe("certain");
+    expect(CONF(toRashi)).toBeLessThan(CONF(toBase));
+  });
+
+  it("without the commentary in the library, the place alone (once)", () => {
+    const r = runCitationsEngine(glossary(["1 / (ברכות ג.) / מלה / לעז"]), library());
+    expect(r.suggestions.map((s) => s.target.book.key)).toEqual(["ber"]);
+  });
+});
+
 const CONF = (s: { score: number }) => s.score;

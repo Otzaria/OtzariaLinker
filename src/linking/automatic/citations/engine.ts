@@ -613,6 +613,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "sk-here") s -= PENALTY.ibidPartial;
   // the book is told by a word before the name, not by the name: "ברבות [בראשית פי"א]", a glossary of Rashi's words
   if (c.rule === "midrash-rabbah") s -= PENALTY.midrashRabbah;
+  // its twin to the place itself ("title-commentator-base") is the citation as written: no cost
   if (c.rule === "title-commentator") s -= PENALTY.baseDaf;
   if (c.ordinal && c.elems.length === 1 && TALMUDIC.has(t.collection)) s -= PENALTY.ordinalChapter;
   // "[פ"ק דברכות] בשר ודם…": a chapter alone sent to the Mishna, though the book did not say "משנה" — books
@@ -662,6 +663,7 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "named-bare": "שם של פרק בלי המילה \"פרק\", ואחריו בסוגריים דף שנמצא בתוך הפרק הזה",
   "midrash-rabbah": "לפני שם הספר כתוב \"מדרש רבה\" / \"ברבות\" / \"במד\"ר\": ההפניה היא למדרש רבה על הספר הזה, לא לפסוק",
   "title-commentator": "הספר הוא אוצר של מילות מפרש אחד, ולכן המקום הוא בפירוש שלו על הדף או על הפרק",
+  "title-commentator-base": "הספר הוא אוצר של מילות מפרש אחד: ההפניה מקושרת לפירוש שלו במקום הזה (בהצעה נפרדת), וגם למקום עצמו, לפסוק או לדף שהמילה כתובה בו",
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",

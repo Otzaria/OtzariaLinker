@@ -26,6 +26,8 @@ const CATALOG = [
   book("tos-ned", "תוספות על נדרים"),
   book("rashi-bk", 'רש"י על בבא קמא'),
   book("rashi-hul", 'רש"י על חולין'),
+  book("m-hul", "משנה חולין"),
+  book("rashi-gen", 'רש"י על בראשית'),
   book("sa-oc", "שולחן ערוך, אורח חיים"),
   book("me", "מאירת עיניים על שולחן ערוך חושן משפט", "sefaria", ['מ"ע', 'סמ"ע']),
   book("rivash", 'תשובות הריב"ש'),
@@ -165,10 +167,25 @@ describe("guards from the hand check of new references (LIBRARY_BENCHMARK §4.3)
     // a midrash not in the library: no link, and not to the verse
     expect(scan(['ובמדרש רבה [בראשית פי"א] איתא'])).toHaveLength(0);
   });
-  it('a glossary of Rashi\'s words cites Rashi', () => {
-    const [c] = scan(["פירוש המילה (חולין פד:) כך"], 'אוצר לעזי רש"י');
+  it('a glossary of Rashi\'s words cites Rashi, and the place itself too', () => {
+    // "חולין" is also the Mishna's name (no Rashi there): only the Bavli moves to Rashi — before, the Mishna
+    // namesake kept the whole citation on the Gemara
+    const [c, base] = scan(["פירוש המילה (חולין פד:) כך"], 'אוצר לעזי רש"י');
     expect(books(c)).toEqual(["rashi-hul"]);
     expect(c!.rule).toBe("title-commentator");
-    expect(books(scan(["פירוש המילה (חולין פד:) כך"], "אוצר מילים")[0])).toEqual(["hul"]);
+    expect(c!.commentator).toBe('רש"י');
+    // the twin: the same words, the books as named, no commentator
+    expect(books(base)).toEqual(expect.arrayContaining(["hul", "m-hul"]));
+    expect(base!.rule).toBe("title-commentator-base");
+    expect(base!.commentator).toBeUndefined();
+    expect([base!.rawStart, base!.rawEnd, base!.line]).toEqual([c!.rawStart, c!.rawEnd, c!.line]);
+    expect(base!.seq).toBeGreaterThan(c!.seq);
+    // a verse: Rashi on the book, and the verse
+    const [v, vb] = scan(["פירוש המילה (בראשית מו א) כך"], 'אוצר לעזי רש"י');
+    expect([books(v), books(vb)]).toEqual([["rashi-gen"], ["gen"]]);
+    // a book without Rashi on it in the library is the place alone, once
+    expect(scan(["פירוש המילה (ויקרא א ב) כך"], 'אוצר לעזי רש"י').map(books)).toEqual([["lev"]]);
+    // any other book: the place alone
+    expect(scan(["פירוש המילה (חולין פד:) כך"], "אוצר מילים").map((x) => x.rule ?? "")).toEqual([""]);
   });
 });
