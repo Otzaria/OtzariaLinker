@@ -138,7 +138,7 @@ function ProjectLinksPanel() {
           {choose("ספר מקור", "source", opts.source)}
           {choose("ספר יעד", "target", opts.target)}
           {choose("סוג", "type", opts.type, (t) => TYPE_LABELS[t as ConnectionType].he)}
-          {choose("מנוע", "engine", ["manual", ...opts.engine], (e) => (e === "manual" ? "ידני / מקובץ" : ENGINES.find((x) => x.id === e)?.title ?? e))}
+          {choose("שיטה", "engine", ["manual", ...opts.engine], (e) => (e === "manual" ? "ידני / מקובץ" : ENGINES.find((x) => x.id === e)?.title ?? e))}
           {choose("ודאות", "confidence", CONFIDENCE_ORDER.filter((c) => rows.some((r) => r.confidence === c)), (c) => CONFIDENCE_LABELS[c as Confidence])}
           {choose("בעיות", "problem", report ? ["error", "warning"] : [], (p) => (p === "error" ? "שגיאות" : "אזהרות ושגיאות"))}
           <label class="field">
@@ -175,7 +175,7 @@ function ProjectLinksPanel() {
   );
 }
 
-const SORT_LABEL: Record<SortKey, string> = { source: "ספר ושורת מקור", target: "ספר ושורת יעד", type: "סוג", status: "מצב", engine: "מנוע", confidence: "ודאות" };
+const SORT_LABEL: Record<SortKey, string> = { source: "ספר ושורת מקור", target: "ספר ושורת יעד", type: "סוג", status: "מצב", engine: "שיטה", confidence: "ודאות" };
 const ROW = 64;
 
 /** Only the rows in view are in the DOM: 100K links scroll like 100. */
@@ -228,7 +228,7 @@ function GroupActions({ sel, rows, clear }: { sel: ReadonlySet<string>; rows: re
             <datalist id="lt-titles">{[...store.booksByTitle.value.keys()].map((t) => <option key={t} value={t} />)}</datalist>
             <button class="btn text small" disabled={!title.trim()} onClick={() => store.fixes.retarget(ids, title)}>החלפת יעד</button>
           </span>
-          <button class="btn text small" disabled={busy} onClick={() => void store.fixes.fixRefs(ids)} title="ציון ספריא רק בצד של ספר ספריא; החסר נבנה משם המקום שבמסד">תיקון ref</button>
+          <button class="btn text small" disabled={busy} onClick={() => void store.fixes.fixRefs(ids)} title="ציון ספריא באנגלית רק בצד של ספר ספריא; החסר נבנה משם המקום שבמסד">{store.prefs.advanced.value ? "תיקון ref" : "תיקון ציון ספריא"}</button>
           <button class="btn text small" onClick={() => store.fixes.fixDirection(ids)} title='קישור מפירוש אל הספר שעליו נכתב: הסוג "מקור"'>תיקון כיוון</button>
           <button class="btn text small" onClick={() => store.fixes.removeDuplicates(ids)} title="קישורים שבמסד יהיו קישור אחד: נשאר אחד מכל קבוצה">הסרת כפולים</button>
           <button class="btn text small" onClick={() => store.fixes.fixRanges(ids)} title="סוף שאינו אחרי ההתחלה או אחרי סוף הספר, טווח בצד ספריא, וטווח שבולע את הקישור הבא">תיקון טווחים</button>

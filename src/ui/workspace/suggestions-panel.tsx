@@ -283,7 +283,7 @@ function TableView() {
         )}
       </div>
       <div class="row bulk">
-        <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהמנוע בטוח בהן לגמרי"}>
+        <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהכלי בטוח בהן לגמרי"}>
           <Icon name="oz_link_check" size={18} />
           אישור כל הוודאיות ({certain.toLocaleString("he")})
         </button>

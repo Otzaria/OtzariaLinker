@@ -33,8 +33,11 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
 
   const fieldSelect = (label: string, key: "sourceLine" | "sourceLineEnd" | "targetTitle" | "targetPath" | "targetLine" | "targetLineEnd" | "heRef2" | "start" | "end", required = false) => (
     <label class="field">
-      {label}
-      {required && <span class="req" aria-hidden="true"> *</span>}
+      {/* the label and its star in one grid row: a loose star took a row of its own and pushed the field down */}
+      <span>
+        {label}
+        {required && <span class="req" aria-hidden="true"> *</span>}
+      </span>
       <select aria-required={required} value={m[key] ?? NONE} onChange={(e) => set({ [key]: e.currentTarget.value || undefined } as Partial<RecordsMapping>)}>
         <option value={NONE}>{required ? "בחרו שדה…" : "— אין —"}</option>
         {table.fields.map((f) => (
@@ -62,8 +65,10 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
           </p>
           <div class="records-grid">
             <label class="field">
-              ספר המקור
-              <span class="req" aria-hidden="true"> *</span>
+              <span>
+                ספר המקור
+                <span class="req" aria-hidden="true"> *</span>
+              </span>
               <select
                 aria-required="true"
                 value={sourceValue}
