@@ -213,8 +213,9 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   const dl = page.waitForEvent("download");
   await page.keyboard.press("Enter");
   await dl;
+  // the focus moves to the notice when it renders, a frame or two after the download event (flaked in CI)
+  await expect.poll(async () => (await focused(page))?.name ?? "").toMatch(/ירד/);
   expect(await focused(page)).toMatchObject({ inDialog: true });
-  expect((await focused(page))?.name).toMatch(/ירד/);
 });
 
 test("dialogs and menus keep focus inside, close with Esc and give focus back", async ({ page }) => {
