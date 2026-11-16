@@ -28,20 +28,20 @@ function chapters(key: string, title: string, list: readonly (readonly [number, 
 const codes = (r: ReturnType<typeof runHeadingsEngine>, line: number) => r.unmatched.find((u) => u.line === line)?.reasons.map((x) => x.code) ?? [];
 
 describe("headings — a tie on a number alone is not a suggestion", () => {
-  it('מדרש תהילים (id 267, lines 360–363): "מזמור ל" is not verse ל of every chapter that has one', () => {
-    const midrash = book("c:mt", "מדרש תהילים", [
-      "<h1>מדרש תהילים</h1>",
-      "<h2>מזמור כט</h2>",
-      "מזמור לדוד הבו לה' בני אלים. זה שאמר הכתוב על ידי יחזקאל (יחזקאל לד כב) והושעתי לצאני ולא תהיינה עוד לבז.",
-      "<h2>מזמור ל</h2>",
-      "מזמור שיר חנוכת הבית לדוד. אמר רב חסדא לית מילתא פליגא שבית המקדש של מטה מכוון כנגד בית המקדש של מעלה.",
+  it('נועם אלימלך (id 400, lines 360–363): "וישלח › פירוש ב" is its own second piece on the parasha, not verse ב of every chapter', () => {
+    const noam = book("c:noam", "נועם אלימלך", [
+      "<h1>נועם אלימלך</h1>",
+      "<h2>ספר בראשית</h2>",
+      "<h3>וישלח</h3>",
+      "<h4>פירוש ב</h4>",
+      '<b>או יאמר</b> "ויהי לי שור וחמור" דהנה כתיב "ויאמר אלקים ישרצו המים שרץ נפש חיה ועוף יעופף על הארץ".',
+      `"ויירא יעקב כו' ויצר לו", דהנה הצדיק השלם העובד ה' בתמימות בכל לבו אין כל אומה ולשון יכולים לשלוט בו להרע לו ח"ו`,
     ]);
-    // תהילים יח (51 verses) and כב (32) both have a verse ל and a verse כט; פרק ל of the base is not in this cut
-    const r = runHeadingsEngine(midrash, chapters("b:ps", "תהילים", [[1, 6], [18, 51], [22, 32]]));
+    const r = runHeadingsEngine(noam, chapters("b:gen0", "בראשית", [[1, 31], [2, 25], [32, 33]]));
     expect(r.suggestions).toEqual([]);
-    expect(codes(r, 2)).toEqual(["heading/number-only"]);
     expect(codes(r, 4)).toEqual(["heading/number-only"]);
-    expect(r.unmatched.find((u) => u.line === 4)!.reasons[0]!.text).toContain("רק המספר ל של \"מזמור ל\" נמצא בספר הבסיס, ב־2 מקומות שאין ביניהם הבדל אחר (פרק יח, ל; פרק כב, ל)");
+    expect(codes(r, 5)).toEqual(["heading/number-only"]);
+    expect(r.unmatched.find((u) => u.line === 5)!.reasons[0]!.text).toContain('רק המספר ב של "ספר בראשית, וישלח, פירוש ב" נמצא בספר הבסיס, ב־3 מקומות שאין ביניהם הבדל אחר (פרק א, ב; פרק ב, ב; פרק לב, ב)');
     expect(r.notes.find((n) => n.code === "heading/number-only")?.text).toMatch(/^2 שורות/);
   });
 
@@ -77,10 +77,71 @@ describe("headings — a tie on a number alone is not a suggestion", () => {
     expect(codes(r, 3)).toEqual(["heading/number-only"]);
   });
 
-  it("one place is not a tie: the same lines against a base with one verse מג still get a suggestion (not changed here)", () => {
+  it("one place left is still a number alone: the same lines against a base with one verse מג are suggested, never above possible", () => {
+    // before: "high" (0.93) — מדרש תהילים "מזמור קלו" → תהילים קיט, קלו was 342 of 343 such highs wrong against the library
     const r = runHeadingsEngine(sifre("c:sifre1"), chapters("b:deut1", "דברים", [[1, 46], [2, 37]]));
     expect(r.suggestions.map((s) => s.source.line)).toEqual([2, 3]);
-    expect(r.notes.map((n) => n.code)).not.toContain("heading/number-only");
+    for (const s of r.suggestions) {
+      expect(s.confidence).toBe("possible");
+      expect(s.warnings.map((w) => w.code)).toContain("heading/number-only");
+      expect(s.rules).toContain("headings.number-only");
+    }
+  });
+
+  it('מלבי"ם על ויקרא (id 3396, lines 3508–3509): an order tiebreak among bare numbers is a number alone too', () => {
+    // the line before is placed for certain (a named section both books have); "בהר › סימן נה" (the Malbim's own
+    // running סימן) then tied verse נה of פרקים יג, יד, כה, and the book's order chose יג — "high" (0.9) before, wrong
+    const malbim = book("c:malbim", 'מלבי"ם על ויקרא', [
+      '<h1>מלבי"ם על ויקרא</h1>',
+      "<h2>הקדמה</h2>",
+      "דברי פתיחה לספר",
+      "<h2>בהר</h2>",
+      "<h3>סימן נה</h3>",
+      'עד מלאת לו שנה תמימה: מלת "לו" מוסב על שם "ואיש" הנזכר בראש הפרשה, שהוא המוכר, או על שם "ממכרו" שנזכר בסמוך ר"ל להמכר.',
+    ]);
+    const lev = chapters("b:lev", "ויקרא", [[13, 59], [14, 57], [25, 55]]);
+    const r = runHeadingsEngine(malbim, book("b:lev", "ויקרא", [lev.lines[0]!.text, "<h2>הקדמה</h2>", "פתיחה", ...lev.lines.slice(1).map((l) => l.text)]));
+    expect(r.suggestions.find((s) => s.source.line === 2)!.confidence).toBe("certain");
+    const s = r.suggestions.find((x) => x.source.line === 5)!;
+    expect(s.rules).toContain("headings.order-tiebreak");
+    expect(s.confidence).toBe("possible");
+    expect(s.warnings.map((w) => w.code)).toContain("heading/number-only");
+  });
+
+  it('מדרש תהילים (id 267, lines 362–363): "מזמור ל" is פרק ל of תהילים, the whole chapter', () => {
+    const midrash = book("c:mt2", "מדרש תהילים", [
+      "<h1>מדרש תהילים</h1>",
+      "<h2>מזמור ל</h2>",
+      "מזמור שיר חנוכת הבית לדוד. אמר רב חסדא לית מילתא פליגא שבית המקדש של מטה מכוון כנגד בית המקדש של מעלה.",
+    ]);
+    // פרק ל has 13 verses; פרק לד has a verse ל — before, "מזמור ל" could only reach that bare "(ל)"
+    const base = chapters("b:ps2", "תהילים", [[22, 32], [30, 13], [34, 23]]);
+    const s = runHeadingsEngine(midrash, base).suggestions[0]!;
+    const start = base.lines.findIndex((l) => l.text === "<h2>פרק ל</h2>") + 1;
+    expect(s.target).toMatchObject({ line: start, end: start + 12 });
+    expect(s.confidence).toBe("high");
+    expect(s.reasons.map((x) => x.text)).toContain('"מזמור ל" הוא "פרק ל" בספר הבסיס (מזמור ופרק הם אותה יחידה)');
+  });
+
+  it('באר הגולה על אבן העזר (id 3847, line 363): "סימן יב" goes to סימן יב, not to the "(יב)" lines of the appended סדר הגט', () => {
+    const base = book("b:eh", "שולחן ערוך, אבן העזר", [
+      "<h1>שולחן ערוך, אבן העזר</h1>",
+      "<h2>סימן יא</h2>",
+      "(א) סעיף",
+      "<h2>סימן יב</h2>",
+      "(א) סעיף א",
+      "(ב) סעיף ב",
+      "<h2>סדר הגט</h2>",
+      ...Array.from({ length: 12 }, (_, i) => `(${toGematria(i + 1)}) סדר הגט ${i + 1}`),
+      "<h2>סדר חליצה</h2>",
+      ...Array.from({ length: 12 }, (_, i) => `(${toGematria(i + 1)}) סדר חליצה ${i + 1}`),
+    ]);
+    const beer = book("c:beer", "באר הגולה על שולחן ערוך אבן העזר", ["<h1>באר הגולה</h1>", "<h2>סימן יב</h2>", "(ז) שם במשנה"]);
+    const s = runHeadingsEngine(beer, base).suggestions[0]!;
+    // before: "ambiguous", best = סדר הגט (יב) at 0.93 over the range of סימן יב at 0.92
+    expect(s.target).toMatchObject({ line: 4, end: 5 });
+    expect(s.confidence).toBe("possible");
+    expect(s.rules).toContain("headings.bare-number-rival");
   });
 
   it("a tie that also matches a chapter stays a choice for the reviewer (ambiguous), not number-only", () => {

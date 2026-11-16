@@ -226,8 +226,17 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     }
     // ambiguity, and a tie broken by the order of the book
     const margin = opts.thresholds.ambiguityMargin;
-    const tied = cands.filter((c) => best0.score - c.score < margin);
-    let chosen = best0;
+    const close = cands.filter((c) => best0.score - c.score < margin);
+    /*
+     * In a tie, a place reached by a bare number alone (see numberOnly) yields to one the line reaches by
+     * more — its kind word, a name, a second number: באר הגולה "סימן יב" tied its own סימן יב (a range, so
+     * 0.08 lower) with the "(יב)" lines of the appended "סדר הגט" and "סדר חליצה". Decided by this rule,
+     * not by the text: never above "possible".
+     */
+    const real = close.filter((c) => !numberOnly(c));
+    const tied = real.length && real.length < close.length ? real : close;
+    const outranked = tied === real && real.length === 1;
+    let chosen = tied[0]!;
     let runnerUp: number | null = tied.length > 1 ? tied[1]!.score : null;
     let orderTie = false;
     if (tied.length > 1 && prevStart !== null) {
@@ -264,7 +273,13 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
      */
     const last = P[P.length - 1];
     const unplacedName = P.length > 1 && last!.kind === "name" && chosen.alignment.events.some((e) => e.code === "skip-commentary" && e.c === last);
-    if (suspect || outsideSection || unplacedName) score = Math.min(score, belowHigh);
+    /*
+     * The same reading with ONE place left — the only chapter long enough ("מזמור קלו" → תהילים קיט, קלו),
+     * or the first of the tied places after the previous link (an order tiebreak, מלבי"ם "סימן נה") — is
+     * still a number alone: never above "possible", and never the anchor of the next order tiebreak.
+     */
+    const loneNumber = numberOnly(chosen);
+    if (suspect || outsideSection || unplacedName || loneNumber || outranked) score = Math.min(score, belowHigh);
     // the line's own quote, when it marks one, must not sit in the neighbouring stretch instead (./quote.ts)
     let quoteAt: number | null = null;
     if (score >= opts.thresholds.high) {
@@ -293,6 +308,14 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     if (quoteAt !== null) {
       warnings.push({ code: "heading/quote-elsewhere", text: `הדיבור המתחיל של השורה לא נמצא במקום הזה, אבל נמצא סמוך אליו בספר הבסיס (שורה ${base.lines[quoteAt]!.index + 1}); ייתכן שגבולות הקטעים בשני הספרים שונים, ולכן הביטחון הוגבל ל"אפשרית"` });
       rules.push("headings.quote-elsewhere");
+    }
+    if (outranked) {
+      warnings.push({ code: "heading/bare-number-rival", text: `${close.length - 1} מקומות נוספים התאימו רק לפי המספר, בלי סוג היחידה (שורות "(N)" בספר הבסיס); נבחר המקום שמתאים גם בסוג, והביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.bare-number-rival");
+    }
+    if (loneNumber) {
+      warnings.push({ code: "heading/number-only", text: `המקום נקבע רק לפי המספר ${toGematria(matchedOf(chosen.alignment)[0]!.c!.n!)} של "${describe(P)}", בלי שום חלק אחר של המיקום (מספור של הפירוש עצמו נראה כך), ולכן הביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.number-only");
     }
     if (orderTie) {
       warnings.push({ code: "heading/order-tiebreak", text: `נמצאו ${tied.length} מקומות מתאימים בספר הבסיס; נבחר הראשון שאחרי הקישור הקודם, לפי סדר הספר` });
@@ -577,6 +600,7 @@ function eventReason(ev: AlignEvent): { code: string; text: string; warning?: bo
   const b = ev.b;
   switch (ev.code) {
     case "same-number":
+      if (c!.kind !== b!.kind) return { code: "heading/same-number", text: `"${c!.label}" הוא "${b!.label}" בספר הבסיס (${kindWord(c!.kind)} ו${kindWord(b!.kind)} הם אותה יחידה)` };
       return { code: "heading/same-number", text: `מספר ${kindThe(c!.kind)} תואם (${toGematria(c!.n!)})` };
     case "inline-number": {
       const g = toGematria(c!.n!);
