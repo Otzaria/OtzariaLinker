@@ -1,9 +1,10 @@
 import type { BookRef } from "../../../core/links/model";
 import { amudOnlyAt, CHAPTER_ORDINALS, closesAt, opensAt, parseAddress, type AddrElem, type Address, type Kind } from "./address";
-import { collectionOf, COMMON_TITLES, normTitle, SA_PARTS, saSpelling, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
+import { collectionOf, COMMON_TITLES, normTitle, rambamNameKey, SA_PARTS, saSpelling, TIER_RANK, type AliasIndex, type AliasMatch, type AliasTarget, type Collection } from "./aliases";
 import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from "./named";
 import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
+import { CHAPTER_OPENINGS } from "./knowledge";
 import { StructureTracker, type InternalRef } from "./self";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
@@ -238,7 +239,7 @@ export class CitationScanner {
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
-      const next = this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line)) : null);
+      const next = this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.otherChapter(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line)) : null);
       if (next !== null) i = next - 1;
     }
   }
@@ -438,12 +439,15 @@ export class CitationScanner {
    * chapter. The chapter is required: "הרמב"ם שבת" is no place.
    */
   private rambamNamed(toks: readonly Tok[], i: number, line: number): number | null {
-    if (wordIn(toks[i], QUALIFIERS) !== "rambam" || !this.aliases.rambamTopics.length) return null;
+    // …or a word for "הלכות" and the topic as books write it, then the chapter: "ובהל' מעשה"ק (פ"ב הי"ב)", "בה' ק"פ
+    // (פ"ד ה"ד)" (a topic written in full is a name of the book: forward() reads it)
+    const hilchotFirst = toks[i]?.kind === "word" && HILCHOT.has(wordShape(toks[i]!).replace(/^ו?ב/, ""));
+    if ((!hilchotFirst && wordIn(toks[i], QUALIFIERS) !== "rambam") || !this.aliases.rambamTopics.length) return null;
     let k = i + 1;
-    const open = opensAt(toks, k);
+    const open = !hilchotFirst && opensAt(toks, k);
     if (open) k++;
     const w = toks[k];
-    const hl = w?.kind === "word" && HILCHOT.has(wordShape(w).replace(/^ו?ב/, ""));
+    const hl = !hilchotFirst && w?.kind === "word" && HILCHOT.has(wordShape(w).replace(/^ו?ב/, ""));
     if (hl) k++;
     // "הרמב"ם ס"ל פ"א": an abbreviation of running text is no topic
     if (toks[k]?.kind === "word" && COMMON_ABBREVIATIONS.has(wordShape(toks[k]!))) return null;
@@ -460,7 +464,7 @@ export class CitationScanner {
     const cands = this.own([topic.target]);
     if (!cands.length) return this.drop("self");
     const to = addr.bracketed && addr.closed ? addr.to + 1 : addr.to;
-    return this.emit(toks, line, { from: i, to, candidates: cands, name: topic.target.book.title, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: false, rule: `rambam-named-${topic.how}` });
+    return this.emit(toks, line, { from: i, to, candidates: cands, name: topic.target.book.title, elems: addr.elems, evidence: addr.evidence, bracketed: addr.closed, ibid: "none", form: "forward", numericName: false, rule: `rambam-${hilchotFirst ? "hilchot" : "named"}-${topic.how}` });
   }
 
   /**
@@ -581,7 +585,16 @@ export class CitationScanner {
         }
       }
     }
-    if (!m?.entry.targets.some((t) => t.collection === "rambam")) {
+    // "פ"א מהל' עבודת כוכבים": a name books write for a topic (knowledge.ts) beats a derived name that only shares its
+    // first word ("הל' עבודת" — עבודת יום הכפורים)
+    if (m?.entry.targets.some((t) => t.collection === "rambam")) {
+      const known = rambamTopicAt(this.aliases, toks, j);
+      if (known?.how === "known" && known.to >= m.to && !m.entry.targets.some((t) => t.book.key === known.target.book.key)) {
+        topic = known;
+        m = undefined;
+      }
+    }
+    if (!topic && !m?.entry.targets.some((t) => t.collection === "rambam")) {
       topic = rambamTopicAt(this.aliases, toks, j);
       if (topic && !topic.hilchot && !rambamBefore) topic = null;
       // "הרמב"ם בפ"ו מאבות" (שמונה פרקים, on the tractate): a topic read loosely loses to a tractate's name
@@ -738,6 +751,118 @@ export class CitationScanner {
       ...(found.initials && { initials: true }),
     };
     return this.emitUnit(toks, line, from, end, candidates, unit, addr, u.kind === "chapter", bare ? "named-bare" : undefined);
+  }
+
+  /**
+   * A chapter of the Yerushalmi or the Mishnah by its name: "בירושלמי דסוכה פ' החליל", "ירושלמי שבת פ' המצניע",
+   * "בבבא קמא ירושלמי בפרק החובל", "ירושלמי סנהדרין (סוף פרק נגמר הדין)", "[בפ' גדיש]" in a commentary on the
+   * Yerushalmi of פאה. The database names only the Bavli's chapters, and their numbering differs from the Mishnah's
+   * and the Yerushalmi's in places — so the names are each book's own: the opening words of its chapters
+   * (knowledge.ts). The collection must be said (a word for it up to three words before, or the citing book's base),
+   * and the tractate (named up to six words before, glued after the name, or the base). The cited words must open
+   * one chapter only — one word, of four letters or more, or more words. The whole chapter is a coarse target
+   * ("possible", like a unit by name); a halacha / mishna after it is precise.
+   */
+  /** the Yerushalmi / Mishnah tractate this book comments on ("פני משה על תלמוד ירושלמי כתובות"), or null */
+  private otherBaseCache: AliasTarget | null | undefined;
+  private get otherBase(): AliasTarget | null {
+    if (this.otherBaseCache === undefined) {
+      const on = / על (.+)$/.exec(normTitle(this.sourceTitle))?.[1];
+      this.otherBaseCache = (on && this.aliases.lookup(on)?.targets.find((x) => x.tier === "title" && (x.collection === "yerushalmi" || x.collection === "mishna"))) || null;
+    }
+    return this.otherBaseCache;
+  }
+
+  private otherChapter(toks: readonly Tok[], i: number, line: number): number | null {
+    const head = unitWordAt(toks, i);
+    if (!head || !head.kinds.includes("chapter")) return null;
+    const prev = toks[i - 1];
+    const from = prev?.kind === "word" && !prev.gershayim && !prev.geresh && POSITION_BEFORE.test(prev.text) ? i - 1 : i;
+    let coll: Collection | null = null;
+    let bookAt = -1;
+    for (let back = 1; back <= 3 && !coll; back++) {
+      const q = wordIn(before(toks, from, back), QUALIFIERS);
+      if (q) coll = q;
+    }
+    const base = this.otherBase;
+    const baseColl = base?.collection ?? null;
+    if (coll === null && baseColl) coll = baseColl;
+    if (coll !== "yerushalmi" && coll !== "mishna") return null;
+    // the tractate: named a few words before, or glued after the chapter's name, or the citing book's base
+    let tractate: string | null = null;
+    for (let j = from - 1; j >= Math.max(0, from - 6) && !tractate; j--) {
+      for (const m of this.aliases.matchAt(toks, j)) {
+        const t = m.entry.targets.find((x) => TALMUDIC_COLLECTIONS.has(x.collection));
+        const tr = t ? tractateOfTitle(t.book.title, t.collection) : null;
+        if (tr) {
+          tractate = tr;
+          bookAt = j;
+          break;
+        }
+      }
+    }
+    // the words cited: up to four, to the first one that is not a plain word
+    const words: Tok[] = [];
+    for (let k = head.next; k < toks.length && words.length < 4; k++) {
+      const w = toks[k]!;
+      if (w.kind !== "word" || w.gershayim || w.geresh) break;
+      words.push(w);
+    }
+    if (!words.length) return null;
+    const pick = (title: string): { n: number; chapter: number } | null => {
+      const openings = CHAPTER_OPENINGS[title];
+      if (!openings) return null;
+      let best: { n: number; chapter: number } | null = null;
+      let tie = false;
+      openings.forEach((o, c) => {
+        const ws = o.split(" ").map((w) => looseWord(unifyFinals(w)));
+        let n = 0;
+        while (n < words.length && n < ws.length && looseWord(words[n]!.key) === ws[n]) n++;
+        if (n === 0 || (n === 1 && words[0]!.key.length < 4)) return;
+        if (best && n === best.n) tie = true;
+        else if (!best || n > best.n) {
+          best = { n, chapter: c + 1 };
+          tie = false;
+        }
+      });
+      return tie ? null : best;
+    };
+    const after = (k: number) => this.aliases.matchAt(toks, k).find((m) => m.prefix !== "" && /[דב]$/.test(m.prefix) && !m.prefix.startsWith("ו"));
+    let target: AliasTarget | undefined;
+    let found: { n: number; chapter: number } | null = null;
+    const tryTractate = (tr: string | null) => {
+      const t = tr ? this.aliases.tractates.get(tr)?.get(coll!) : undefined;
+      const f = t ? pick(t.book.title) : null;
+      if (t && f) {
+        target = t;
+        found = f;
+      }
+    };
+    tryTractate(tractate);
+    if (!target) {
+      // "פ' החליל דסוכה": the tractate glued after the name (the longest name that opens a chapter of it)
+      for (let n = Math.min(words.length, 4); n >= 1 && !target; n--) {
+        const m = after(head.next + n);
+        const t = m?.entry.targets.find((x) => TALMUDIC_COLLECTIONS.has(x.collection));
+        const tr = t ? tractateOfTitle(t.book.title, t.collection) : null;
+        if (tr) {
+          tryTractate(tr);
+          if (target) bookAt = head.next + n;
+        }
+      }
+    }
+    if (!target && baseColl === coll && base) tryTractate(tractateOfTitle(base.book.title, base.collection));
+    if (!target || !found) return tractate ? this.drop("unit-not-in-book") : null;
+    const f = found as { n: number; chapter: number };
+    let k = head.next + f.n;
+    if (bookAt > k) k = this.aliases.matchAt(toks, bookAt).find((m) => m.prefix !== "")?.to ?? k;
+    const rest = parseAddress(toks, k, { after: "perek" });
+    const deeper = rest && rest.elems.every((e) => e.kind === "halacha" || e.kind === "mishna" || e.kind === "?") ? rest.elems : [];
+    const cands = this.own([{ ...target, tier: "derived" }]);
+    if (!cands.length) return this.drop("self");
+    const elems: AddrElem[] = [{ kind: "perek", n: f.chapter, explicit: true, numeral: { n: f.chapter, form: "gershayim", common: false } }, ...deeper];
+    const to = deeper.length ? rest!.to : k;
+    return this.emit(toks, line, { from, to, candidates: cands, name: words.slice(0, f.n).map((w) => w.text).join(" "), elems, evidence: "strong", bracketed: false, ibid: "none", form: "reversed", numericName: false, commentators: false, rule: "chapter-name-other" });
   }
 
   /**
@@ -1798,7 +1923,8 @@ interface RambamTopic {
   readonly hilchot: boolean;
   /** all the topic's words, its first word alone, or its initials ("מא"ב" — איסורי ביאה) */
   /** "abbrev": the starts of words anywhere in it ("יו"ט"); "word": a later word of it ("לולב") */
-  readonly how: "full" | "first" | "initials" | "abbrev" | "word";
+  /** "known": a name books write for it, from the knowledge data ("מעשר" — מעשרות, "שביעית", "איסורי מזבח") */
+  readonly how: "full" | "first" | "initials" | "abbrev" | "word" | "known";
 }
 
 /**
@@ -1829,7 +1955,30 @@ function rambamTopicAt(aliases: AliasIndex, toks: readonly Tok[], j: number): Ra
 function topicAt(aliases: AliasIndex, toks: readonly Tok[], k: number, strip: number): Omit<RambamTopic, "hilchot"> | null {
   const t = toks[k];
   if (!t || t.kind !== "word" || t.key.length - strip < 2) return null;
+  // a name books write for the topic (knowledge.ts), the longest first; one word of it only after the titles' own
+  // words of two or more ("מעשר שני" is the title's, before "מעשר" — מעשרות)
+  const known = (min: number): Omit<RambamTopic, "hilchot"> | null => {
+    if (!aliases.rambamNames.size) return null;
+    for (let n = 3; n >= min; n--) {
+      const words: string[] = [];
+      for (let q = 0; q < n; q++) {
+        const x = toks[k + q];
+        if (!x || x.kind !== "word") break;
+        words.push(q ? wordShape(x) : shapeOf(x, strip));
+      }
+      const hit = words.length === n ? aliases.rambamNames.get(rambamNameKey(words.join(" "))) : undefined;
+      if (hit) return { target: hit, to: k + n, how: "known" };
+    }
+    return null;
+  };
+  const long = known(2);
+  if (long) return long;
   const topics = aliases.rambamTopicWords;
+  if (t.gershayim || t.geresh) {
+    // an abbreviation books write for a topic ("קדה"ח", "פסוהמ"ק", "סנהד'"): the knowledge first
+    const one = known(1);
+    if (one) return one;
+  }
   if (t.gershayim) {
     const letters = t.key.slice(strip);
     const hit = topics.filter((x) => x.words.length >= letters.length && [...letters].every((ch, n) => x.words[n]![0] === ch));
@@ -1846,23 +1995,47 @@ function topicAt(aliases: AliasIndex, toks: readonly Tok[], k: number, strip: nu
     if (!x || x.kind !== "word" || x.gershayim || x.geresh) return null;
     return looseWord(n ? x.key : x.key.slice(strip));
   };
+  // a word of the topic, the article ה written or not ("טומאת המת" — טומאת מת, "איסורי מזבח" — איסורי המזבח)
+  const article = (w: string) => (w.length > 3 && w.startsWith("ה") ? w.slice(1) : w);
+  const same = (n: number, w: string): boolean => {
+    const written = key(n);
+    return written !== null && (written === looseWord(w) || looseWord(article(written)) === looseWord(article(w)));
+  };
   let best: (typeof topics)[number] | null = null;
   let tie = false;
   for (const x of topics) {
-    if (!x.words.every((w, n) => key(n) === looseWord(w))) continue;
+    if (!x.words.every((w, n) => same(n, w))) continue;
     if (best && best.words.length === x.words.length) tie = true;
     else if (!best || x.words.length > best.words.length) {
       best = x;
       tie = false;
     }
   }
+  if (best && !tie && best.words.length > 1) return { target: best.target, to: k + best.words.length, how: "full" };
+  // "כלי מקדש", "מעשר שני", "עבודת יום": the leading words (two or more) of one topic only
+  let lead: (typeof topics)[number] | null = null;
+  let leadN = 0;
+  let leadTie = false;
+  for (const x of topics) {
+    let n = 0;
+    while (n < x.words.length && same(n, x.words[n]!)) n++;
+    if (n < 2) continue;
+    if (n > leadN) {
+      lead = x;
+      leadN = n;
+      leadTie = false;
+    } else if (n === leadN) leadTie = true;
+  }
+  if (lead && !leadTie) return { target: lead.target, to: k + leadN, how: "first" };
+  const one = known(1);
+  if (one) return one;
   if (best && !tie) return { target: best.target, to: k + best.words.length, how: "full" };
   const first = key(0);
   if (!first || first.length < 3) return null;
   const raw = t.key.slice(strip);
-  const same = topics.filter((x) => looseWord(x.words[0]!) === first);
-  if (same.length === 1 && !topics.some((x) => x !== same[0] && x.words[0]!.startsWith(raw) && x.words[0] !== raw)) return { target: same[0]!.target, to: k + 1, how: "first" };
-  if (same.length) return null;
+  const sameFirst = topics.filter((x) => looseWord(x.words[0]!) === first);
+  if (sameFirst.length === 1 && !topics.some((x) => x !== sameFirst[0] && x.words[0]!.startsWith(raw) && x.words[0] !== raw)) return { target: sameFirst[0]!.target, to: k + 1, how: "first" };
+  if (sameFirst.length) return null;
   // "מהל' לולב" (שופר וסוכה ולולב), "מה' סוכה": a later word of one topic only, past its ו
   if (raw.length < 4) return null;
   const later = topics.filter((x) => x.words.slice(1).some((w) => looseWord(w.replace(/^ו(?=.{3})/, "")) === first));

@@ -628,8 +628,11 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.form === "reversed") s -= PENALTY.reversed;
   if (c.form === "relative") s -= PENALTY.relative;
   if (c.internal) s -= PENALTY.internal;
-  if (c.rule && /^rambam-(?:topic|named)-(?:initials|abbrev|word)$/.test(c.rule)) s -= PENALTY.rambamInitials;
+  if (c.rule && /^rambam-(?:topic|named|hilchot)-(?:initials|abbrev|word)$/.test(c.rule)) s -= PENALTY.rambamInitials;
   if (c.rule === "base-daf") s -= PENALTY.baseDaf;
+  // "בירושלמי דסוכה פ' החליל": a chapter of the Yerushalmi / the Mishnah by its opening words — the whole chapter is
+  // coarse, like a unit by name ("possible"); with a halacha after it, the name only confirms the place
+  if (c.rule === "chapter-name-other") s -= c.elems.length > 1 ? PENALTY.named : PENALTY.unitRange;
   if (c.rule === "implicit-context") s -= PENALTY.implicitContext;
   if (c.rule === "implicit-previous-far") s -= PENALTY.implicitFar;
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
@@ -680,10 +683,19 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "rambam-named-initials": "\"רמב\"ם\" ושם ההלכות בראשי תיבות לפני הפרק",
   "rambam-named-abbrev": "\"רמב\"ם\" ושם ההלכות בקיצור לפני הפרק",
   "rambam-named-word": "\"רמב\"ם\" ומילה משם ההלכות לפני הפרק",
+  "rambam-hilchot-full": "\"הלכות\" ושם ההלכות לפני הפרק",
+  "rambam-hilchot-first": "\"הלכות\" והמילים הראשונות של שם ההלכות לפני הפרק",
+  "rambam-hilchot-initials": "\"הלכות\" ושם ההלכות בראשי תיבות לפני הפרק",
+  "rambam-hilchot-abbrev": "\"הלכות\" ושם ההלכות בקיצור לפני הפרק",
+  "rambam-hilchot-word": "\"הלכות\" ומילה משם ההלכות לפני הפרק",
+  "rambam-hilchot-known": "\"הלכות\" ושם ההלכות כפי שספרים כותבים אותו, מרשימת השמות שנבדקה מול הקישורים שבמסד",
+  "rambam-topic-known": "שם ההלכות נכתב כפי שספרים כותבים אותו (\"מעשר\", \"שביעית\", \"איסורי מזבח\"), מרשימת השמות שנבדקה מול הקישורים שבמסד",
+  "rambam-named-known": "\"רמב\"ם\" ושם ההלכות כפי שספרים כותבים אותו, מרשימת השמות שנבדקה מול הקישורים שבמסד",
   "named-level": "אחרי שם הספר נכתב שם של פרשה, שהיא רמה בציוני המקום של הספר (או חלק במבנה הדפים שלו), ואחריה המקום",
   "author-part": "שם שהמסד נותן לכמה חיבורים של מחבר אחד, וחלק השולחן ערוך שאחריו בוחר אחד מהם",
   "part-book": "\"ח\"א\", \"ח\"ב\" אחרי שם החיבור: הכרך, שהוא ספר נפרד בספרייה",
   "base-daf": "נכתב דף בלי שם מסכת, והספר הוא חיבור על המסכת הזאת, ולכן הדף נקרא בה",
+  "chapter-name-other": "פרק של הירושלמי או של המשנה לפי שמו — המילים הראשונות של הפרק בספר עצמו (במסד יש שמות פרקים רק לבבלי)",
   "dibur-context": "שם המפרש ו\"ד\"ה\" בלי שם מסכת: הדף נלקח מההפניה שלפניו (או מהמסכת שהחיבור נכתב עליה), והקישור הוא לפירוש על הדף הזה",
   "dibur-here": "שם המפרש ו\"ד\"ה\" בלי דף ובלי הפניה לפניו: הדף הוא זה שהשורה המצטטת עומדת עליו (לפי ציוני המקום שלה), במסכת שהחיבור נכתב עליה",
   "commentator-ibid": "שם של מפרש ו\"שם\": דבריו על המקום של ההפניה הקודמת (או על הדף שנכתב אחרי \"שם\"), בפירוש שלו על המסכת או על ספר התנ\"ך שנזכר בה",

@@ -1,5 +1,6 @@
 import { pushTo } from "../../../core/collections";
 import type { BookRef } from "../../../core/links/model";
+import { RAMBAM_TOPIC_NAMES } from "./knowledge";
 import { strictValue } from "./numbers";
 import { citationTokens, unifyFinals, type Tok } from "./text";
 
@@ -212,6 +213,11 @@ export class AliasIndex {
     this.rambamWordsCache ??= this.rambamTopics.map((x) => ({ words: (nameWords(x.topic) ?? []).map((w) => w.key), target: x.target }));
     return this.rambamWordsCache;
   }
+  /**
+   * How books write a topic where its title does not say it (knowledge.ts, mined from the database's citations and
+   * verified there): the written words (quote marks as written, final forms unified) → the topic's book.
+   */
+  readonly rambamNames = new Map<string, AliasTarget>();
   /** "יבמו'" → "יבמות": truncated one-word names of the Bavli and Tanakh (only written with a geresh) */
   private readonly truncated = new Map<string, AliasEntry | null>();
   /**
@@ -250,6 +256,7 @@ export class AliasIndex {
       if (topic) ix.rambamTopics.push({ topic, target: { book: c.book, tier: "derived", collection: coll } });
       // the old name of a topic, as printed editions wrote it ("פ"י מהל' ע"ג" — עבודת גלולים)
       if (topic && Object.hasOwn(OLD_TOPICS, topic)) for (const old of OLD_TOPICS[topic]!) ix.rambamTopics.push({ topic: old, target: { book: c.book, tier: "derived", collection: coll } });
+      if (topic) for (const n of RAMBAM_TOPIC_NAMES) if (n.topic === topic) ix.rambamNames.set(rambamNameKey(n.written), { book: c.book, tier: "derived", collection: coll });
       for (const d of derivedNames(title, coll, byTitle)) ix.add(d.name, { book: c.book, tier: d.secondary ? "secondary" : "derived", collection: coll, ...(d.section && { section: d.section }) });
       for (const a of c.aliases ?? []) {
         const name = normTitle(a);
@@ -720,4 +727,9 @@ function derivedNames(title: string, coll: Collection, byTitle: ReadonlyMap<stri
   if (part) out.push({ name: `${part[1]} ח"${part[2]}` });
   // "מדרש תנחומא" is cited "תנחומא" (only when the word names nothing else: added after all names, build())
   return out;
+}
+
+/** a written Rambam topic as a key of AliasIndex.rambamNames: its words with their quote marks, final forms unified */
+export function rambamNameKey(written: string): string {
+  return unifyFinals(written.replace(/[״]/g, '"').replace(/[׳]/g, "'").trim().split(/\s+/).join(" "));
 }
