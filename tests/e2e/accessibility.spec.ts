@@ -295,6 +295,9 @@ test("every control has a name, and text has AA contrast, on each main screen", 
   const wizard = page.getByRole("dialog", { name: /איך לקרוא את המסד/ });
   await expect(wizard).toBeVisible({ timeout: 15_000 });
   await wizard.getByRole("button", { name: "שינוי המיפוי" }).click();
+  await wizard.locator(".map-why summary").click(); // the reasons and the verdict badges
+  await wizard.getByRole("button", { name: "בדיקת המיפוי" }).click();
+  await expect(wizard.getByRole("status", { name: "תוצאת בדיקת המיפוי" })).toBeVisible();
   await screenOk(page, "mapping wizard");
 });
 

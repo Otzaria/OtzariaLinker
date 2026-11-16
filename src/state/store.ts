@@ -2,7 +2,7 @@ import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
 import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
-import { describeMapping, mappingProblems, type DbMapping, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
+import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
@@ -687,6 +687,20 @@ export class AppStore {
     }
     this.toWorkspace();
     return true;
+  }
+
+  /**
+   * The wizard's "בדיקת המיפוי": the first lines of the first books, read through a mapping that is
+   * not confirmed yet. Bounded (the worker reads the start of each table only), so no task bar; an
+   * error comes back as text for the wizard to show next to the button.
+   */
+  async testMapping(p: PendingDb, mapping: DbMapping): Promise<MappingTest | { error: string }> {
+    if (!this.service.testMapping) return { error: "בדיקת מיפוי אינה זמינה כאן." };
+    try {
+      return await this.service.testMapping(p.token, mapping);
+    } catch (err) {
+      return { error: (err as { message?: string }).message ?? String(err) };
+    }
   }
 
   dismissMapping(token: string): void {

@@ -1,6 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
-import type { DbMapping, PendingDb } from "../core/db-mapping";
+import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
@@ -42,6 +42,8 @@ export interface CallOptions {
 export interface BooksService {
   open(files: InputFile[], opts?: CallOptions): Promise<OpenResult>;
   openMapped(token: string, mapping: DbMapping, opts?: CallOptions): Promise<OpenedSource>;
+  /** the wizard's "test the mapping": first lines of the first books (optional for test fakes) */
+  testMapping?(token: string, mapping: DbMapping, opts?: CallOptions): Promise<MappingTest>;
   lines(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<SourceLine[]>;
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
