@@ -41,4 +41,6 @@ export interface SourcesApi {
   dbLinksPage(bookKey: string, query: DbLinkQuery): DbLinkPage;
   /** runs a max-link plan's steps (progress over all steps; one pair in memory at a time) */
   runMaxLink(steps: PlanStep[], options: MaxLinkJobOptions): MaxLinkJobResult;
+  /** the fingerprints of books' text, by key (an unreadable book is left out); progress counts books */
+  fingerprints(bookKeys: string[]): Record<string, string>;
 }

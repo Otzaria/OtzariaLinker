@@ -34,6 +34,11 @@ export interface MaxLinkJobResult {
    * Absent when every book was read.
    */
   dbLinksUnread?: { key: string; why: string }[];
+  /**
+   * The fingerprint (core/text/fingerprint.ts) of every book the steps depend on — the books linked and
+   * their bases — by key. The batch job keeps them to skip unchanged books in a later run (V5 P1-8).
+   */
+  fingerprints?: Record<string, string>;
 }
 
 export interface StepOutcome {

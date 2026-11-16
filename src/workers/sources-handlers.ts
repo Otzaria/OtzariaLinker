@@ -1,7 +1,7 @@
 import type { SourceRegistry } from "../sources/registry";
 import { citationsJob } from "./citations-job";
 import { batchJob, diffJob, engineJob } from "./engine-job";
-import { maxlinkJob } from "./maxlink-job";
+import { fingerprintsJob, maxlinkJob } from "./maxlink-job";
 import type { CallContext, Handlers } from "./rpc";
 import { searchJob } from "./search-job";
 import { selfCheck } from "./self-check";
@@ -33,6 +33,7 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     dbLinkSummary: (ctx, bookKey) => registry.dbLinkSummary(bookKey, jobCtx(ctx)),
     dbLinksPage: (ctx, bookKey, query) => registry.dbLinksPage(bookKey, query, { signal: ctx.signal }),
     runMaxLink: (ctx, steps, options) => maxlinkJob(registry, steps, options, jobCtx(ctx)),
+    fingerprints: (ctx, keys) => fingerprintsJob(registry, keys, jobCtx(ctx)),
   };
 }
 

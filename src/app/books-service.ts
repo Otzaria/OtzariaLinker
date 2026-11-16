@@ -24,5 +24,6 @@ export function booksService(call: SourcesCall): BooksService {
     dbLinkSummary: (key, opts) => call("dbLinkSummary", [key], opts),
     dbLinksPage: (key, query, opts) => call("dbLinksPage", [key, query], opts),
     runMaxLink: (steps, options, opts) => call("runMaxLink", [steps, options], opts),
+    fingerprints: (keys, opts) => call("fingerprints", [keys], opts),
   };
 }

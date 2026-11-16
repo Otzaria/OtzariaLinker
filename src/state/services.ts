@@ -66,6 +66,8 @@ export interface BooksService {
    * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
    */
   runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>>; sefariaOwned?: readonly string[] }, opts?: CallOptions): Promise<MaxLinkJobResult>;
+  /** The fingerprints of books' text (core/text/fingerprint.ts), by key: the batch job skips unchanged books by them. Optional like runMaxLink. */
+  fingerprints?(bookKeys: string[], opts?: CallOptions): Promise<Record<string, string>>;
 }
 
 /** One pair of a batch run (mirrors workers/engine-job BatchItem). */
