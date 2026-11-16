@@ -1,6 +1,6 @@
 import { runToEnd, type EngineSteps } from "../steps";
 import type { LinkSide } from "../../../core/links/model";
-import { sefariaOwnedOf, withoutRange, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
+import { firstRefIn, refBlockOf, sefariaOwnedOf, withoutRange, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
 import { toGematria } from "../../../core/text/gematria";
 import {
   capSpanned,
@@ -109,7 +109,13 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
    * would drift, and a submission refuses it (validate.ts sefaria/range-side; product audit F1).
    */
   const baseRanges = !sefariaOwnedOf(options.sefariaOwned)(base.book);
-  const sideAt = (start: number, end: number) => sideOf(base, start, baseRanges ? end : start);
+  /** on a Sefaria base, which lines a record can be written to (withoutRange: the first such line of a section) */
+  const block = baseRanges ? undefined : refBlockOf(base.lines);
+  const sideAt = (start: number, end: number): LinkSide => {
+    if (baseRanges) return sideOf(base, start, end);
+    const whole = sideOf(base, start, end);
+    return { book: base.book, line: firstRefIn(whole.line, whole.end ?? whole.line, block).line };
+  };
 
   const cs = analyzeBook(commentary, opts);
   yield;
@@ -284,20 +290,29 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     }
     if (chosen.alignment.missing) partial++;
     if (confidence === "certain" || confidence === "high") prevStart = chosen.start;
-    // on a Sefaria base: the section's first line, with the section kept as citedSpan (withoutRange)
+    // on a Sefaria base: the section's first line that can carry a record, with the section kept as citedSpan (withoutRange)
     const whole = sideOf(base, chosen.start, chosen.end);
-    const { target, citedSpan } = baseRanges ? { target: whole, citedSpan: undefined } : withoutRange(whole);
+    const { target, citedSpan, lines: each, reason: firstRef } = baseRanges ? { target: whole, citedSpan: undefined, lines: undefined, reason: undefined } : withoutRange(whole, block);
+    if (firstRef) {
+      // a record per line is not "the section's start only" (explain's heading/range-sefaria)
+      if (each) reasons.splice(0, reasons.length, ...reasons.filter((x) => x.code !== "heading/range-sefaria"));
+      reasons.push(firstRef);
+      rules.push(each ? "headings.each-line" : "headings.first-ref");
+    }
     const capped = capSpanned(confidence, citedSpan);
     if (capped.warning) warnings.push(capped.warning);
     const source: LinkSide = { book: commentary.book, line: srcIndex };
+    const heRef2 = heRefOf(base, chosen);
     suggestions.push({
       id: suggestionId(commentary, srcIndex, target),
       engine: ENGINE,
       source,
       target,
       ...(citedSpan && { citedSpan }),
+      // every written line has a heRef (it carries a ref_2: sefaria-owned.ts refBlockOf)
+      ...(each && { spanLines: each.map((l) => ({ line: l, heRef2: lineAt(base, l)?.heRef ?? heRef2 })) }),
       declaredType: opts.declaredType,
-      heRef2: heRefOf(base, chosen),
+      heRef2,
       score: round(score),
       confidence: capped.confidence,
       reasons,
@@ -457,6 +472,12 @@ function structuralNotes(cs: BookStructure, bs: BookStructure, units: readonly U
   if (cs.untagged || bs.untagged) notes.push({ code: "heading/untagged", text: `זוהו כותרות בלי תגית כותרת: ${cs.untagged} בפירוש ו־${bs.untagged} בספר הבסיס` });
   if (!cs.headings.length) notes.push({ code: "heading/commentary-no-headings", text: "בפירוש אין כותרות, ולכן אי אפשר לקשר אותו לפי כותרות" });
   if (!bs.headings.length) notes.push({ code: "heading/base-no-headings", text: "בספר הבסיס אין כותרות, ולכן אי אפשר לקשר אליו לפי כותרות" });
+}
+
+/** the line with this index (lines are in order, usually one per index) */
+function lineAt(book: EngineBook, index: number): EngineBook["lines"][number] | undefined {
+  const l = book.lines[index];
+  return l?.index === index ? l : book.lines.find((x) => x.index === index);
 }
 
 function sideOf(book: EngineBook, start: number, end: number): LinkSide {
