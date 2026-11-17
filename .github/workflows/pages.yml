@@ -1,0 +1,50 @@
+# The GitHub Pages site (https://otzaria.github.io/OtzariaLinker/): the built single file as the home page.
+# Pages used to serve the repository's root, where index.html was v3 itself; since 4.0 the root index.html
+# is Vite's entry (it loads /src/app/main.tsx) and shows nothing unbuilt. v3 stays at /v3.html.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: The site
+        run: |
+          mkdir -p _site
+          cp dist/OtzariaLinker.html _site/index.html
+          cp dist/OtzariaLinker.html _site/OtzariaLinker.html
+          cp legacy/OtzariaLinker-v3.html _site/v3.html
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
