@@ -12,6 +12,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: pages
@@ -46,5 +47,21 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # While the repository's Pages source is still "Deploy from a branch", every push to main also starts
+      # GitHub's own build of the branch root (pages-build-deployment), whose index.html is Vite's entry. The
+      # two race and the last one wins: wait for that build of this commit to finish, so this one is last.
+      # (Settings → Pages → Source: "GitHub Actions" removes the branch build; then this step finds none.)
+      - name: Wait for the branch build of this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            states=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=${{ github.sha }}" \
+              --jq '[.workflow_runs[] | select(.path == "dynamic/pages/pages-build-deployment") | .status] | join(" ")')
+            if [ -n "$states" ] && ! echo "$states" | tr ' ' '\n' | grep -qvx completed; then echo "branch build done: $states"; break; fi
+            # none at all after two minutes: there is no branch build (Source is GitHub Actions, or a manual run)
+            if [ -z "$states" ] && [ "$i" -ge 12 ]; then echo "no branch build"; break; fi
+            sleep 10
+          done
       - id: deployment
         uses: actions/deploy-pages@v4
