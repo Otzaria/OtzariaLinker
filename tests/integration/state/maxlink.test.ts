@@ -188,3 +188,49 @@ describe("AppStore — max-link pairs by the database's existing links (plan.ts 
     expect(store.maxLink.plan({ kind: "source", id: folder.info.id }, PAIRS).steps.length).toBe(before);
   });
 });
+
+describe("AppStore — max-link: these books (#26) and the user's choices (#21)", () => {
+  it('scope "books": exactly the chosen books, in the chosen order, and its label names them', async () => {
+    const { store, key } = await opened();
+    const scope = { kind: "books", keys: [key("ספר דוגמה"), key("בראשית"), "ghost:1"] } as const;
+    expect(store.maxLink.selection(scope)).toEqual([key("ספר דוגמה"), key("בראשית")]);
+    expect(store.maxLink.scopeLabel(scope)).toBe('הספרים "ספר דוגמה", "בראשית"');
+    expect(store.maxLink.scopeLabel({ kind: "books", keys: [key("בראשית")] })).toBe('הספר "בראשית"');
+  });
+
+  it("plan(scope, …, choices): an explicit pair links two books whose names do not say it", async () => {
+    const { store, key } = await opened();
+    const scope = { kind: "books", keys: [key("חידושים")] } as const;
+    expect(store.maxLink.plan(scope, PAIRS).steps).toHaveLength(0);
+    const plan = store.maxLink.plan(scope, PAIRS, undefined, { pairs: [{ dependant: "חידושים", base: "בראשית" }] });
+    // the same book against its base by the user's word (+ the intermediate commentator on it, plan.ts intermediateSteps)
+    expect(plan.steps.map((s) => s.id).slice(0, 2)).toEqual([`headings|${key("חידושים")}>${key("בראשית")}`, `dibur-hamatchil|${key("חידושים")}>${key("בראשית")}`]);
+    expect(plan.steps.slice(0, 2).every((s) => s.kind === "pair" && s.relation.via === "user")).toBe(true);
+  });
+
+  it("pairPlan: one book, several targets, all methods merged into ONE run (pair mode)", async () => {
+    const { store, key } = await opened();
+    const plan = store.maxLink.pairPlan(key("ביאור על בראשית"), [key("בראשית"), key("ספר דוגמה")], ["headings", "dibur-hamatchil"]);
+    // no citations step in pair mode; the fifth step is the intermediate commentator on the first target
+    expect(plan.steps.map((s) => `${s.engine}>${s.kind === "pair" ? s.target.title : ""}`)).toEqual(["headings>בראשית", "dibur-hamatchil>בראשית", "headings>ספר דוגמה", "dibur-hamatchil>ספר דוגמה", 'dibur-hamatchil>רש"י על בראשית']);
+    expect(await store.maxLink.run(plan, "זוג עם כמה יעדים")).toBe(true);
+    const run = store.suggestions.run.value!;
+    expect(run.maxlink!.steps.length).toBe(5);
+    // the second target is not a base of it: the merge puts everything in one run
+    expect(store.maxLink.job.value!.choices).toEqual(plan.choices);
+  });
+
+  it("titleFit: the screens ask before offering the headings method", async () => {
+    const { store, key } = await opened();
+    expect((await store.maxLink.titleFit(key("ביאור על בראשית"), key("בראשית")))!.verdict).toBe("fit");
+    expect((await store.maxLink.titleFit(key("חידושים"), key("בראשית")))!.verdict).toBe("unfit");
+  });
+
+  it("the choices travel with the job: a resumed job plans the same pairs", async () => {
+    const { store, key } = await opened();
+    const plan = store.maxLink.pairPlan(key("חידושים"), [key("בראשית")], ["dibur-hamatchil"]);
+    expect(plan.steps.map((s) => s.engine)).toEqual(["dibur-hamatchil", "dibur-hamatchil"]);
+    await store.maxLink.run(plan, "זוג");
+    expect(store.maxLink.job.value!.choices).toEqual({ pairs: [{ dependant: "חידושים", base: "בראשית" }], methods: { "חידושים>בראשית": ["dibur-hamatchil"] } });
+  });
+});

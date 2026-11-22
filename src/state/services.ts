@@ -8,6 +8,7 @@ import type { LineFate } from "../matching/line-diff";
 import type { BookSearchResult } from "../core/text/find";
 import type { MaxLinkJobResult } from "../linking/maxlink-report";
 import type { PlanStep } from "../linking/plan";
+import type { TitleFitReport } from "../linking/title-fit";
 
 /*
  * What the state layer needs from the outside world, as interfaces (architecture rule 17). The app
@@ -52,6 +53,8 @@ export interface BooksService {
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
   close(sourceId: string): Promise<void>;
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
+  /** Whether a commentary's titles fit its base (linking/title-fit.ts). Optional like runMaxLink: test fakes need not implement it. */
+  titleFit?(source: BookRef, target: BookRef, opts?: CallOptions): Promise<TitleFitReport>;
   diffBooks(oldKey: string, newKey: string, opts?: CallOptions): Promise<{ to: number[]; fate: LineFate[]; similarity: number[]; moves: [number, number][]; newLength: number; stats: Record<string, number> }>;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>, opts?: CallOptions): Promise<BatchResultItem[]>;
   searchBook(bookKey: string, query: string, options: { limit?: number }, opts?: CallOptions): Promise<BookSearchResult>;

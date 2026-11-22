@@ -30,6 +30,43 @@ function makeStore() {
 }
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
+describe("guided flow — the method per book pair (#21)", () => {
+  async function ready() {
+    const { store } = makeStore();
+    const g = store.guided;
+    g.start();
+    await g.addBooks([commentary("ביאור א על בראשית"), commentary("ביאור ב על בראשית")]);
+    await g.addBases([DB]);
+    return { store, g };
+  }
+  const engines = (g: Awaited<ReturnType<typeof ready>>["g"]) => g.plan.value!.steps.filter((x) => x.kind === "pair").map((x) => `${x.engine}:${x.source.title}`);
+
+  it("by default every method that fits runs (the title gate decides at run time)", async () => {
+    const { g } = await ready();
+    expect(g.plan.value!.perEngine).toMatchObject({ headings: 2, "dibur-hamatchil": 4 });
+    expect(g.methods.value).toBeNull();
+  });
+
+  it("force dibur-hamatchil for all pairs: no headings step in the plan, and the run keeps it that way", async () => {
+    const { g, store } = await ready();
+    g.setMethods(new Set(["dibur-hamatchil"]));
+    expect(g.plan.value!.perEngine.headings).toBeUndefined();
+    expect(g.plan.value!.perEngine["dibur-hamatchil"]).toBeGreaterThan(0);
+    expect(await g.run()).toBe(true);
+    expect(store.maxLink.job.value!.engines).toEqual(["dibur-hamatchil"]);
+  });
+
+  it("one pair on its own method, the other on the default", async () => {
+    const { g } = await ready();
+    g.setPairMethods("ביאור א על בראשית", "בראשית", ["headings"]);
+    expect(engines(g).filter((e) => e.includes("ביאור א"))).toEqual(["headings:ביאור א על בראשית"]);
+    expect(engines(g).filter((e) => e.includes("ביאור ב"))).toContain("dibur-hamatchil:ביאור ב על בראשית");
+    g.setPairMethods("ביאור א על בראשית", "בראשית", null);
+    expect(engines(g).filter((e) => e.includes("ביאור א"))).toContain("dibur-hamatchil:ביאור א על בראשית");
+    expect(g.pairMethods.value).toEqual({});
+  });
+});
+
 describe("guided flow — through the store", () => {
   it("a folder of commentaries: the database is asked for, named; then plan → run → approve → check → download", async () => {
     const { store, saved } = makeStore();

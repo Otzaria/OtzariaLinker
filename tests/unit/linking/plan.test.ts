@@ -680,6 +680,14 @@ describe("planMaxLink — title gate, explicit pairs and per-pair methods", () =
     expect(steps(p)).toEqual(['headings:רש"י על ספר א>ספר ב', 'dibur-hamatchil:רש"י על ספר א>ספר ב']);
   });
 
+  it('the intermediate-commentator pair (רש"י on the same base) is added only where dibur-hamatchil is among the pair methods', () => {
+    const sel = { selected: ["u:1"], library: lib };
+    const withDh = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }] } });
+    expect(steps(withDh)).toContain('dibur-hamatchil:חיבור כלשהו>רש"י על ספר א');
+    const headingsOnly = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }], methods: { [pairMethodKey("חיבור כלשהו", "ספר א")]: ["headings"] } } });
+    expect(steps(headingsOnly)).toEqual(["headings:חיבור כלשהו>ספר א"]);
+  });
+
   it("an explicit notes relation runs footnotes with the main book as the source", () => {
     const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", kind: "notes" }] } });
     expect(steps(p)).toEqual(["footnotes:ספר ב>חיבור כלשהו"]);

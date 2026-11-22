@@ -4,7 +4,7 @@ import type { Link } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
 import type { EngineId } from "../linking/automatic";
-import { notesBaseTitle, type MaxLinkPlan, type Relation } from "../linking/plan";
+import { notesBaseTitle, pairMethodKey, type MaxLinkPlan, type PairEngineId, type Relation } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
 import type { LinkState } from "./history";
@@ -435,6 +435,14 @@ export class GuidedFlowState {
   readonly bookSources = signal<readonly string[]>([]);
   /** the source whose books are the bases when a base is open in several ("" = the planner's default) */
   readonly preferSource = signal("");
+  /**
+   * The methods that may run, for every pair (null = every method that fits). "Force dibur-hamatchil for all pairs"
+   * is the set {dibur-hamatchil}. Not kept in the saved flow: a continued flow starts from the default again, while
+   * the job keeps the engines it ran with (JobRecord.engines).
+   */
+  readonly methods = signal<ReadonlySet<EngineId> | null>(null);
+  /** the methods the user named for one pair (plan.ts pairMethodKey): exactly those run there, headings with no title gate */
+  readonly pairMethods = signal<Readonly<Record<string, readonly PairEngineId[]>>>({});
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
   readonly saved = signal<GuidedRecord | null>(null);
   /** where a continued flow had got to: step 1 leads back there once its books are open again */
@@ -460,7 +468,8 @@ export class GuidedFlowState {
     const scope = this.scope.value;
     if (!scope) return null;
     const prefer = this.preferSource.value || (this.preferLabel ? this.host.sources.value.find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
-    return this.host.maxLink.plan(scope, undefined, prefer || undefined);
+    const methods = this.pairMethods.value;
+    return this.host.maxLink.plan(scope, this.methods.value ?? undefined, prefer || undefined, Object.keys(methods).length ? { methods } : undefined);
   });
 
   readonly missing = computed<MissingBase[]>(() => {
@@ -580,6 +589,20 @@ export class GuidedFlowState {
   /** Drops a source from the books (it stays open, and may still serve as bases). */
   removeBooks(sourceId: string): void {
     this.bookSources.value = this.bookSources.peek().filter((id) => id !== sourceId);
+  }
+
+  /** The methods for every pair (issue #21): null = all that fit, {dibur-hamatchil} = force it everywhere. */
+  setMethods(engines: ReadonlySet<EngineId> | null): void {
+    this.methods.value = engines;
+  }
+
+  /** The methods for one pair of books, by their titles; null or empty goes back to the default for the pair. */
+  setPairMethods(dependantTitle: string, baseTitle: string, engines: readonly PairEngineId[] | null): void {
+    const key = pairMethodKey(dependantTitle, baseTitle);
+    const next = { ...this.pairMethods.peek() };
+    if (engines?.length) next[key] = engines;
+    else delete next[key];
+    this.pairMethods.value = next;
   }
 
   setPreferSource(id: string): void {

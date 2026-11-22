@@ -66,6 +66,14 @@ describe("the batch job's pure parts", () => {
     expect(parseJobRecord(JSON.stringify({ ...rec, books: [{ title: "a", status: "weird", engines: {} }] }))!.books).toEqual([]);
   });
 
+  it("the user's choices (explicit pairs, per-pair methods) survive storage; malformed entries are dropped", () => {
+    const rec: JobRecord = { v: 1, id: "x", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings", "footnotes"] } } };
+    expect(parseJobRecord(JSON.stringify(rec))!.choices).toEqual(rec.choices);
+    const damaged = { ...rec, choices: { pairs: [{ dependant: "א" }, 7, { dependant: "ג", base: "ד", kind: "bogus" }], methods: { "א>ב": ["pattern?", "citations"], "ג>ד": ["dibur-hamatchil"] } } };
+    expect(parseJobRecord(JSON.stringify(damaged))!.choices).toEqual({ pairs: [{ dependant: "ג", base: "ד" }], methods: { "ג>ד": ["dibur-hamatchil"] } });
+    expect(parseJobRecord(JSON.stringify({ ...rec, choices: "x" }))!.choices).toBeUndefined();
+  });
+
   it("books that read the same bases run next to each other, groups in order of appearance", () => {
     const on = (t: string, base: BookRef): PlanStep[] => [{ id: t, kind: "pair", engine: "headings", source: ref(`k:${t}`, t), target: base, relation: {} as never, why: "" } as PlanStep, { id: `c:${t}`, kind: "single", engine: "citations", source: ref(`k:${t}`, t), why: "" }];
     const S = ref("s1:שמות.txt", "שמות");

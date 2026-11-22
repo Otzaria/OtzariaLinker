@@ -302,6 +302,8 @@ export interface MaxLinkPlan {
    * (PlanInput.preferSource). Empty when no base is open twice.
    */
   baseSources: { title: string; sources: string[] }[];
+  /** the user's choices the plan was made with (PlanInput.choices): the job keeps them, to plan the same after a reload */
+  choices?: PlanChoices;
 }
 
 /**
@@ -748,7 +750,7 @@ function ownRelations(book: PlanBook, byKey: ReadonlyMap<string, PlanBook>, inde
  * such a commentator on the same base is open, the plan adds that pair too — otherwise those lines
  * are never linked (measured: 2,469 lines in the DH validation samples).
  */
-function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<string, PlanBook>, relations: ReadonlyMap<string, Relation[]>, commentariesOn: ReadonlyMap<string, Relation[]>): Extract<PlanStep, { kind: "pair" }>[] {
+function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<string, PlanBook>, relations: ReadonlyMap<string, Relation[]>, commentariesOn: ReadonlyMap<string, Relation[]>, methods?: PlanChoices["methods"]): Extract<PlanStep, { kind: "pair" }>[] {
   const out: Extract<PlanStep, { kind: "pair" }>[] = [];
   for (const k of selected) {
     const book = byKey.get(k);
@@ -757,6 +759,9 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
     for (const own of relations.get(k) ?? []) {
       // a midrash or a translation (by its links) does not quote רש"י or תוספות
       if (own.kind !== "commentary" || own.scope || own.through || own.dependence || own.dhOnly || own.dependant.key !== k) continue;
+      // the user named this pair's methods without dibur-hamatchil: nothing else runs on it
+      const named = methods?.[pairMethodKey(own.dependant.title, own.base.title)];
+      if (named && !named.includes("dibur-hamatchil")) continue;
       const self = commentatorOfTitle(own.dependant.title)?.key;
       for (const sib of commentariesOn.get(own.base.key) ?? []) {
         const who = commentatorOfTitle(sib.dependant.title);
@@ -951,7 +956,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       }
     }
   if (enabled("dibur-hamatchil"))
-    for (const step of intermediateSteps(selected, byKey, relations, commentariesOn)) {
+    for (const step of intermediateSteps(selected, byKey, relations, commentariesOn, input.choices?.methods)) {
       if (seen.has(step.id)) continue;
       seen.add(step.id);
       steps.push(step);
@@ -1009,7 +1014,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const perEngine: Partial<Record<EngineId, number>> = {};
   for (const s of steps) perEngine[s.engine] = (perEngine[s.engine] ?? 0) + 1;
   const identified = books.filter((r) => relations.has(r.book.key) || onBase.has(r.book.key)).length;
-  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })) };
+  const choices = input.choices && (input.choices.pairs?.length || Object.keys(input.choices.methods ?? {}).length) ? input.choices : undefined;
+  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }) };
 }
 
 /** The book names a base it is written on: by its title ("X על Y", "הערות על Y") or by the database. */
