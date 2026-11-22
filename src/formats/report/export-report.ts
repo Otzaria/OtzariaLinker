@@ -28,6 +28,8 @@ export interface ReportInput {
   altToc: AltTocExportPlan;
   /** what the export is for: the next steps put its route first (default: the library) */
   purpose?: ExportPurpose;
+  /** what the user decided about the automatic suggestions of this project (approved: links they became; rejected: decisions kept) */
+  suggestions?: { approved: number; rejected: number };
   /** advanced mode: the problems carry their technical detail (the file's field names; audit F14) */
   technical?: boolean;
 }
@@ -56,6 +58,10 @@ export function buildExportReport(r: ReportInput): string {
 
   section("סיכום");
   L.push(row("קישורים שנכתבו", w.length));
+  if (r.suggestions && (r.suggestions.approved || r.suggestions.rejected)) {
+    L.push(row("הצעות שאושרו", r.suggestions.approved));
+    L.push(row("הצעות שנדחו", r.suggestions.rejected));
+  }
   L.push(row("  מהם חדשים", c.new));
   L.push(row("  מהם ערוכים", c.edited));
   L.push(row("  מהם נשמרו כמו שהם", c.kept));
@@ -86,7 +92,7 @@ export function buildExportReport(r: ReportInput): string {
   if (r.format === "json") {
     for (const f of links.files) {
       const moved = f.movedIn?.reduce((n, m) => n + m.records, 0) ?? 0;
-      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : ""}`);
+      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : !f.isNewFile ? "  [מחליף את הקובץ של הספר בספרייה, שנטען לכלי]" : ""}`);
       for (const m of f.movedIn ?? [])
         L.push(`      מהן ${m.records.toLocaleString("he")} קישורים של "${m.from}" אל הספר הזה, מסוג "מקור", שנכתבים כאן כפירוש: כך באוצריא שלכם (ייבוא אישי) "${m.from}" יופיע בפאנל המפרשים של "${f.sourceTitle}"${r.technical ? ' ("Conection Type": "commentary")' : ""}`);
     }

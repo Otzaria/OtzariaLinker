@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
 import type { ValidationContext } from "../../../src/core/links/validate";
 import { planAltTocExport } from "../../../src/formats/alt-toc/export";
+import { recordToLink } from "../../../src/formats/links-json/convert";
+import { parseLinksJson } from "../../../src/formats/links-json/parse";
 import { planExport } from "../../../src/formats/links-json/export";
 import { buildExportReport, REPORT_FILE_NAME } from "../../../src/formats/report/export-report";
 import { planSefariaCsv } from "../../../src/formats/sefaria-csv/write";
@@ -110,5 +112,33 @@ describe("_report.txt: a private export's source links written at their base", (
     expect(text).not.toContain("Conection Type");
     // a file of moved records only is not "new": it adds to the base, it replaces nothing
     expect(text).not.toContain("[קובץ חדש");
+  });
+});
+
+/*
+ * 1.8 (task list): the report says how many suggestions the user approved and rejected, and names a file that
+ * REPLACES one the tool imported from the library (an untouched-name file written back), apart from a "new file".
+ */
+describe("_report.txt: suggestions and replaced files", () => {
+  const base = { date: "1.1.2026, 10:00:00", app: "2.0.0-test", format: "json" as const, links: plan, altToc };
+
+  it("shows the numbers of suggestions approved and rejected, and omits the lines when there were none", () => {
+    const withS = buildExportReport({ ...base, suggestions: { approved: 12, rejected: 3 } });
+    const line = (label: string) => withS.split("\n").find((l) => l.trimStart().startsWith(label))!;
+    expect(line("הצעות שאושרו")).toMatch(/ 12$/);
+    expect(line("הצעות שנדחו")).toMatch(/ 3$/);
+    expect(report).not.toContain("הצעות שאושרו");
+    expect(buildExportReport({ ...base, suggestions: { approved: 0, rejected: 0 } })).not.toContain("הצעות שנדחו");
+  });
+
+  it("labels a file that replaces the library file the tool imported, differently from a new file", () => {
+    const imported = JSON.stringify([{ line_index_1: 3, heRef_2: "בראשית א, ב", path_2: "בראשית.txt", line_index_2: 4, "Conection Type": "commentary" }], null, 2);
+    const parsed = parseLinksJson(imported).records.map((r, i) => recordToLink(r, i, S, () => T, `f${i}`).link);
+    const replaced = planExport([...parsed, link("new", 9)], ctx);
+    expect(replaced.files[0]!.isNewFile).toBe(false);
+    const text = buildExportReport({ ...base, links: replaced });
+    expect(text).toContain("[מחליף את הקובץ של הספר בספרייה, שנטען לכלי]");
+    expect(text).not.toContain("[קובץ חדש");
+    expect(report).toContain("[קובץ חדש"); // the all-new plan above still says so
   });
 });
