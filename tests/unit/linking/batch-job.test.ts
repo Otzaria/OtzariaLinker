@@ -73,6 +73,16 @@ describe("the batch job's pure parts", () => {
     expect(runOrder(["a", "b", "c", "d", "e"], steps)).toEqual(["a", "c", "b", "d", "e"]);
   });
 
+  it("does not depend on the order the books were opened in: titles run in natural order (a chosen folder arrives in the file system's order)", () => {
+    const steps = new Map(["ביאור 1 על בראשית", "ביאור 2 על בראשית", "ביאור 10 על בראשית", "ביאור 11 על בראשית", "ביאור 20 על בראשית"].map((t) => [t, [{ id: t, kind: "pair", engine: "headings", source: ref(`k:${t}`, t), target: B, relation: {} as never, why: "" } as PlanStep]]));
+    const sorted = [...steps.keys()];
+    // an ext4 directory lists in hash order, NTFS alphabetically: the same folder, two orders
+    const ext4 = ["ביאור 11 על בראשית", "ביאור 2 על בראשית", "ביאור 20 על בראשית", "ביאור 10 על בראשית", "ביאור 1 על בראשית"];
+    expect(runOrder(ext4, steps)).toEqual(sorted);
+    expect(runOrder([...sorted].reverse(), steps)).toEqual(sorted);
+    expect(runOrder(sorted, steps)).toEqual(sorted);
+  });
+
   it("the per-book report as CSV", () => {
     const job = { books: [book({ status: "failed", why: "דף פגום" }), book({ title: "בראשית", status: "not-planned", why: "ספר בסיס", engines: {} }), book({ status: "done", suggestions: 4, changedDecisions: 2 })] } as JobRecord;
     const csv = jobCsv(job);

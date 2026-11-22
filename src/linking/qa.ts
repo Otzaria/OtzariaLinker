@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../core/csv";
 import type { Link } from "../core/links/model";
 import { exportVerdicts, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
@@ -70,12 +71,17 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/db-copy-no-file": "db-copy",
   "export/file-unverified": "library-file",
   "export/library-file-not-loaded": "library-file",
+  "export/library-file-snapshot": "library-file",
   "export/file-held": "library-file",
   "export/unsafe-title": "title",
   "export/reversed-dependency": "type",
   "export/private-source-to-base": "type",
   "export/private-source-kept": "type",
   "export/private-reversed": "type",
+  "export/inline-linker-private-only": "type",
+  "export/inline-linker-version": "type",
+  "export/inline-linker-anchor": "anchor",
+  "export/inline-linker-source-range": "type",
   "export/private-title-in-library": "title",
   "export/anchor-on-notes-line": "anchor",
   "export/book-changed": "edition",
@@ -99,6 +105,9 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/anchor-out-of-line": "סמנו מחדש את המילים בבונה.",
   "export/unknown-type": "בחרו בבונה סוג קשר מהרשימה.",
   "export/linker": "בחרו בבונה סוג קשר אחר.",
+  "export/inline-linker-private-only": 'בחרו בחלון הייצוא "לשימוש פרטי" (הסוג "ציטוט בטקסט" מוכר רק לייבוא האישי של אוצריא), או בחרו סוג אחר.',
+  "export/inline-linker-version": "ודאו שגרסת אוצריא שבה תייבאו את הקובץ מכירה ציטוט בטקסט (כרגע רק ענף dev). אם לא, בחרו סוג אחר, למשל הפניה.",
+  "export/inline-linker-anchor": "סמנו בבונה את המילים של הציטוט בשורת המקור, או בחרו סוג אחר.",
   "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\".",
   "export/private-source-to-base": "אין צורך לתקן: כך הפירוש יופיע בפאנל המפרשים של ספר הבסיס באוצריא שלכם.",
   "export/private-source-kept": "הסיבה כתובה בהודעה. אם קובץ ספר הבסיס מוחזק, תקנו את מה שעוצר אותו (ההסבר ליד הקישורים שלו), והקישור ייכתב שם כפירוש.",
@@ -111,6 +120,7 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/in-db-other-type": "אין צורך לתקן. ודאו שאינכם יוצרים קישור כפול.",
   "export/db-copy": "בדקו את שם המקום ביעד ואת סוג הקשר לפני הייצוא.",
   "export/file-held": "תקנו את הבעיה של הקובץ כולו שמתוארת בהסבר.",
+  "export/library-file-snapshot": "בדקו בספרייה אם הקובץ קיים (הרשימה שבכלי היא תמונת מצב). אם כן, טענו אותו מהספרייה לפני הייצוא. אם לא, אפשר להתעלם.",
   "export/unsafe-title": "שנו את שם הספר במקור שלו.",
   "export/title-not-normalized": "כתבו את שם הספר בדיוק כפי שהוא במסד.",
   "sefaria/both-refs": "הסירו בבונה את אחד משני ציוני ספריא.",
@@ -153,7 +163,7 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
  *   "accept-edition" — the user checked the links of a book that changed since the project was saved.
  */
 export type QaAction = "private" | "drop-anchor" | "accept-edition";
-const PRIVATE_REMEDY = new Set(["sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
+const PRIVATE_REMEDY = new Set(["export/inline-linker-private-only", "sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
 const ANCHOR_REMEDY = new Set(["sefaria/anchor-range", "sefaria/anchor-into-sefaria", "sefaria/pending-anchor-hash", "export/anchor-on-notes-line", "export/anchor-dropped-flip", "export/companion-merge-broken"]);
 
 export function qaAction(p: Problem, purpose: "submission" | "private" = "submission"): QaAction | null {
@@ -219,7 +229,7 @@ export function redundantDuplicates(report: QaReport): string[] {
 
 /** The report as CSV (UTF-8 with BOM so Excel shows Hebrew), for review outside the tool. */
 export function qaCsv(report: QaReport): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const head = ["חומרה", "קטגוריה", "ספר מקור", "שורת מקור", "ספר יעד", "שורת יעד", "שם המקום ביעד", "סוג", "הסבר", "קוד", "פרטים טכניים"];
   const sev: Record<Severity, string> = { error: "שגיאה", warning: "אזהרה", info: "מידע" };
   const rows = report.issues.map((i) =>

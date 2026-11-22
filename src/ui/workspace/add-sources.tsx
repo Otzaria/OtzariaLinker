@@ -3,6 +3,7 @@ import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
 import { ltr } from "../shell/file-name";
+import { OTZARIA_DB_DIR, OTZARIA_DB_FILE, otzariaDbCopyNotice, otzariaDbCopyText } from "./otzaria-db-path";
 
 /*
  * Adding a source is first-class: a folder, files, a database (the Otzaria one or a personal one),
@@ -26,28 +27,25 @@ export const SOURCE_OPTIONS: readonly SourceOption[] = [
   { id: "project", icon: "oz_document_link", label: "פרויקט שמור", hint: `קובץ ${ltr(".otzlinker.json")} שנשמר קודם`, pick: { accept: ".json" } },
 ];
 
-/** Where Otzaria keeps its database on Windows (the installer's default). */
-export const OTZARIA_DB_PATH = "C:\\ProgramData\\otzaria\\books\\seforim.db";
-
 /** The browser cannot open a path by itself: where the Otzaria database is, and how to pick it. */
 export function OtzariaDbHint({ compact }: { compact?: boolean }) {
   const store = useStore();
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(OTZARIA_DB_PATH);
-      store.notify("success", "הנתיב הועתק. בחלון הבחירה הדביקו אותו בשדה \"שם הקובץ\" ולחצו \"פתח\".");
+      await navigator.clipboard.writeText(otzariaDbCopyText());
+      store.notify("success", otzariaDbCopyNotice());
     } catch {
-      store.notify("info", `לא הצלחתי להעתיק. הנתיב: ${OTZARIA_DB_PATH}`);
+      store.notify("info", `לא הצלחתי להעתיק. התיקייה: ${OTZARIA_DB_DIR}. בחרו בה את הקובץ בשם seforim.`);
     }
   };
   return (
     <div class={`db-hint${compact ? " compact" : ""}`}>
       <Icon name="fl_info" size={16} />
       <div>
-        <b>איפה מסד אוצריא?</b> בדרך כלל:
+        <b>איפה מסד אוצריא?</b> בדרך כלל בתיקייה:
         {/* a break opportunity after each backslash: a narrow column wraps the path between folders, not inside a name */}
         <bdi dir="ltr" class="path">
-          {OTZARIA_DB_PATH.split("\\").map((part, i, all) => (
+          {OTZARIA_DB_DIR.split("\\").map((part, i, all) => (
             <span key={i}>
               {part}
               {i < all.length - 1 && (
@@ -58,13 +56,13 @@ export function OtzariaDbHint({ compact }: { compact?: boolean }) {
             </span>
           ))}
         </bdi>
-        <button class="btn text small" onClick={copy} title="העתקת הנתיב, כדי להדביק אותו בחלון הבחירה">
+        <button class="btn text small" onClick={copy} title="העתקת נתיב התיקייה, כדי להדביק אותו בחלון הבחירה">
           <Icon name="fl_copy" size={14} />
           העתקה
         </button>
         {!compact && (
           <div class="muted">
-            הדפדפן לא פותח נתיב בעצמו: לחצו "מסד נתונים", הדביקו את הנתיב בשדה "שם הקובץ" ולחצו "פתח". התיקייה ProgramData מוסתרת בסייר הקבצים, אבל הדבקת הנתיב עובדת.
+            הדפדפן לא פותח נתיב בעצמו: לחצו "מסד נתונים", הדביקו את נתיב התיקייה בשדה "שם הקובץ" ולחצו Enter, ובתיקייה בחרו את הקובץ בשם <bdi dir="ltr">seforim</bdi> (<bdi dir="ltr">{OTZARIA_DB_FILE}</bdi>). התיקייה ProgramData מוסתרת בסייר הקבצים, אבל הדבקת הנתיב עובדת.
           </div>
         )}
       </div>

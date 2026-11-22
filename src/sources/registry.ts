@@ -14,6 +14,7 @@ import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
+import type { ExternalTargetResolver, TargetBook } from "./db/external-target";
 import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
@@ -48,9 +49,13 @@ export interface OpenResult {
   needsMapping?: PendingDb[];
   /** zstd dictionaries opened as files: books compressed with them can now be read (see DictionaryPool) */
   dictionaries?: { path: string; id: number }[];
+  /** databases that were already open (the same file picked again): not opened a second time, listed here instead (#22) */
+  reused?: OpenedSource[];
 }
 
 const HEAD = 4096;
+/** heRef → line maps kept for resolving external_link targets: about 400K entries (tens of MB at most) in all */
+const REF_INDEX_BUDGET = 400_000;
 const MAX_TEXT_DOC = 256 * 1024 ** 2;
 /** how much of a book is read to tell its encoding when it opens */
 const SNIFF = 64 * 1024;
@@ -60,11 +65,31 @@ const MAX_ZIP = 512 * 1024 ** 2;
 export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
-  private readonly pending = new Map<string, { blob: Blob; label: string }>();
+  private readonly pending = new Map<string, { blob: Blob; label: string; identity?: string }>();
+  /** the mapping each open mapped database was opened with (JSON), to tell "the same again" from "another mapping" */
+  private readonly mappingOf = new Map<string, string>();
+  /**
+   * The identity of each open database file → its source id, and back (to release it on close). Picking the
+   * same file twice must not load it twice: two sources would list every book twice and hold the file twice
+   * in the worker (#22). The identity is the file's name, size, last-modified time and the 100-byte SQLite
+   * header (page size, file change counter, size in pages, schema cookie — it changes whenever the file does).
+   */
+  private readonly byIdentity = new Map<string, string>();
+  private readonly identityOf = new Map<string, string>();
   private seq = 0;
   private idPrefix = "s";
   /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
   private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
+  /** per source: its books by exact title (a personal database's external_link names its targets by title) */
+  private readonly titleIndexes = new Map<string, Promise<Map<string, SourceBook>>>();
+  /** per book key: heRef → 0-based line, for the books external_link rows were resolved in (a few at a time) */
+  private readonly refIndexes = new Map<string, Promise<Map<string, number>>>();
+  /** entries of each finished ref index: the cache is capped by their SUM (a big book's map is megabytes), see REF_INDEX_BUDGET */
+  private readonly refIndexSizes = new Map<string, number>();
+  private readonly resolver: ExternalTargetResolver = {
+    book: (title, targetSource, from) => this.findTarget(title, targetSource, from),
+    lineOfRef: async (bookKey, heRef) => (await this.refIndex(bookKey)).get(heRef) ?? null,
+  };
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
@@ -94,7 +119,29 @@ export class SourceRegistry {
   async openMapped(token: string, mapping: DbMapping, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<OpenedSource> {
     const p = this.pending.get(token);
     if (!p) throw new LinkerError("db/mapping-unknown-token", "המסד הזה כבר אינו פתוח לבחירת מיפוי. גררו אותו שוב.");
-    return this.add(await MappedDbSource.open(this.nextId(), p.label, blobSource(p.blob), mapping, ctx));
+    // A mapped database is one source like any other (#22): the same file mapped twice is the same reader (the same
+    // mapping) or REPLACES it (another mapping), never two readers of one file. The identity is reserved in the same
+    // synchronous step that checks it, so two overlapping calls see each other.
+    const identity = p.identity;
+    const mappingKey = JSON.stringify(mapping);
+    const known = identity === undefined ? undefined : this.byIdentity.get(identity);
+    const held = known === undefined ? undefined : this.sources.get(known);
+    if (held && this.mappingOf.get(held.info.id) === mappingKey) return { info: held.info, books: await held.books() };
+    if (held) this.close(held.info.id);
+    const id = this.nextId();
+    if (identity !== undefined) {
+      this.byIdentity.set(identity, id);
+      this.identityOf.set(id, identity);
+    }
+    try {
+      const opened = await this.add(await MappedDbSource.open(id, p.label, blobSource(p.blob), mapping, ctx));
+      this.mappingOf.set(id, mappingKey);
+      return opened;
+    } catch (err) {
+      if (identity !== undefined && this.byIdentity.get(identity) === id) this.byIdentity.delete(identity);
+      this.identityOf.delete(id);
+      throw err;
+    }
   }
 
   /** The first lines of the first books through a mapping that is not confirmed yet (the wizard's test). */
@@ -158,6 +205,16 @@ export class SourceRegistry {
     const l = await this.listing(bookKey, ctx);
     if (typeof l === "string") return { bookKey, reason: l };
     const books = new Map((await this.of(bookKey).books()).map((b) => [b.key, b]));
+    // the other end of a personal database's external_link is a book of another source, or only a title
+    for (const k of l.otherBookKeys()) {
+      if (books.has(k)) continue;
+      if (k.startsWith("unresolved:")) books.set(k, { key: k, title: k.slice("unresolved:".length), origin: "unknown" });
+      else {
+        const id = sourceIdOfBookKey(k);
+        const found = this.sources.has(id) ? (await this.sources.get(id)!.books()).find((b) => b.key === k) : undefined;
+        if (found) books.set(k, found);
+      }
+    }
     return l.summary((k) => ({ title: books.get(k)?.title ?? k, origin: books.get(k)?.origin ?? "unknown" }));
   }
 
@@ -181,9 +238,85 @@ export class SourceRegistry {
     return p;
   }
 
+  /** The book with this exact title in a source another source's external_link points at (see ExternalTargetResolver). */
+  private async findTarget(title: string, targetSource: string | null, from: string): Promise<TargetBook | null> {
+    const candidates = [...this.sources.values()].filter((s) => s.info.id !== from);
+    const named = targetSource === null || targetSource === "official" ? [] : candidates.filter((s) => s instanceof DbBookSource && s.capabilities.meta["library_id"] === targetSource);
+    // 'official' (or none given): the library's own sources, first; a null source then also any other
+    const pool = targetSource === "official" ? candidates.filter((s) => s.info.library) : targetSource === null ? [...candidates.filter((s) => s.info.library), ...candidates.filter((s) => !s.info.library)] : named;
+    for (const s of pool) {
+      const b = (await this.titleIndex(s)).get(title);
+      if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.lineCount !== undefined && { lineCount: b.lineCount }) };
+    }
+    return null;
+  }
+
+  private titleIndex(s: BookSource): Promise<Map<string, SourceBook>> {
+    let p = this.titleIndexes.get(s.info.id);
+    if (!p) {
+      p = s.books().then((books) => {
+        const m = new Map<string, SourceBook>();
+        for (const b of books) if (!m.has(b.title)) m.set(b.title, b);
+        return m;
+      });
+      this.titleIndexes.set(s.info.id, p);
+    }
+    return p;
+  }
+
+  private refIndex(bookKey: string): Promise<Map<string, number>> {
+    let p = this.refIndexes.get(bookKey);
+    if (!p) {
+      const s = this.sources.get(sourceIdOfBookKey(bookKey));
+      p = (s?.heRefs ? s.heRefs(bookKey) : Promise.resolve([])).then((rows) => {
+        const m = new Map<string, number>();
+        for (const r of rows) if (r.heRef && !m.has(r.heRef)) m.set(r.heRef, r.index);
+        this.refIndexSizes.set(bookKey, m.size);
+        this.trimRefIndexes(bookKey);
+        return m;
+      });
+      this.refIndexes.set(bookKey, p);
+      p.catch(() => (this.refIndexes.delete(bookKey), this.refIndexSizes.delete(bookKey)));
+    }
+    return p;
+  }
+
+  /**
+   * Keeps the heRef maps within about REF_INDEX_BUDGET entries in all (oldest first, never the one just built):
+   * a run resolves the targets of one book at a time, so recent books are the ones needed again.
+   */
+  private trimRefIndexes(keep: string): void {
+    let total = 0;
+    for (const n of this.refIndexSizes.values()) total += n;
+    for (const k of [...this.refIndexes.keys()]) {
+      if (total <= REF_INDEX_BUDGET) break;
+      if (k === keep || !this.refIndexSizes.has(k)) continue;
+      total -= this.refIndexSizes.get(k)!;
+      this.refIndexes.delete(k);
+      this.refIndexSizes.delete(k);
+    }
+  }
+
+  /** a source opened or closed: the databases that resolve external_link targets by title must look again */
+  private sourcesChanged(closed?: string): void {
+    this.titleIndexes.clear();
+    if (closed !== undefined)
+      for (const k of [...this.refIndexes.keys()])
+        if (sourceIdOfBookKey(k) === closed) {
+          this.refIndexes.delete(k);
+          this.refIndexSizes.delete(k);
+        }
+    for (const s of this.sources.values()) if (s instanceof DbBookSource) s.targetsChanged();
+  }
+
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
+    this.sourcesChanged(sourceId);
+    const identity = this.identityOf.get(sourceId);
+    if (identity !== undefined) this.byIdentity.delete(identity);
+    this.identityOf.delete(sourceId);
+    this.mappingOf.delete(sourceId);
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
@@ -191,7 +324,29 @@ export class SourceRegistry {
     switch (kind) {
       case "sqlite":
         try {
-          result.sources.push(await this.add(await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob))));
+          const identity = await fileIdentity(f);
+          const known = this.byIdentity.get(identity);
+          const held = known ? this.sources.get(known) : undefined;
+          if (held) {
+            const again = result.reused ?? (result.reused = []);
+            if (!again.some((r) => r.info.id === held.info.id)) again.push({ info: held.info, books: await held.books() });
+            return;
+          }
+          const fresh = await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob));
+          // another drop of the same file finished first (drops can overlap): keep that one, release this one
+          const raced = this.byIdentity.get(identity);
+          const winner = raced ? this.sources.get(raced) : undefined;
+          if (winner) {
+            fresh.close();
+            (result.reused ??= []).push({ info: winner.info, books: await winner.books() });
+            return;
+          }
+          // the identity is taken in the same synchronous step that registers the source (add sets it before it awaits),
+          // so a drop of the same file finishing in the meantime sees it
+          this.byIdentity.set(identity, fresh.info.id);
+          this.identityOf.set(fresh.info.id, identity);
+          const opened = await this.add(fresh);
+          result.sources.push(opened);
         } catch (err) {
           // not Otzaria's schema: hand its tables to the mapping wizard instead of refusing the file
           if (err instanceof LinkerError && err.code === "db/no-books") return this.offerMapping(f, result);
@@ -245,7 +400,11 @@ export class SourceRegistry {
 
   private async offerMapping(f: InputFile, result: OpenResult): Promise<void> {
     try {
-      (result.needsMapping ??= []).push(await pendingMapping(f.path, nameOf(f.path), f.blob, this.pending));
+      const offered = await pendingMapping(f.path, nameOf(f.path), f.blob, this.pending);
+      (result.needsMapping ??= []).push(offered);
+      // the identity of the file, kept with its token: when it is mapped, picking it again is "already open" (like an Otzaria database)
+      const entry = this.pending.get(offered.token);
+      if (entry) entry.identity = await fileIdentity(f);
     } catch (err) {
       result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את המסד.") });
     }
@@ -275,6 +434,8 @@ export class SourceRegistry {
 
   private async add(s: BookSource): Promise<OpenedSource> {
     this.sources.set(s.info.id, s);
+    if (s instanceof DbBookSource) s.setTargetResolver(this.resolver);
+    this.sourcesChanged();
     return { info: s.info, books: await s.books() };
   }
 
@@ -299,6 +460,14 @@ export class SourceRegistry {
 }
 
 type ListingContext = { signal?: AbortSignal; progress?: (done: number, total: number) => void };
+
+/** name | size | last-modified (a File has one) | the SQLite header, as hex — see SourceRegistry.byIdentity */
+async function fileIdentity(f: InputFile): Promise<string> {
+  const head = new Uint8Array(await f.blob.slice(0, 100).arrayBuffer());
+  const hex = Array.from(head, (b) => b.toString(16).padStart(2, "0")).join("");
+  const modified = (f.blob as Partial<File>).lastModified;
+  return `${nameOf(f.path)}|${f.blob.size}|${modified ?? ""}|${hex}`;
+}
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;
 

@@ -269,3 +269,53 @@ describe("A3: a new link of a book the database says has links waits for the boo
     expect(plan.files.map((f) => [f.name, f.isNewFile])).toEqual([["א_links.json", true]]);
   });
 });
+
+// CHANGED on the reviewer's decision, with the user's approval (fix round before merge, task 2): the list is a snapshot, so the listed
+// book is written with a warning (export/library-file-snapshot) instead of being held; the describe at the end of this file pins it too.
+describe("#18: a book the library lists a links file for is warned about (it used to be held) even when the database does not mark it", () => {
+  it("a text book named like a library file gets the snapshot warning; a book with another name does not", async () => {
+    const store = makeStore();
+    const txt = (name: string, lines: string[]) => ({ path: name, blob: new Blob([lines.join("\n")]) });
+    await store.openFiles([txt("ארצות החיים.txt", ["<h1>ארצות החיים</h1>", "שורה א", "שורה ב"]), txt("ספר שלי.txt", ["<h1>ספר שלי</h1>", "שורה א", "שורה ב"]), txt("יעד.txt", ["<h1>יעד</h1>", "שורה א", "שורה ב"])]);
+    const book = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!;
+    const make = (from: string) => {
+      store.pickLine("source", book(from).key, 1);
+      store.pickLine("target", book("יעד").key, 1);
+      store.draftType.value = "reference";
+      store.draftTypeTouched.value = true;
+      expect(store.createFromDraft()).not.toBeNull();
+    };
+    make("ארצות החיים");
+    make("ספר שלי");
+    const plan = (await store.exchange.prepareExport())!;
+    expect(plan.heldBack.filter((h) => h.problems.some((p) => p.code === "export/library-file-not-loaded"))).toEqual([]);
+    expect(plan.files.map((f) => f.sourceTitle).sort()).toEqual(["ארצות החיים", "ספר שלי"]);
+    const warned = plan.warned.filter((w) => w.problems.some((p) => p.code === "export/library-file-snapshot"));
+    expect(warned.map((w) => w.link.source.book.title)).toEqual(["ארצות החיים"]);
+    expect(warned[0]!.problems.find((p) => p.code === "export/library-file-snapshot")!.message).toContain("ייתכן שהקובץ נוסף או הוסר מאז");
+  });
+});
+
+describe("#18, fix round before merge: the library's file-name list is a snapshot hint, never a hold", () => {
+  it("a text book named like a library file is written with a snapshot warning; a book the list does not name has none", async () => {
+    const store = makeStore();
+    const txt = (name: string, lines: string[]) => ({ path: name, blob: new Blob([lines.join("\n")]) });
+    await store.openFiles([txt("ארצות החיים.txt", ["<h1>ארצות החיים</h1>", "שורה א", "שורה ב"]), txt("ספר שלי.txt", ["<h1>ספר שלי</h1>", "שורה א", "שורה ב"]), txt("יעד.txt", ["<h1>יעד</h1>", "שורה א", "שורה ב"])]);
+    const book = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!;
+    for (const from of ["ארצות החיים", "ספר שלי"]) {
+      store.pickLine("source", book(from).key, 1);
+      store.pickLine("target", book("יעד").key, 1);
+      store.draftType.value = "reference";
+      store.draftTypeTouched.value = true;
+      expect(store.createFromDraft()).not.toBeNull();
+    }
+    const plan = (await store.exchange.prepareExport())!;
+    expect(plan.heldBack).toEqual([]);
+    expect(plan.files.map((f) => f.sourceTitle).sort()).toEqual(["ארצות החיים", "ספר שלי"]);
+    const warned = plan.warned.filter((w) => w.problems.some((p) => p.code === "export/library-file-snapshot"));
+    expect(warned.map((w) => w.link.source.book.title)).toEqual(["ארצות החיים"]);
+    const msg = warned[0]!.problems.find((p) => p.code === "export/library-file-snapshot")!.message;
+    expect(msg).toContain("2026-11-22"); // the snapshot's date, as the tool embeds it
+    expect(msg).toContain("תמונת מצב");
+  });
+});

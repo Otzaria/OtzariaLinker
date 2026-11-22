@@ -1,5 +1,5 @@
 import { CONNECTION_TYPES, parseConnectionType } from "../../core/links/connection-type";
-import type { DbLinkPage, DbLinkQuery, DbLinkSummary } from "../../core/links/db-links";
+import { DB_LINK_FLAGS, type DbLinkPage, type DbLinkQuery, type DbLinkSummary } from "../../core/links/db-links";
 import type { BookOrigin, Link } from "../../core/links/model";
 
 /*
@@ -11,7 +11,7 @@ import type { BookOrigin, Link } from "../../core/links/model";
  */
 export interface ListingRows {
   /** what `fetch` takes back: a database link id, or a position in an in-memory list */
-  ref: Int32Array;
+  ref: ArrayLike<number>;
   /** 0 = the book is the stored source, 1 = the stored target */
   dir: Uint8Array;
   /** index into `otherKeys` */
@@ -20,6 +20,8 @@ export interface ListingRows {
   type: Uint8Array;
   /** 0-based line of the listed book (-1 when unknown) */
   ownIndex: Int32Array;
+  /** bit i = DB_LINK_FLAGS[i] (external_link rows); absent = no flags */
+  flags?: Uint8Array;
 }
 
 export class LinkListing {
@@ -33,11 +35,18 @@ export class LinkListing {
     private readonly fetch: (refs: number[]) => Promise<Link[]>,
     readonly method: DbLinkSummary["method"],
     readonly ms: number,
+    private readonly unlisted?: DbLinkSummary["unlisted"],
+    private readonly tables?: DbLinkSummary["tables"],
   ) {
     const n = rows.ref.length;
     const order = new Int32Array(n);
     for (let i = 0; i < n; i++) order[i] = i;
     this.order = order.sort((a, b) => rows.ownIndex[a]! - rows.ownIndex[b]! || rows.ref[a]! - rows.ref[b]!);
+  }
+
+  /** the keys of the books at the other end of the rows (the ones a summary counts by) */
+  otherBookKeys(): readonly string[] {
+    return this.otherKeys;
   }
 
   get size(): number {
@@ -62,9 +71,13 @@ export class LinkListing {
       else if (type[i] === targum) b[key === "out" ? "targumOut" : "targumIn"]++;
       else if (type[i] === midrash) b[key === "out" ? "midrashOut" : "midrashIn"]++;
     }
+    const flagCounts = this.rows.flags ? DB_LINK_FLAGS.map((flag, b) => ({ flag, count: this.rows.flags!.reduce((n, f) => n + ((f >> b) & 1), 0) })).filter((f) => f.count > 0) : [];
     return {
       bookKey: this.bookKey,
       total: dir.length,
+      ...(flagCounts.length && { flags: flagCounts }),
+      ...(this.tables && { tables: this.tables }),
+      ...(this.unlisted && (this.unlisted.badLine || this.unlisted.noPlace || this.unlisted.orphanSource) && { unlisted: this.unlisted }),
       out,
       in: dir.length - out,
       byType: types.filter((t) => t.out + t.in > 0),
@@ -75,7 +88,8 @@ export class LinkListing {
   }
 
   async page(q: DbLinkQuery): Promise<DbLinkPage> {
-    const { dir, type, other, ownIndex, ref } = this.rows;
+    const { dir, type, other, ownIndex, ref, flags } = this.rows;
+    const wantFlag = q.flag === undefined ? 0 : 1 << DB_LINK_FLAGS.indexOf(q.flag);
     const wantDir = q.dir === undefined ? -1 : q.dir === "out" ? 0 : 1;
     const wantTypes = q.types?.length ? new Set(q.types.map((t) => CONNECTION_TYPES.indexOf(t))) : null;
     const wantOther = q.otherBookKey === undefined ? -1 : this.otherKeys.indexOf(q.otherBookKey);
@@ -88,6 +102,7 @@ export class LinkListing {
       if (wantDir >= 0 && dir[i] !== wantDir) continue;
       if (wantTypes && !wantTypes.has(type[i]!)) continue;
       if (wantOther >= 0 && other[i] !== wantOther) continue;
+      if (wantFlag && !((flags?.[i] ?? 0) & wantFlag)) continue;
       if (q.lines && (ownIndex[i]! < q.lines.from || ownIndex[i]! > q.lines.to)) continue;
       if (total >= offset && picked.length < limit) picked.push(ref[i]!);
       total++;
@@ -104,12 +119,13 @@ export function listingFromLinks(bookKey: string, links: readonly Link[], ms: nu
   const otherKeys: string[] = [];
   const otherAt = new Map<string, number>();
   const n = links.length;
-  const rows: ListingRows = { ref: new Int32Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
+  const ref = new Int32Array(n);
+  const rows: ListingRows = { ref, dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
   links.forEach((l, i) => {
     const isOut = l.source.book.key === bookKey;
     const otherKey = (isOut ? l.target : l.source).book.key;
     if (!otherAt.has(otherKey)) otherAt.set(otherKey, otherKeys.push(otherKey) - 1);
-    rows.ref[i] = i;
+    ref[i] = i;
     rows.dir[i] = isOut ? 0 : 1;
     rows.other[i] = otherAt.get(otherKey)!;
     rows.type[i] = CONNECTION_TYPES.indexOf(parseConnectionType(l.declaredType).type);

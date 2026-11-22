@@ -11,6 +11,59 @@ export const CONNECTION_TYPES = [
 
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
+/*
+ * INLINE_LINKER — "ציטוט בטקסט": a connection type of OTZARIA'S PERSONAL IMPORT only (Otzaria/otzaria, docs/personal_databases.md,
+ * commit 6f71470e, issue #4308), a citation clickable inside the text. It is NOT in the generator's enum above:
+ * appending it there would give it a database id (index + 1) that the generator may give to another type later,
+ * and the library generator reads it as an unknown type, OTHER. So it is a declared string of a private-use file,
+ * accepted by validateLink only when the export purpose is "private" (LINK_FORMATS §1.12).
+ */
+export const INLINE_LINKER_TYPE = "INLINE_LINKER";
+export const INLINE_LINKER_LABEL = "ציטוט בטקסט";
+
+/**
+ * Which Otzaria builds know INLINE_LINKER, as measured on `checkedOn` with `gh api repos/Otzaria/otzaria`: the commit is an
+ * ancestor of `dev` and of no published release (the newest, 0.9.98.3+809, is 2,582 commits behind it, and its
+ * user_import_parser.dart has no INLINE_LINKER). `supportedFrom` is the first PUBLISHED release that has it, null until one
+ * does: set it when a release ships it (and say so in LINK_FORMATS §1.12). Nothing in the tool promises support in every version.
+ */
+export const INLINE_LINKER_SUPPORT = {
+  commit: "6f71470e",
+  commitDate: "2026-11-20",
+  checkedOn: "2026-11-22",
+  latestStable: "0.9.98.3+809",
+  latestStableDate: "2026-11-02",
+  supportedFrom: null as string | null,
+} as const;
+
+/** The one sentence for the user: this type depends on the Otzaria version (the export warning, the engine option, the notes). */
+export function inlineLinkerVersionNote(): string {
+  const s = INLINE_LINKER_SUPPORT;
+  return s.supportedFrom
+    ? `ציטוט בטקסט תלוי בגרסת אוצריא: הוא נתמך מגרסה ${s.supportedFrom} (בדיקה מ־${s.checkedOn}). בגרסה ישנה יותר הייבוא האישי ידחה אותו כסוג קישור לא מוכר.`
+    : `ציטוט בטקסט תלוי בגרסת אוצריא: נכון ל־${s.checkedOn} הוא קיים רק בענף dev של אוצריא (commit ${s.commit}, ${s.commitDate}) ועדיין לא בגרסה שפורסמה. הגרסה היציבה האחרונה שנבדקה, ${s.latestStable} (${s.latestStableDate}), לא מכירה אותו, והייבוא האישי שלה ידחה אותו כסוג קישור לא מוכר.`;
+}
+
+/**
+ * Whether a declared type means INLINE_LINKER in ANY spelling the app would read — the gate of the library
+ * purpose is this wide on purpose. The app (Otzaria/otzaria lib/models/link_types.dart, `LinkTypes.normalize`)
+ * trims, upper-cases and turns every run of whitespace or "-" into "_", so "inline-linker", "INLINE-LINKER",
+ * "inline<tab>linker" and a non-breaking space all mean it; the Hebrew label is matched after a trim
+ * (user_import_parser.dart). Beyond that, "InlineLinker" and a label with doubled spaces are held too: nothing that
+ * is meant as this private type may reach a library file.
+ */
+export function isInlineLinkerType(raw: unknown): boolean {
+  const s = String(raw ?? "").trim();
+  if (s.replace(/\s+/g, " ") === INLINE_LINKER_LABEL) return true;
+  return /^inline_*linker$/i.test(s.replace(/[\s-]+/g, "_"));
+}
+
+/** The two spellings the app's documentation gives; the private export accepts only these. */
+export const isDocumentedInlineLinker = (raw: unknown): boolean => {
+  const s = String(raw ?? "").trim();
+  return s === INLINE_LINKER_TYPE || s === INLINE_LINKER_LABEL;
+};
+
 /** connection_type.id in the database. */
 export const connectionTypeId = (t: ConnectionType): number => CONNECTION_TYPES.indexOf(t) + 1;
 

@@ -76,3 +76,42 @@ test("compare the database with a links file, merge two versions, a group action
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * #15: two versions of a file that differ only in the place name (heRef_2) and a ref used to be listed as
+ * "conflicts" whose two columns read the same. They are their own group now, and the cell names the field.
+ */
+test("two versions of a links file that differ only in the place name: not a conflict, and the difference is shown", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  let chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: /^ארצות החיים/ }).getByRole("button", { name: "מקור" }).click({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).first().click();
+  await page.getByRole("button", { name: "השוואה ומיזוג" }).click();
+  const dlg = page.getByRole("dialog");
+  const OLD = JSON.stringify([LIB_1, DB_ROWS[0]], null, 2);
+  const NEW = JSON.stringify([LIB_1, { ...DB_ROWS[0], heRef_2: "שם מקום אחר לגמרי", ref_2: "Placeholder Ref 1:1" }], null, 2);
+  for (const text of [OLD, NEW]) {
+    chooser = page.waitForEvent("filechooser");
+    await dlg.getByRole("button", { name: /הוספת קובצי/ }).click();
+    await (await chooser).setFiles([{ name: NAME, mimeType: "application/json", buffer: Buffer.from(text) }]);
+  }
+  // two files of the same name: the second is listed as "(2)"; pick by position, the older file first
+  await dlg.getByLabel("לפני (א)").selectOption({ index: 0 });
+  await dlg.getByLabel("אחרי (ב)").selectOption({ index: 1 });
+  await dlg.getByRole("button", { name: "השוואה", exact: true }).click();
+  const chips = dlg.locator(".cmp-diff .chip");
+  await expect(chips).toHaveText([/^סותרים\s*0$/, /^רק שם המקום\s*1$/, /^טווחים חופפים\s*0$/, /^רק ב־.*\s0$/, /^רק ב־.*\s0$/, /^זהים\s*1$/]);
+  await chips.filter({ hasText: "רק שם המקום" }).click();
+  const row = dlg.locator(".cmp-diff .cmp-table tbody tr");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("שם המקום ביעד: «שם מקום אחר לגמרי»");
+  await expect(row).toContainText("ציון ספריא בספר היעד: «Placeholder Ref 1:1»");
+  await expect(row).toContainText("ציון ספריא בספר היעד: ריק");
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});

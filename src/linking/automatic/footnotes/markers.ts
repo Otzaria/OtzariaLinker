@@ -158,7 +158,7 @@ const escapeTag = (t: string) => t.replace(/[^a-zA-Z0-9:_-]/g, "");
 function detectTag(html: string, map: VisibleMap, tagName: string, style: Marker["style"], opts: DetectOptions): Marker[] {
   const tag = escapeTag(tagName);
   if (!tag) return [];
-  const openRe = new RegExp(`<\\s*${tag}\\b([^>]*)>`, "gi");
+  const openRe = new RegExp(`<\\s*${tag}\\b([^<>]*)>`, "gi");
   const opens = [...html.matchAll(openRe)];
   const out: Marker[] = [];
   for (let i = 0; i < opens.length; i++) {
@@ -270,7 +270,7 @@ const stripTagsLoose = (s: string) => s.replace(/<[^>]*>?/g, "");
 
 /* ------------------------------------------------------------------ Sefaria data-label elements */
 
-const LABEL_TAG_RE = /<([a-z][a-z0-9]*)\b([^>]*)>/gi;
+const LABEL_TAG_RE = /<([a-z][a-z0-9]*)\b([^<>]*)>/gi;
 const ATTR_RE: Readonly<Record<string, RegExp>> = { "data-commentator": /\bdata-commentator\s*=\s*(["'])([^"']*)\1/i, "data-label": /\bdata-label\s*=\s*(["'])([^"']*)\1/i };
 const attr = (attrs: string, name: "data-commentator" | "data-label"): string | null => ATTR_RE[name]!.exec(attrs)?.[2] ?? null;
 
@@ -409,7 +409,7 @@ function taggedLead(html: string, map: VisibleMap, lead: number, opts: DetectOpt
   const afterFrom = map.ends[j]!;
   const before = html.slice(beforeFrom, map.starts[lead]!);
   const after = html.slice(afterFrom, j + 1 < n ? map.starts[j + 1]! : html.length);
-  const opens = [...before.matchAll(/<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g)];
+  const opens = [...before.matchAll(/<\s*([a-zA-Z][a-zA-Z0-9]*)\b[^<>]*>/g)];
   const closes = [...after.matchAll(/<\s*\/\s*([a-zA-Z][a-zA-Z0-9]*)\s*>/g)];
   // innermost element that opens right before the number and closes right after it
   for (const o of opens.reverse()) {

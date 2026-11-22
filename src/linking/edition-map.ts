@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../core/csv";
 import type { LineFate } from "../matching/line-diff";
 
 /*
@@ -83,7 +84,7 @@ export const ROW_KIND_LABEL: Readonly<Record<EditionRowKind, string>> = {
  * every line of each edition appears exactly once. The code column is stable (EditionRowKind).
  */
 export function lineMappingCsv(rows: readonly EditionRow[], d?: Pick<EditionDiff, "similarity">): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const head = ["שורה במהדורה הישנה", "שורה במהדורה החדשה", "מצב", "דמיון", "קוד"];
   const out = [head.map(esc).join(",")];
   for (const r of rows) {

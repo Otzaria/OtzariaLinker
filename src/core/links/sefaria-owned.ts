@@ -1,3 +1,4 @@
+import { scanEnd } from "../limits";
 import type { BookRef, LinkSide } from "./model";
 import { sefariaRefFromHeRef } from "./sefaria-ref";
 
@@ -82,7 +83,7 @@ export function firstRefIn(line: number, end: number, block: RefBlock | undefine
   if (!block) return { line };
   const why = block(line);
   if (why === null) return { line };
-  for (let l = line + 1; l <= end; l++)
+  for (let l = line + 1, last = scanEnd(line, end); l <= last; l++)
     if (block(l) === null)
       return {
         line: l,
@@ -131,7 +132,7 @@ export function withoutRange(
   const span = `${side.line + 1}–${side.end + 1}`;
   if (block && side.end - side.line + 1 <= SPAN_EACH_LINE_MAX) {
     const lines: number[] = [];
-    for (let l = side.line; l <= side.end; l++) if (block(l) === null) lines.push(l);
+    for (let l = side.line, last = scanEnd(side.line, side.end); l <= last; l++) if (block(l) === null) lines.push(l);
     if (lines.length > 1) {
       const skipped = side.end - side.line + 1 - lines.length;
       return {

@@ -36,7 +36,8 @@ export interface DbLinkRow {
  * Nothing about lines, anchors or ranges: those are read only for the page shown (DbLinksReader.byIds).
  */
 export interface BookLinkRows {
-  ids: Int32Array;
+  /** link ids: Float64 — a personal database numbers links and lines past 2^32 */
+  ids: Float64Array;
   /** 0 = the book is the stored source, 1 = the stored target */
   dir: Uint8Array;
   /** book id at the other end (the book itself for a link inside one book) */
@@ -44,7 +45,9 @@ export interface BookLinkRows {
   /** index into CONNECTION_TYPES (unknown stored names count as OTHER) */
   type: Uint8Array;
   /** line id at the listed book's end */
-  ownLine: Int32Array;
+  ownLine: Float64Array;
+  /** 0-based line at the OTHER end, from link.targetLineIndex, for the rows where the listed book is the stored source (-1: not known) */
+  otherLine: Int32Array;
   /** "index": through the book indexes of `link`; "scan": a full scan (the database has no such index) */
   method: "index" | "scan";
 }
@@ -97,6 +100,7 @@ export class DbLinksReader {
     const [ixOut, ixIn] = [await this.file.findIndex("link", ["sourceBookId"]), await this.file.findIndex("link", ["targetBookId"])];
     const L = (n: string) => col(this.t.link, n);
     const [sb, tb, sl, tl, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("connectionTypeId"), L("connectionType")];
+    const tliAt = L("targetLineIndex");
     const rows: { id: number; v: readonly unknown[] }[] = [];
     let method: BookLinkRows["method"] = "index";
     if (ixOut && ixIn) {
@@ -118,11 +122,12 @@ export class DbLinksReader {
       }
     }
     const out: BookLinkRows = {
-      ids: new Int32Array(rows.length),
+      ids: new Float64Array(rows.length),
       dir: new Uint8Array(rows.length),
       other: new Int32Array(rows.length),
       type: new Uint8Array(rows.length),
-      ownLine: new Int32Array(rows.length),
+      ownLine: new Float64Array(rows.length),
+      otherLine: new Int32Array(rows.length).fill(-1),
       method,
     };
     rows.forEach(({ id, v }, i) => {
@@ -133,6 +138,7 @@ export class DbLinksReader {
       out.other[i] = Number(v[isOut ? tb : sb]);
       out.type[i] = CONNECTION_TYPES.indexOf(this.typeOf(name));
       out.ownLine[i] = Number(v[isOut ? sl : tl]);
+      if (isOut && tliAt >= 0 && v[tliAt] !== null && v[tliAt] !== undefined) out.otherLine[i] = Number(v[tliAt]);
     });
     return out;
   }

@@ -1,5 +1,6 @@
 import { pushTo } from "../../core/collections";
 import { LinkerError } from "../../core/errors";
+import { MAX_BOOK_LINES } from "../../core/limits";
 import { LineContentCodec } from "../compression/zstd";
 import type { ByteSource } from "../sqlite/lazy/byte-source";
 import type { SqlValue } from "../sqlite/lazy/record";
@@ -20,8 +21,10 @@ export interface DbBook {
   orderIndex: number | null;
   /** null when the database does not say */
   isBaseBook: boolean | null;
-  /** as declared by the database; count lines with lineEntries() for the truth */
+  /** as declared by the database (null when it declares none or an impossible one, see declaredTotalInvalid); count lines with lineEntries() for the truth */
   totalLines: number | null;
+  /** the declared totalLines when it is not a count of lines (negative, fractional, beyond MAX_BOOK_LINES): never passed on as a count */
+  declaredTotalInvalid?: number;
   /** book.dependenceType (schema 2+), verbatim; null when absent */
   dependenceType: string | null;
 }
@@ -35,6 +38,15 @@ export interface DbLine {
   /** schema-7 footnotes of this line, in noteIndex order (bodies decoded) */
   notes: NoteAt[];
 }
+
+/** one line of a book: its 0-based lineIndex and its line id */
+export interface LineEntry {
+  index: number;
+  id: number;
+}
+
+/** how many line entries the reader keeps across books (≈ 40 bytes each: 400,000 are some 16 MB) */
+const ENTRY_BUDGET = 400_000;
 
 export class OtzariaDbReader {
   private constructor(
@@ -66,6 +78,13 @@ export class OtzariaDbReader {
     });
   }
 
+  /** The database is closed: its dictionaries leave the worker's pool. */
+  close(): void {
+    this.codec.release();
+    this.entries.clear();
+    this.entrySizes.clear();
+  }
+
   async books(): Promise<DbBook[]> {
     const sources = new Map<number, string>();
     if (this.t.source) {
@@ -85,7 +104,7 @@ export class OtzariaDbReader {
         categoryId: num(at(categoryId)),
         orderIndex: num(at(orderIndex)),
         isBaseBook: at(isBase) === null ? null : Number(at(isBase)) === 1,
-        totalLines: num(at(total)),
+        ...(validTotal(num(at(total))) ?? { totalLines: null, declaredTotalInvalid: num(at(total))! }),
         dependenceType: at(dependence) === null ? null : String(at(dependence)),
       });
     }
@@ -135,8 +154,43 @@ export class OtzariaDbReader {
     return out;
   }
 
-  /** (lineIndex, lineId) of every line of a book, in order — from the (bookId, lineIndex) index when present. */
-  async lineEntries(bookId: number): Promise<{ index: number; id: number }[]> {
+  /** the line entries of the last few books, by book id, in LRU order (the database is read-only, so an entry never goes stale) */
+  private readonly entries = new Map<number, Promise<readonly LineEntry[]>>();
+  private readonly entrySizes = new Map<number, number>();
+
+  /**
+   * (lineIndex, lineId) of every line of a book, in order. The tool walks a book in chunks of 200 lines, and every chunk
+   * (lines, existingLinks, heRefs…) needs the entries of its book: read once per book and kept (measured on the library's biggest
+   * book, 190,453 lines: 463 ms per chunk, 953 chunks). The cache is capped by the SUM of its entries, the newest book always stays.
+   */
+  lineEntries(bookId: number): Promise<readonly LineEntry[]> {
+    const hit = this.entries.get(bookId);
+    if (hit) {
+      this.entries.delete(bookId);
+      this.entries.set(bookId, hit);
+      return hit;
+    }
+    const read = this.readLineEntries(bookId);
+    this.entries.set(bookId, read);
+    read.then(
+      (list) => {
+        if (this.entries.get(bookId) !== read) return;
+        this.entrySizes.set(bookId, list.length);
+        let total = 0;
+        for (const n of this.entrySizes.values()) total += n;
+        for (const k of [...this.entries.keys()]) {
+          if (total <= ENTRY_BUDGET || this.entries.size <= 1 || k === bookId) break;
+          total -= this.entrySizes.get(k) ?? 0;
+          this.entries.delete(k);
+          this.entrySizes.delete(k);
+        }
+      },
+      () => void (this.entries.get(bookId) === read && this.entries.delete(bookId)), // a failed read is not cached
+    );
+    return read;
+  }
+
+  private async readLineEntries(bookId: number): Promise<LineEntry[]> {
     const ix = await this.file.findIndex("line", ["bookId", "lineIndex"]);
     const out: { index: number; id: number }[] = [];
     if (ix) {
@@ -244,6 +298,11 @@ export class OtzariaDbReader {
 
 function colIndex(t: TableInfo, name: string): number {
   return t.columns.findIndex((c) => c.name.toLowerCase() === name.toLowerCase());
+}
+
+/** {totalLines} when the declared count can be one (null passes as "not declared"), else undefined */
+function validTotal(n: number | null): { totalLines: number | null } | undefined {
+  return n === null || (Number.isInteger(n) && n >= 0 && n <= MAX_BOOK_LINES) ? { totalLines: n } : undefined;
 }
 
 function num(v: SqlValue | null): number | null {

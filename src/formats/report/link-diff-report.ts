@@ -1,4 +1,5 @@
-import { diffGroup, type LinkDiff, type LinkDiffGroup, type LinkDiffKind } from "../../core/links/link-diff";
+import { humanCsvCell } from "../../core/csv";
+import { detailDifferences, type DetailField, diffGroup, type LinkDiff, type LinkDiffGroup, type LinkDiffKind } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
 
 /*
@@ -24,17 +25,32 @@ const only = (name: string) => (name.startsWith("ה") && !name.includes(".") ? `
 export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffGroup, string>> => ({
   identical: "זהים",
   conflict: "סותרים",
+  details: "רק שם המקום",
   overlap: "טווחים חופפים",
   onlyA: only(a),
   onlyB: only(b),
 });
 
+/** The detail fields in the user's words (the fields of the file are heRef_2, ref_1, ref_2) */
+export const DETAIL_LABELS: Readonly<Record<DetailField, string>> = { heRef2: "שם המקום ביעד", ref1: "ציון ספריא בספר המקור", ref2: "ציון ספריא בספר היעד" };
+
+/**
+ * What a "details" row says on each side: only the fields that differ, quoted so that a space or an empty
+ * value is visible ("שם המקום ביעד: «x» ← «y»" shows the two as the same line would hide it, #15).
+ */
+export function detailsText(a: Link | undefined, b: Link | undefined, side: "a" | "b"): string {
+  if (!a || !b) return "";
+  return detailDifferences(a, b)
+    .map((d) => `${DETAIL_LABELS[d.field]}: ${d[side] ? `«${d[side]}»` : "ריק"}`)
+    .join(" · ");
+}
+
 const place = (s: LinkSide) => `${s.line + 1}${s.end !== undefined && s.end > s.line ? `–${s.end + 1}` : ""}`;
-const sideCells = (l?: Link) => (l ? [l.source.book.title, place(l.source), l.target.book.title, place(l.target), l.declaredType, l.anchor ? String(l.anchor.rawStart) : "", l.heRef2] : ["", "", "", "", "", "", ""]);
+const sideCells = (l?: Link) => (l ? [l.source.book.title, place(l.source), l.target.book.title, place(l.target), l.declaredType, l.anchor ? String(l.anchor.rawStart) : "", l.heRef2, l.ref1 ?? "", l.ref2 ?? ""] : ["", "", "", "", "", "", "", "", ""]);
 
 export function linkDiffCsv(d: LinkDiff, a: string, b: string): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const side = (n: string) => [`${n}: ספר מקור`, "שורה", "ספר יעד", "שורה", "סוג", "עוגן", "שם המקום ביעד"];
+  const esc = humanCsvCell;
+  const side = (n: string) => [`${n}: ספר מקור`, "שורה", "ספר יעד", "שורה", "סוג", "עוגן", "שם המקום ביעד", "ref_1", "ref_2"];
   const groups = diffGroupLabels(a, b);
   const head = ["קבוצה", "שינוי", ...side(a), ...side(b)];
   const rows = d.rows.map((r) => [groups[diffGroup(r)], DIFF_KIND_LABELS[r.kind], ...sideCells(r.a), ...sideCells(r.b)].map(esc).join(","));

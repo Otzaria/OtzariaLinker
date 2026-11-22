@@ -148,3 +148,19 @@ export function unsafeFileTitle(title: string): string | null {
   if (/[. ]$/.test(title)) return "השם מסתיים בנקודה או ברווח, ו־Windows משמיטה אותם משם קובץ";
   return null;
 }
+
+/**
+ * A title as the name of a download the program makes (a report, the project file): the title itself when
+ * `unsafeFileTitle` accepts it, else the same title with what that refuses replaced by "_" (never a path, never
+ * "..", never a trailing dot or space) — `fallback` when nothing is left. The EXPORT of links does not use
+ * this: there an unsafe title is refused, because the file name must equal the title the generator reads.
+ */
+export function safeFileTitle(title: string, fallback = "קובץ"): string {
+  if (unsafeFileTitle(title) === null) return title;
+  const clean = title
+    .replace(new RegExp(UNSAFE_FILE_CHAR.source, "g"), "_")
+    .replace(/\.{2,}/g, "_")
+    .replace(/[. ]+$/, "")
+    .trim();
+  return /^_*$/.test(clean) ? fallback : clean;
+}

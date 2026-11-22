@@ -1,5 +1,17 @@
 import { parseConnectionType, type ConnectionType } from "./connection-type";
-import type { BookOrigin, Link } from "./model";
+import { DB_LINK_FLAGS, type BookOrigin, type DbLinkFlag, type Link } from "./model";
+
+export { DB_LINK_FLAGS, type DbLinkFlag };
+
+/** The flags in the user's words (the panel shows them; docs/research/PERSONAL_DB_V52_AUDIT.md §5 has the real counts). */
+export const DB_LINK_FLAG_LABELS: Readonly<Record<DbLinkFlag, { he: string; hint: string }>> = {
+  "target-out-of-range": { he: "יעד מחוץ לספר", hint: "שורת היעד גדולה ממספר השורות של ספר היעד: הקישור כנראה מצביע על ספר אחר או על גרסה אחרת" },
+  "header-target": { he: "היעד הוא כותרת", hint: "שורת היעד היא כותרת (יש לה ערך בתוכן העניינים)" },
+  "header-source": { he: "המקור הוא כותרת", hint: "שורת המקור היא כותרת: אוצריא של הספרייה מדלגת על קישור כזה" },
+  "reverse-duplicate": { he: "כפילות הפוכה", hint: "אותן שתי שורות מקושרות גם בכיוון ההפוך: באפליקציה זה קישור כפול" },
+  "ambiguous-title": { he: "כותרת עמומה", hint: "שם ספר היעד הוא גם שם של ספר בספרייה הרשמית, ולא ידוע לאיזה מהם הקישור התכוון" },
+  "source-out-of-range": { he: "המקור מחוץ לספר", hint: "שורת המקור גדולה ממספר השורות של ספר המקור: השורה הזאת לא קיימת בספר" },
+};
 
 /*
  * Links that already exist in an opened database, as the worker lists them for one book (stage 10:
@@ -20,6 +32,8 @@ export interface DbLinkQuery {
   otherBookKey?: string;
   /** lines of the listed book, 0-based inclusive */
   lines?: { from: number; to: number };
+  /** only links that carry this flag */
+  flag?: DbLinkFlag;
   offset: number;
   limit: number;
 }
@@ -62,6 +76,22 @@ export interface DbLinkSummary {
   byType: DbLinkTypeCount[];
   /** by the book at the other end, most links first */
   byBook: DbLinkBookCount[];
+  /** how many of the book's links carry each flag (only those with any; external_link databases only) */
+  flags?: { flag: DbLinkFlag; count: number }[];
+  /**
+   * external_link rows that could not become a listed link, counted instead of dropped unseen (only when there are
+   * any): `badLine` a line number that is not a whole non-negative number (and no ref to go by), `noPlace` neither a
+   * target line nor a ref, `orphanSource` rows of the whole database whose source book does not exist.
+   */
+  unlisted?: { badLine: number; noPlace: number; orphanSource: number };
+  /**
+   * Only for a database that has BOTH a `link` table and `external_link`: what the merge did. `link` and `externalLink` are
+   * the links of this book each table gave to the list; `duplicatesDropped` external_link rows were left out because the
+   * `link` table says the same link (same own line, other book, other line and type); `incomingUnchecked` external_link
+   * rows into this book are listed without being compared with the `link` table (its far end is not known without a
+   * lookup), so a link that both tables hold may appear twice among them.
+   */
+  tables?: { link: number; externalLink: number; duplicatesDropped: number; incomingUnchecked: number };
   /** "index": through idx_link_source_book/idx_link_target_book; "scan": the database has neither (slow) */
   method: "index" | "scan";
   /** what reading the summary cost, for the status line and the real-database test */

@@ -1,3 +1,4 @@
+import { embeddedLibraryLinkFiles } from "../core/links/library-link-files";
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
 import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
@@ -5,7 +6,7 @@ import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
-import { path2ForTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
+import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
@@ -246,7 +247,14 @@ export class AppStore {
 
   /* ---------------- sources ---------------- */
 
+  /**
+   * What the last openFiles did to the sources: the ids it added, and the ids of open sources whose file
+   * was picked again (not opened a second time, #22). A task sheet reads it to mark its step done.
+   */
+  lastOpen: { added: string[]; reused: string[] } = { added: [], reused: [] };
+
   async openFiles(files: InputFile[]): Promise<void> {
+    this.lastOpen = { added: [], reused: [] };
     if (!files.length) return;
     const res = await this.runTask(`פותח ${files.length === 1 ? files[0]!.path : `${files.length} קבצים`}…`, (opts) => this.service.open(files, opts));
     if (!res) return;
@@ -256,11 +264,22 @@ export class AppStore {
       skipped: res.skipped.length,
       needsMapping: res.needsMapping?.length ?? 0,
     });
+    // a file that is open already is not a new source: the same sources, the same books (#22)
+    const openIds = new Set(this.sources.peek().map((x) => x.info.id));
+    const reused = (res.reused ?? []).filter((r) => openIds.has(r.info.id));
+    // the worker holds it, the store does not (an earlier open of it was cancelled after the worker had added it): it is new here
+    const orphans = (res.reused ?? []).filter((r) => !openIds.has(r.info.id));
+    const fresh = [...res.sources, ...orphans];
+    this.lastOpen = { added: fresh.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
+    if (reused.length) {
+      const names = reused.map((r) => `"${r.info.label}"`).join(", ");
+      this.notify("info", reused.length === 1 ? `${names} כבר פתוח, ולכן לא נטען שוב. ממשיכים עם הספרים הפתוחים.` : `${names} כבר פתוחים, ולכן לא נטענו שוב. ממשיכים עם הספרים הפתוחים.`);
+    }
     batch(() => {
-      this.sources.value = [...this.sources.value, ...res.sources];
-      for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
+      this.sources.value = [...this.sources.value, ...fresh];
+      for (const s of fresh) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
-    if (res.sources.length) this.attachLinks();
+    if (fresh.length) this.attachLinks();
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
     const each = (kind: string, run: (path: string, text: string) => void) => {
@@ -283,7 +302,7 @@ export class AppStore {
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
-    const opened = res.sources.flatMap((s) => s.books);
+    const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
       this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
       this.chooseRoles(opened);
@@ -332,9 +351,18 @@ export class AppStore {
     return notesOn?.key ?? null;
   }
 
-  async closeSource(id: string): Promise<void> {
+  /**
+   * Closes a source and releases what the worker held for it. Not while a task runs (a drop being opened, an
+   * engine, a max-link job: the worker may be reading this very source): the user is told and nothing closes.
+   * Returns whether it closed (#22).
+   */
+  async closeSource(id: string): Promise<boolean> {
     const s = this.sources.value.find((x) => x.info.id === id);
-    if (!s) return;
+    if (!s) return true;
+    if (this.running.length > 0 || this.maxLink.running.peek()) {
+      this.notify("warning", `"${s.info.label}" בשימוש עכשיו: עבודה רצה על הספרים הפתוחים. חכו שתסתיים (או בטלו אותה) ונסו לסגור שוב.`);
+      return false;
+    }
     await this.service.close(id);
     this.dbLinks.forgetSummary();
     batch(() => {
@@ -353,6 +381,7 @@ export class AppStore {
       }
     });
     this.lines.forgetSource(id);
+    return true;
   }
 
   /**
@@ -737,7 +766,7 @@ export class AppStore {
     const p = this.mappedFrom.get(sourceId);
     if (!p) return;
     const current = this.dbMappings.value.get(p.preview.fingerprint)?.mapping ?? p.guess;
-    await this.closeSource(sourceId);
+    if (!(await this.closeSource(sourceId))) return;
     this.mappedFrom.delete(sourceId);
     this.pendingDbs.value = [...this.pendingDbs.value, { ...p, guess: current }];
   }
@@ -982,7 +1011,11 @@ export class AppStore {
         if (!b || this.isLibrarySource(sourceIdOfBookKey(b.key))) return false;
         return (this.booksByTitle.value.get(ref.title) ?? []).some((x) => x.key !== b.key && this.isLibrarySource(sourceIdOfBookKey(x.key)));
       },
+      // the database mark (wide: Sefaria's and automatic links count); a file of that name in the library's list holds
+      // separately, in validateLink, for the library purpose only
       libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
+      libraryFileListed: (title) => embeddedLibraryLinkFiles().titles.has(title),
+      libraryFileListLabel: embeddedLibraryLinkFiles().label,
       existing: (l) => this.dbLinks.matchDb(l),
       bookChanged: (ref) => {
         const saved = this.projectBookLines.value.get(ref.title);
@@ -1150,7 +1183,7 @@ export class AppStore {
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
-    this.saver.save(`${t}.otzlinker.json`, this.projectText(), "application/json");
+    this.saver.save(`${safeFileTitle(t, "פרויקט")}.otzlinker.json`, this.projectText(), "application/json");
     this.savedRevision.value = this.linkState.value.revision;
     this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
   }

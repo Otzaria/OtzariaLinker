@@ -1,6 +1,8 @@
+import { humanCsvCell } from "../core/csv";
 import type { BookRef } from "../core/links/model";
 import { combineFingerprints } from "../core/text/fingerprint";
 import { ENGINES, type EngineId, type Suggestion } from "./automatic";
+import { sanitizeStoredOptions } from "./automatic/option-specs";
 import type { StepResult } from "./maxlink-report";
 import type { MaxLinkPlan, PlanStep } from "./plan";
 
@@ -83,6 +85,29 @@ export interface BookResult {
   dbLinksUnread?: { title: string; why: string }[];
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isBookRef = (v: unknown): boolean => isObj(v) && typeof v.key === "string" && typeof v.title === "string" && typeof v.origin === "string";
+
+/**
+ * A book's stored result read back from the browser's storage: null when it is not one (damaged JSON, a wrong
+ * shape) — the caller treats that as "nothing kept" and the book runs again. Only the shape the restore relies
+ * on is checked; the values inside a step's report are display data.
+ */
+export function parseBookResult(text: string | null | undefined): BookResult | null {
+  if (!text) return null;
+  try {
+    const r: unknown = JSON.parse(text);
+    if (!isObj(r) || typeof r.title !== "string" || !isBookRef(r.source) || !Array.isArray(r.steps) || !Array.isArray(r.dbLinkKeys)) return null;
+    if (!r.dbLinkKeys.every((k) => typeof k === "string")) return null;
+    if (r.partial !== undefined && typeof r.partial !== "boolean") return null;
+    if (r.dbLinksUnread !== undefined && !(Array.isArray(r.dbLinksUnread) && r.dbLinksUnread.every((u) => isObj(u) && typeof u.title === "string" && typeof u.why === "string"))) return null;
+    const stepOk = (s: unknown) => isObj(s) && typeof s.id === "string" && typeof s.kind === "string" && typeof s.engine === "string" && ENGINES.some((e) => e.id === s.engine) && isObj(s.item) && (s.target === undefined || isBookRef(s.target));
+    return r.steps.every(stepOk) ? (r as unknown as BookResult) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The steps of each linked book (the plan's focus: the step's source), in the order of the plan's books. */
 export function stepsByBook(plan: MaxLinkPlan): Map<string, PlanStep[]> {
   const by = new Map<string, PlanStep[]>();
@@ -102,16 +127,22 @@ const tallies = (steps: readonly PlanStep[]): Partial<Record<EngineId, EngineTal
   return out;
 };
 
+const NATURAL = new Intl.Collator("he", { numeric: true });
+
 /**
  * The order the waiting books run in: books that read the same other books (a base, the commentaries on
- * it they quote) next to each other, groups in the order they first appear, the plan's order inside a
- * group. The worker keeps the last few books it read (workers/maxlink-job.ts), and the books of one base
+ * it they quote) next to each other, groups in the order they first appear, titles in natural order
+ * ("ביאור 2" before "ביאור 10") inside a group. Not the plan's order: that is the order the files were
+ * opened in, and a chosen folder arrives in the file system's order (NTFS: by name, ext4: by hash), so
+ * the same folder would run, pause and report in a different order on each machine. The worker keeps the last few books it read (workers/maxlink-job.ts), and the books of one base
  * then hit it: in the plan's order a folder alternates between bases, and against the Otzaria database
  * 100 commentaries on the five books of the Torah took 302 s, in this order 154 s (one call for all: 202 s).
  */
 export function runOrder(titles: readonly string[], steps: ReadonlyMap<string, readonly PlanStep[]>): string[] {
   const groups = new Map<string, string[]>();
-  for (const t of titles) {
+  // The collator calls "ביאור 02" and "ביאור 2" equal: a plain code-unit comparison breaks that tie, so the order never
+  // depends on the input order. Array.sort is stable: identical titles (a clash across folders) keep the plan's order.
+  for (const t of [...titles].sort((a, b) => NATURAL.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0))) {
     const k = [...new Set((steps.get(t) ?? []).flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])))].sort().join("|");
     const g = groups.get(k);
     if (g) g.push(t);
@@ -232,7 +263,7 @@ export const STATUS_TEXT: Readonly<Record<JobBookStatus, string>> = {
 
 /** The per-book report as CSV (Excel opens it: BOM, CRLF). */
 export function jobCsv(job: JobRecord): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const title = new Map(ENGINES.map((e) => [e.id, e.title]));
   const rows = [
     ["ספר", "מצב", "הצעות", "שיטות", "שניות", "פירוט"].map(esc).join(","),
@@ -252,6 +283,16 @@ export function jobCsv(job: JobRecord): string {
   return `﻿${rows.join("\r\n")}\r\n`;
 }
 
+/** The stored per-engine options, each validated like the form's (option-specs.ts): a hostile or damaged value is dropped. */
+function storedEngineOptions(stored: object): NonNullable<JobRecord["engineOptions"]> {
+  const out: NonNullable<JobRecord["engineOptions"]> = {};
+  for (const e of ENGINES) {
+    const o = sanitizeStoredOptions(e.id, (stored as Record<string, unknown>)[e.id]);
+    if (Object.keys(o).length) out[e.id] = o;
+  }
+  return out;
+}
+
 /** Parses a stored record; null when it is not one (an older or damaged entry is dropped, never trusted). */
 export function parseJobRecord(text: string | null | undefined): JobRecord | null {
   if (!text) return null;
@@ -267,7 +308,7 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
       scope: typeof r.scope === "string" ? r.scope : "",
       sources: r.sources.filter((s): s is string => typeof s === "string"),
       ...(Array.isArray(r.engines) && { engines: r.engines.filter((e): e is EngineId => ENGINES.some((x) => x.id === e)) }),
-      ...(r.engineOptions && typeof r.engineOptions === "object" && { engineOptions: r.engineOptions }),
+      ...(r.engineOptions && typeof r.engineOptions === "object" && !Array.isArray(r.engineOptions) && { engineOptions: storedEngineOptions(r.engineOptions) }),
       ...(typeof r.preferBase === "string" && { preferBase: r.preferBase }),
       // a job that was running when the tab closed is paused: nothing runs until the user says so
       state: r.state === "running" || !states.includes(r.state as JobState) ? "paused" : r.state!,

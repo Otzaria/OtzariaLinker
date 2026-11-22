@@ -46,14 +46,32 @@ export interface LinkDiff {
   readonly loose: boolean;
 }
 
-/** What a row means for a reader: the five groups the comparison screen filters by. */
-export type LinkDiffGroup = "identical" | "conflict" | "overlap" | "onlyA" | "onlyB";
+/**
+ * What a row means for a reader: the six groups the comparison screen filters by. "details" is the same
+ * stored link whose only difference is heRef_2 / ref_1 / ref_2 (#15): wording of the target's place, not a
+ * disagreement about the link — so it is not a "conflict". Only the GROUP is separate; the row's `kind`
+ * stays "details", which `mergeLinkSets` still reports as a disagreement (nothing held is overwritten).
+ */
+export type LinkDiffGroup = "identical" | "conflict" | "details" | "overlap" | "onlyA" | "onlyB";
 
 export function diffGroup(r: LinkDiffRow): LinkDiffGroup {
   if (r.kind === "same") return "identical";
   if (r.kind === "removed") return "onlyA";
   if (r.kind === "added") return "onlyB";
+  if (r.kind === "details") return "details";
   return r.kind === "range" || r.overlap ? "overlap" : "conflict";
+}
+
+export type DetailField = "heRef2" | "ref1" | "ref2";
+
+/** The detail fields on which two links differ (an absent ref and an empty one are the same: nothing was written). */
+export function detailDifferences(a: Link, b: Link): { field: DetailField; a: string; b: string }[] {
+  const out: { field: DetailField; a: string; b: string }[] = [];
+  const vals = (l: Link): Record<DetailField, string> => ({ heRef2: l.heRef2 ?? "", ref1: l.ref1 ?? "", ref2: l.ref2 ?? "" });
+  const x = vals(a);
+  const y = vals(b);
+  for (const field of ["heRef2", "ref1", "ref2"] as const) if (seenRef(x[field]) !== seenRef(y[field])) out.push({ field, a: x[field], b: y[field] });
+  return out;
 }
 
 interface Oriented {
@@ -75,8 +93,26 @@ function orient(l: Link): Oriented {
 const at = (s: LinkSide) => `${s.book.title}#${s.line}`;
 const span = (s: LinkSide) => (s.end !== undefined && s.end > s.line ? s.end : s.line);
 const anchorKey = (l: Link) => (l.anchor ? `${l.anchor.rawStart}-${l.anchor.rawEnd ?? ""}-${l.anchor.label ?? ""}` : "");
-const detailsKey = (l: Link) => `${l.heRef2}\u0001${l.ref1 ?? ""}\u0001${l.ref2 ?? ""}`;
-const typeKey = (l: Link) => l.declaredType.trim().toLowerCase();
+/**
+ * A reference as a reader sees it, for COMPARISON only (the written value is never changed): zero-width and
+ * direction marks are dropped, every kind of whitespace (NBSP, tab, doubled spaces) is one space, the ends are
+ * trimmed. Two places that differ only in that are the same place.
+ */
+export const seenRef = (v: string | undefined): string =>
+  (v ?? "")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+const detailsKey = (l: Link) => `${seenRef(l.heRef2)}\u0001${seenRef(l.ref1)}\u0001${seenRef(l.ref2)}`;
+/**
+ * The declared type as the generator parses it (parseConnectionType: trim, case, spaces/underscores, the aliases
+ * "quotation_auto", "footnote"…). A type the generator does not know is compared by its own (normalised) text:
+ * two different unknown strings are two different things in the file, though both are stored OTHER.
+ */
+const typeKey = (l: Link) => {
+  const t = parseConnectionType(l.declaredType);
+  return t.known ? t.type : `?${l.declaredType.trim().toLowerCase().replace(/\s+/g, "_")}`;
+};
 const overlaps = (x: LinkSide, y: LinkSide) => x.line <= span(y) && y.line <= span(x);
 const id = (o: Oriented) => `${at(o.s)}>${at(o.t)}:${o.type}`;
 const rangeKey = (o: Oriented) => `${span(o.s)}:${span(o.t)}`;

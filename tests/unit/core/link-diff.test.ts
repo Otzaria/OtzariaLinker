@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
+import { detailDifferences, diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
 import type { BookRef, Link } from "../../../src/core/links/model";
 import { linkDiffCsv } from "../../../src/formats/report/link-diff-report";
 
@@ -95,6 +95,71 @@ describe("diffLinks", () => {
       ["added", "onlyB"],
     ]);
     expect(linkDiffCsv(d, "המסד", "הקובץ").split("\r\n")).toHaveLength(5);
+  });
+
+  /*
+   * #15: two files whose only difference is heRef_2 / ref_1 / ref_2 landed in "conflicts", and the screen
+   * printed neither field, so both columns read identically. They are their own group now, and the fields
+   * that differ are known (and shown).
+   */
+  it("a record that differs only in heRef_2, ref_1 or ref_2 is a 'details' row, not a conflict", () => {
+    const d = diffLinks(
+      [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40)],
+      [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 41)],
+    );
+    const group = (s: number) => diffGroup(d.rows.find((r) => r.a!.source.line === s)!);
+    expect([1, 2, 3].map(group)).toEqual(["details", "details", "details"]);
+    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(3); // the kind stays: merges still treat it as a disagreement
+    expect(group(4)).toBe("conflict"); // another target line is a real disagreement
+  });
+
+  it("names the fields that differ, and only those", () => {
+    expect(detailDifferences(link(1, 10, { ref1: "a", ref2: "b" }), link(1, 10, { ref1: "a", ref2: "c", heRef2: "z" }))).toEqual([
+      { field: "heRef2", a: link(1, 10).heRef2, b: "z" },
+      { field: "ref2", a: "b", b: "c" },
+    ]);
+    expect(detailDifferences(link(1, 10), link(1, 10))).toEqual([]);
+    // an absent ref and an empty one are the same: nothing was written
+    expect(detailDifferences(link(1, 10, { ref1: undefined }), link(1, 10, { ref1: "" }))).toEqual([]);
+  });
+
+  it("the CSV report carries ref_1 and ref_2 of each side", () => {
+    const d = diffLinks([link(1, 10, { ref1: "REF-ONE-A" })], [link(1, 10, { ref1: "REF-ONE-B", ref2: "REF-TWO-B" })]);
+    const csv = linkDiffCsv(d, "א", "ב");
+    expect(csv).toContain("REF-ONE-A");
+    expect(csv).toContain("REF-ONE-B");
+    expect(csv).toContain("REF-TWO-B");
+    expect(csv.split("\r\n")[0]).toContain("ref_1");
+  });
+
+  /*
+   * 1.7 (task list): the references are compared the way a reader sees them — whitespace of any kind (NBSP, tabs,
+   * doubled spaces), zero-width and direction marks do not make two places different — and the type through the
+   * generator's parser, so "COMMENTARY", " commentary " and the alias "quotation_auto" are what they store. The
+   * written values stay as they were; only the comparison is normalised.
+   */
+  it("references that differ only in invisible characters or spacing are the same link", () => {
+    const messy = "ספר ב  ​5	";
+    const a = [link(1, 10, { heRef2: "ספר ב 5", ref1: "Genesis 1:1", ref2: undefined })];
+    const b = [link(1, 10, { heRef2: messy, ref1: "Genesis 1:1 ", ref2: undefined })];
+    const d = diffLinks(a, b);
+    expect(d.rows.map((r) => r.kind)).toEqual(["same"]);
+    expect(detailDifferences(a[0]!, b[0]!)).toEqual([]);
+    expect(linkDiffKey(a[0]!)).toBe(linkDiffKey(b[0]!));
+    // a real difference of words still shows
+    const c = diffLinks(a, [link(1, 10, { heRef2: "ספר ג 5", ref1: "Genesis 1:1" })]);
+    expect(c.rows.map((r) => r.kind)).toEqual(["details"]);
+  });
+
+  it("the type is compared as the generator parses it, not as a lower-cased string", () => {
+    for (const [x, y] of [["COMMENTARY", "commentary"], [" Commentary ", "commentary"], ["quotation_auto", "quotation"], ["Super Commentary", "super_commentary"], ["footnote", "footnotes"]] as const) {
+      const d = diffLinks([link(1, 10, { declaredType: x })], [link(1, 10, { declaredType: y })]);
+      expect(d.rows.map((r) => r.kind), `${x} / ${y}`).toEqual(["same"]);
+    }
+    // two unknown strings are not the same type (the file says different things), a known one and an unknown are not either
+    expect(diffLinks([link(1, 10, { declaredType: "foo" })], [link(1, 10, { declaredType: "bar" })]).rows.map((r) => r.kind)).toEqual(["type"]);
+    expect(diffLinks([link(1, 10, { declaredType: "other" })], [link(1, 10, { declaredType: "foo" })]).rows.map((r) => r.kind)).toEqual(["type"]);
+    expect(diffLinks([link(1, 10, { declaredType: "commentary" })], [link(1, 10, { declaredType: "targum" })]).rows.map((r) => r.kind)).not.toContain("same");
   });
 
   it("100K links against 100K links in well under a second", () => {

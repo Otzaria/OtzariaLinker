@@ -3,7 +3,7 @@ import type { SourceBook } from "../core/books";
 import { dbLinkOrigin } from "../core/links/db-links";
 import { diffLinks, mergeLinkSets, type LinkDiff, type LinkMerge } from "../core/links/link-diff";
 import type { BookRef, Link } from "../core/links/model";
-import { sourceTitleFromLinksFileName } from "../core/links/titles";
+import { safeFileTitle, sourceTitleFromLinksFileName } from "../core/links/titles";
 import { recordToLink } from "../formats/links-json/convert";
 import { detectLayout } from "../formats/links-json/layout";
 import { parseLinksJson } from "../formats/links-json/parse";
@@ -146,7 +146,7 @@ export class LinkCompareState {
 
   saveReport(): void {
     const r = this.result.value;
-    if (r) this.saver.save(`השוואת קישורים - ${r.a.title}.csv`, linkDiffCsv(r.diff, r.a.name, r.b.name), "text/csv;charset=utf-8");
+    if (r) this.saver.save(`השוואת קישורים - ${safeFileTitle(r.a.title)}.csv`, linkDiffCsv(r.diff, r.a.name, r.b.name), "text/csv;charset=utf-8");
   }
 
   /** The merge of the chosen sets of a book, and what it changes against the preferred one (the preview). */

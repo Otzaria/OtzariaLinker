@@ -8,6 +8,7 @@ import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
 import { OtzariaDbHint, SOURCE_OPTIONS, type SourceOption } from "../workspace/add-sources";
 import { SourceBadge } from "../workspace/source-badge";
+import { assignOpenSources, candidatesFor, type OpenSource } from "./task-sources";
 import { ltr } from "../shell/file-name";
 
 /*
@@ -278,11 +279,19 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
     const links = store.linkState.peek().links.size;
     const pending = store.pendingDbs.peek().length;
     await store.openFiles(files);
-    const added = store.sources.peek().filter((s) => !before.has(s.info.id)).map((s) => s.info.id);
+    // a database that was open already is not a new source (#22), but it fills the step all the same
+    const held = new Set(Object.values(done).flatMap((d) => (Array.isArray(d) ? d : [])));
+    const added = [...store.sources.peek().filter((s) => !before.has(s.info.id)).map((s) => s.info.id), ...store.lastOpen.reused.filter((id) => !held.has(id))];
     if (added.length) setDone((d) => ({ ...d, [i]: [...(Array.isArray(d[i]) ? (d[i] as string[]) : []), ...added] }));
     else if (store.linkState.peek().links.size !== links || store.pendingDbs.peek().length > pending) setDone((d) => ({ ...d, [i]: d[i] ?? true }));
   };
   const ready = task.steps.every((s, i) => s.optional || done[i]);
+  // the sources already open (#22): a step takes each once, and the sheet offers them instead of asking again
+  const openNow: OpenSource[] = store.sources.value.map((s) => ({ id: s.info.id, kind: s.info.kind, library: store.isLibrarySource(s.info.id) }));
+  const taken = new Set(Object.values(done).flatMap((d) => (Array.isArray(d) ? d : [])));
+  const use = (i: number, ids: string[]) => setDone((d) => ({ ...d, [i]: [...(Array.isArray(d[i]) ? (d[i] as string[]) : []), ...ids] }));
+  const proposal = assignOpenSources(task.steps, openNow, done);
+  const proposed = Object.keys(proposal).length;
   const start = () => {
     const then = task.then;
     const scoped = then.scopeStep !== undefined ? done[then.scopeStep] : undefined;
@@ -314,6 +323,15 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
         </header>
         <div class="body">
           <p class="muted" style="margin:0">{task.hint}. בחרו את מה שצריך, שלב אחרי שלב; כל מקור מתווסף לאלה שכבר פתוחים.</p>
+          {proposed > 0 && (
+            <div class="opened-offer">
+              <span class="grow">יש כבר מקורות פתוחים שמתאימים למשימה הזו: לא צריך לבחור אותם שוב.</span>
+              <button class="btn outlined" onClick={() => Object.entries(proposal).forEach(([i, ids]) => use(Number(i), ids))}>
+                <Icon name="oz_check" size={16} />
+                המשך עם המקורות הפתוחים
+              </button>
+            </div>
+          )}
           <ol class="steps">
             {task.steps.map((s, i) => (
               <li key={i} class={done[i] ? "done" : undefined}>
@@ -339,6 +357,18 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
                       <SourceBadge source={src} name /> · {src.books.length.toLocaleString("he")} ספרים
                     </div>
                   ))}
+                  {!done[i] &&
+                    candidatesFor(s, openNow, taken).map((c) => {
+                      const src = store.sources.value.find((x) => x.info.id === c.id)!;
+                      return (
+                        <div key={c.id} class="opened offer">
+                          <button class="btn text small" onClick={() => use(i, [c.id])} aria-label={`${s.label}: שימוש במקור הפתוח ${src.info.label}`}>
+                            <Icon name="fl_checkmark_circle" size={14} />
+                            שימוש במקור הפתוח: <SourceBadge source={src} name /> · {src.books.length.toLocaleString("he")} ספרים
+                          </button>
+                        </div>
+                      );
+                    })}
                   {done[i] === true && <div class="opened"><Icon name="fl_checkmark_circle" size={14} /> נטען</div>}
                   {s.dbHint && <OtzariaDbHint compact />}
                 </div>

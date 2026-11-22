@@ -36,7 +36,9 @@ test("routes: a guided workflow, tabs, max-link, help and export; Back/Forward/E
   await (await chooser).setFiles(dir);
   await expect(sheet.locator(".steps > li").first()).toHaveClass(/done/, { timeout: 30_000 });
   await expect(start).toBeDisabled(); // the database is still missing
-  await expect(sheet).toContainText("C:\\ProgramData\\otzaria\\books\\seforim.db");
+  // the hint shows the folder, not the file: a file path pasted into the file dialog opens the file (#16)
+  await expect(sheet).toContainText("C:\\ProgramData\\otzaria\\books");
+  await expect(sheet).not.toContainText("books\\seforim.db");
   chooser = page.waitForEvent("filechooser");
   await sheet.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
   await (await chooser).setFiles([DB]);

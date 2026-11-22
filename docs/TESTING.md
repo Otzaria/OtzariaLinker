@@ -181,6 +181,8 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | `tests/integration/database/real-db.local.test.ts` | הקורא העצל ו־`OtzariaDbReader` מול המסד המלא | `OTZARIA_DB` |
 | `tests/integration/database/alt-toc-real-db.local.test.ts` | מבני `alt_toc` של ספרים שאינם של ספריא (ספר העיטור, תרגום ותפסיר רס"ג) במסד האמיתי | `OTZARIA_DB` |
 | `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; והשחזור של רשומות הספרייה מהמסד | `OTZARIA_DB`; הבלוק השני רק עם `OTZARIA_LIBRARY` |
+| `tests/integration/database/fix-round-measure.local.test.ts` | מדידות סבב התיקון לפני מיזוג (PR1): עלות חלוקה לטווחים ב־`external_link`, זיכרון, ביטול סריקה משותפת, מיפוי של מסד גדול, וצעד של 200 שורות על הספר הגדול של הספרייה. מדפיס מספרים מצטברים בלבד; `MEASURE_OUT=<קובץ>` מוסיף אותם גם לקובץ | `OTZARIA_PERSONAL_DB` ו־`OTZARIA_DB` |
+| `tests/integration/database/external-links-real-db.local.test.ts` | `external_link` של מסד אישי אמיתי (PDC, v52): שורות יוצאות של שלושת הספרים הגדולים והסריקה הפנימית, מול SQLite, עם זמנים | `OTZARIA_PERSONAL_DB` |
 | `tests/integration/linking/headings/real-db.local.test.ts` | מנוע הכותרות על 13 זוגות, מול הקישורים שבמסד | `OTZARIA_DB` |
 | `tests/integration/linking/dibur-hamatchil/real-db.local.test.ts` | מנוע הד"ה על ספרים שלמים | `OTZARIA_DB`; `DH_REPORT=<קובץ>` כותב את כל ההחטאות |
 | `tests/integration/linking/footnotes/real-db.local.test.ts` | מנוע ההערות על מדרש ויסעו ועל 25 ספרים עם `line_note` | `OTZARIA_DB` |

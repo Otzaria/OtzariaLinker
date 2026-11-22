@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../core/csv";
 import type { BookRef } from "../core/links/model";
 import { ENGINES, type EngineId, type EngineResult, type Reason } from "./automatic";
 import type { MergedSuggestion, MergeStats } from "./merge";
@@ -166,7 +167,7 @@ const HEAD = ["רמה", "ספר / שיטה", "שלבים", "הצעות", "ודא
 
 /** The report as CSV (UTF-8 with BOM, CRLF — opens in Excel with Hebrew intact, like the QA report). */
 export function reportCsv(rep: MaxLinkReport): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const line = (level: string, label: string, c: ReportCounts, note = "") =>
     [level, label, c.steps, c.links, c.certain, c.review, c.approved, c.rejected, c.existing, c.duplicates, c.agreements, c.conflicts, c.errors, note].map(esc).join(",");
   const rows = [

@@ -340,7 +340,15 @@ export class ExchangeState {
 
   /** `_report.txt` for a plan (and the CSV files, when exporting as CSV). */
   exportReport(plan: ExportBundle, csv?: readonly SefariaCsvFile[]): string {
-    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc, purpose: this.host.exportPurpose.peek(), technical: this.host.prefs?.advanced.peek() === true });
+    return buildExportReport({ date: new Date().toLocaleString("he-IL"), app: APP_VERSION, format: csv ? "sefaria-csv" : "json", links: plan, ...(csv && { csv }), altToc: plan.altToc, purpose: this.host.exportPurpose.peek(), technical: this.host.prefs?.advanced.peek() === true, suggestions: this.suggestionDecisions() });
+  }
+
+  /** how many automatic suggestions became links (and are still there), and how many the user rejected — for the report */
+  private suggestionDecisions(): { approved: number; rejected: number } {
+    const s = this.host.linkState.peek();
+    let approved = 0;
+    for (const l of s.links.values()) if (l.provenance === "auto" && l.status !== "deleted") approved++;
+    return { approved, rejected: s.rejected.size };
   }
 
   /** What to do with the files of this export, the route of its purpose first (audit F13). */

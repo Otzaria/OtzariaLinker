@@ -1,3 +1,4 @@
+import { inlineLinkerVersionNote } from "../../core/links/connection-type";
 import { checkCustomPattern } from "../../core/text/safe-regex";
 import type { MarkerStyle } from "./footnotes/markers";
 import { compilePattern, CUSTOM_PRESET, DEFAULT_PRESET, describeLevels, PATTERN_PRESETS, presetById } from "./pattern";
@@ -99,6 +100,14 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "ibid", label: 'לפענח "שם" לפי ההפניה הקודמת', default: true },
     { kind: "boolean", key: "ranges", label: "הפניה לפרק או לדף שלם מקושרת לכל השורות שלו", default: true, hint: "בלי הסימון הקישור הוא לשורה הראשונה בלבד." },
     { kind: "select", key: "anchors", label: "עוגן על מילות ההפניה", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
+    {
+      kind: "select",
+      key: "citationType",
+      label: "סוג הקישור",
+      default: "reference",
+      choices: [["reference", "הפניה (מתאים גם לספרייה)"], ["inline-linker", "ציטוט בטקסט (לשימוש פרטי בלבד)"]],
+      hint: 'ציטוט בטקסט נפתח בלחיצה על מילות ההפניה, גם בספר של ספריא. הסוג מוכר רק לייבוא האישי של אוצריא, ולכן בייצוא לספרייה הוא יוחזק: ייצאו אותו בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote(),
+    },
     { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
     ...THRESHOLDS,
@@ -290,4 +299,49 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
   }
   for (const k of Object.keys(options)) if (options[k] === undefined) delete options[k];
   return { options, errors, changed };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Options of one engine as they were STORED (a job record read back from IndexedDB, which anyone can edit) →
+ * only what the form could have produced: a known key with a value of the right type, numbers clamped to
+ * their range, select values from the choices, regular expressions through the same guard as
+ * `toEngineOptions`. Anything else is dropped, never passed on to the worker.
+ */
+export function sanitizeStoredOptions(engine: EngineId, stored: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const specs = ENGINE_OPTION_SPECS[engine];
+  if (!specs || !isRecord(stored)) return out;
+  for (const spec of specs) {
+    const raw = stored[spec.key];
+    if (raw === undefined) continue;
+    switch (spec.kind) {
+      case "boolean":
+        if (typeof raw === "boolean") out[spec.key] = raw;
+        break;
+      case "number":
+        if (spec.key.startsWith("t.")) break; // thresholds are stored together, below
+        if (typeof raw === "number" && Number.isFinite(raw)) out[spec.key] = Math.round(Math.min(spec.max, Math.max(spec.min, raw)));
+        break;
+      case "select":
+        if (spec.key === "targetStartsWithDh" ? typeof raw === "boolean" : typeof raw === "string" && spec.choices.some(([c]) => c === raw)) out[spec.key] = raw;
+        break;
+      case "regex":
+        if (typeof raw === "string" && (spec.template ? compilePattern(raw) : checkCustomPattern(raw)).ok) out[spec.key] = raw;
+        break;
+      case "marker":
+        if (raw === "sup" || raw === "sub" || raw === "parentheses") out[spec.key] = raw;
+        else if (isRecord(raw) && typeof raw["tag"] === "string" && /^[a-zA-Z][\w-]*$/.test(raw["tag"])) out[spec.key] = { tag: raw["tag"] };
+        else if (isRecord(raw) && typeof raw["regex"] === "string" && checkCustomPattern(raw["regex"]).ok) out[spec.key] = { regex: raw["regex"] };
+        break;
+    }
+  }
+  const t = stored["thresholds"];
+  if (isRecord(t)) {
+    const { certain, high, possible, ambiguityMargin } = t;
+    const ok = [certain, high, possible, ambiguityMargin].every((x) => typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1);
+    if (ok && (possible as number) <= (high as number) && (high as number) <= (certain as number)) out["thresholds"] = { certain, high, possible, ambiguityMargin };
+  }
+  return out;
 }
