@@ -32,6 +32,8 @@ export interface OpenResult {
   needsMapping?: PendingDb[];
   /** zstd dictionaries opened as files (books compressed with them become readable) */
   dictionaries?: { path: string; id: number }[];
+  /** databases already open: the same file picked again is not opened a second time (#22) */
+  reused?: OpenedSource[];
 }
 
 export interface CallOptions {

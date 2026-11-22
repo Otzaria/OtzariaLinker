@@ -246,7 +246,14 @@ export class AppStore {
 
   /* ---------------- sources ---------------- */
 
+  /**
+   * What the last openFiles did to the sources: the ids it added, and the ids of open sources whose file
+   * was picked again (not opened a second time, #22). A task sheet reads it to mark its step done.
+   */
+  lastOpen: { added: string[]; reused: string[] } = { added: [], reused: [] };
+
   async openFiles(files: InputFile[]): Promise<void> {
+    this.lastOpen = { added: [], reused: [] };
     if (!files.length) return;
     const res = await this.runTask(`פותח ${files.length === 1 ? files[0]!.path : `${files.length} קבצים`}…`, (opts) => this.service.open(files, opts));
     if (!res) return;
@@ -256,6 +263,12 @@ export class AppStore {
       skipped: res.skipped.length,
       needsMapping: res.needsMapping?.length ?? 0,
     });
+    // a file that is open already is not a new source: the same sources, the same books (#22)
+    const openIds = new Set(this.sources.peek().map((x) => x.info.id));
+    const reused = (res.reused ?? []).filter((r) => openIds.has(r.info.id));
+    this.lastOpen = { added: res.sources.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
+    if (reused.length)
+      this.notify("info", `${reused.map((r) => `"${r.info.label}"`).join(", ")} ${reused.length === 1 ? "כבר פתוח" : "כבר פתוחים"}: הוא לא נטען שוב, ממשיכים עם הספרים הפתוחים.`);
     batch(() => {
       this.sources.value = [...this.sources.value, ...res.sources];
       for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
@@ -332,9 +345,18 @@ export class AppStore {
     return notesOn?.key ?? null;
   }
 
-  async closeSource(id: string): Promise<void> {
+  /**
+   * Closes a source and releases what the worker held for it. Not while a task runs (a drop being opened, an
+   * engine, a max-link job: the worker may be reading this very source): the user is told and nothing closes.
+   * Returns whether it closed (#22).
+   */
+  async closeSource(id: string): Promise<boolean> {
     const s = this.sources.value.find((x) => x.info.id === id);
-    if (!s) return;
+    if (!s) return true;
+    if (this.running.length > 0 || this.maxLink.running.peek()) {
+      this.notify("warning", `"${s.info.label}" בשימוש עכשיו: עבודה רצה על הספרים הפתוחים. חכו שתסתיים (או בטלו אותה) ונסו לסגור שוב.`);
+      return false;
+    }
     await this.service.close(id);
     this.dbLinks.forgetSummary();
     batch(() => {
@@ -353,6 +375,7 @@ export class AppStore {
       }
     });
     this.lines.forgetSource(id);
+    return true;
   }
 
   /**
@@ -737,7 +760,7 @@ export class AppStore {
     const p = this.mappedFrom.get(sourceId);
     if (!p) return;
     const current = this.dbMappings.value.get(p.preview.fingerprint)?.mapping ?? p.guess;
-    await this.closeSource(sourceId);
+    if (!(await this.closeSource(sourceId))) return;
     this.mappedFrom.delete(sourceId);
     this.pendingDbs.value = [...this.pendingDbs.value, { ...p, guess: current }];
   }

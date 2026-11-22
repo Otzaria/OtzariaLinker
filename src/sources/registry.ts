@@ -48,6 +48,8 @@ export interface OpenResult {
   needsMapping?: PendingDb[];
   /** zstd dictionaries opened as files: books compressed with them can now be read (see DictionaryPool) */
   dictionaries?: { path: string; id: number }[];
+  /** databases that were already open (the same file picked again): not opened a second time, listed here instead (#22) */
+  reused?: OpenedSource[];
 }
 
 const HEAD = 4096;
@@ -61,6 +63,14 @@ export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
   private readonly pending = new Map<string, { blob: Blob; label: string }>();
+  /**
+   * The identity of each open database file → its source id, and back (to release it on close). Picking the
+   * same file twice must not load it twice: two sources would list every book twice and hold the file twice
+   * in the worker (#22). The identity is the file's name, size, last-modified time and the 100-byte SQLite
+   * header (page size, file change counter, size in pages, schema cookie — it changes whenever the file does).
+   */
+  private readonly byIdentity = new Map<string, string>();
+  private readonly identityOf = new Map<string, string>();
   private seq = 0;
   private idPrefix = "s";
   /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
@@ -184,6 +194,9 @@ export class SourceRegistry {
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
+    const identity = this.identityOf.get(sourceId);
+    if (identity !== undefined) this.byIdentity.delete(identity);
+    this.identityOf.delete(sourceId);
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
@@ -191,7 +204,18 @@ export class SourceRegistry {
     switch (kind) {
       case "sqlite":
         try {
-          result.sources.push(await this.add(await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob))));
+          const identity = await fileIdentity(f);
+          const known = this.byIdentity.get(identity);
+          const held = known ? this.sources.get(known) : undefined;
+          if (held) {
+            const again = result.reused ?? (result.reused = []);
+            if (!again.some((r) => r.info.id === held.info.id)) again.push({ info: held.info, books: await held.books() });
+            return;
+          }
+          const opened = await this.add(await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob)));
+          this.byIdentity.set(identity, opened.info.id);
+          this.identityOf.set(opened.info.id, identity);
+          result.sources.push(opened);
         } catch (err) {
           // not Otzaria's schema: hand its tables to the mapping wizard instead of refusing the file
           if (err instanceof LinkerError && err.code === "db/no-books") return this.offerMapping(f, result);
@@ -299,6 +323,14 @@ export class SourceRegistry {
 }
 
 type ListingContext = { signal?: AbortSignal; progress?: (done: number, total: number) => void };
+
+/** name | size | last-modified (a File has one) | the SQLite header, as hex — see SourceRegistry.byIdentity */
+async function fileIdentity(f: InputFile): Promise<string> {
+  const head = new Uint8Array(await f.blob.slice(0, 100).arrayBuffer());
+  const hex = Array.from(head, (b) => b.toString(16).padStart(2, "0")).join("");
+  const modified = (f.blob as Partial<File>).lastModified;
+  return `${nameOf(f.path)}|${f.blob.size}|${modified ?? ""}|${hex}`;
+}
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;
 
