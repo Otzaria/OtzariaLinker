@@ -221,7 +221,7 @@ describe("data-label markers (Sefaria)", () => {
  */
 describe('style "digits" (bare numbers glued to a word)', () => {
   it("finds a number right after a Hebrew word or punctuation, with exact raw spans", () => {
-    const line = "שלום1 עולם2. עוד,3 ו<b>ש</b>4";
+    const line = "שלום1 עולם2. עוד,3 ו<b>שלום</b>4";
     const ms = detectMarkers(line, "digits");
     expect(ms.map((m) => m.num)).toEqual([1, 2, 3, 4]);
     for (const m of ms) expect(shownByGenerator(line, m)).toBe(String(m.num));
@@ -232,6 +232,15 @@ describe('style "digits" (bare numbers glued to a word)', () => {
     expect(detectMarkers('<i data-label="5">שלום</i> <sup>7</sup> <a href="x1">ק</a>', "digits")).toEqual([]);
     expect(detectMarkers("שלום1990", "digits")).toEqual([]);
   });
+  it("a number glued to an abbreviation or a one- or two-letter word is a reference, not a marker (ח\"א.12, ג'3, פרק ג,3, א.2, הלכה ו.1)", () => {
+    for (const t of ['ראה ח"א.12 ועוד', "בדף ג'3 ועוד", "פרק ג,3 ועוד", "פסוק א.2 ועוד", "הלכה ו.1 ועוד", "ב\"ק.5 ועוד"]) expect(detectMarkers(t, "digits"), t).toEqual([]);
+  });
+
+  it("a note line opening with chapter:verse is no note number", () => {
+    expect(leadingMarker("12:5 הערה", "digits")).toBeNull();
+    expect(leadingMarker("12. הערה", "digits")?.num).toBe(12);
+  });
+
   it("does not read parts of ordinary numbers: a citation 'כג:5', '1,200', '3.5', and a number inside nested <sup><b>", () => {
     expect(detectMarkers("תהלים כג:5 ושלום", "digits")).toEqual([]);
     expect(detectMarkers("שלום 1,200 ועוד", "digits")).toEqual([]);

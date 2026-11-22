@@ -256,6 +256,20 @@ function detectParentheses(map: VisibleMap, opts: DetectOptions): Marker[] {
 
 /** what may stand right before a bare number: a Hebrew letter or the punctuation that closes a phrase */
 const BEFORE_DIGITS = /[א-ת.,;"'׳״)\]!?]/;
+/**
+ * The word a bare number is glued to must be a real word: three Hebrew letters or more, with no gershayim or geresh
+ * inside. A number after an abbreviation or a lone letter is a reference, not a note marker: ח"א.12, ב"ק.5, ג'3,
+ * פרק ג,3, פסוק א.2, הלכה ו.1 (QA: a main book with no markers read these as a series). Nikud is not counted.
+ */
+const NIKUD = "֑-ׇ";
+const TRAILING = new RegExp(`[.,;)\\]!?"'׳״]+$`);
+const WORD_TAIL = new RegExp(`[א-ת${NIKUD}"'׳״]+$`);
+function realWordBefore(text: string, at: number): boolean {
+  const word = WORD_TAIL.exec(text.slice(Math.max(0, at - 24), at).replace(TRAILING, ""))?.[0] ?? "";
+  if (/["'׳״]/.test(word)) return false;
+  return word.replace(new RegExp(`[${NIKUD}]`, "g"), "").length >= 3;
+}
+
 const IN_SUP_OPEN = /<\s*(?:sup|sub)\b[^>]*>\s*(?:<[^>]*>\s*)*$/i;
 
 function detectDigits(html: string, map: VisibleMap, opts: DetectOptions): Marker[] {
@@ -266,10 +280,10 @@ function detectDigits(html: string, map: VisibleMap, opts: DetectOptions): Marke
     const at = m.index;
     const prev = at > 0 ? map.text[at - 1]! : "";
     const lineStart = at === firstText;
-    if (!lineStart && !BEFORE_DIGITS.test(prev)) continue;
+    if (!lineStart && (!BEFORE_DIGITS.test(prev) || !realWordBefore(map.text, at))) continue;
     // part of a larger number: "3.5" and "1,200" (before and after the separator)
     if ((prev === "." || prev === ",") && /\d/.test(map.text[at - 2] ?? "")) continue;
-    if (/^[.,]\d/.test(map.text.slice(at + m[0].length, at + m[0].length + 2))) continue;
+    if (/^[.,:]\d/.test(map.text.slice(at + m[0].length, at + m[0].length + 2))) continue;
     const rawStart = map.starts[at]!;
     // a <sup>/<sub> number belongs to those styles (also inside nested tags: <sup><b>1</b></sup>); looked at in a window, not the whole line
     if (IN_SUP_OPEN.test(html.slice(Math.max(0, rawStart - 200), rawStart))) continue;
