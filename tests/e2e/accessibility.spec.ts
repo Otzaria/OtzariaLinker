@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { clippedControls, focused, horizontalOverflow, lowContrast, tabTo, unnamedControls } from "./a11y";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * Accessibility regressions (docs/reviews/ACCESSIBILITY_AUDIT.md), in the built single file: the
@@ -87,7 +87,13 @@ test("keyboard only: the guided flow from the home card to the download", async 
   const main = page.locator("main.guided");
 
   // every Tab stop on the way shows where focus is (tabTo checks it)
-  await tabTo(page, /^תיקייה מול אוצריא/);
+  await tabTo(page, /^קישור אוטומטי/);
+  await page.keyboard.press("Enter");
+  // the sheet asks which task: the radio group (arrows move and choose), then "המשך"
+  await tabTo(page, /^ספר ופירוש/, { role: "radio" });
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("radio", { name: /^תיקייה מול אוצריא/ })).toBeChecked();
+  await tabTo(page, /^המשך$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/files$/);
   await tabTo(page, /^הספרים: תיקייה$/);
@@ -232,10 +238,10 @@ test("dialogs and menus keep focus inside, close with Esc and give focus back", 
       }
   };
 
-  // a task's sheet, opened from its card
-  const card = await tabTo(page, /^ספר ופירוש/);
+  // a path's first question (the choice of task), opened from its card
+  const card = await tabTo(page, /^קישור אוטומטי/);
   await page.keyboard.press("Enter");
-  const sheet = page.getByRole("dialog", { name: "ספר ופירוש" });
+  const sheet = page.getByRole("dialog", { name: "קישור אוטומטי" });
   await expect(sheet).toBeVisible();
   expect(await focused(page)).toMatchObject({ inDialog: true });
   await trapped();
@@ -283,7 +289,12 @@ test("every control has a name, and text has AA contrast, on each main screen", 
   await screenOk(page, "settings menu");
   await page.keyboard.press("Escape");
 
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  // the first question of a path (issue 20): every choice named, readable in both themes
+  await page.locator('.task-card[data-path="auto"]').click();
+  await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+  await screenOk(page, "home: the path's choice");
+  await page.keyboard.press("Escape");
+  await chooseTask(page, "auto", "folder-otzaria");
   await screenOk(page, "guided: files");
   await page.goto(distUrl);
 
@@ -386,7 +397,7 @@ test("200% zoom at 1280px: no sideways scrolling and every control reachable", a
     expect(await clippedControls(page), `${what}: controls out of reach`).toEqual([]);
   };
   await check("home");
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   await check("guided: files");
   await page.goto(distUrl);
   await workspace(page);

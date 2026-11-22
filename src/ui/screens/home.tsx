@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { EngineId } from "../../linking/automatic";
 import type { SuggestMode } from "../../state/router";
 import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
+import { HOME_CARDS, isPathId, pathOfTask, TASK_PATHS, type PathId } from "../../state/task-paths";
 import type { SideTab } from "../../state/store";
 import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
+import { rovingKeys, rovingTabIndex } from "../keyboard";
 import { Icon, type IconName } from "../icons/icon";
 import { OfflineDownload } from "../shell/offline-download";
 import { OtzariaDbHint, SOURCE_OPTIONS, type SourceOption } from "../workspace/add-sources";
@@ -60,7 +62,7 @@ export const TASKS: readonly TaskDef[] = [
     icon: "oz_book_link",
     title: "ספר ופירוש",
     // "one": with four commentaries on one tractate, three cards looked right (V5 UX audit, task b)
-    hint: "פירוש אחד מול ספר הבסיס שלו — לפי כותרות ודיבור המתחיל (לכמה פירושים יחד יש כרטיס משלהם)",
+    hint: `פירוש אחד מול ספר הבסיס שלו — לפי כותרות ודיבור המתחיל (לכמה פירושים יחד: "כמה ספרים יחד")`,
     steps: [
       { label: "הפירוש", hint: `קובץ ${ltr(".txt")}, תיקייה או מסד שבו הפירוש. אם גם ספר הבסיס שם — זה מספיק.`, options: ["files", "folder", "db"] },
       { label: "ספר הבסיס, אם הוא במקור אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "files"], optional: true, dbHint: true },
@@ -78,6 +80,18 @@ export const TASKS: readonly TaskDef[] = [
       { label: "ספר ההערות, אם הוא במקור אחר", hint: "קובץ, תיקייה או מסד. השורות בו נפתחות במספר ההערה.", options: ["files", "db"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "footnotes", mode: "pair" },
+  },
+  {
+    // reachable from the "automatic linking" path (issue 20); the citations method links one book into all the open ones
+    id: "citations",
+    icon: "oz_link_marker",
+    title: "מראי מקומות",
+    hint: "הפניות כתובות בטקסט ('בראשית א, ב', 'ב\"ק דף ט') מקושרות לספרים שהן מציינות",
+    steps: [
+      { label: "הספר עם מראי המקום", hint: `קובץ ${ltr(".txt")}, תיקייה או מסד.`, options: ["files", "folder", "db"] },
+      { label: "הספרים שמצטטים אליהם, אם הם במקור אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "folder", "files"], optional: true, dbHint: true },
+    ],
+    then: { tab: "suggestions", engine: "citations", mode: "pair" },
   },
   {
     // audit F15: several books that link to each other, with no fixed roles — max-link over all of them
@@ -157,7 +171,7 @@ export const TASKS: readonly TaskDef[] = [
   {
     id: "manual",
     icon: "oz_link_add",
-    title: "עבודה ידנית מתקדמת",
+    title: "קישור ידני",
     hint: "בוחרים ספרים, שורות, טווחים ומילים בעצמכם — גם בין מקורות שונים",
     steps: [
       { label: "מקור ראשון", hint: "תיקייה, קבצים, מסד או ZIP.", options: ["folder", "files", "db", "zip"] },
@@ -168,6 +182,33 @@ export const TASKS: readonly TaskDef[] = [
 ];
 
 const OPTION = new Map(SOURCE_OPTIONS.map((o) => [o.id, o]));
+
+/*
+ * The five paths of the home screen (issue 20). "auto", "repo" and "fix" open a sheet that first asks which task
+ * (state/task-paths.ts says which tasks each one chooses from); "manual" is a task of its own; "project" opens a saved
+ * project file. The tasks above and their routes #/start/<id> are unchanged.
+ */
+const PATHS: Record<PathId, { icon: IconName; title: string; hint: string; ask: string }> = {
+  auto: {
+    icon: "oz_book_link",
+    title: "קישור אוטומטי",
+    hint: "הכלי מוצא את הקישורים לבד: פירוש, הערות שוליים, מראי מקומות, כמה ספרים יחד או תיקייה שלמה מול אוצריא",
+    ask: "מה לקשר?",
+  },
+  repo: {
+    icon: "oz_library_link",
+    title: "ניתוח והשלמת קישורים במאגר",
+    hint: "מה שמסד אוצריא או מסד אישי כבר מקשר, והשלמת מה שחסר — מסד מול מסד, בתוך מסד, או הקישורים הקיימים",
+    ask: "מה לעשות במאגר?",
+  },
+  fix: {
+    icon: "oz_link_edit",
+    title: "בדיקה, תיקון ומיזוג קישורים",
+    hint: `קובצי ${ltr("_links.json")} קיימים: בדיקה, תיקון, השוואה ומיזוג, ומעבר למהדורה חדשה של ספר`,
+    ask: "מה לתקן?",
+  },
+};
+const PROJECT_CARD = { icon: "oz_document_link" as IconName, title: "פתיחת פרויקט קיים", hint: `קובץ ${ltr(".otzlinker.json")} שנשמר קודם — ממשיכים מאיפה שעצרתם` };
 
 export function Home() {
   const store = useStore();
@@ -181,6 +222,11 @@ export function Home() {
     store.startTask.value = t.id;
     store.dialog.value = "start";
   };
+  const openPath = (id: PathId) => {
+    store.startTask.value = id;
+    store.dialog.value = "start";
+  };
+  const openProject = () => void pick(OPTION.get("project")!);
   const hasWork = store.sources.value.length > 0 || store.linkState.value.links.size > 0;
 
   return (
@@ -208,13 +254,18 @@ export function Home() {
         <h1>מה תרצו לעשות?</h1>
         <p class="lede">בוחרים משימה, והכלי יבקש רק את מה שצריך. הכול נשאר במחשב שלכם — שום קובץ לא נשלח לשום מקום.</p>
         <div class="tasks">
-          {TASKS.map((t) => (
-            <button key={t.id} class="task-card" onClick={() => begin(t)}>
-              <Icon name={t.icon} size={28} />
-              <b>{t.title}</b>
-              <span>{t.hint}</span>
-            </button>
-          ))}
+          {HOME_CARDS.map((id) => {
+            const manual = id === "manual" ? TASKS.find((t) => t.id === "manual")! : undefined;
+            const card = id === "project" ? PROJECT_CARD : (manual ?? PATHS[id as PathId]);
+            const onClick = id === "project" ? openProject : manual ? () => begin(manual) : () => openPath(id as PathId);
+            return (
+              <button key={id} class="task-card" data-path={id} onClick={onClick}>
+                <Icon name={card.icon} size={28} />
+                <b>{card.title}</b>
+                <span>{card.hint}</span>
+              </button>
+            );
+          })}
         </div>
         {hasWork && (
           <div class="recent">
@@ -259,11 +310,75 @@ export function Home() {
   );
 }
 
-/** The sheet of a guided workflow ("#/start/<id>"): one row per source it needs, then "start". */
+/** "#/start/<id>": a path asks which task first; a task's sheet asks for its sources. */
 export function StartTaskDialog({ onClose }: { onClose: () => void }) {
+  const store = useStore();
+  const id = store.startTask.value;
+  return isPathId(id) ? <PathChooser key={id} path={id} onClose={onClose} /> : <TaskSheet key={id ?? ""} onClose={onClose} />;
+}
+
+/** The first question of a path: which task. Radio group (arrows move and select), then "continue". */
+function PathChooser({ path, onClose }: { path: PathId; onClose: () => void }) {
+  const store = useStore();
+  const ref = useRef<HTMLDialogElement>(null);
+  const info = PATHS[path];
+  const choices = TASK_PATHS.find((p) => p.id === path)!.choose.map((id) => TASKS.find((t) => t.id === id)!);
+  const [picked, setPicked] = useState(choices[0]!.id);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  const go = () => {
+    const t = TASKS.find((x) => x.id === picked)!;
+    // a guided task replaces the sheet with the guided flow, as its card did; the others go on to their own sheet
+    if (t.guided) {
+      store.dialog.value = null;
+      store.startTask.value = null;
+      store.guided.start();
+    } else store.startTask.value = t.id;
+  };
+  return (
+    <dialog ref={ref} class="start-task" onClose={onClose} aria-labelledby="start-title">
+      <div class="dlg">
+        <header>
+          <Icon name={info.icon} size={24} />
+          <h2 id="start-title">{info.title}</h2>
+          <span class="grow" />
+          <button class="icon-btn" onClick={() => ref.current?.close()} aria-label="סגירה" title="סגירה (Esc)">
+            <Icon name="fl_dismiss" />
+          </button>
+        </header>
+        <div class="body">
+          <p class="muted" style="margin:0">{info.hint}.</p>
+          <div role="radiogroup" aria-label={info.ask} class="choices" onKeyDown={rovingKeys}>
+            {choices.map((t) => (
+              <button key={t.id} class="choice" role="radio" data-task={t.id} aria-checked={picked === t.id} tabIndex={rovingTabIndex(picked === t.id)} onClick={() => setPicked(t.id)} onFocus={() => setPicked(t.id)} onDblClick={go}>
+                <Icon name={t.icon} size={22} />
+                <span>
+                  <b>{t.title}</b>
+                  <span class="muted">{t.hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <footer>
+          <button class="btn text" onClick={() => ref.current?.close()}>ביטול</button>
+          <button class="btn filled" onClick={go}>
+            <Icon name="oz_link" size={18} />
+            המשך
+          </button>
+        </footer>
+      </div>
+    </dialog>
+  );
+}
+
+/** The sheet of a guided workflow ("#/start/<id>"): one row per source it needs, then "start". */
+function TaskSheet({ onClose }: { onClose: () => void }) {
   const store = useStore();
   const ref = useRef<HTMLDialogElement>(null);
   const task = TASKS.find((t) => t.id === store.startTask.value);
+  const back = task ? pathOfTask(task.id) : undefined;
   /** per step: the ids of the sources it opened, or true when it opened only documents (links files, a project) */
   const [done, setDone] = useState<Record<number, string[] | true>>({});
   useEffect(() => {
@@ -380,6 +495,9 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
           </ol>
         </div>
         <footer>
+          {back && (
+            <button class="btn text" onClick={() => (store.startTask.value = back)} title="חזרה לבחירת המשימה">חזרה</button>
+          )}
           <button class="btn text" onClick={() => ref.current?.close()}>ביטול</button>
           <button class="btn filled" disabled={!ready} onClick={start} title={ready ? undefined : "חסר מקור שהמשימה צריכה"}>
             <Icon name="oz_link" size={18} />

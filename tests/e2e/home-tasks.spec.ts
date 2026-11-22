@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * The two guided tasks the product audit found missing (F15): "several books together" runs max-link
@@ -38,7 +38,7 @@ test("'links already in the database' opens the database's links of the book in 
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "הקישורים שכבר במסד" }).click();
+  await chooseTask(page, "repo", "db-links");
   const sheet = page.getByRole("dialog", { name: "הקישורים שכבר במסד" });
   const chooser = page.waitForEvent("filechooser");
   await sheet.getByRole("button", { name: "המסד: מסד נתונים" }).click();
@@ -61,7 +61,7 @@ test("an open database is offered by the next task sheet, and picking it again d
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "הקישורים שכבר במסד" }).click();
+  await chooseTask(page, "repo", "db-links");
   let sheet = page.getByRole("dialog", { name: "הקישורים שכבר במסד" });
   let chooser = page.waitForEvent("filechooser");
   await sheet.getByRole("button", { name: "המסד: מסד נתונים" }).click();
@@ -72,7 +72,7 @@ test("an open database is offered by the next task sheet, and picking it again d
 
   // back home: another task that needs a database starts from the open one, no file chooser
   await page.getByRole("button", { name: /מנהל הקישורים — למסך הפתיחה/ }).click();
-  await page.locator(".task-card", { hasText: "קישור בתוך מסד אישי" }).click();
+  await chooseTask(page, "repo", "within-db");
   sheet = page.getByRole("dialog", { name: "קישור בתוך מסד אישי" });
   const start = sheet.getByRole("button", { name: "התחלה" });
   await expect(start).toBeDisabled();
@@ -88,5 +88,58 @@ test("an open database is offered by the next task sheet, and picking it again d
   await expect(sheet.locator(".steps .opened")).toHaveCount(1);
   await start.click();
   await expect(page.getByRole("region", { name: "מקורות וספרים" }).locator(".src-badge")).toHaveCount(1);
+  expect(seen.errors).toEqual([]);
+});
+
+/*
+ * Issue 20: the home screen has five paths instead of ten cards; the choice between a commentary, footnotes, citations,
+ * several books or a folder against Otzaria is made inside the wizard; every old address still opens its task.
+ */
+test("home: five paths; the choice is inside the wizard; old #/start/<id> addresses still work", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const cards = page.locator(".task-card");
+  await expect(cards).toHaveCount(5);
+  await expect(cards.locator("b")).toHaveText(["קישור אוטומטי", "קישור ידני", "ניתוח והשלמת קישורים במאגר", "בדיקה, תיקון ומיזוג קישורים", "פתיחת פרויקט קיים"]);
+
+  // a path asks which task: a radio group the arrows move through
+  await cards.filter({ hasText: "קישור אוטומטי" }).click();
+  const dlg = page.getByRole("dialog", { name: "קישור אוטומטי" });
+  const radios = dlg.getByRole("radio");
+  await expect(radios).toHaveCount(5);
+  await expect(radios.first()).toBeChecked();
+  await radios.first().focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(dlg.locator('[data-task="notes"]')).toBeChecked();
+  await dlg.getByRole("button", { name: "המשך" }).click();
+  // the task's own sheet, at the address the old card used, with a way back to the choice
+  const sheet = page.getByRole("dialog", { name: "ספר והערות שוליים" });
+  await expect(sheet).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("#/start/notes");
+  await sheet.getByRole("button", { name: "חזרה" }).click();
+  await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+  expect(new URL(page.url()).hash).toBe("#/start/auto");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // the old addresses of the merged cards open their tasks, and the new paths are addresses too
+  for (const [id, title] of [["commentary", "ספר ופירוש"], ["notes", "ספר והערות שוליים"], ["citations", "מראי מקומות"], ["db-db", "מסד מול מסד"], ["relink", "תיקון קישורים אחרי שינוי ספר"], ["fix", "בדיקה, תיקון ומיזוג קישורים"]] as const) {
+    await page.goto(`${distUrl}#/start/${id}`);
+    await expect(page.getByRole("dialog", { name: title })).toBeVisible();
+  }
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+test("home: 'open an existing project' picks the project file, 'manual' opens its sheet", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".task-card", { hasText: "פתיחת פרויקט קיים" }).click();
+  expect((await chooser).isMultiple()).toBeDefined();
+  await page.locator(".task-card", { hasText: "קישור ידני" }).click();
+  await expect(page.getByRole("dialog", { name: "קישור ידני" })).toBeVisible();
   expect(seen.errors).toEqual([]);
 });

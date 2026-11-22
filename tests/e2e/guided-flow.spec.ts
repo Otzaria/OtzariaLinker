@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { expect, test, type Page } from "@playwright/test";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * The guided flow "link a folder to Otzaria" in the built single file, from the home card to the
@@ -72,7 +72,7 @@ test("guided flow: folder → books → database → plan → run → approve �
   await page.goto(distUrl);
 
   // the home card starts the flow
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   await expect(page).toHaveURL(/#\/guided\/files$/);
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
@@ -201,7 +201,7 @@ test("guided flow: the books already hold their bases — no database step; a wa
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("עם בסיס", { "ספר דוגמה": BOOKS["ספר דוגמה"], "הערות לספר דוגמה": BOOKS["הערות לספר דוגמה"] });
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "כמה ספרים יחד" }).click();
+  await chooseTask(page, "auto", "several");
   const main = page.locator("main.guided");
   const chooser = page.waitForEvent("filechooser");
   await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
@@ -236,7 +236,7 @@ test("guided flow: the run shows one bar, pause and stop, and the details on req
   const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`ביאור ${i + 1} על בראשית`, commentary(`ביאור ${i + 1} על בראשית`)]));
   const dir = folder("שלושים", many);
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
   const chooser = page.waitForEvent("filechooser");
@@ -294,7 +294,7 @@ test("guided flow: approving a group approves exactly the count it showed, and i
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("קבוצה", BOOKS);
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
   const chooser = page.waitForEvent("filechooser");

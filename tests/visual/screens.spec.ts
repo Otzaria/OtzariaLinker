@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { distUrl, watchPage } from "../e2e/helpers";
+import { chooseTask, distUrl, watchPage } from "../e2e/helpers";
 import { embedFonts, fontLeaks, fontsSettled } from "./stable";
 
 /*
@@ -286,7 +286,7 @@ for (const [width, viewport] of WIDTHS) {
         "חידושים": ["שורה אחת של חידושים."],
       };
       for (const [t, lines] of Object.entries(books)) writeFileSync(join(dir, `${t}.txt`), lines.join(nl), "utf8");
-      await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+      await chooseTask(page, "auto", "folder-otzaria");
       await expect(page).toHaveURL(/#\/guided\/files$/);
       const main = page.locator("main.guided");
       const chooser = page.waitForEvent("filechooser");
