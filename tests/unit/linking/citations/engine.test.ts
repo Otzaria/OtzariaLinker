@@ -102,6 +102,35 @@ describe("citations engine (in memory)", () => {
     expect(notes.warnings.map((w) => w.code)).toContain("citations/anchor-skipped-notes");
   });
 
+  /*
+   * #23 (export): for PRIVATE use the citation can be the app's "ציטוט בטקסט" (INLINE_LINKER) — clickable inside the
+   * text, with an anchor even towards a Sefaria book. Opt-in: the default stays "reference", which is what the
+   * library accepts (§1.4: LINKER is skipped; §1.8: no anchor towards a Sefaria book).
+   */
+  it("citationType inline-linker: INLINE_LINKER with an anchor, also towards a Sefaria book; the default is unchanged", () => {
+    const text = "כמו שנאמר (בראשית א, ב) ועוד";
+    const plain = runCitationsEngine(source([text]), library()).suggestions[0]!;
+    expect(plain).toMatchObject({ declaredType: "reference" });
+    expect(plain.anchor).toBeUndefined();
+    const inline = runCitationsEngine(source([text]), library(), { citationType: "inline-linker" }).suggestions[0]!;
+    expect(inline.declaredType).toBe("INLINE_LINKER");
+    expect(inline.target.book.key).toBe("gen");
+    expect(text.slice(inline.anchor!.rawStart, inline.anchor!.rawEnd)).toContain("בראשית");
+    expect(inline.anchor!.rawEnd! > inline.anchor!.rawStart).toBe(true);
+    // the ids do not change with the type: the same citation is the same suggestion
+    expect(inline.id).toBe(plain.id);
+  });
+
+  it("citationType inline-linker: no INLINE_LINKER where it cannot be written (a Sefaria source, a line with merged notes, anchors off)", () => {
+    const opts = { citationType: "inline-linker" } as const;
+    const text = "כמו שנאמר (בראשית א, ב) ועוד";
+    expect(runCitationsEngine(source([text], "sefaria"), library(), opts).suggestions[0]).toMatchObject({ declaredType: "reference" });
+    const notes = runCitationsEngine(source([`${text}<i class="footnote">הערה</i>`]), library(), opts).suggestions[0]!;
+    expect(notes).toMatchObject({ declaredType: "reference" });
+    expect(notes.anchor).toBeUndefined();
+    expect(runCitationsEngine(source([text]), library(), { ...opts, anchors: "off" }).suggestions[0]).toMatchObject({ declaredType: "reference" });
+  });
+
   it("a location that does not exist is reported, not guessed", () => {
     const r = runCitationsEngine(source(["כמו שנאמר (בראשית ט, ג) ועוד"]), library());
     expect(r.suggestions).toHaveLength(0);

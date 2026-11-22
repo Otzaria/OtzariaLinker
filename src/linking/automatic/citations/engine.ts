@@ -1,3 +1,4 @@
+import { INLINE_LINKER_TYPE } from "../../../core/links/connection-type";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import {
   confidenceOf,
@@ -51,6 +52,14 @@ export interface CitationsOptions extends SefariaOwnedOption {
   readonly ranges?: boolean;
   /** "auto": an anchor on the citation words when both books are Otzaria's; "off": never. */
   readonly anchors?: "auto" | "off";
+  /**
+   * "reference" (default): a REFERENCE link, which the library accepts. "inline-linker": the app's "ציטוט בטקסט"
+   * (INLINE_LINKER, core/links/connection-type.ts) — clickable inside the text, with an anchor also towards a Sefaria
+   * book. For PRIVATE use only: the library does not know it, and validateLink holds it back unless the export is
+   * for private use (LINK_FORMATS §1.12). Where the anchor cannot be written (a Sefaria source, a line with merged
+   * notes, anchors off) the suggestion stays a REFERENCE.
+   */
+  readonly citationType?: "reference" | "inline-linker";
   /** "all" books, or only the classic corpora (Tanakh, Mishna, both Talmuds, Tosefta, Rambam, Tur, Shulchan Aruch and its commentaries). */
   readonly scope?: "all" | "classic";
   readonly thresholds?: ConfidenceThresholds;
@@ -196,6 +205,7 @@ export class CitationRun {
       ibid: options.ibid ?? true,
       ranges: options.ranges ?? true,
       anchors: options.anchors ?? "auto",
+      citationType: options.citationType ?? "reference",
       scope: options.scope ?? "all",
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
@@ -425,8 +435,11 @@ export class CitationRun {
       // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
       const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
       const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
+      const inlineMode = this.opts.citationType === "inline-linker";
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
+      // INLINE_LINKER needs the anchor (start and end after it): without one the suggestion stays a REFERENCE
+      const inline = inlineMode && anchor !== undefined && c.rawEnd > c.rawStart;
       // the id names the span (raw offsets in the line) even without an anchor, so a measure or a
       // reviewer can tell two mentions in one line apart; two mentions of the same place in one line
       // without anchors are still ONE link
@@ -453,7 +466,7 @@ export class CitationRun {
         ...(anchor && { anchor }),
         target,
         ...(narrowed && { citedSpan: { line: res.line, end: res.end } }),
-        declaredType: "reference",
+        declaredType: inline ? INLINE_LINKER_TYPE : "reference",
         heRef2: best.heRef?.trim() ? best.heRef : res.label,
         score: round(best.score),
         confidence,
@@ -489,7 +502,12 @@ export class CitationRun {
   private anchorPolicy(target: BookRef, cache: Map<string, boolean>): boolean {
     const hit = cache.get(target.key);
     if (hit !== undefined) return hit;
-    const ok = this.opts.anchors === "auto" && this.source.origin === "otzaria" && target.origin === "otzaria" && !this.sefariaOwned(this.source) && !this.sefariaOwned(target);
+    // INLINE_LINKER (private use): the offsets are in the user's own source line, so the target may be a Sefaria book
+    const ok =
+      this.opts.anchors === "auto" &&
+      this.source.origin === "otzaria" &&
+      !this.sefariaOwned(this.source) &&
+      (this.opts.citationType === "inline-linker" || (target.origin === "otzaria" && !this.sefariaOwned(target)));
     cache.set(target.key, ok);
     return ok;
   }
@@ -498,6 +516,8 @@ export class CitationRun {
     if (this.opts.anchors === "off") return { code: "citations/anchors-off", text: "עוגנים כובו בהגדרות: הקישורים יוצגו בפאנל הקישורים בלבד, בלי סימון המילים." };
     if (!cache.size) return null;
     const without = [...cache.values()].filter((v) => !v).length;
+    if (!without && this.opts.citationType === "inline-linker")
+      return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי".' };
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
     if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };
