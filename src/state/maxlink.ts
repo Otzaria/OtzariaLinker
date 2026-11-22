@@ -132,7 +132,7 @@ export class MaxLinkState {
 
   scopeLabel(scope: MaxLinkScope): string {
     if (scope.kind === "book") return `הספר "${this.host.refOf(scope.key).title}"`;
-    if (scope.kind === "source") return `המקור "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
+    if (scope.kind === "source") return `הקובץ או המסד "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
     if (scope.kind === "books") {
       const titles = this.selection(scope).map((k) => `"${this.host.refOf(k).title}"`);
       return titles.length === 1 ? `הספר ${titles[0]}` : `הספרים ${titles.join(", ")}`;

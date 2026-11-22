@@ -177,9 +177,9 @@ export class LinkCompareState {
     if (pref.kind === "file") {
       const held = [...s.links.values()].filter((l) => l.provenance === "file" && l.source.book.title === title);
       if (held.some((l) => l.status !== "existing"))
-        return void this.host.notify("error", `בפרויקט יש עותק ערוך של קובץ הקישורים של "${title}". כדי לא לדרוס אותו, בחרו את "הפרויקט" כמקור המועדף.`), null;
+        return void this.host.notify("error", `בפרויקט יש עותק ערוך של קובץ הקישורים של "${title}". כדי לא לדרוס אותו, בחרו את "הפרויקט" כעותק המועדף.`), null;
       changes.push(...held.map((l) => ({ id: l.id, before: l })));
-      if (held.length) this.host.notify("info", `העותק הקודם של קובץ הקישורים של "${title}" (${linksCount(held.length)}, בלי שינויים) הוחלף במקור המועדף.`);
+      if (held.length) this.host.notify("info", `העותק הקודם של קובץ הקישורים של "${title}" (${linksCount(held.length)}, בלי שינויים) הוחלף בעותק המועדף.`);
       const base = merge.entries.filter((e) => e.base).map((e, i) => ({ ...e.link, id: `file:${title}#m${n}:${i}`, origins: e.origins }));
       changes.push(...addChanges(base));
       files.push(fileChange(s, title, { title, records: pref.links.length, hash: fileFingerprint(pref.text ?? ""), verified: true, layout: detectLayout(pref.text ?? "") }));
@@ -200,7 +200,7 @@ export class LinkCompareState {
     this.host.linkState.value = commit(s, `מיזוג ${sources.length} גרסאות של "${title}" (${linksCount(added.length)} נוספו)`, changes, Date.now(), [], files);
     this.host.notify(
       merge.conflicts.length && !keepConflicts ? "warning" : "success",
-      `המיזוג הוחל. נוספו: ${linksCount(added.length)}; כפילויות שאוחדו: ${merge.duplicates.toLocaleString("he")}${merge.conflicts.length ? `; סתירות ${keepConflicts ? "שנוספו גם הן" : "שלא נוספו (נשמר המקור המועדף)"}: ${merge.conflicts.length.toLocaleString("he")}` : ""}. Ctrl+Z מבטל.`,
+      `המיזוג הוחל. נוספו: ${linksCount(added.length)}; כפילויות שאוחדו: ${merge.duplicates.toLocaleString("he")}${merge.conflicts.length ? `; סתירות ${keepConflicts ? "שנוספו גם הן" : "שלא נוספו (נשמר העותק המועדף)"}: ${merge.conflicts.length.toLocaleString("he")}` : ""}. Ctrl+Z מבטל.`,
     );
     return added.length;
   }

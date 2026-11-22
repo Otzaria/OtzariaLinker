@@ -343,7 +343,7 @@ export class AppStore {
     }
     const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
+      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
       this.chooseRoles(opened);
       this.toWorkspace();
     } else if (res.documents.length) this.toWorkspace();

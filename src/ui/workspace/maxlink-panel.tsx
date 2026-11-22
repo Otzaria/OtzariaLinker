@@ -99,7 +99,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
       )}
       {kind === "source" && (
         <label class="field">
-          המקור
+          הקובץ או המסד
           <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
             {sources.map((x) => (
               <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length.toLocaleString("he")} ספרים)</option>

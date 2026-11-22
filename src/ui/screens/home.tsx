@@ -76,7 +76,7 @@ export const TASKS: readonly TaskDef[] = [
     hint: "מספרי ההערות בספר מול ספר ההערות",
     steps: [
       // the engine's roles (automatic/index.ts): the SOURCE is the book with the note numbers, the TARGET the notes book
-      { label: "הספר עם מספרי ההערות", hint: "הספר עצמו, שבטקסט שלו מופיעים מספרי ההערות. ואם ספר ההערות באותו מקור, באותה בחירה.", options: ["files", "folder", "db"] },
+      { label: "הספר עם מספרי ההערות", hint: "הספר עצמו, שבטקסט שלו מופיעים מספרי ההערות. ואם ספר ההערות באותו קובץ או מסד, באותה בחירה.", options: ["files", "folder", "db"] },
       { label: "ספר ההערות, אם הוא בקובץ או במסד אחר", hint: "קובץ, תיקייה או מסד. השורות בו נפתחות במספר ההערה.", options: ["files", "db"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "footnotes", mode: "pair" },

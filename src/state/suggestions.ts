@@ -259,7 +259,7 @@ export class SuggestionsState {
     const pairs = pairByTitle(commentaries, bases);
     const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
     if (!runnable.length) {
-      this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
+      this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר בקובץ או במסד הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
     const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }));

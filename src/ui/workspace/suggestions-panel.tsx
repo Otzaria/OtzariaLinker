@@ -47,7 +47,7 @@ export function SuggestionsPanel() {
   const view = store.prefs.suggestionsView.value;
   const engine = ENGINES.find((e) => e.id === run.engine);
   return (
-    <div style="display:flex;flex-direction:column;min-height:100%">
+    <div class="sug-results" style="display:flex;flex-direction:column;min-height:100%">
       <div class="sug-head">
         <div class="grow">
           <b>{run.maxlink ? "קישור מרבי" : engine?.title}</b>: {run.label}
