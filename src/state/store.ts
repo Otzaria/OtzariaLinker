@@ -6,7 +6,7 @@ import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
-import { path2ForTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
+import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
@@ -1183,7 +1183,7 @@ export class AppStore {
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
-    this.saver.save(`${t}.otzlinker.json`, this.projectText(), "application/json");
+    this.saver.save(`${safeFileTitle(t, "פרויקט")}.otzlinker.json`, this.projectText(), "application/json");
     this.savedRevision.value = this.linkState.value.revision;
     this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
   }
