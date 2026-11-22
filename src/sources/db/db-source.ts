@@ -1,3 +1,4 @@
+import { MAX_BOOK_LINES } from "../../core/limits";
 import { CONNECTION_TYPES, canonicalTypeString } from "../../core/links/connection-type";
 import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
@@ -54,6 +55,12 @@ export class DbBookSource implements BookSource {
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links, ext);
     for (const b of await reader.books()) s.booksById.set(b.id, b);
+    const badTotals = [...s.booksById.values()].filter((b) => b.declaredTotalInvalid !== undefined);
+    if (badTotals.length)
+      warnings.push({
+        code: "db/book-line-count-invalid",
+        message: `ב־${badTotals.length} ספרים במסד מספר השורות המוצהר (totalLines) אינו מספר שורות אפשרי (שלילי, שבר, או מעל ${MAX_BOOK_LINES.toLocaleString("he")}), ולכן הוא לא נלקח בחשבון: ${badTotals.slice(0, 3).map((b) => `"${b.title}" (${b.declaredTotalInvalid})`).join(", ")}${badTotals.length > 3 ? "…" : ""}. אורך הספר ייקבע מהשורות עצמן.`,
+      });
     s.info.library = isLibraryDb(reader.caps.kind, label, s.booksById.values());
     s.bases = await reader.baseTexts();
     s.commentatorOf = await reader.defaultCommentators();

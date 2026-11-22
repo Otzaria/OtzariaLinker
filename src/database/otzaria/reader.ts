@@ -1,5 +1,6 @@
 import { pushTo } from "../../core/collections";
 import { LinkerError } from "../../core/errors";
+import { MAX_BOOK_LINES } from "../../core/limits";
 import { LineContentCodec } from "../compression/zstd";
 import type { ByteSource } from "../sqlite/lazy/byte-source";
 import type { SqlValue } from "../sqlite/lazy/record";
@@ -20,8 +21,10 @@ export interface DbBook {
   orderIndex: number | null;
   /** null when the database does not say */
   isBaseBook: boolean | null;
-  /** as declared by the database; count lines with lineEntries() for the truth */
+  /** as declared by the database (null when it declares none or an impossible one, see declaredTotalInvalid); count lines with lineEntries() for the truth */
   totalLines: number | null;
+  /** the declared totalLines when it is not a count of lines (negative, fractional, beyond MAX_BOOK_LINES): never passed on as a count */
+  declaredTotalInvalid?: number;
   /** book.dependenceType (schema 2+), verbatim; null when absent */
   dependenceType: string | null;
 }
@@ -85,7 +88,7 @@ export class OtzariaDbReader {
         categoryId: num(at(categoryId)),
         orderIndex: num(at(orderIndex)),
         isBaseBook: at(isBase) === null ? null : Number(at(isBase)) === 1,
-        totalLines: num(at(total)),
+        ...(validTotal(num(at(total))) ?? { totalLines: null, declaredTotalInvalid: num(at(total))! }),
         dependenceType: at(dependence) === null ? null : String(at(dependence)),
       });
     }
@@ -244,6 +247,11 @@ export class OtzariaDbReader {
 
 function colIndex(t: TableInfo, name: string): number {
   return t.columns.findIndex((c) => c.name.toLowerCase() === name.toLowerCase());
+}
+
+/** {totalLines} when the declared count can be one (null passes as "not declared"), else undefined */
+function validTotal(n: number | null): { totalLines: number | null } | undefined {
+  return n === null || (Number.isInteger(n) && n >= 0 && n <= MAX_BOOK_LINES) ? { totalLines: n } : undefined;
 }
 
 function num(v: SqlValue | null): number | null {
