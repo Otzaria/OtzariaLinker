@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { chooseTask, distUrl, watchPage } from "./helpers";
@@ -232,4 +233,61 @@ test("the 'copy the folder path' button of the database hint is at least 24px hi
   const box = (await copy.boundingBox())!;
   expect(box.height).toBeGreaterThanOrEqual(24);
   expect(box.width).toBeGreaterThanOrEqual(24);
+});
+
+/*
+ * Pre-merge audit: with links already made, nothing on the repository screen (analysis, stop, coverage of a book, suggested
+ * pairs, picking, closing with Escape) removes or replaces them or the undo step that made them.
+ */
+test("repository: with links in the project, no action of the screen removes or replaces them (and Escape only closes)", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const heb = ["א", "ב", "ג", "ד", "ה"];
+  const nl = String.fromCharCode(10);
+  const biur = ["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...heb.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `ביאור לפסוק ${i + 1}`])].join(nl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(DB_FILE) },
+    { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
+  ]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  const approveAll = page.getByRole("button", { name: /אישור כל הוודאיות/ });
+  await expect(approveAll).toBeEnabled({ timeout: 30_000 });
+  await approveAll.click();
+  const linksTab = page.getByRole("tab", { name: /^קישורים/ });
+  await expect(linksTab).toContainText("5");
+  const undo = page.getByRole("button", { name: "ביטול הפעולה האחרונה" });
+  await expect(undo).toBeEnabled();
+  const undoTitle = await undo.getAttribute("title");
+
+  await page.evaluate(() => (location.hash = "#/repository"));
+  const dlg = page.locator("dialog.repository");
+  await expect(dlg).toBeVisible();
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  await dlg.getByLabel("חיפוש ספר").fill("ארצות החיים");
+  await dlg.locator(".repo-book").first().getByRole("button", { name: /^פרטי הספר/ }).click();
+  const detail = dlg.getByRole("region", { name: /^פרטי הספר/ });
+  await detail.getByRole("button", { name: /חישוב כיסוי מלא/ }).click();
+  await expect(detail.getByRole("status").filter({ hasText: /שורות (ה)?תוכן/ })).toBeVisible({ timeout: 30_000 });
+  await detail.getByRole("button", { name: "סגירת הפרטים" }).click();
+  await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
+  await expect(dlg.getByRole("list", { name: "זוגות מוצעים" })).toBeVisible({ timeout: 30_000 });
+  await dlg.getByRole("checkbox", { name: /^בחירה: / }).first().check();
+  await expect(dlg.locator(".repo-chosen")).toContainText("נבחר ספר אחד");
+
+  // Escape closes the screen and nothing else happens
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+  await expect(linksTab).toContainText("5");
+  await expect(undo).toBeEnabled();
+  expect(await undo.getAttribute("title")).toBe(undoTitle);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
 });

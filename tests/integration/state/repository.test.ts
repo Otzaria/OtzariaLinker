@@ -111,3 +111,63 @@ describe("suspicious books", () => {
     expect(isSuspicious(row(0, 0))).toBe(false);
   });
 });
+
+/*
+ * Pre-merge audit of every action of the repository screen (PR 3 fix round): none of them touches the open project. The links,
+ * the rejections, the undo history, the revision (so "unsaved changes" and the autosave) and a flow an earlier session left are
+ * exactly as they were. The only thing the screen writes into the project is a book's coverage snapshot, on the explicit button,
+ * for that book alone. The one replacement the screen can cause — "complete links" starting a NEW guided flow — is behind a
+ * confirmation in the dialog (e2e: repository.spec.ts), and starts nothing by itself.
+ */
+describe("the repository screen never changes the open project", () => {
+  it("analyze, stop and resume, coverage of many and of one book, suggest pairs, pick: the project is untouched", async () => {
+    const { store, repo, key } = await opened();
+    // the project has a link of the user, one undo step, a rejection, and a flow left by an earlier session
+    const before = [...store.books.value.values()].find((b) => b.title === "המאיר לארץ על ארצות החיים")!;
+    const base = [...store.books.value.values()].find((b) => b.title === "ארצות החיים")!;
+    await store.lines.load(before.key, 0, 5);
+    await store.lines.load(base.key, 0, 5);
+    store.pickLine("source", before.key, 1);
+    store.pickLine("target", base.key, 1);
+    expect(store.createFromDraft()).toBeTruthy();
+    store.guided.saved.value = { v: 1, step: "plan", sources: [], purpose: "submission", links: 1, done: false, savedAt: 1 } as never;
+    const state = store.linkState.value;
+    const saved = store.guided.saved.value;
+    const project = JSON.parse(store.projectText());
+
+    const run = repo.analyze();
+    repo.cancel();
+    await run;
+    await repo.analyze();
+    await repo.countCoverage([key("ארצות החיים")]);
+    await repo.countBookCoverage(key("ארצות החיים"));
+    await repo.suggest();
+    repo.setPickedBooks([key("ארצות החיים")]);
+    repo.togglePickedPair(repo.suggestions.value!.proposals[0]!);
+    repo.leaveBook();
+    repo.dropStale();
+
+    // the same state object: no link, rejection, undo step or revision was added, removed or replaced
+    expect(store.linkState.value).toBe(state);
+    expect(store.guided.saved.value).toBe(saved);
+    expect(store.guided.active.value).toBe(false);
+    expect(store.suggestions.run.value).toBeNull();
+    // the project as saved differs only by the explicit coverage snapshot of the one book
+    const after = JSON.parse(store.projectText());
+    const { coverage: c0, savedAt: _a0, ...rest0 } = project;
+    const { coverage: c1, savedAt: _a1, ...rest1 } = after;
+    expect(rest1).toEqual(rest0);
+    expect(c0 ?? []).toEqual([]);
+    expect((c1 as { title: string }[]).map((c) => c.title)).toEqual(["ארצות החיים"]);
+  });
+
+  it("starting the guided flow from the screen keeps every link and decision of the project", async () => {
+    const { store, repo, key } = await opened();
+    await repo.analyze();
+    repo.setPickedBooks([key("ארצות החיים")]);
+    const state = store.linkState.value;
+    store.guided.startForBooks(repo.chosenBooks(), []);
+    expect(store.linkState.value).toBe(state);
+    expect(store.guided.active.value).toBe(true);
+  });
+});
