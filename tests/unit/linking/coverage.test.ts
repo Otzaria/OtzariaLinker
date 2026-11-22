@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link, LinkSide } from "../../../src/core/links/model";
-import { coverageOfLines, coverageSummary, unlinkedRanges, type CoverageBook } from "../../../src/linking/coverage";
+import type { Suggestion } from "../../../src/linking/automatic";
+import { candidateLines, coverageCounts, coverageOfLines, coverageSummary, doubtfulLines, unlinkedRanges, type CoverageBook } from "../../../src/linking/coverage";
+import type { QaIssue } from "../../../src/linking/qa";
 
 /* Pure coverage rules (issue #17); the state accessor and the real-book run are in tests/integration/state/coverage.test.ts. */
 const C: BookRef = { key: "c", title: "פירוש", origin: "otzaria" };
@@ -86,11 +88,67 @@ describe("coverageSummary", () => {
   it("counts every bucket, the suitable lines and the unlinked share", () => {
     const ls = [link(side(C, 1), side(B, 1)), link(side(C, 3, 4), side(B, 2))];
     const s = coverageSummary(ls, book(7, [0]));
-    expect(s.byBucket).toEqual({ linked: 2, unlinked: 3, partial: 1, multiple: 0, "not-suitable": 1 });
+    expect(s.byBucket).toEqual({ linked: 2, unlinked: 3, partial: 1, multiple: 0, "not-suitable": 1, candidate: 0, doubtful: 0 });
     expect(s).toMatchObject({ total: 7, suitable: 6, unlinked: 3, unlinkedShare: 0.5 });
     expect(s.ranges).toEqual([{ start: 2, end: 2 }, { start: 5, end: 6 }]);
   });
   it("no suitable line: a share of 0, not NaN", () => {
     expect(coverageSummary([], book(2, [0, 1])).unlinkedShare).toBe(0);
+  });
+});
+
+/* 2.15 — two more buckets: a candidate found but not approved, and a link the QA doubts */
+describe("coverageOfLines — candidate and doubtful", () => {
+  const withSets = (extra: Partial<CoverageBook>, n = 6, headings: number[] = []) => ({ ...book(n, headings), ...extra });
+
+  it("an unlinked line that a pending suggestion points at is 'candidate' (found, not approved), not 'unlinked'", () => {
+    expect(coverageOfLines([link(side(C, 1), side(B, 1))], withSets({ candidates: new Set([1, 2, 3]) }, 5))).toEqual(["unlinked", "linked", "candidate", "candidate", "unlinked"]);
+  });
+
+  it("a covered line the QA flags is 'doubtful', whatever it was (linked, partial, multiple)", () => {
+    const ls = [link(side(C, 0, 1), side(B, 5)), link(side(C, 3), side(B, 6)), link(side(C, 3), side(B2, 7))];
+    expect(coverageOfLines(ls, withSets({ doubtful: new Set([1, 3]) }, 5))).toEqual(["linked", "doubtful", "unlinked", "doubtful", "unlinked"]);
+  });
+
+  it("not-suitable wins over both; unlinkedRanges still means only 'unlinked' (a candidate line is already found)", () => {
+    const b = withSets({ candidates: new Set([2]), doubtful: new Set([0]) }, 4, [0]);
+    expect(coverageOfLines([], b)).toEqual(["not-suitable", "unlinked", "candidate", "unlinked"]);
+    expect(unlinkedRanges([], b)).toEqual([{ start: 1, end: 1 }, { start: 3, end: 3 }]);
+  });
+
+  it("the summary counts them; the unlinked share counts only the lines nothing found", () => {
+    const s = coverageSummary([link(side(C, 0), side(B, 1))], withSets({ candidates: new Set([1]), doubtful: new Set([0]) }, 3));
+    expect(s.byBucket).toEqual({ linked: 0, unlinked: 1, partial: 0, multiple: 0, "not-suitable": 0, candidate: 1, doubtful: 1 });
+    expect(s.unlinkedShare).toBeCloseTo(1 / 3);
+  });
+});
+
+describe("candidateLines and doubtfulLines — the lines of ONE book from suggestions and from the QA", () => {
+  const sug = (id: string, source: LinkSide, target: LinkSide, confidence: Suggestion["confidence"] = "high") => ({ id, source, target, confidence }) as Suggestion;
+  it("candidates: both ends that lie in the book, ranges whole, pending only, no 'none'", () => {
+    const list = [sug("a", side(C, 2), side(B, 9)), sug("b", side(B, 1), side(C, 4, 5)), sug("c", side(C, 7), side(B, 1)), sug("d", side(C, 8), side(B, 1), "none"), sug("e", side(B, 3), side(B2, 3))];
+    const lines = candidateLines(list, (id) => id !== "c", (r) => r.key === "c");
+    expect([...lines].sort((x, y) => x - y)).toEqual([2, 4, 5]);
+  });
+  it("doubtful: links of the QA's errors and warnings, but not its administrative notes (already in the database, a library file, unverified)", () => {
+    const l1 = link(side(C, 1), side(B, 1));
+    const l2 = link(side(C, 3, 4), side(B, 2));
+    const l3 = link(side(C, 6), side(B, 3));
+    const issues = [
+      { link: l1, problem: { severity: "warning" }, category: "anchor" },
+      { link: l2, problem: { severity: "error" }, category: "heading" },
+      { link: l3, problem: { severity: "warning" }, category: "in-db" },
+      { link: l3, problem: { severity: "info" }, category: "anchor" },
+    ] as unknown as QaIssue[];
+    expect([...doubtfulLines(issues, (r) => r.key === "c")].sort((x, y) => x - y)).toEqual([1, 3, 4]);
+  });
+});
+
+describe("coverageCounts — the table row, no ranges", () => {
+  it("is the summary without the ranges, for many books", () => {
+    const ls = [link(side(C, 1), side(B, 1))];
+    const c = coverageCounts(ls, book(4, [0]));
+    expect(c).toEqual({ total: 4, byBucket: coverageSummary(ls, book(4, [0])).byBucket, suitable: 3, unlinked: 2, unlinkedShare: 2 / 3 });
+    expect("ranges" in c).toBe(false);
   });
 });

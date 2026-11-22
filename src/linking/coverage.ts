@@ -1,4 +1,6 @@
 import type { BookRef, Link, LinkSide } from "../core/links/model";
+import type { Suggestion } from "./automatic/types";
+import type { QaIssue } from "./qa";
 
 /*
  * Coverage of one book by links (issue #17: "which parts of the commentary are still unlinked?"), pure.
@@ -19,7 +21,7 @@ import type { BookRef, Link, LinkSide } from "../core/links/model";
  * blank one. Nothing here reads a book or changes state (state/coverage.ts feeds it).
  */
 
-export type LineCoverage = "linked" | "unlinked" | "partial" | "multiple" | "not-suitable";
+export type LineCoverage = "linked" | "unlinked" | "partial" | "multiple" | "not-suitable" | "candidate" | "doubtful";
 
 export interface CoverageBook {
   /** true for every link end that lies in this book (the store compares book keys/titles) */
@@ -29,6 +31,10 @@ export interface CoverageBook {
   readonly headings: ReadonlySet<number>;
   /** lines that are not headings but cannot carry a link either (blank, a few letters): the caller knows the text */
   readonly unsuitable?: ReadonlySet<number>;
+  /** lines a pending suggestion points at (candidateLines): found by an engine, not approved yet */
+  readonly candidates?: ReadonlySet<number>;
+  /** lines of a link the QA flags (doubtfulLines) */
+  readonly doubtful?: ReadonlySet<number>;
 }
 
 export interface LineRange {
@@ -77,7 +83,8 @@ export function coverageOfLines(links: readonly Link[], book: CoverageBook): Lin
   const out: LineCoverage[] = new Array<LineCoverage>(n);
   for (let i = 0; i < n; i++) {
     if (book.headings.has(i) || book.unsuitable?.has(i)) out[i] = "not-suitable";
-    else if (first[i] === -1) out[i] = "unlinked";
+    else if (first[i] === -1) out[i] = book.candidates?.has(i) ? "candidate" : "unlinked";
+    else if (book.doubtful?.has(i)) out[i] = "doubtful";
     else if (several[i]) out[i] = "multiple";
     else out[i] = starts[i] ? "linked" : "partial";
   }
@@ -116,8 +123,46 @@ export interface CoverageSummary {
 
 export function coverageSummary(links: readonly Link[], book: CoverageBook): CoverageSummary {
   const coverage = coverageOfLines(links, book);
-  const byBucket: Record<LineCoverage, number> = { linked: 0, unlinked: 0, partial: 0, multiple: 0, "not-suitable": 0 };
+  return { ...countsOf(coverage), ranges: rangesOf(coverage) };
+}
+
+/** The table row of a book: the summary without the ranges (a table of thousands of books keeps no list per book). */
+export function coverageCounts(links: readonly Link[], book: CoverageBook): Omit<CoverageSummary, "ranges"> {
+  return countsOf(coverageOfLines(links, book));
+}
+
+function countsOf(coverage: readonly LineCoverage[]): Omit<CoverageSummary, "ranges"> {
+  const byBucket: Record<LineCoverage, number> = { linked: 0, unlinked: 0, partial: 0, multiple: 0, "not-suitable": 0, candidate: 0, doubtful: 0 };
   for (const c of coverage) byBucket[c]++;
   const suitable = coverage.length - byBucket["not-suitable"];
-  return { total: coverage.length, byBucket, suitable, unlinked: byBucket.unlinked, unlinkedShare: suitable ? byBucket.unlinked / suitable : 0, ranges: rangesOf(coverage) };
+  return { total: coverage.length, byBucket, suitable, unlinked: byBucket.unlinked, unlinkedShare: suitable ? byBucket.unlinked / suitable : 0 };
+}
+
+/**
+ * The lines of ONE book that pending suggestions point at: both ends that lie in it (`owns`), a range whole; a suggestion
+ * the caller calls decided (`pending` false: approved, rejected) and one with no confidence ("none") count for nothing.
+ */
+export function candidateLines(suggestions: readonly Suggestion[], pending: (id: string) => boolean, owns: (ref: BookRef) => boolean): Set<number> {
+  const out = new Set<number>();
+  for (const s of suggestions) {
+    if (s.confidence === "none" || !pending(s.id)) continue;
+    for (const side of [s.source, s.target]) if (owns(side.book)) for (let i = side.line; i <= (side.end ?? side.line); i++) out.add(i);
+  }
+  return out;
+}
+
+/** Categories the QA reports that say nothing about whether a link is right: where it already exists, a file to load, a line not read. */
+const ADMINISTRATIVE: ReadonlySet<string> = new Set(["in-db", "db-copy", "library-file", "unverified", "edition"]);
+
+/**
+ * The lines of ONE book whose link the QA doubts: its errors and warnings, except the administrative categories
+ * (ADMINISTRATIVE) and plain information. A range counts whole.
+ */
+export function doubtfulLines(issues: readonly QaIssue[], owns: (ref: BookRef) => boolean): Set<number> {
+  const out = new Set<number>();
+  for (const { link, category, problem } of issues) {
+    if (problem.severity === "info" || ADMINISTRATIVE.has(category)) continue;
+    for (const side of [link.source, link.target]) if (owns(side.book)) for (let i = side.line; i <= (side.end ?? side.line); i++) out.add(i);
+  }
+  return out;
 }
