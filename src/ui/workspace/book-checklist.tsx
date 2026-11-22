@@ -50,7 +50,7 @@ export function BookChecklist({ label, selected, onChange, exclude }: { label: s
         })}
       </ul>
       {list.length > SHOWN && <p class="muted">מוצגים {SHOWN} מתוך {list.length.toLocaleString("he")} — הקלידו כדי לצמצם.</p>}
-      {!list.length && <p class="muted">{query.trim() ? "אין ספר בשם הזה במקורות הפתוחים." : "אין ספרים פתוחים."}</p>}
+      {!list.length && <p class="muted">{query.trim() ? "אין ספר בשם הזה בקבצים ובמסדים הפתוחים." : "אין ספרים פתוחים."}</p>}
     </fieldset>
   );
 }

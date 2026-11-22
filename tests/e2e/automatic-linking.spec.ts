@@ -19,7 +19,7 @@ test("headings engine: run in the worker → table → approve all certain → c
     { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
   ]);
 
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
 
@@ -58,7 +58,7 @@ test("sort the suggestions: weakest first, strongest first, and back to the book
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -110,7 +110,7 @@ test("a suggestion shows the target's line number in the table, the step view an
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -193,7 +193,7 @@ test("dibur hamatchil: the matched words are marked on both texts in the card an
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -246,7 +246,7 @@ test("pair mode: one book against several targets, all methods merged into one r
     { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
   ]);
   await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -278,7 +278,7 @@ test("suggestions table: the method and the link type of each suggestion, as col
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();

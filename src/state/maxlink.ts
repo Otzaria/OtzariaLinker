@@ -136,7 +136,7 @@ export class MaxLinkState {
     }
     if (scope.kind === "sources") {
       const labels = this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).map((s) => `"${s.info.label}"`);
-      return labels.length === 1 ? `המקור ${labels[0]}` : `המקורות ${labels.join(", ")}`;
+      return labels.length === 1 ? `הקובץ או המסד ${labels[0]}` : `הקבצים והמסדים ${labels.join(", ")}`;
     }
     return "כל הספרים הפתוחים";
   }
@@ -394,7 +394,7 @@ export class MaxLinkState {
     for (const s of this.host.sources.value) for (const b of s.books) if (!byTitle.has(b.title) || (labels.has(s.info.label) && !labels.has(this.labelOfKey(byTitle.get(b.title)!)))) byTitle.set(b.title, b.key);
     const keys = job.books.flatMap((b) => byTitle.get(b.title) ?? []);
     if (!keys.length) {
-      this.host.notify("warning", `כדי להמשיך, פתחו שוב את ${job.sources.length > 1 ? "המקורות" : "המקור"} ${job.sources.map((l) => `"${l}"`).join(", ")}.`);
+      this.host.notify("warning", `כדי להמשיך, פתחו שוב את ${job.sources.length > 1 ? "הקבצים והמסדים" : "הקובץ או המסד"} ${job.sources.map((l) => `"${l}"`).join(", ")}.`);
       return false;
     }
     const prefer = job.preferBase ? this.host.sources.value.find((s) => s.info.label === job.preferBase)?.info.id : undefined;

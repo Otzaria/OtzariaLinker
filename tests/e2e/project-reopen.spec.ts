@@ -37,7 +37,7 @@ test("a reopened project lists its sources by name and each one's button opens i
   await page.locator(".drop-strip").getByRole("button", { name: "פרויקט שמור" }).click();
   await (await chooser).setFiles(PROJECT);
 
-  const list = page.getByRole("region", { name: "מקורות לפתוח מחדש" });
+  const list = page.getByRole("region", { name: "קבצים ומסדים לפתוח מחדש" });
   await expect(list).toBeVisible();
   await expect(list).toContainText("seforim.db");
   await expect(list).toContainText("ביאור על בראשית.txt");
@@ -50,15 +50,15 @@ test("a reopened project lists its sources by name and each one's button opens i
   await list.getByRole("button", { name: "פתיחה מחדש: seforim.db" }).click();
   await (await db).setFiles(DB);
   // the database is back; the text file is still missing, now listed in the sources panel
-  const panel = page.locator(".sources-panel").getByRole("region", { name: "מקורות לפתוח מחדש" });
+  const panel = page.locator(".sources-panel").getByRole("region", { name: "קבצים ומסדים לפתוח מחדש" });
   await expect(panel).toBeVisible();
   await expect(panel).not.toContainText("seforim.db");
   await expect(panel).toContainText("ביאור על בראשית.txt");
 
-  await panel.getByRole("button", { name: "הסתרת רשימת המקורות לפתוח מחדש" }).click();
-  await expect(page.getByRole("region", { name: "מקורות לפתוח מחדש" })).toHaveCount(0);
+  await panel.getByRole("button", { name: "הסתרת רשימת הקבצים ומסדים לפתוח מחדש" }).click();
+  await expect(page.getByRole("region", { name: "קבצים ומסדים לפתוח מחדש" })).toHaveCount(0);
   // hidden, not gone: one line brings the list back
-  await page.locator(".sources-panel").getByRole("button", { name: "מקורות לפתוח מחדש (1)" }).click();
+  await page.locator(".sources-panel").getByRole("button", { name: "קבצים ומסדים לפתוח מחדש (1)" }).click();
   await expect(panel).toContainText("ביאור על בראשית.txt");
   expect(seen.errors).toEqual([]);
 });

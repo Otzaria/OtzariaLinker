@@ -197,7 +197,7 @@ export class LinkCompareState {
         return { ...rest, id: `imp:m${n}:${i}`, status: "new", provenance: "import", origins: e.origins };
       });
     changes.push(...addChanges(added));
-    this.host.linkState.value = commit(s, `מיזוג ${sources.length} מקורות של "${title}" (${linksCount(added.length)} נוספו)`, changes, Date.now(), [], files);
+    this.host.linkState.value = commit(s, `מיזוג ${sources.length} גרסאות של "${title}" (${linksCount(added.length)} נוספו)`, changes, Date.now(), [], files);
     this.host.notify(
       merge.conflicts.length && !keepConflicts ? "warning" : "success",
       `המיזוג הוחל. נוספו: ${linksCount(added.length)}; כפילויות שאוחדו: ${merge.duplicates.toLocaleString("he")}${merge.conflicts.length ? `; סתירות ${keepConflicts ? "שנוספו גם הן" : "שלא נוספו (נשמר המקור המועדף)"}: ${merge.conflicts.length.toLocaleString("he")}` : ""}. Ctrl+Z מבטל.`,

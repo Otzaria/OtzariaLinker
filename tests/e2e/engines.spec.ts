@@ -15,7 +15,7 @@ async function open(page: Page, files: { name: string; buffer: Buffer }[]) {
 }
 
 async function runEngine(page: Page, source: string | RegExp, target: string | RegExp, engine: string) {
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: source }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: target }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -49,7 +49,7 @@ test("engine settings (advanced): a custom marker tag is passed to the worker; a
     { name: "ספר דוגמה.txt", buffer: Buffer.from(main) },
     { name: "הערות לספר דוגמה.txt", buffer: Buffer.from(notes) },
   ]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: /^ספר דוגמה/ }).first().locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: "הערות לספר דוגמה" }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
@@ -89,7 +89,7 @@ test("batch: a folder of commentaries, each against the base its title names", a
   ]);
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("radio", { name: "ספרים רבים (אצווה)" }).click();
-  await page.getByLabel("המקור שבו נמצאים הפירושים").selectOption({ label: "2 קובצי טקסט (2 ספרים)" });
+  await page.getByLabel("הקובץ או המסד שבו נמצאים הפירושים").selectOption({ label: "2 קובצי טקסט (2 ספרים)" });
   await expect(page.getByText("זוהו 1 מתוך 2 ספרים")).toBeVisible();
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
   await expect(page.getByRole("table", { name: "הצעות" }).locator("tbody tr").first()).toBeVisible({ timeout: 30_000 });

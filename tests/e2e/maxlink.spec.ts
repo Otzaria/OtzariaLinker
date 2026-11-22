@@ -34,7 +34,7 @@ test("max-link: a folder of a commentary and a notes book against the database �
   // the folder is chosen by default; the plan: the commentary (two engines, plus dibur-hamatchil against
   // רש"י on the same base, which the database slice has), the notes book (footnotes), and the citations
   // engine once on each of the three books
-  await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "קובץ, תיקייה או מסד" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
   const engines = page.getByRole("group", { name: "השיטות שירוצו" });
   await expect(engines.getByRole("checkbox")).toHaveCount(4);

@@ -20,7 +20,7 @@ import "./maxlink.css";
  * reach the worker as MaxLinkRunOptions.engineOptions, and an invalid one blocks the run.
  */
 type ScopeKind = Exclude<MaxLinkScope["kind"], "sources">;
-const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "מקור או תיקייה", books: "ספרים שאבחר", all: "כל הספרים הפתוחים" };
+const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "קובץ, תיקייה או מסד", books: "ספרים שאבחר", all: "כל הספרים הפתוחים" };
 const ENGINE_TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const SHOWN_BOOKS = 200;
 
@@ -118,9 +118,9 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           </p>
           {baseSources.length > 0 && (
             <label class="field">
-              ספרי הבסיס כשהם פתוחים בכמה מקורות ({baseSources.slice(0, 3).map((b) => `"${b.title}"`).join(", ")}{baseSources.length > 3 ? "…" : ""})
+              ספרי הבסיס כשהם פתוחים בכמה קבצים או מסדים ({baseSources.slice(0, 3).map((b) => `"${b.title}"`).join(", ")}{baseSources.length > 3 ? "…" : ""})
               <select value={prefer} onChange={(e) => setPrefer(e.currentTarget.value)}>
-                <option value="">אוטומטי: מאותו מקור כמו הפירוש</option>
+                <option value="">אוטומטי: מאותו קובץ או מסד כמו הפירוש</option>
                 {[...new Set(baseSources.flatMap((b) => b.sources))].map((id) => (
                   <option key={id} value={id}>מתוך "{labelOf(id)}"</option>
                 ))}

@@ -21,7 +21,7 @@ function LibrarySwitch({ sourceId }: { sourceId: string }) {
   return (
     <label
       class="library-switch"
-      title={`בספריית אוצריא ${which} ${named.length === 1 ? "הוא ספר" : "הם ספרים"} של ספריא. סמנו אם המקור הזה הוא ספריית אוצריא עצמה (או עותק שלה): אז הקישורים אליהם נבדקים לפי הכללים של ספרי ספריא. בלי הסימון אלה ספרים שלכם, והכללים האלה לא חלים עליהם.`}
+      title={`בספריית אוצריא ${which} ${named.length === 1 ? "הוא ספר" : "הם ספרים"} של ספריא. סמנו אם הקובץ או המסד הזה הוא ספריית אוצריא עצמה (או עותק שלה): אז הקישורים אליהם נבדקים לפי הכללים של ספרי ספריא. בלי הסימון אלה ספרים שלכם, והכללים האלה לא חלים עליהם.`}
     >
       <input type="checkbox" checked={on} onChange={(e) => store.setLibrarySource(sourceId, e.currentTarget.checked)} />
       ספרי ספריית אוצריא
@@ -41,7 +41,7 @@ export function SourcesBody() {
         {store.books.value.size > 0 && <ReopenSources />}
         {sources.length === 0 && (
           <p class="muted empty-sources">
-            אין מקור פתוח. הוסיפו תיקייה, קבצים או מסד — אפשר כמה מקורות יחד, ולקשר בין ספרים של מקורות שונים.
+            אין קובץ או מסד פתוח. הוסיפו תיקייה, קבצים או מסד — אפשר כמה קבצים ומסדים יחד, ולקשר בין ספרים מקבצים ומסדים שונים.
           </p>
         )}
         {sources.map((s) => (
@@ -61,7 +61,7 @@ export function SourcesBody() {
                 <Icon name="fl_settings" size={16} />
               </button>
             )}
-            <button class="icon-btn" title={`סגירת המקור (${badgeOf(s).label}). הקישורים שבפרויקט נשארים.`} aria-label={`סגירת ${s.info.label}`} onClick={() => void store.closeSource(s.info.id)}>
+            <button class="icon-btn" title={`סגירת הקובץ או המסד (${badgeOf(s).label}). הקישורים שבפרויקט נשארים.`} aria-label={`סגירת ${s.info.label}`} onClick={() => void store.closeSource(s.info.id)}>
               <Icon name="fl_dismiss" size={16} />
             </button>
           </div>
@@ -71,7 +71,7 @@ export function SourcesBody() {
       {sources.length > 0 && (
         <>
           <div class="book-search">
-            <input type="search" placeholder="חיפוש ספר…" title="חיפוש בכל המקורות הפתוחים" value={q} onInput={(e) => setQ(e.currentTarget.value)} aria-label="חיפוש ספר" />
+            <input type="search" placeholder="חיפוש ספר…" title="חיפוש בכל הקבצים והמסדים הפתוחים" value={q} onInput={(e) => setQ(e.currentTarget.value)} aria-label="חיפוש ספר" />
           </div>
           <BookList query={q} />
         </>

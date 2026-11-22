@@ -16,9 +16,9 @@ test("relink: links move to the new edition of a book (stage 11)", async ({ page
     [{ name: "ספר.txt", buffer: Buffer.from(v2.join(nl)) }],
   ]) {
     const chooser = page.waitForEvent("filechooser");
-    // home: the drop strip's "קבצים"; the workspace: "הוספת מקור" → "קבצים"
+    // home: the drop strip's "קבצים"; the workspace: "הוספת קובץ או מסד" → "קבצים"
     const pickBtn = page.getByRole("button", { name: "קבצים", exact: true });
-    if (!(await pickBtn.isVisible())) await page.getByRole("button", { name: "הוספת מקור" }).click();
+    if (!(await pickBtn.isVisible())) await page.getByRole("button", { name: "הוספת קובץ או מסד" }).click();
     await pickBtn.click();
     await (await chooser).setFiles(files.map((f) => ({ ...f, mimeType: "text/plain" })));
     await expect(page.locator(".source-row").last()).toBeVisible({ timeout: 30_000 });

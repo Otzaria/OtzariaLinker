@@ -314,7 +314,7 @@ export interface IssueGroup {
 /** What each kind of problem means to the user, without the file format's names. */
 const ISSUE_TEXT: Readonly<Record<QaCategory, string>> = {
   duplicate: "קישורים כפולים",
-  "missing-book": "קישורים לספר שלא נמצא באף מקור פתוח",
+  "missing-book": "קישורים לספר שלא נמצא באף קובץ או מסד פתוח",
   "out-of-range": "קישורים לשורה שאינה בספר",
   heading: "קישורים לשורת כותרת, שאוצריא מדלגת עליהם",
   anchor: "סימון מילים שאוצריא לא תשמור כמו שהוא",

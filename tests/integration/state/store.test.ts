@@ -271,7 +271,7 @@ describe("AppStore — projects and autosave", () => {
       ["פירוש על בראשית.txt", ["פירוש על בראשית"]],
     ]);
     // the success notice points at the list, and does not fade into nothing on its own
-    expect(b.store.notices.value.at(-1)!.text).toContain("מקורות וספרים");
+    expect(b.store.notices.value.at(-1)!.text).toContain("קבצים, מסדים וספרים");
     // saving before reopening keeps the sources the project still waits for
     expect(JSON.parse(b.store.projectText()).sources).toEqual(stored);
 

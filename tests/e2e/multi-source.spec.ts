@@ -6,7 +6,7 @@ import { distUrl, watchPage } from "./helpers";
 /*
  * Several sources at once (the owner's question: "I loaded a folder; now I want another folder, or
  * the Otzaria database, and to link between them — how?"): a folder, the real database slice and a
- * second folder are opened one after the other from the workspace's "הוספת מקור"; the books are
+ * second folder are opened one after the other from the workspace's "הוספת קובץ או מסד"; the books are
  * listed by source; a link is made from a folder book to a database book; max-link runs across all
  * three (folder → database, folder → folder); the export writes the folder books' links files.
  */
@@ -22,10 +22,10 @@ function folder(name: string, books: Record<string, string[]>): string {
   return dir;
 }
 
-/** In the workspace: "הוספת מקור" → one of its options → the picker. */
+/** In the workspace: "הוספת קובץ או מסד" → one of its options → the picker. */
 async function addSource(page: Page, option: "תיקייה" | "מסד נתונים" | "קבצים", files: string | (typeof DB)[]) {
-  const item = page.getByRole("group", { name: "סוג המקור להוספה" }).getByRole("button", { name: option, exact: true });
-  if (!(await item.isVisible())) await page.getByRole("button", { name: "הוספת מקור" }).click();
+  const item = page.getByRole("group", { name: "סוג הקובץ או המסד להוספה" }).getByRole("button", { name: option, exact: true });
+  if (!(await item.isVisible())) await page.getByRole("button", { name: "הוספת קובץ או מסד" }).click();
   const chooser = page.waitForEvent("filechooser");
   await item.click();
   await (await chooser).setFiles(files);

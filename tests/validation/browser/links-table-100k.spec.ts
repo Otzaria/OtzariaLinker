@@ -43,7 +43,7 @@ test("100K links: table render, filter, sort, scroll, group action; 100K-vs-100K
     { name: "ארצות החיים_links.json", mimeType: "application/json", buffer: Buffer.from(v1) },
   ]);
   await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 120_000 });
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
   await books.filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click({ timeout: 60_000 });
 
   const items = page.locator(".vlist .link-item");

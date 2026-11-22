@@ -216,7 +216,7 @@ function MergePanel({ title }: { title: string }) {
   return (
     <details class="held cmp-merge" open>
       <summary>מיזוג הקבצים של "{title}"</summary>
-      <p class="muted">המקור המועדף נשמר כמו שהוא. מה שיש רק במקורות האחרים נוסף כקישורים חדשים שזוכרים מאיזה קובץ באו; כפילויות מתאחדות; סתירות לא נוספות אלא אם תבחרו בזה.</p>
+      <p class="muted">הגרסה המועדפת נשמרת כמו שהיא. מה שיש רק בגרסאות האחרות נוסף כקישורים חדשים שזוכרים מאיזה קובץ באו; כפילויות מתאחדות; סתירות לא נוספות אלא אם תבחרו בזה.</p>
       <ul class="cmp-sets">
         {sets.map((s) => (
           <li key={s.id}>
@@ -238,7 +238,7 @@ function MergePanel({ title }: { title: string }) {
       {plan ? (
         <>
           <div class="stats">
-            <div class="stat"><b>{plan.merge.entries.filter((e) => e.base).length.toLocaleString("he")}</b><span class="muted">מהמקור המועדף</span></div>
+            <div class="stat"><b>{plan.merge.entries.filter((e) => e.base).length.toLocaleString("he")}</b><span class="muted">מהגרסה המועדפת</span></div>
             <div class="stat"><b>{plan.preview.counts.added.toLocaleString("he")}</b><span class="muted">יתווספו</span></div>
             <div class="stat"><b>{plan.merge.duplicates.toLocaleString("he")}</b><span class="muted">כפילויות</span></div>
             <div class={`stat${plan.merge.conflicts.length ? " bad" : ""}`}><b>{plan.merge.conflicts.length.toLocaleString("he")}</b><span class="muted">סתירות</span></div>
@@ -268,7 +268,7 @@ function MergePanel({ title }: { title: string }) {
           </div>
         </>
       ) : (
-        <p class="muted">בחרו לפחות שני מקורות.</p>
+        <p class="muted">בחרו לפחות שתי גרסאות.</p>
       )}
     </details>
   );

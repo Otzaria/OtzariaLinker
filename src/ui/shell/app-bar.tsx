@@ -8,7 +8,7 @@ import { HistoryMenu } from "./history-menu";
 import { Menu, MenuGroup, MenuItem } from "./menu";
 
 const presetLabels = (r: RoleLabels): Record<LayoutPreset, string> => ({ four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: `${r.source.short} מעל ${r.target.short}` });
-const panelLabels = (r: RoleLabels): Record<PanelId, string> => ({ sources: "מקורות וספרים", source: r.source.name, target: r.target.name, side: "החלונית (בונה, קישורים, הצעות)" });
+const panelLabels = (r: RoleLabels): Record<PanelId, string> => ({ sources: "קבצים, מסדים וספרים", source: r.source.name, target: r.target.name, side: "החלונית (בונה, קישורים, הצעות)" });
 const THEME_LABELS: Record<ThemeSetting, string> = { system: "לפי המערכת", light: "בהיר", dark: "כהה" };
 
 export function AppBar({ onExport }: { onExport: () => void }) {

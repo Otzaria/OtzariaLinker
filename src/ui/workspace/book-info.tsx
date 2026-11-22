@@ -26,7 +26,7 @@ export function BookInfo({ id, bookKey }: { id: string; bookKey: string }) {
             נתיב: <SourceName name={book.path} />
           </span>
         )}
-        {origin.ambiguous && <span class="muted">יש ספר באותו שם גם במקור אחר: זה הספר מ־{origin.source ? origin.source.info.label : "מקור אחר"}.</span>}
+        {origin.ambiguous && <span class="muted">יש ספר באותו שם גם בקובץ או במסד אחר: זה הספר מ־{origin.source ? origin.source.info.label : "קובץ או מסד אחר"}.</span>}
       </div>
     </div>
   );

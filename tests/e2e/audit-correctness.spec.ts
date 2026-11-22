@@ -22,7 +22,7 @@ const text = (name: string, lines: string[]) => ({ name, mimeType: "text/plain",
 async function openFiles(page: Page, files: { name: string; mimeType: string; buffer: Buffer }[]) {
   const chooser = page.waitForEvent("filechooser");
   const pickBtn = page.getByRole("button", { name: "קבצים", exact: true });
-  if (!(await pickBtn.isVisible())) await page.getByRole("button", { name: "הוספת מקור" }).click();
+  if (!(await pickBtn.isVisible())) await page.getByRole("button", { name: "הוספת קובץ או מסד" }).click();
   await pickBtn.click();
   await (await chooser).setFiles(files);
 }

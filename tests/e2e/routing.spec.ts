@@ -48,7 +48,7 @@ test("routes: a guided workflow, tabs, max-link, help and export; Back/Forward/E
   // it starts max-link on the folder
   await expect(sheet).toBeHidden();
   await expect.poll(() => hash(page)).toBe("#/maxlink");
-  await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "קובץ, תיקייה או מסד" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("label.field select").first()).toHaveValue(/.+/);
   await expect(page.locator("label.field select").first().locator("option:checked")).toContainText("פירושים");
 

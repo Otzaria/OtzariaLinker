@@ -730,7 +730,7 @@ export class AppStore {
     for (const p of list) {
       const saved = this.dbMappings.value.get(p.preview.fingerprint)?.mapping;
       if (saved && !mappingProblems(p.preview, saved).some((x) => x.level === "error") && (await this.openMapped(p, saved))) {
-        this.notify("info", `${p.label}: נפתח לפי המיפוי השמור בפרויקט (${describeMapping(saved)}). לשינוי: "מיפוי" ברשימת המקורות.`);
+        this.notify("info", `${p.label}: נפתח לפי המיפוי השמור בפרויקט (${describeMapping(saved)}). לשינוי: "מיפוי" ברשימת הקבצים והמסדים.`);
         continue;
       }
       this.pendingDbs.value = [...this.pendingDbs.value.filter((x) => x.token !== p.token), p];
@@ -1249,7 +1249,7 @@ export class AppStore {
     });
     const missing = this.missingSources.value.length;
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
-    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את המקור של הפרויקט" : `את ${missing.toLocaleString("he")} המקורות של הפרויקט`} — הרשימה ב"מקורות וספרים".` : ""}`);
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים, מסדים וספרים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     this.noticeChangedBooks();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];

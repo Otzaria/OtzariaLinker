@@ -22,22 +22,22 @@ test("a window made narrower switches to 'two texts and a side panel'; wider aga
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים, מסדים וספרים")).toBeVisible();
   await page.setViewportSize({ width: 1024, height: 768 });
   // the books moved to the side panel's tab
-  await expect(panel(page, "מקורות וספרים")).toHaveCount(0);
+  await expect(panel(page, "קבצים, מסדים וספרים")).toHaveCount(0);
   await page.getByRole("tab", { name: "ספרים" }).click();
   await expect(page.locator(".side-panel .book-list li")).toHaveCount(2);
   await expect(page.locator(".notice", { hasText: "החלון צר" })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים, מסדים וספרים")).toBeVisible();
   await expect(page.getByRole("tab", { name: "ספרים" })).toHaveCount(0);
 
   // a layout the user chose is kept, at any width
   await layoutMenu(page).click();
   await page.getByRole("menuitemradio", { name: "מקור מעל יעד" }).click();
   await page.setViewportSize({ width: 1024, height: 768 });
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים, מסדים וספרים")).toBeVisible();
   await layoutMenu(page).click();
   await expect(page.getByRole("menuitemradio", { name: "מקור מעל יעד" })).toHaveAttribute("aria-checked", "true");
   expect(seen.errors).toEqual([]);
@@ -56,7 +56,7 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
 
   // four columns: each panel alone, hidden and shown again from the layout menu (its button counts them)
   for (const [hideLabel, region, menuLabel] of [
-    ["מקורות וספרים", "מקורות וספרים", "מקורות וספרים"],
+    ["קבצים, מסדים וספרים", "קבצים, מסדים וספרים", "קבצים, מסדים וספרים"],
     ["ספר המקור", "ספר המקור", "ספר המקור"],
     ["ספר היעד", "ספר היעד", "ספר היעד"],
     ["החלונית", "בונה וקישורים", "החלונית (בונה, קישורים, הצעות)"],
@@ -70,10 +70,10 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await expect(layoutMenu(page)).toHaveAccessibleName("פריסת סביבת העבודה");
 
   // everything hidden: the workspace itself says so and shows them again
-  for (const label of ["מקורות וספרים", "ספר המקור", "ספר היעד", "החלונית"]) await hide(label);
+  for (const label of ["קבצים, מסדים וספרים", "ספר המקור", "ספר היעד", "החלונית"]) await hide(label);
   await expect(layoutMenu(page)).toHaveAccessibleName("פריסת סביבת העבודה (4 פאנלים מוסתרים)");
   await page.getByRole("button", { name: "הצגת כל הפאנלים" }).click();
-  for (const region of ["מקורות וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
+  for (const region of ["קבצים, מסדים וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
 
   // "source above target": the target hides alone (it shares the source's column) and comes back there
   await layoutMenu(page).click();
@@ -92,8 +92,8 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await layoutMenu(page).click();
   await page.getByRole("menuitemradio", { name: "שני טקסטים וחלונית צד" }).click();
   await expect(page.getByRole("tab", { name: "ספרים" })).toBeVisible();
-  await show("מקורות וספרים");
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await show("קבצים, מסדים וספרים");
+  await expect(panel(page, "קבצים, מסדים וספרים")).toBeVisible();
   await expect(page.getByRole("tab", { name: "ספרים" })).toHaveCount(0);
 
   // reset: four columns, every panel shown
@@ -101,13 +101,13 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await hide("ספר היעד");
   await layoutMenu(page).click();
   await page.getByRole("menuitem", { name: /איפוס הפריסה/ }).click();
-  for (const region of ["מקורות וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
+  for (const region of ["קבצים, מסדים וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
   await layoutMenu(page).click();
   await expect(page.getByRole("menuitemradio", { name: "ארבעה טורים" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 
   // a side panel's section folded away comes back from the same place: the "add a source" options
-  const add = page.getByRole("button", { name: /הוספת מקור/ });
+  const add = page.getByRole("button", { name: /הוספת קובץ או מסד/ });
   await expect(add).toHaveAttribute("aria-expanded", "false");
   await add.click();
   await expect(add).toHaveAttribute("aria-expanded", "true");

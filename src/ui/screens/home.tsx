@@ -65,7 +65,7 @@ export const TASKS: readonly TaskDef[] = [
     hint: `פירוש אחד מול ספר הבסיס שלו — לפי כותרות ודיבור המתחיל (לכמה פירושים יחד: "כמה ספרים יחד")`,
     steps: [
       { label: "הפירוש", hint: `קובץ ${ltr(".txt")}, תיקייה או מסד שבו הפירוש. אם גם ספר הבסיס שם — זה מספיק.`, options: ["files", "folder", "db"] },
-      { label: "ספר הבסיס, אם הוא במקור אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "files"], optional: true, dbHint: true },
+      { label: "ספר הבסיס, אם הוא בקובץ או במסד אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "headings", mode: "pair" },
   },
@@ -77,7 +77,7 @@ export const TASKS: readonly TaskDef[] = [
     steps: [
       // the engine's roles (automatic/index.ts): the SOURCE is the book with the note numbers, the TARGET the notes book
       { label: "הספר עם מספרי ההערות", hint: "הספר עצמו, שבטקסט שלו מופיעים מספרי ההערות. ואם ספר ההערות באותו מקור, באותה בחירה.", options: ["files", "folder", "db"] },
-      { label: "ספר ההערות, אם הוא במקור אחר", hint: "קובץ, תיקייה או מסד. השורות בו נפתחות במספר ההערה.", options: ["files", "db"], optional: true, dbHint: true },
+      { label: "ספר ההערות, אם הוא בקובץ או במסד אחר", hint: "קובץ, תיקייה או מסד. השורות בו נפתחות במספר ההערה.", options: ["files", "db"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "footnotes", mode: "pair" },
   },
@@ -89,7 +89,7 @@ export const TASKS: readonly TaskDef[] = [
     hint: "הפניות כתובות בטקסט ('בראשית א, ב', 'ב\"ק דף ט') מקושרות לספרים שהן מציינות",
     steps: [
       { label: "הספר עם מראי המקום", hint: `קובץ ${ltr(".txt")}, תיקייה או מסד.`, options: ["files", "folder", "db"] },
-      { label: "הספרים שמצטטים אליהם, אם הם במקור אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "folder", "files"], optional: true, dbHint: true },
+      { label: "הספרים שמצטטים אליהם, אם הם בקובץ או במסד אחר", hint: "בדרך כלל מסד אוצריא.", options: ["db", "folder", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", engine: "citations", mode: "pair" },
   },
@@ -101,7 +101,7 @@ export const TASKS: readonly TaskDef[] = [
     hint: "כמה פירושים, ספרי הערות וספרי בסיס — הכלי מזהה מי קשור למי ומקשר את כולם",
     steps: [
       { label: "הספרים", hint: `קבצים (${ltr(".txt")}), תיקייה, ZIP או מסד — אפשר כמה יחד.`, options: ["files", "folder", "zip", "db"] },
-      { label: "ספרי הבסיס, אם הם במקור אחר", hint: "למשל מסד אוצריא, כשהפירושים מתייחסים לספרים שבו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
+      { label: "ספרי הבסיס, אם הם בקובץ או במסד אחר", hint: "למשל מסד אוצריא, כשהפירושים מתייחסים לספרים שבו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "suggestions", mode: "maxlink", allBooks: true },
     guided: true,
@@ -183,10 +183,10 @@ export const TASKS: readonly TaskDef[] = [
     id: "manual",
     icon: "oz_link_add",
     title: "קישור ידני",
-    hint: "בוחרים ספרים, שורות, טווחים ומילים בעצמכם — גם בין מקורות שונים",
+    hint: "בוחרים ספרים, שורות, טווחים ומילים בעצמכם — גם בין קבצים ומסדים שונים",
     steps: [
-      { label: "מקור ראשון", hint: "תיקייה, קבצים, מסד או ZIP.", options: ["folder", "files", "db", "zip"] },
-      { label: "מקור נוסף", hint: "למשל מסד אוצריא, כדי לקשר אליו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
+      { label: "קובץ או מסד ראשון", hint: "תיקייה, קבצים, מסד או ZIP.", options: ["folder", "files", "db", "zip"] },
+      { label: "קובץ או מסד נוסף", hint: "למשל מסד אוצריא, כדי לקשר אליו.", options: ["db", "folder", "files"], optional: true, dbHint: true },
     ],
     then: { tab: "builder" },
   },
@@ -282,7 +282,7 @@ export function Home() {
           <div class="recent">
             <button class="btn tonal" onClick={() => (store.screen.value = "workspace")}>
               <Icon name="oz_book_open_medium_lines" size={18} />
-              חזרה לסביבת העבודה ({store.sources.value.length} מקורות, {store.linkState.value.links.size.toLocaleString("he")} קישורים)
+              חזרה לסביבת העבודה ({store.sources.value.length} קבצים ומסדים, {store.linkState.value.links.size.toLocaleString("he")} קישורים)
             </button>
           </div>
         )}
@@ -301,7 +301,7 @@ export function Home() {
       >
         <Icon name="fl_arrow_upload" size={36} />
         <b>גררו לכאן ספרים, תיקייה, מסד או קובץ קישורים</b>
-        <span class="muted">הכלי מזהה לבד את סוג כל קובץ. אפשר לפתוח כמה מקורות יחד ולקשר ביניהם.</span>
+        <span class="muted">הכלי מזהה לבד את סוג כל קובץ. אפשר לפתוח כמה קבצים ומסדים יחד ולקשר ביניהם.</span>
         <div class="actions">
           {SOURCE_OPTIONS.map((o) => (
             <button key={o.id} class="btn outlined" onClick={() => void pick(o)} title={o.hint}>
@@ -457,13 +457,13 @@ function TaskSheet({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <div class="body">
-          <p class="muted" style="margin:0">{task.hint}. בחרו את מה שצריך, שלב אחרי שלב; כל מקור מתווסף לאלה שכבר פתוחים.</p>
+          <p class="muted" style="margin:0">{task.hint}. בחרו את מה שצריך, שלב אחרי שלב; כל קובץ או מסד מתווסף לאלה שכבר פתוחים.</p>
           {proposed > 0 && (
             <div class="opened-offer">
-              <span class="grow">יש כבר מקורות פתוחים שמתאימים למשימה הזו: לא צריך לבחור אותם שוב.</span>
+              <span class="grow">יש כבר קבצים ומסדים פתוחים שמתאימים למשימה הזו: לא צריך לבחור אותם שוב.</span>
               <button class="btn outlined" onClick={() => Object.entries(proposal).forEach(([i, ids]) => use(Number(i), ids))}>
                 <Icon name="oz_check" size={16} />
-                המשך עם המקורות הפתוחים
+                המשך עם הקבצים והמסדים הפתוחים
               </button>
             </div>
           )}
@@ -497,9 +497,9 @@ function TaskSheet({ onClose }: { onClose: () => void }) {
                       const src = store.sources.value.find((x) => x.info.id === c.id)!;
                       return (
                         <div key={c.id} class="opened offer">
-                          <button class="btn text small" onClick={() => use(i, [c.id])} aria-label={`${s.label}: שימוש במקור הפתוח ${src.info.label}`}>
+                          <button class="btn text small" onClick={() => use(i, [c.id])} aria-label={`${s.label}: שימוש בקובץ או במסד הפתוח ${src.info.label}`}>
                             <Icon name="fl_checkmark_circle" size={14} />
-                            שימוש במקור הפתוח: <SourceBadge source={src} name /> · {src.books.length.toLocaleString("he")} ספרים
+                            שימוש בקובץ או במסד הפתוח: <SourceBadge source={src} name /> · {src.books.length.toLocaleString("he")} ספרים
                           </button>
                         </div>
                       );
@@ -516,7 +516,7 @@ function TaskSheet({ onClose }: { onClose: () => void }) {
             <button class="btn text" onClick={() => (store.startTask.value = back)} title="חזרה לבחירת המשימה">חזרה</button>
           )}
           <button class="btn text" onClick={() => ref.current?.close()}>ביטול</button>
-          <button class="btn filled" disabled={!ready} onClick={start} title={ready ? undefined : "חסר מקור שהמשימה צריכה"}>
+          <button class="btn filled" disabled={!ready} onClick={start} title={ready ? undefined : "חסר קובץ או מסד שהמשימה צריכה"}>
             <Icon name="oz_link" size={18} />
             התחלה
           </button>

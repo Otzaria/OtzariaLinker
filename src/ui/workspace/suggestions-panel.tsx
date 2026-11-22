@@ -237,7 +237,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
       ) : (
         <>
           <label class="field">
-            המקור שבו נמצאים הפירושים
+            הקובץ או המסד שבו נמצאים הפירושים
             <select value={batchSource} onChange={(e) => setBatchSource(e.currentTarget.value)}>
               {sources.map((x) => (
                 <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length} ספרים)</option>

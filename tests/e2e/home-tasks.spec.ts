@@ -76,7 +76,7 @@ test("an open database is offered by the next task sheet, and picking it again d
   sheet = page.getByRole("dialog", { name: "קישור בתוך מסד אישי" });
   const start = sheet.getByRole("button", { name: "התחלה" });
   await expect(start).toBeDisabled();
-  await sheet.getByRole("button", { name: "המשך עם המקורות הפתוחים" }).click();
+  await sheet.getByRole("button", { name: "המשך עם הקבצים והמסדים הפתוחים" }).click();
   await expect(sheet.locator(".steps > li").first()).toHaveClass(/done/);
   await expect(start).toBeEnabled();
 
@@ -87,7 +87,7 @@ test("an open database is offered by the next task sheet, and picking it again d
   await expect(page.getByText(/כבר פתוח, ולכן לא נטען שוב/)).toBeVisible();
   await expect(sheet.locator(".steps .opened")).toHaveCount(1);
   await start.click();
-  await expect(page.getByRole("region", { name: "מקורות וספרים" }).locator(".src-badge")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".src-badge")).toHaveCount(1);
   expect(seen.errors).toEqual([]);
 });
 
