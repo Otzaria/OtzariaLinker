@@ -181,6 +181,7 @@ CREATE INDEX idx_line_book_index ON line(bookId, lineIndex)
 אותו מזהה, שני מילונים שונים בגודלם (בגיבוב: SHA-256 `61b5d6f5…f728` מול `7b08b7c3…a396`; ביקורת קודמת). לכן:
 
 - כל מסד נפתח ומפוענח **עם המילון של עצמו** מתוך `zstd_dict` שלו. אסור להניח שה־`dictID` בכותרת המסגרת מזהה מילון ברמת הסשן.
+- **נבדק בפועל (2026-11-22):** `tests/integration/database/dictionary-collision-real-db.local.test.ts` פותח את שני המסדים יחד, בשני הסדרים, ו־`sharedDictionaries.isConflicted(32768)` הוא true; מכל מסד נקראות שורות של 3 ספרים לפחות, מפוענחות עם המילון של עצמו (הרצה מקומית עם `OTZARIA_DB` ו־`OTZARIA_PERSONAL_DB`: 1 passed).
 - [DATABASE_SUPPORT_MATRIX §3.4](../contracts/DATABASE_SUPPORT_MATRIX.md) מניח שמסד PDC מעתיק את המילון הרשמי. ב־v52 זה לא נכון: המילון קטן בהרבה ושונה.
 - מסד אישי שדחוס במילון הרשמי **בלי** `zstd_dict` משלו לא ייפתר נכון בבריכת מילונים משותפת. זה לא נבדק בפועל בתוכנה.
 
