@@ -46,7 +46,12 @@ export interface PersonalExportContext {
   positionOf(side: LinkSide): string | null;
   /** the library folder id of a personal book whose name is not unique */
   categoryOf?(book: BookRef): number | undefined;
+  /** how many lines the book has: a range `end` read from a file never walks past it (default: MAX_RANGE_LINES) */
+  lineCount?(book: BookRef): number | undefined;
 }
+
+/** The longest range walked when the book's length is not known (formats may import only core, so this is not linking/coverage's cap). */
+const MAX_RANGE_LINES = 5_000_000;
 
 export type PersonalSkipCode = "csv/deleted" | "csv/ends" | "csv/type" | "csv/source-line" | "csv/no-position";
 
@@ -86,7 +91,8 @@ export function personalLinkRows(links: readonly Link[], ctx: PersonalExportCont
       continue;
     }
     let any = false;
-    for (let line = mine.line; line <= (mine.end ?? mine.line); line++) {
+    const last = Math.min(mine.end ?? mine.line, (ctx.lineCount?.(mine.book) ?? MAX_RANGE_LINES) - 1);
+    for (let line = Math.max(mine.line, 0); line <= last; line++) {
       if (!ctx.contentLine(mine.book, line)) continue;
       any = true;
       const row: PersonalLinkRow = { sourceLine: line + 1, sourceBook: mine.book.title, targetBook: other.book.title, position, type };
@@ -271,3 +277,4 @@ export function validatePersonalRows(rows: readonly PersonalLinkRow[], v: Person
   }
   return out;
 }
+

@@ -59,6 +59,20 @@ describe("personalLinkRows — our links as rows", () => {
   });
 });
 
+describe("personalLinkRows — a range end from a file is not a loop bound (QA round 2, A)", () => {
+  const short: PersonalExportContext = { ...ctx, contentLine: (_b, line) => line >= 1 && line < 10, lineCount: () => 10 };
+  it("a personal range of 2^53-1 is clamped to the book's last line, and finishes at once", () => {
+    const t0 = Date.now();
+    const { rows } = personalLinkRows([link(side(PERSONAL, 2, Number.MAX_SAFE_INTEGER), side(OFFICIAL, 3))], short);
+    expect(rows.map((r) => r.sourceLine)).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+  it("a range of three million lines in a ten-line book is ten lines at most, not three million rows", () => {
+    const { rows } = personalLinkRows([link(side(PERSONAL, 1, 3_000_000), side(OFFICIAL, 3))], short);
+    expect(rows).toHaveLength(9);
+  });
+});
+
 describe("writePersonalLinksCsv — the files", () => {
   const row = (line: number, bookTitle = "פירוש אישי", target = "ברכות", position = "ב.", type: PersonalLinkRow["type"] = "פירוש"): PersonalLinkRow => ({ sourceLine: line, sourceBook: bookTitle, targetBook: target, position, type });
 
@@ -150,3 +164,4 @@ describe("validatePersonalRows — the all-or-nothing rules of the import", () =
     expect(codes([{ ...ok, position: "ג." }])).toEqual(["csv/unknown-position"]);
   });
 });
+

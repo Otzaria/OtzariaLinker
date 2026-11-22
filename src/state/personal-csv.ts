@@ -51,6 +51,7 @@ export class PersonalCsvState {
     // the headings of the official targets and the content lines of the personal sources, read once each
     const targets = new Map<string, BookHeading[]>();
     const content = new Map<string, Set<number>>();
+    const lengths = new Map<string, number>();
     const ok = await this.host.runTask("קורא את הכותרות והשורות של הספרים…", async (opts) => {
       for (const l of links)
         for (const [mine, other] of [[l.source, l.target], [l.target, l.source]] as const) {
@@ -58,6 +59,7 @@ export class PersonalCsvState {
           if (!targets.has(other.book.key)) targets.set(other.book.key, await this.service.headings(other.book.key, opts));
           if (!content.has(mine.book.key)) {
             const lines = await this.service.lines(mine.book.key, 0, Number.MAX_SAFE_INTEGER, opts);
+            lengths.set(mine.book.key, lines.reduce((m, x) => Math.max(m, x.index + 1), 0));
             content.set(mine.book.key, new Set(lines.filter((x) => x.heading === null && stripTags(x.text).trim() !== "").map((x) => x.index)));
           }
         }
@@ -68,6 +70,8 @@ export class PersonalCsvState {
       isPersonal: personal,
       isOfficial: official,
       contentLine: (b, line) => content.get(b.key)?.has(line) ?? false,
+      // the lines read are the book's length: a range end of a hostile file never walks past them
+      lineCount: (b) => lengths.get(b.key),
       positionOf: (side) => {
         const hs = targets.get(side.book.key);
         if (!hs) return null;
@@ -93,3 +97,4 @@ export class PersonalCsvState {
     this.saver.save(`קישורים-לספרייה-האישית-${new Date().toISOString().slice(0, 10)}.zip`, data, "application/zip");
   }
 }
+
