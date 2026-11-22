@@ -131,6 +131,13 @@ describe("citations engine (in memory)", () => {
     expect(runCitationsEngine(source([text]), library(), { ...opts, anchors: "off" }).suggestions[0]).toMatchObject({ declaredType: "reference" });
   });
 
+  it("citationType inline-linker: the note says the type depends on the Otzaria version (fix round, task 3)", () => {
+    const r = runCitationsEngine(source(["כמו שנאמר (בראשית א, ב) ועוד"]), library(), { citationType: "inline-linker" });
+    const note = r.notes.find((n) => n.code === "citations/inline-linker")!;
+    expect(note.text).toMatch(/תלוי בגרסת אוצריא/);
+    expect(note.text).toContain("dev");
+  });
+
   it("a location that does not exist is reported, not guessed", () => {
     const r = runCitationsEngine(source(["כמו שנאמר (בראשית ט, ג) ועוד"]), library());
     expect(r.suggestions).toHaveLength(0);

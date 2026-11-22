@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CONNECTION_TYPES, isInlineLinkerType } from "../../../src/core/links/connection-type";
+import { CONNECTION_TYPES, INLINE_LINKER_SUPPORT, inlineLinkerVersionNote, isInlineLinkerType } from "../../../src/core/links/connection-type";
+import { ENGINE_OPTION_SPECS } from "../../../src/linking/automatic/option-specs";
 import type { BookRef, Link } from "../../../src/core/links/model";
 import { storedForm } from "../../../src/core/links/stored-form";
 import { recordToLink } from "../../../src/formats/links-json/convert";
@@ -177,3 +178,53 @@ describe("duplicates in a private export (QA)", () => {
     expect(dupes([link({ id: "a" }), link({ id: "b", declaredType: "other", anchor: undefined, ref2: undefined })])).toEqual([false, false]);
   });
 });
+
+/*
+ * Fix round before merge (task 3): INLINE_LINKER depends on the Otzaria VERSION. Measured on 2026-11-22 with `gh api`:
+ * commit 6f71470e (2026-11-20) is in `dev` and in no published release; the newest release, 0.9.98.3+809 (2026-11-02), is
+ * 2,582 commits behind it and its personal-import code has no INLINE_LINKER. The tool says so and promises nothing.
+ */
+describe("INLINE_LINKER depends on the Otzaria version (no promise for every version)", () => {
+  const priv = (l: Link) => validateLink(l, { ...ctx, purpose: "private" });
+
+  it("the support record says it is in no published release yet, and which release was checked", () => {
+    expect(INLINE_LINKER_SUPPORT.supportedFrom).toBeNull();
+    expect(INLINE_LINKER_SUPPORT.commit).toBe("6f71470e");
+    expect(INLINE_LINKER_SUPPORT.latestStable).toBe("0.9.98.3+809");
+  });
+
+  it("the note says it depends on the version, is only in dev for now, names the newest release that lacks it, and promises nothing", () => {
+    const note = inlineLinkerVersionNote();
+    expect(note).toMatch(/תלוי בגרסת אוצריא/);
+    expect(note).toContain("dev");
+    expect(note).toContain("0.9.98.3+809");
+    expect(note).toContain("2026-11-22"); // when it was checked
+    expect(note).toMatch(/עדיין לא בגרסה שפורסמה/);
+    expect(note).not.toMatch(/בכל הגרסאות|כל גרסה|נתמך בכל/);
+  });
+
+  it("a private export of an INLINE_LINKER link is written, with a warning that carries the note; it is no error", () => {
+    const got = priv(link());
+    expect(got.filter((p) => p.severity === "error")).toEqual([]);
+    const w = got.find((p) => p.code === "export/inline-linker-version")!;
+    expect(w.severity).toBe("warning");
+    expect(w.message).toContain("dev");
+    expect(w.message).toContain("0.9.98.3+809");
+    expect(w.message).not.toMatch(TECH_WORDS_INLINE);
+    const plan = planExport([link({ provenance: "user", status: "new", heRef2: "ברכות ב." })], { ...ctx, purpose: "private", lineCount: () => 1000 });
+    expect(plan.heldBack).toEqual([]);
+    expect(plan.warned.flatMap((x) => x.problems.map((p) => p.code))).toContain("export/inline-linker-version");
+  });
+
+  it("a link of another type, and the library purpose, get no such warning", () => {
+    expect(priv(link({ declaredType: "reference", anchor: undefined })).map((p) => p.code)).not.toContain("export/inline-linker-version");
+    expect(validateLink(link(), ctx).map((p) => p.code)).not.toContain("export/inline-linker-version");
+  });
+
+  it("the engine option's hint carries the version note", () => {
+    const spec = ENGINE_OPTION_SPECS.citations.find((s) => s.key === "citationType")!;
+    expect(spec.hint).toMatch(/תלוי בגרסת אוצריא/);
+    expect(spec.hint).toContain("dev");
+  });
+});
+const TECH_WORDS_INLINE = /ref_[12]|heRef|anchor_src_hash|Conection|path_2|הגנרטור/;

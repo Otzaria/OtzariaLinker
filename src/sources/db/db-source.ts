@@ -367,6 +367,8 @@ export class DbBookSource implements BookSource {
       lis.ownIndex[k] = r.lineIndex;
       lis.flags[k] = await this.flagsOf(r, ix, toc);
       if (r.targetLine !== null && !r.targetRef?.trim()) otherLine[k] = r.targetLine;
+      // a database with a link table too compares the two tables by the far line, which a row with a ref has only once the ref is resolved
+      else if (this.links) otherLine[k] = (await this.lineOf(r)) ?? -1;
       k++;
     }
     const ownTitle = this.booksById.get(id)?.title ?? "";
@@ -425,6 +427,7 @@ export class DbBookSource implements BookSource {
       id: `${this.info.id}:ext:${r.rowid}`,
       status: "existing",
       provenance: "db",
+      dbTable: "external_link",
       source: { book: this.bookRef(r.bookId), line: r.lineIndex },
       target: { book: target, line },
       declaredType: canonicalTypeString(this.ext!.typeOf(r.typeName)),
@@ -481,6 +484,7 @@ export class DbBookSource implements BookSource {
       id: `${this.info.id}:link:${r.id}`,
       status: "existing",
       provenance: "db",
+      dbTable: "link",
       source: end(r.source),
       target: end(r.target),
       declaredType: canonicalTypeString(r.type),
@@ -563,6 +567,14 @@ function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkList
   }
   const nl = link.rows.ref.length;
   const n = nl + keep.length;
+  const linkHasIncoming = link.rows.dir.some((x) => x === 1);
+  const tables = {
+    link: nl,
+    externalLink: keep.length,
+    duplicatesDropped: ext.rows.ref.length - keep.length,
+    // an incoming external row has no known far line on the link side, so it is not compared; say so when there is anything to compare it with
+    incomingUnchecked: linkHasIncoming ? keep.filter((i) => ext.rows.dir[i] === 1).length : 0,
+  };
   const rows = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n), flags: new Uint8Array(n) };
   for (let i = 0; i < nl; i++) {
     rows.ref[i] = link.rows.ref[i]!;
@@ -592,5 +604,6 @@ function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkList
     link.method === "index" && ext.method === "index" ? "index" : "scan",
     ms,
     ext.unlisted,
+    tables,
   );
 }

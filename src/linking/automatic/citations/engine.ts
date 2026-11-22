@@ -1,4 +1,4 @@
-import { INLINE_LINKER_TYPE } from "../../../core/links/connection-type";
+import { INLINE_LINKER_TYPE, inlineLinkerVersionNote } from "../../../core/links/connection-type";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import {
   confidenceOf,
@@ -547,7 +547,7 @@ export class CitationRun {
     if (!cache.size) return null;
     const without = [...cache.values()].filter((v) => !v).length;
     if (!without && this.opts.citationType === "inline-linker")
-      return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי".' };
+      return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote() };
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
     if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };
