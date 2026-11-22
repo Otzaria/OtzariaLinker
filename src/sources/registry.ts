@@ -54,6 +54,8 @@ export interface OpenResult {
 }
 
 const HEAD = 4096;
+/** heRef → line maps kept for resolving external_link targets: about 400K entries (tens of MB at most) in all */
+const REF_INDEX_BUDGET = 400_000;
 const MAX_TEXT_DOC = 256 * 1024 ** 2;
 /** how much of a book is read to tell its encoding when it opens */
 const SNIFF = 64 * 1024;
@@ -80,6 +82,8 @@ export class SourceRegistry {
   private readonly titleIndexes = new Map<string, Promise<Map<string, SourceBook>>>();
   /** per book key: heRef → 0-based line, for the books external_link rows were resolved in (a few at a time) */
   private readonly refIndexes = new Map<string, Promise<Map<string, number>>>();
+  /** entries of each finished ref index: the cache is capped by their SUM (a big book's map is megabytes), see REF_INDEX_BUDGET */
+  private readonly refIndexSizes = new Map<string, number>();
   private readonly resolver: ExternalTargetResolver = {
     book: (title, targetSource, from) => this.findTarget(title, targetSource, from),
     lineOfRef: async (bookKey, heRef) => (await this.refIndex(bookKey)).get(heRef) ?? null,
@@ -243,19 +247,41 @@ export class SourceRegistry {
       p = (s?.heRefs ? s.heRefs(bookKey) : Promise.resolve([])).then((rows) => {
         const m = new Map<string, number>();
         for (const r of rows) if (r.heRef && !m.has(r.heRef)) m.set(r.heRef, r.index);
+        this.refIndexSizes.set(bookKey, m.size);
+        this.trimRefIndexes(bookKey);
         return m;
       });
       this.refIndexes.set(bookKey, p);
-      while (this.refIndexes.size > 48) this.refIndexes.delete(this.refIndexes.keys().next().value!);
-      p.catch(() => this.refIndexes.delete(bookKey));
+      p.catch(() => (this.refIndexes.delete(bookKey), this.refIndexSizes.delete(bookKey)));
     }
     return p;
+  }
+
+  /**
+   * Keeps the heRef maps within about REF_INDEX_BUDGET entries in all (oldest first, never the one just built):
+   * a run resolves the targets of one book at a time, so recent books are the ones needed again.
+   */
+  private trimRefIndexes(keep: string): void {
+    let total = 0;
+    for (const n of this.refIndexSizes.values()) total += n;
+    for (const k of [...this.refIndexes.keys()]) {
+      if (total <= REF_INDEX_BUDGET) break;
+      if (k === keep || !this.refIndexSizes.has(k)) continue;
+      total -= this.refIndexSizes.get(k)!;
+      this.refIndexes.delete(k);
+      this.refIndexSizes.delete(k);
+    }
   }
 
   /** a source opened or closed: the databases that resolve external_link targets by title must look again */
   private sourcesChanged(closed?: string): void {
     this.titleIndexes.clear();
-    if (closed !== undefined) for (const k of [...this.refIndexes.keys()]) if (sourceIdOfBookKey(k) === closed) this.refIndexes.delete(k);
+    if (closed !== undefined)
+      for (const k of [...this.refIndexes.keys()])
+        if (sourceIdOfBookKey(k) === closed) {
+          this.refIndexes.delete(k);
+          this.refIndexSizes.delete(k);
+        }
     for (const s of this.sources.values()) if (s instanceof DbBookSource) s.targetsChanged();
   }
 

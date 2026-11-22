@@ -166,7 +166,12 @@ export class DbBookSource implements BookSource {
   }
 
   private titles(): Map<string, number> {
-    return (this.titleToId ??= new Map([...this.booksById.values()].map((b) => [b.title, b.id])));
+    // two books of one title: the first (lowest id, the order of the book table) wins — the same rule as the registry's title index
+    if (!this.titleToId) {
+      this.titleToId = new Map();
+      for (const b of this.booksById.values()) if (!this.titleToId.has(b.title)) this.titleToId.set(b.title, b.id);
+    }
+    return this.titleToId;
   }
 
   private internal(ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<InternalLinks> {
@@ -182,6 +187,21 @@ export class DbBookSource implements BookSource {
     const own = this.titles().get(r.targetTitle);
     if (own !== undefined && (r.targetSource === this.libraryId || (r.targetSource === null && !(await this.resolver?.book(r.targetTitle, null, this.info.id))))) return this.bookRef(own);
     return (await this.resolver?.book(r.targetTitle, r.targetSource, this.info.id)) ?? null;
+  }
+
+  /**
+   * Whether the internal row at `i` really points at this database's book. A row with no targetSource means "any
+   * source, the library first": it reaches this database only when the library does not have the title.
+   */
+  private async reachesOwn(ix: InternalLinks, i: number, memo: Map<number, boolean>): Promise<boolean> {
+    if (!ix.viaNull[i]) return true;
+    const tb = ix.targetBook[i]!;
+    let ok = memo.get(tb);
+    if (ok === undefined) {
+      ok = !(await this.resolver?.book(this.booksById.get(tb)?.title ?? "", null, this.info.id));
+      memo.set(tb, ok);
+    }
+    return ok;
   }
 
   private bookRef(bookId: number): BookRef {
@@ -204,7 +224,8 @@ export class DbBookSource implements BookSource {
       const at = ix.range.get(bookId);
       if (at) {
         const ids: number[] = [];
-        for (let i = at[0]; i < at[1]; i++) if (ix.targetLine[i]! >= from && ix.targetLine[i]! <= to && ix.sourceBook[i] !== bookId) ids.push(ix.rowid[i]!);
+        const memo = new Map<number, boolean>();
+        for (let i = at[0]; i < at[1]; i++) if (ix.targetLine[i]! >= from && ix.targetLine[i]! <= to && ix.sourceBook[i] !== bookId && (await this.reachesOwn(ix, i, memo))) ids.push(ix.rowid[i]!);
         out.push(...(await Promise.all((await this.ext!.byRowids(ids)).map((r) => this.externalToLink(r)))).filter((l): l is Link => !!l));
       }
     }
@@ -218,12 +239,15 @@ export class DbBookSource implements BookSource {
    */
   private async buildExternalListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
     const t0 = performance.now();
-    // a row with neither targetLineIndex nor targetRef cannot be placed: not counted (one with a ref may still resolve)
-    const rows = (await this.ext!.outgoing(id, ctx)).filter((r) => r.targetLine !== null || !!r.targetRef?.trim());
+    // a row that cannot be placed (no targetLineIndex, and no ref that an open book resolves) is no link: it is left
+    // out of the counts exactly as externalToLink leaves it out of the pages
+    const rows: ExternalLinkRow[] = [];
+    for (const r of await this.ext!.outgoing(id, ctx)) if (r.targetLine !== null || (await this.lineOf(r)) !== null) rows.push(r); // only a row with no targetLineIndex needs its ref resolved here
     const ix = await this.internal(ctx);
     const incoming: number[] = [];
     const at = ix.range.get(id);
-    if (at) for (let i = at[0]; i < at[1]; i++) if (ix.sourceBook[i] !== id) incoming.push(i);
+    const memo = new Map<number, boolean>();
+    if (at) for (let i = at[0]; i < at[1]; i++) if (ix.sourceBook[i] !== id && (await this.reachesOwn(ix, i, memo))) incoming.push(i);
     const n = rows.length + incoming.length;
     const keys: string[] = [];
     const keyAt = new Map<string, number>();
@@ -276,10 +300,17 @@ export class DbBookSource implements BookSource {
    * versions, a ref survives), else targetLineIndex. A target that is in no open source keeps its title (it is
    * bound when that source opens) and the ref as its place name; nothing is guessed.
    */
+  /** the target line of a row: the heRef's line in an open target book, else targetLineIndex; null when neither */
+  private async lineOf(r: ExternalLinkRow, book?: BookRef | null): Promise<number | null> {
+    if (r.targetLine !== null && !r.targetRef?.trim()) return r.targetLine;
+    const b = book === undefined ? await this.targetBook(r) : book;
+    if (b && r.targetRef?.trim() && !b.key.startsWith(`${this.info.id}:`)) return (await this.resolver?.lineOfRef(b.key, r.targetRef)) ?? r.targetLine;
+    return r.targetLine;
+  }
+
   private async externalToLink(r: ExternalLinkRow): Promise<Link | null> {
     const book = await this.targetBook(r);
-    let line: number | null = r.targetLine;
-    if (book && r.targetRef?.trim() && !book.key.startsWith(`${this.info.id}:`)) line = (await this.resolver?.lineOfRef(book.key, r.targetRef)) ?? line;
+    const line = await this.lineOf(r, book);
     // no targetLineIndex and a ref that no open book resolves: the line is unknown, and a link to a guessed line is worse than none (AGENTS §8)
     if (line === null) return null;
     const target: BookRef = book ?? { key: `unresolved:${r.targetTitle}`, title: r.targetTitle, origin: "unknown" };

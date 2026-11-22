@@ -42,6 +42,11 @@ export interface InternalLinks {
   readonly targetLine: Int32Array;
   /** index into CONNECTION_TYPES */
   readonly type: Uint8Array;
+  /**
+   * 1 when the row has no targetSource ("any source, the library first"): it reaches this database's book only if
+   * the library does not have that title — the registry decides when the links are listed, never the scan
+   */
+  readonly viaNull: Uint8Array;
   /** first and last+1 position of a target book's rows */
   readonly range: ReadonlyMap<number, readonly [number, number]>;
   /** rows whose target line is unknown (no targetLineIndex): left out */
@@ -130,22 +135,24 @@ export class ExternalLinksReader {
   }
 
   /**
-   * One scan of the table for the links whose target is a book of this same database: `targetSource` is the
-   * database's own library_id and the title is one of its books (`titles`: title → book id). Rows to the library
-   * ('official'), to other databases, or with no line, are not in it.
+   * One scan of the table for the links whose target may be a book of this same database: `targetSource` is the
+   * database's own library_id, or NULL (any source — flagged `viaNull`, see InternalLinks), and the title is one of
+   * its books (`titles`: title → book id). Rows to the library ('official') or to other databases are not in it;
+   * rows with no targetLineIndex are counted in `skipped`.
    */
   async internal(libraryId: string | undefined, titles: ReadonlyMap<string, number>, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<InternalLinks> {
-    const cap = { rowid: [] as number[], sb: [] as number[], sl: [] as number[], tb: [] as number[], tl: [] as number[], ty: [] as number[] };
+    const cap = { rowid: [] as number[], sb: [] as number[], sl: [] as number[], tb: [] as number[], tl: [] as number[], ty: [] as number[], nul: [] as number[] };
     let skipped = 0;
     let n = 0;
-    if (libraryId !== undefined && this.c.source >= 0 && this.c.target >= 0) {
+    {
       for await (const r of this.file.scan(this.t)) {
         if (++n % 50_000 === 0) ctx.signal?.throwIfAborted();
         const v = r.values;
-        if (v[this.c.source] !== libraryId) continue;
+        const source = this.c.source < 0 ? null : (v[this.c.source] ?? null);
+        if (source !== null && source !== libraryId) continue;
         const tb = titles.get(String(v[this.c.title]));
         if (tb === undefined) continue;
-        if (v[this.c.target] === null || v[this.c.target] === undefined) {
+        if (this.c.target < 0 || v[this.c.target] === null || v[this.c.target] === undefined) {
           skipped++;
           continue;
         }
@@ -154,12 +161,13 @@ export class ExternalLinksReader {
         cap.sl.push(Number(v[this.c.line]));
         cap.tb.push(tb);
         cap.tl.push(Number(v[this.c.target]));
+        cap.nul.push(source === null ? 1 : 0);
         cap.ty.push(CONNECTION_TYPES.indexOf(this.typeOf(this.c.type < 0 ? null : (v[this.c.type] as string | null))));
       }
     }
     const order = Int32Array.from(cap.tb.keys()).sort((a, b) => cap.tb[a]! - cap.tb[b]! || cap.rowid[a]! - cap.rowid[b]!);
     const m = order.length;
-    const out = { rowid: new Float64Array(m), sourceBook: new Int32Array(m), sourceLine: new Int32Array(m), targetBook: new Int32Array(m), targetLine: new Int32Array(m), type: new Uint8Array(m) };
+    const out = { rowid: new Float64Array(m), sourceBook: new Int32Array(m), sourceLine: new Int32Array(m), targetBook: new Int32Array(m), targetLine: new Int32Array(m), type: new Uint8Array(m), viaNull: new Uint8Array(m) };
     const range = new Map<number, [number, number]>();
     order.forEach((from, i) => {
       out.rowid[i] = cap.rowid[from]!;
@@ -168,6 +176,7 @@ export class ExternalLinksReader {
       out.targetBook[i] = cap.tb[from]!;
       out.targetLine[i] = cap.tl[from]!;
       out.type[i] = cap.ty[from]!;
+      out.viaNull[i] = cap.nul[from]!;
       const r = range.get(cap.tb[from]!);
       if (r) r[1] = i + 1;
       else range.set(cap.tb[from]!, [i, i + 1]);
