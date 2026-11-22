@@ -136,3 +136,4 @@ function* runEngineSteps(id: EngineId, source: EngineBook, target: EngineBook, o
 export * from "./types";
 export { applySourceFilter, compileSourceFilter, parseSourceFilter, previewSourceFilter, type SourceFilter, type SourceFilterPreview } from "./source-filter";
 export { runSliced, runToEnd, SLICE_MS, type EngineSteps } from "./steps";
+export * from "./sort";

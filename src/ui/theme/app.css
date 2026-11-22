@@ -30,6 +30,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: var(--radius); background: transparent; cursor: pointer; color: var(--on-surface-variant); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .icon-btn[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+code { font-family: var(--font-mono); font-size: 0.92em; }
 kbd { font: 11px var(--font-mono); border: 1px solid var(--outline-variant); border-radius: var(--radius-xs); padding: 0 4px; color: var(--on-surface-variant); }
 /* a shortcut inside a button takes the button's colour (on a filled button the muted grey was 1.5:1) */
 .btn kbd { color: inherit; border-color: currentColor; }
@@ -79,11 +80,17 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .task-card .icon { grid-row: span 2; color: var(--primary); margin-top: 2px; }
 .task-card b { font-size: var(--fs-lg); }
 .task-card span { font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.choices { display: grid; gap: 8px; }
+.choice { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; text-align: start; padding: 12px; border-radius: var(--radius); border: 1px solid var(--outline-variant); background: var(--surface); cursor: pointer; color: inherit; font: inherit; }
+.choice > span { display: grid; gap: 2px; min-width: 0; }
+.choice .icon { color: var(--primary); margin-top: 2px; }
+.choice[aria-checked="true"] { border-color: var(--primary); background: color-mix(in srgb, var(--primary-container) 40%, var(--surface)); box-shadow: inset 0 0 0 1px var(--primary); }
 .task-card .soon { grid-column: 2; justify-self: start; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
 .drop-strip { border: 2px dashed var(--outline); border-radius: var(--radius); padding: 20px; display: grid; gap: 12px; align-content: start; text-align: center; background: var(--surface-container-low); }
 .drop-strip.over, .drop-zone-over { border-color: var(--primary); background: color-mix(in srgb, var(--primary-container) 45%, var(--surface)); }
 .drop-strip .icon { justify-self: center; color: var(--primary); }
 .drop-strip .actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.drop-strip .offline-download { justify-self: center; text-decoration: none; white-space: normal; text-align: start; }
 .recent { margin-top: 24px; }
 .privacy { margin-top: 24px; font-size: var(--fs-sm); color: var(--on-surface-variant); display: flex; gap: 8px; align-items: start; }
 
@@ -92,6 +99,100 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border: 1px solid var(--outline-variant); border-radius: var(--radius); overflow: hidden; }
 .panel-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 8px; min-height: 42px; background: var(--surface-container-high); border-bottom: 1px solid var(--outline-variant); }
 .panel-head h2 { font-size: var(--fs-md); margin: 0; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a reader's head (issue 24): the book name wraps over two lines and is a button that opens the full name and source */
+.panel-head h2.book-title { display: block; white-space: normal; text-overflow: clip; overflow: hidden; min-width: 0; }
+/* in a narrow reader the name got no width at all (grip, badges and three icon buttons fill the row): below 300px
+   the name takes a row of its own under them */
+.reader .panel-head { flex-wrap: wrap; container-type: inline-size; container-name: rhead; }
+@container rhead (max-width: 300px) {
+  .panel-head h2.book-title { order: 9; flex: 1 1 100%; }
+  /* the badge would push a button onto a row of its own; the name button's strip shows it (and a twin title keeps its badge) */
+  .panel-head .src-badge:not(.twin) { display: none; }
+}
+/* the words the engine matched: tinted AND underlined (not colour alone), in the card and in the readers */
+.match-hl { background: color-mix(in srgb, var(--highlight) 75%, transparent); color: inherit; border-radius: var(--radius-xs); text-decoration: underline 2px; text-decoration-color: var(--primary); text-underline-offset: 3px; font-weight: 700; padding-inline: 1px; }
+::highlight(match-source), ::highlight(match-target) { background-color: color-mix(in srgb, var(--highlight) 75%, transparent); text-decoration: underline 2px; text-decoration-color: var(--primary); }
+.match-legend { margin: 0; font-size: var(--fs-sm); }
+/* coverage: which lines are still unlinked (issue 17) */
+.coverage { margin: 6px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.coverage > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
+.cov-body { padding: 0 10px 10px; display: grid; gap: 8px; min-width: 0; }
+.cov-sum { margin: 0; }
+.cov-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.cov-count { padding: 2px 10px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); font-size: var(--fs-sm); }
+.cov-count[data-bucket="unlinked"] { border-color: var(--warning); background: var(--warning-container); color: var(--on-warning-container); }
+.cov-ranges { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cov-range { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 6px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); }
+.cov-range .btn.small, .pair-row .btn.small { min-height: 24px; }
+.cov-where { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+/* the guided plan's pairs: title fit and a method per pair (issues 21, 26) */
+.guided-pairs { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.guided-pairs > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
+.pairs-body { padding: 0 10px 10px; display: grid; gap: 8px; }
+.pair-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pair-row { display: grid; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; overflow-wrap: anywhere; }
+.pair-main, .pair-ctl { display: grid; gap: 4px; min-width: 0; align-content: start; }
+.pair-ctl label.field { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.pair-ctl label.check { display: flex; gap: 8px; align-items: start; }
+.pair-row.off { background: var(--surface-container-low); }
+.pair-row.off .pair-names { text-decoration: line-through; text-decoration-thickness: 1px; }
+.pair-skipped ul { margin: 2px 0 0; padding-inline-start: 1.2em; color: var(--on-surface-variant); }
+/* the per-pair matrix (advanced): a row of three columns on a wide screen, a card on a phone */
+@media (min-width: 62rem) { .pair-list.adv .pair-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.1fr); gap: 4px 16px; align-items: start; } }
+.pair-reasons { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.pair-reasons .sign { display: inline-block; inline-size: 1.2em; }
+.fit-badge { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; border: 1px solid var(--outline-variant); }
+.fit-fit { background: var(--secondary-container); color: var(--on-secondary-container); }
+.fit-partial, .fit-undecided { background: var(--warning-container); color: var(--on-warning-container); }
+.fit-unfit { background: var(--error-container); color: var(--on-error-container); }
+.warn-text { margin: 0; padding: 6px 8px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
+/* ticking books (issue 26) */
+.book-checklist { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 8px; margin: 0; display: grid; gap: 6px; min-width: 0; }
+.book-checklist legend { font-weight: 600; padding-inline: 4px; }
+.pick-list { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; display: grid; gap: 2px; }
+.pick-list .check { display: flex; gap: 8px; align-items: start; padding: 2px 4px; overflow-wrap: anywhere; }
+.pick-count { margin: 0; font-size: var(--fs-sm); }
+.dbl-unresolved { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); border: 1px dashed var(--warning); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
+/* the types page (3.5) */
+.types-help { width: min(720px, calc(100vw - 32px)); }
+.types-group h3, .types-export h3 { margin: 8px 0 4px; font-size: var(--fs-md); }
+.types-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.type-item { padding: 6px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
+.type-item code { color: var(--on-surface-variant); }
+.types-export ul { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+/* the suggestions table: method and type as columns when the table is wide, a line under the target when it is not */
+.sug-wrap { container-type: inline-size; }
+.sug-table .col-meta { display: none; }
+@container (min-width: 560px) {
+  .sug-table .col-meta { display: table-cell; font-size: var(--fs-sm); }
+  .sug-table .meta-inline { display: none; }
+}
+.meta-inline { font-size: var(--fs-sm); }
+/* the reader's tools: heading jump and the unlinked-lines switch (3.8) */
+.reader-tools { flex-wrap: wrap; }
+.heading-jump { position: relative; }
+/* opened, the list takes the whole row of the tools bar and pushes the text down, instead of hanging from the small summary: as a popup anchored to the summary it started 43px past the left edge of a 360px reader, where the panel clips it */
+.heading-jump[open] { flex: 1 1 100%; }
+.heading-jump > summary { cursor: pointer; font-size: var(--fs-sm); padding: 2px 6px; }
+.heading-jump .heading-list { margin-top: 4px; max-height: 40vh; overflow: auto; padding: 6px; background: var(--surface-container-high); border: 1px solid var(--outline-variant); border-radius: var(--radius); box-shadow: var(--elev-2); display: grid; gap: 4px; }
+.heading-jump ul { list-style: none; margin: 0; padding: 0; }
+.heading-jump li .btn { white-space: normal; text-align: start; min-height: 28px; }
+.reader-tools .grow { white-space: nowrap; }
+.unl-switch { font-size: var(--fs-sm); display: inline-flex; gap: 4px; align-items: center; }
+.ln.unlinked { border-inline-start-style: dotted; border-inline-start-color: var(--outline); }
+.ln .unl { color: var(--on-surface-variant); font-size: 11px; }
+.guided-existing { margin: 0; }
+.guided-final { padding: 8px 10px; border-radius: var(--radius); background: var(--surface-container-low); border: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
+.guided-final ul { margin: 4px 0 0; padding-inline-start: 20px; display: grid; gap: 3px; }
+.title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
+.title-btn:focus-visible { outline-offset: -2px; }
+.title-btn:hover { text-decoration: underline dotted; }
+.book-info { padding: 8px 12px; display: grid; gap: 6px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
+.book-info .bi-title { font-size: var(--fs-md); overflow-wrap: anywhere; user-select: text; }
+.book-info .bi-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.book-info { grid-template-columns: minmax(0, 1fr); }
+.book-info .bi-meta > * { min-width: 0; max-width: 100%; }
+.book-info .src-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: var(--radius); line-height: 18px; }
 .panel-head .grip { cursor: grab; color: var(--outline); display: grid; place-items: center; }
 .panel.drag-over { outline: 2px solid var(--primary); outline-offset: -2px; }
 .panel-body { flex: 1; min-height: 0; overflow: auto; }
@@ -147,6 +248,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .db-hint .icon { margin-top: 2px; color: var(--primary); }
 .db-hint .path { display: block; margin: 2px 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--on-surface); text-align: left; }
 .db-hint .muted { margin-top: 4px; }
+.db-hint .btn.small { min-height: 24px; }
+@media (pointer: coarse) { .db-hint .btn.small, .home .btn, .home .btn.small { min-height: 44px; } }
 .btn.small { min-height: 0; padding: 0 6px; font-size: var(--fs-sm); gap: 4px; vertical-align: middle; color: var(--primary); }
 /* books grouped by source */
 .book-group + .book-group { border-top: 1px solid var(--outline-variant); }
@@ -218,16 +321,21 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .anchor-hl { background: var(--highlight); border-radius: 2px; }
 
 /* builder */
-.builder { padding: 10px; display: grid; gap: 10px; }
-.builder .end { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 8px; border-radius: var(--radius); background: var(--surface-container-low); border: 1px solid var(--outline-variant); }
+/* minmax(0, …) tracks: an 'auto'/'1fr' track's minimum is its content's min-content, so one unbroken book name
+   stretched the whole builder past a narrow side panel (issue 26b) */
+.builder { padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.builder > * { min-width: 0; }
+.builder .end { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding: 8px; border-radius: var(--radius); background: var(--surface-container-low); border: 1px solid var(--outline-variant); }
 .builder .end.set { border-color: var(--primary); }
 .builder .end.target.set { border-color: var(--tertiary); }
-.builder .end .what { font-weight: 600; }
+.builder .end .what { font-weight: 600; min-width: 0; text-align: start; overflow-wrap: anywhere; }
+.builder .end > * { min-width: 0; overflow-wrap: anywhere; }
 .builder .end .snip { grid-column: 1 / -1; font-family: var(--font-book); font-size: 15px; color: var(--on-surface-variant); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .builder label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .builder .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .problems { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .problems li { display: flex; gap: 6px; align-items: start; padding: 6px 8px; border-radius: var(--radius); }
+.problems li > *, .stored-as > * { min-width: 0; overflow-wrap: anywhere; }
 .problems li.error { background: var(--error-container); color: var(--on-error-container); }
 .problems li.warning { background: var(--warning-container); color: var(--on-warning-container); }
 .problems li.info { background: var(--surface-container); color: var(--on-surface-variant); }
@@ -249,6 +357,10 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .tabs button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .count { font-size: 11px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
 .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
+/* the target's line number sits on its own line under the place name, so a narrow row never cuts it (as in the links list) */
+.sug-table td .where { font-size: var(--fs-sm); white-space: nowrap; }
+.sort-select { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.sort-select select { max-width: 11em; }
 .chip { font-size: var(--fs-sm); padding: 2px 10px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); cursor: pointer; }
 .chip:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) { background: var(--secondary-container); color: var(--on-secondary-container); border-color: var(--secondary); }
 .link-list { list-style: none; margin: 0; padding: 4px 6px; display: grid; gap: 4px; }
@@ -446,9 +558,26 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 /* alt_toc editor */
 .alt-toc label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .alt-toc .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
-.alt-rows { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
-.alt-row { display: grid; grid-template-columns: 64px 1fr 90px auto auto; gap: 6px; align-items: center; }
+/* issue #25: the table keeps room for ~3 rows (a scroll container's min-content is 0, so in a squeezed dialog body
+   it collapsed to its padding), scrolls inside itself, and its column headers stay put */
+.alt-why-body { display: grid; gap: 6px; font-size: var(--fs-sm); }
+.alt-why-body p { margin: 0; }
+.alt-rows { display: grid; gap: 4px; align-content: start; min-height: min(12rem, 40vh); max-height: 40vh; overflow: auto; padding: 0 8px 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.alt-row, .alt-head { display: grid; grid-template-columns: 64px minmax(0, 1fr) 90px auto auto; gap: 6px; align-items: center; }
+.alt-head { position: sticky; top: 0; z-index: 1; padding-block: 8px 4px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.alt-head .gap { inline-size: 26px; }
 .alt-row.bad input { border-color: var(--error); }
+.alt-toc .problems { max-height: min(9rem, 24vh); overflow: auto; }
+@media (max-width: 600px) {
+  /* narrow: the title gets a full line; level and line sit under it */
+  .alt-row, .alt-head { grid-template-columns: 72px 88px minmax(0, 1fr) auto auto; row-gap: 4px; }
+  .alt-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 1; }
+  .alt-row > :nth-child(4) { grid-column: 4; }
+  .alt-head > :nth-child(2) { display: none; }
+  .alt-head > .gap { display: none; }
+  .alt-rows { min-height: min(17rem, 48vh); max-height: 48vh; }
+  .alt-row + .alt-row { padding-block-start: 4px; border-top: 1px dashed var(--outline-variant); }
+}
 
 /* export: "what now?" (audit F13) */
 .saved-note { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--on-surface); }
@@ -532,3 +661,13 @@ main.guided .bulk-approve { margin: 0; }
 /* a tile of words ("פחות מ־5 שניות") takes two columns, so it reads on one line (V5 UX audit U23) */
 .stat.text { grid-column: span 2; }
 .stat.text b { font-size: 17px; line-height: 1.6; }
+
+/* Pre-merge audit (PR 3): a check or radio row, and a summary that opens a section, are targets of at least 24 px (WCAG 2.5.8);
+   they were 20-23 px in the guided plan's pair rows, the book picker and the alt_toc dialog. 44 px for a finger. */
+.guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check, .bulk-scope .check, .bulk-levels .check { min-height: 24px; }
+.sug-results .chip { min-height: 24px; }
+.sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 24px; box-sizing: border-box; padding-block: 2px; }
+@media (pointer: coarse) {
+  .guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check { min-height: 44px; align-items: center; }
+  .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 44px; display: flex; align-items: center; }
+}

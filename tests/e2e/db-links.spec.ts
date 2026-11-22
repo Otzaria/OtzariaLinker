@@ -18,8 +18,8 @@ test("browse a book's database links, filter, copy one, export it with the repla
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
 
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: /^ארצות החיים/ }).getByRole("button", { name: "מקור" }).click({ timeout: 30_000 });
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
   await expect(page.locator(".reader.source h2")).toHaveText("ארצות החיים");
 
   await page.getByRole("tab", { name: /קישורים/ }).first().click();
@@ -73,4 +73,76 @@ test("browse a book's database links, filter, copy one, export it with the repla
 
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
+});
+
+/*
+ * Issue 13 (screen): a personal database whose links are in external_link. A link that points at a book that is not open
+ * says so (and has no line to jump to), and a "source" link says which way it runs — "מקור" alone reads as a role.
+ */
+test("a personal database's links: an unopened target book is named as such, and 'source' says which way it runs", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "personal.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/pdc-personal-mini.db")) }]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "PLACEHOLDER commentary on official" }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).first().click();
+  await page.getByRole("tab", { name: /קישורים מהמסד/ }).click();
+  const panel = page.locator(".dbl");
+  await expect(panel.locator(".dbl-sum")).toContainText("קישורים במסד", { timeout: 30_000 });
+  const items = panel.getByRole("list", { name: "קישורים מהמסד" }).locator(".dbl-item");
+  await expect(items.first()).toBeVisible();
+
+  // the library is not open: the target is named, marked as not open, and shows no line number
+  const toLibrary = items.filter({ hasText: "בראשית" }).first();
+  await expect(toLibrary.locator(".dbl-unresolved")).toContainText("הספר לא פתוח");
+  await expect(toLibrary).not.toContainText(/בראשית \d/);
+  // the direction type says which way it runs
+  await expect(items.filter({ hasText: "מקור — מפירוש אל ספר הבסיס" }).first()).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * 3.7: the flags of a personal database's links — counted in the summary, a filter, and said on each link in words with
+ * what it means (not only a colour). The book here has two rows that are the same two lines in both directions.
+ */
+test("a personal database's links: the flags are counted, filter the list, and are explained on each link", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "personal.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/pdc-personal-mini.db")) }]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "PLACEHOLDER commentary on official" }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).first().click();
+  await page.getByRole("tab", { name: /קישורים מהמסד/ }).click();
+  const panel = page.locator(".dbl");
+  const items = panel.getByRole("list", { name: "קישורים מהמסד" }).locator(".dbl-item");
+  await expect(items.first()).toBeVisible({ timeout: 30_000 });
+  const total = await items.count();
+
+  const sum = panel.locator(".dbl-flags-sum");
+  await expect(sum.locator("summary")).toContainText("סימוני בדיקה");
+  await sum.locator("summary").click();
+  // what each flag means is written out, not only in a tooltip
+  await expect(sum.locator(".dbl-flag-legend")).toContainText("אותן שתי שורות מקושרות גם בכיוון ההפוך");
+  const chip = sum.getByRole("button", { name: /כפילות הפוכה/ });
+  await expect(chip.locator(".count")).toHaveText("2");
+  await chip.click();
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await expect(items).toHaveCount(2);
+  for (const i of [0, 1]) {
+    const marker = items.nth(i).locator(".dbl-flags");
+    await expect(marker).toContainText("כדאי לבדוק: כפילות הפוכה");
+    await expect(marker).toContainText("בכיוון ההפוך");
+  }
+  // cancelling the filter brings the whole list back
+  await panel.getByRole("button", { name: /כפילות הפוכה/ }).last().click();
+  await expect(items).toHaveCount(total);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
 });

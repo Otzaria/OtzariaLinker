@@ -1,0 +1,14 @@
+# Weekly update PRs for the npm packages (4 runtime dependencies, pinned exactly; the dev tools) and for the actions the
+# workflows use. A PR is a proposal: CI (typecheck, tests, E2E, visual, reproducible build) runs on it, and a person merges.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

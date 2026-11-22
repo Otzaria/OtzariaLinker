@@ -26,7 +26,8 @@
    - כותב `SHA256SUMS`;
    - **תקציב גודל:** נכשל אם `OtzariaLinker.html` גדול מ־2MiB (הקבוע `BUDGET` ב־`scripts/package-release.mjs`). הקובץ
      נפתח בלחיצה כפולה במחשבים רגילים, ולכן גדילה צריכה להיות החלטה: מעלים את `BUDGET` רק בכוונה. אחרי
-     שהוסר sql.js מהתוצר הקובץ היה כ־1MB (לפני ההסרה כ־1.8MB); התקציב הועלה מ־1.5MiB ב־2026-11-16, כשנתוני מראי המקומות (שמות פרקים, הלכות הרמב"ם) וניהול הקישורים הקיימים הביאו אותו לכ־1.6MB;
+     שהוסר sql.js מהתוצר הקובץ היה כ־1MB (לפני ההסרה כ־1.8MB); התקציב הועלה ל־1.9MiB ב־2026-11-22 (מ־1.75MiB; התוצר היה 1,862,158 בתים) בגלל קורא `external_link` של מסדים אישיים, רשימת קובצי הספרייה, שליטה לכל זוג, כיסוי, ייצוא `links.csv`, והמסכים החדשים; קודם הועלה מ־1.5MiB ב־2026-11-16, כשנתוני מראי המקומות (שמות פרקים, הלכות הרמב"ם) וניהול הקישורים הקיימים הביאו אותו לכ־1.6MB;
+     ב־2026-11-22 התקציב הועלה ל־2MiB (2,097,152 בתים) בהחלטת הבעלים, כי ענף PR 2 ומסכי PR 3 הגיעו לתקרה הקודמת.
    - מדפיס את הגודל ואת ה־hash.
 
 ## 3. בנייה שחוזרת על עצמה
@@ -48,11 +49,27 @@
 `npm ci` → `npm run typecheck` → `npm test` (עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3) →
 `npm run build` (כולל הסריקה ותקציב הגודל, §2) → התקנת Chrome, Edge ו־Firefox (`npx playwright install
 --with-deps chrome msedge firefox`) → `npx playwright test` (שלושת הדפדפנים) → בדיקת בנייה חוזרת →
-העלאת `dist/OtzariaLinker.html` כ־artifact (`OtzariaLinker-html`).
+העלאת `dist/OtzariaLinker.html` וה־`SHA256SUMS` שלו כ־artifact (`OtzariaLinker-html`: מי שמוריד אותו משווה את ה־hash).
+בתחילת ה־job (אחרי `npm ci`) רץ `npm audit --omit=dev --audit-level=high` כצעד **שלא מכשיל** (`continue-on-error`): הוא מדווח על
+פגיעות ידועה בתלות של זמן ריצה (ארבע חבילות, מוצמדות), ומישהו מחליט. job נפרד, `visual`, מריץ את ההשוואה החזותית (§2א ב־[`TESTING.md`](TESTING.md)).
+
+**`.github/dependabot.yml`**: פעם בשבוע PR להעלאת גרסאות של חבילות npm ושל ה־actions שבשימוש. זו הצעה בלבד: ה־CI רץ עליה ואדם ממזג.
+
+**פרסום האתר (`.github/workflows/pages.yml`)**: האתר לא מתפרסם בעצם ה־push. `pages.yml` נדלק כש־run של CI על `main` **הסתיים בהצלחה**
+(`workflow_run`, `conclusion == 'success'`), בונה מחדש את אותו commit (`head_sha` של ה־run, לא ראש `main` בזמן הפרסום) ומפרסם את
+`OtzariaLinker.html` ואת `SHA256SUMS`. commit שנכשל בבדיקות לא מגיע לאתר.
+**הגנה מפני fork:** המסנן `branches: [main]` של `workflow_run` בודק את **שם** ענף ה־head, ו־PR מ־fork יכול לקרוא לענף שלו `main`;
+בלי בדיקה נוספת, CI ירוק של ה־PR היה גורם ל־`pages.yml` למשוך את `head_sha` של ה־fork, להריץ עליו `npm ci` ו־`npm run build` ולפרסם.
+לכן ה־`if` של `build` דורש גם `workflow_run.event == 'push'` וגם `workflow_run.head_repository.full_name == github.repository`,
+והרשאות הכתיבה (`pages: write`, `id-token: write`) נמצאות רק ב־job של `deploy`; ל־job שמריץ npm יש `contents: read` בלבד. `workflow_dispatch` נשאר לפרסום ידני של ראש הענף, בלי בדיקה.
+**אי אפשר להוכיח את ה־workflows בלי להריץ אותם ב־GitHub:** בדקתי שהקבצים הם YAML תקין (`js-yaml`) ושהשדות והביטויים נכונים לפי התיעוד,
+`actionlint` לא היה זמין, ולכן ריצה ראשונה אחרי המיזוג היא הבדיקה: ב־Actions רואים ש־Pages נדלק אחרי CI ירוק, ולא נדלק אחרי CI אדום.
 
 ## 5. שחרור (`.github/workflows/release.yml`)
 
 השחרור מופעל **כשמפרסמים GitHub Release**. אין צורך להעלות קבצים ידנית.
+
+**מצב (22.11.2026): אף Release של 4.x לא פורסם, ולא נוצר tag.** פרסום גרסה 4 (גם alpha) מחכה לאישור מפורש של הבעלים; סבב התיקונים לפני מיזוג PR 3 לא יצר tag, Release או הרצת workflow. שלבים 1–5 למטה נבדקו מול `release.yml` ו־`ci.yml` בקריאה (הטריגר `release: published`, בדיקת ה־tag מול `package.json`, סדר הצעדים, בדיקת הבנייה החוזרת, `gh release upload --clobber`) ולא בהרצה.
 
 1. מעדכנים את `version` ב־`package.json` (וב־`package-lock.json`, למשל `npm version 4.0.0 --no-git-tag-version`),
    ומתעדים את השינויים.
@@ -72,8 +89,25 @@
 אם ה־workflow נכשל, ל־Release לא יהיו קבצים. מתקנים, ומריצים שוב את ה־job (או מוחקים את ה־Release
 וה־tag ויוצרים מחדש).
 
-**שימו לב:** הקישור `releases/latest/download/...` של GitHub מצביע על ה־Release האחרון שאינו pre-release.
+**שימו לב:** הקישור `releases/latest/download/OtzariaLinker.html` של GitHub מצביע על ה־Release האחרון שאינו pre-release.
 כל עוד יש רק גרסאות pre-release, ייתכן שהקישור לא יעבוד. בדקו את זה לפני שמפרסמים את הקישור.
+
+## 5א. הקישור הקבוע והכפתור "הורדת הכלי" (נבדק 2026-11-22)
+
+מצב הקישור `releases/latest/download/OtzariaLinker.html` לפני השחרור היציב הראשון של 4.x: **404**. סיבה:
+`gh release list` מראה רק v1, v2 ו־v3 (v3 הוא "Latest"), והנכס היחיד של v3 הוא `Otzaria-Link-Manager-v3.html`.
+גרסאות pre-release (כמו `4.0.0-alpha.*`) אינן "latest". **אין לצרף עותק בשם `OtzariaLinker.html` ל־v3** (זה כלי אחר).
+
+מה צריך לעשות (פעולת בעלים, לא קוד):
+
+1. מוודאים ש־`version` ב־`package.json` הוא `4.0.0` (או 4.x יציבה אחרת), ועוברים את §3–§4 כרגיל.
+2. מפרסמים את ה־Release ו**לא** מסמנים "pre-release". ה־workflow מעלה את `OtzariaLinker.html`.
+3. בודקים: `curl -sIL https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html` מחזיר 200
+   (ו־`gh release list` מסמן את 4.x כ־Latest). רק אז מעדכנים את ה־README: הקישור הקבוע כבר מוצג שם, עם הסבר שעדיין
+   לא עובד, ומוחקים את ההסבר.
+4. הכפתור "הורדת הכלי לעבודה בלי אינטרנט" (`src/ui/shell/offline-download.tsx`) לא תלוי ב־Release: זה קישור יחסי
+   באותו מקור (`OtzariaLinker.html`) שמופיע רק כשהכלי נפתח מ־http(s). הוא עובד כל עוד `pages.yml` מעתיק את הקובץ
+   ל־`_site/OtzariaLinker.html` (בדיקה: `tests/unit/release-asset-name.test.ts`). **לא אומת** מול האתר החי.
 
 ## 6. אימות למשתמש
 

@@ -5,6 +5,7 @@ import { parseProject, serializeProject, type ProjectSource } from "../projects/
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
+import { matchedAfterEdit } from "../core/links/matched";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
@@ -14,7 +15,7 @@ import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTit
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -31,8 +32,10 @@ import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
 import { SuggestionsState } from "./suggestions";
+import { roleLabels } from "./roles";
 import { ExchangeState } from "./exchange";
 import { PersonalCsvState } from "./personal-csv";
+import { RepositoryState } from "./repository";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
 
@@ -110,6 +113,8 @@ export class AppStore {
   readonly quality: QualityState;
   /** export of a personal book's links to the official library as the personal-database build's links.csv (state/personal-csv.ts) */
   readonly personalCsv: PersonalCsvState;
+  /** the analysis of an open database as a whole (the repository path of the home screen) */
+  readonly repository: RepositoryState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
 
@@ -118,6 +123,8 @@ export class AppStore {
   readonly linkState = signal<LinkState>(emptyLinkState());
   readonly view = { source: signal<string | null>(null), target: signal<string | null>(null) };
   readonly pick = { source: signal<Pick | null>(null), target: signal<Pick | null>(null) };
+  /** the link whose two ends revealLink last showed: its matched words (issue #11) are painted while those lines stay picked */
+  readonly revealedLink = signal<Link | null>(null);
   /** the reader that receives the next click in "click" create mode and keyboard focus */
   readonly activeSide = signal<Side>("source");
   readonly draftType = signal<string>("commentary");
@@ -142,6 +149,18 @@ export class AppStore {
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
   readonly intent = signal<{ engine?: EngineId; sourceId?: string; allBooks?: boolean } | null>(null);
+  /**
+   * What the two sides are called now (issue 19): by the job the user is on — only while the suggestions tab is open
+   * (a finished run must not rename the sides for manual linking of other books): the run being reviewed (a max-link
+   * run mixes engines: neutral), else the engine picked in the form, else the one a home task asked for. Words only:
+   * the side ids never change.
+   */
+  readonly roles = computed(() => {
+    if (this.sideTab.value !== "suggestions") return roleLabels(undefined);
+    const run = this.suggestions.run.value;
+    if (run?.maxlink) return roleLabels(undefined);
+    return roleLabels(run?.engine ?? this.suggestions.formEngine.value ?? this.intent.value?.engine);
+  });
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);
@@ -176,10 +195,13 @@ export class AppStore {
     const target: LinkSide = { book: this.refOf(t.bookKey), line: t.line, ...(t.end !== undefined && t.end > t.line && { end: t.end }) };
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
-    const { anchor: _a, ref1: _r1, ref2: _r2, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
+    const { anchor: _a, ref1: _r1, ref2: _r2, matched: _m, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
     const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
     const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
+    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) };
+    // the engine's matched words stay with the side the user did not change (issue #11)
+    const matched = base && matchedAfterEdit(base, source, target, anchor);
     const d: Link = {
       ...kept,
       source,
@@ -187,7 +209,8 @@ export class AppStore {
       declaredType: this.draftType.value,
       // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
       heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
-      ...(s.anchor && { anchor: { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) } }),
+      ...(anchor && { anchor }),
+      ...(matched && { matched }),
       ...(ref1 && { ref1 }),
       ...(ref2 && { ref2 }),
       ...(base && base.target.book.title !== target.book.title && { targetPath: path2ForTitle(target.book.title) }),
@@ -235,6 +258,7 @@ export class AppStore {
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
     this.personalCsv = new PersonalCsvState(this, service, saver);
+    this.repository = new RepositoryState(this, service);
     this.guided = new GuidedFlowState(this);
   }
 
@@ -308,11 +332,18 @@ export class AppStore {
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
-    if (res.skipped.length)
-      this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
+    if (res.skipped.length) {
+      // the registry calls any file with no known extension a "text file that is not .txt": for a file with no bytes that is not the reason
+      const empty = new Set(files.filter((f) => f.blob.size === 0).map((f) => f.path));
+      this.notify(
+        "warning",
+        `${filesCount(res.skipped.length)} ${res.skipped.length === 1 ? "לא נפתח" : "לא נפתחו"}.`,
+        res.skipped.map((s) => `${s.path}: ${empty.has(s.path) ? "הקובץ ריק (אין בו אף בייט)." : s.reason}`),
+      );
+    }
     const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
+      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
       this.chooseRoles(opened);
       this.toWorkspace();
     } else if (res.documents.length) this.toWorkspace();
@@ -493,6 +524,7 @@ export class AppStore {
     batch(() => {
       if (s) this.reveal("source", s.key, l.source.line);
       if (t) this.reveal("target", t.key, l.target.line);
+      this.revealedLink.value = this.editing.peek() ? null : l;
       if (this.editing.peek()) return;
       if (s) this.pick.source.value = at(s.key, l.source);
       if (t) this.pick.target.value = at(t.key, l.target);
@@ -717,7 +749,7 @@ export class AppStore {
     for (const p of list) {
       const saved = this.dbMappings.value.get(p.preview.fingerprint)?.mapping;
       if (saved && !mappingProblems(p.preview, saved).some((x) => x.level === "error") && (await this.openMapped(p, saved))) {
-        this.notify("info", `${p.label}: נפתח לפי המיפוי השמור בפרויקט (${describeMapping(saved)}). לשינוי: "מיפוי" ברשימת המקורות.`);
+        this.notify("info", `${p.label}: נפתח לפי המיפוי השמור בפרויקט (${describeMapping(saved)}). לשינוי: "מיפוי" ברשימת הקבצים והמסדים.`);
         continue;
       }
       this.pendingDbs.value = [...this.pendingDbs.value.filter((x) => x.token !== p.token), p];
@@ -1236,7 +1268,7 @@ export class AppStore {
     });
     const missing = this.missingSources.value.length;
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
-    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את המקור של הפרויקט" : `את ${missing.toLocaleString("he")} המקורות של הפרויקט`} — הרשימה ב"מקורות וספרים".` : ""}`);
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים ומסדים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     this.noticeChangedBooks();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];

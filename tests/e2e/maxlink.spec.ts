@@ -34,7 +34,7 @@ test("max-link: a folder of a commentary and a notes book against the database �
   // the folder is chosen by default; the plan: the commentary (two engines, plus dibur-hamatchil against
   // רש"י on the same base, which the database slice has), the notes book (footnotes), and the citations
   // engine once on each of the three books
-  await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "קובץ, תיקייה או מסד" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("status").filter({ hasText: "ספרים נבחרו" })).toContainText("7 הרצות");
   const engines = page.getByRole("group", { name: "השיטות שירוצו" });
   await expect(engines.getByRole("checkbox")).toHaveCount(4);
@@ -94,4 +94,51 @@ test("max-link: a folder of a commentary and a notes book against the database �
   expect((await download).suggestedFilename()).toMatch(/^קישור-מרבי-.*\.csv$/);
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
+});
+
+/*
+ * Issue 26: "these books" — max-link over exactly the books the user ticks (two, three, any subset), and pair mode with
+ * several targets for one book (see suggestions-pairs below).
+ */
+test("max-link: 'these books' links exactly the ticked books", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const heb = ["א", "ב", "ג", "ד", "ה"];
+  const nl = String.fromCharCode(10);
+  const biur = (t: string) => [`<h1>${t}</h1>`, "<h2>פרק א</h2>", ...heb.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `${t} לפסוק ${i + 1}`])].join(nl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "ביאור א על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur("ביאור א על בראשית")) },
+    { name: "ביאור ב על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur("ביאור ב על בראשית")) },
+  ]);
+  await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByRole("radio", { name: "קישור מרבי" }).click();
+  await page.getByRole("radio", { name: "ספרים שאבחר" }).click();
+
+  const group = page.getByRole("group", { name: "הספרים לקישור" });
+  const plan = page.getByRole("status").filter({ hasText: "ספרים נבחרו" });
+  // nothing ticked: no plan; tick one commentary: it is the plan (with its base found in the database)
+  await group.getByRole("checkbox", { name: /^ביאור א על בראשית/ }).check();
+  await expect(plan).toContainText("1 ספרים נבחרו");
+  await group.getByRole("checkbox", { name: /^ביאור ב על בראשית/ }).check();
+  await expect(plan).toContainText("2 ספרים נבחרו");
+  await expect(group.locator(".pick-count")).toContainText("נבחרו 2");
+  // the search narrows the list without losing what is ticked
+  await group.getByRole("searchbox", { name: "חיפוש ספר" }).fill("ביאור א");
+  await expect(group.getByRole("checkbox")).toHaveCount(1);
+  await group.getByRole("checkbox", { name: /^ביאור א על בראשית/ }).uncheck();
+  await group.getByRole("searchbox", { name: "חיפוש ספר" }).fill("");
+  await expect(plan).toContainText("1 ספרים נבחרו");
+
+  await page.getByRole("button", { name: "הפעלת קישור מרבי" }).click();
+  await expect(page.locator(".sug-table tbody tr").first()).toBeVisible({ timeout: 60_000 });
+  // only the ticked commentary's lines are suggested
+  expect(await page.locator(".sug-table tbody tr td:nth-child(2)").allTextContents()).toEqual(expect.arrayContaining([expect.stringContaining("ביאור ב על בראשית")]));
+  expect((await page.locator(".sug-table").textContent())!).not.toContain("ביאור א על בראשית");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
 });

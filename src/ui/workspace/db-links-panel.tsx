@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { TYPE_LABELS, parseConnectionType, type ConnectionType } from "../../core/links/connection-type";
-import { DB_LINK_ORIGIN_LABELS, dbLinkOrigin, type DbLinkSummary } from "../../core/links/db-links";
+import { TYPE_LABELS, parseConnectionType, typeShown, type ConnectionType } from "../../core/links/connection-type";
+import { DB_LINK_FLAG_LABELS, DB_LINK_ORIGIN_LABELS, dbLinkOrigin, type DbLinkSummary } from "../../core/links/db-links";
 import { isRange, type Link } from "../../core/links/model";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
@@ -14,8 +14,9 @@ import "./db-links.css";
  * book shown in a reader — READ-ONLY. Counted by the other book and by type (both are filters),
  * by direction and by the picked line; paged from the worker. A click shows both ends in the
  * readers. "העתקה לפרויקט" turns chosen links into project links that can be edited and exported.
+ * A personal database's links may carry flags (DbLinkFlag: what to doubt about the link): counted in the summary, a filter,
+ * and on each link as words with their explanation — never only a colour.
  */
-const SIDE_LABEL: Record<Side, string> = { source: "ספר המקור", target: "ספר היעד" };
 const BOOK_ROWS = 40;
 
 export function DbLinksPanel() {
@@ -33,7 +34,7 @@ export function DbLinksPanel() {
     if (!bookKey) return;
     if (!summary || summary.bookKey !== bookKey) {
       s.forgetSummary();
-      if (s.filter.peek().otherBookKey) s.setFilter({ otherBookKey: undefined });
+      if (s.filter.peek().otherBookKey || s.filter.peek().flag) s.setFilter({ otherBookKey: undefined, flag: undefined });
       void s.loadSummary(bookKey);
     }
   }, [bookKey]);
@@ -49,7 +50,7 @@ export function DbLinksPanel() {
         <div class="filters" role="group" aria-label="איזה ספר להציג">
           {(["source", "target"] as const).map((k) => (
             <button key={k} class="chip" aria-pressed={side === k} onClick={() => (s.side.value = k)} disabled={!store.view[k].value}>
-              {SIDE_LABEL[k]}
+              {store.roles.value[k].name}
             </button>
           ))}
         </div>
@@ -61,7 +62,7 @@ export function DbLinksPanel() {
       {!book ? (
         <div class="empty">
           <Icon name="oz_library_link" size={40} />
-          <span>פתחו ספר מתוך מסד אוצריא בקורא ה{side === "source" ? "מקור" : "יעד"}, ויוצגו כאן הקישורים שכבר יש לו במסד.</span>
+          <span>פתחו ספר מתוך מסד אוצריא בקורא של {store.roles.value[side].name}, ויוצגו כאן הקישורים שכבר יש לו במסד.</span>
         </div>
       ) : summary && summary.bookKey === bookKey && "reason" in summary ? (
         <div class="empty">
@@ -119,6 +120,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
         {summary.method === "scan" && " (במסד הזה אין אינדקס לפי ספר, ולכן הקריאה איטית.)"}
       </p>
       <LineView side={side} />
+      <FlagFilter summary={summary} />
       <div class="filters" role="group" aria-label="כיוון">
         {(["all", "out", "in"] as const).map((d) => (
           <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? `הספר הוא צד המקור של הקישור במסד${advanced ? " (side 0)" : ""}` : d === "in" ? `הספר הוא צד היעד של הקישור במסד${advanced ? " (side 1)" : ""}` : undefined}>
@@ -148,8 +150,13 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       ) : (
         <BookGroups summary={summary} />
       )}
-      {(f.types?.length || f.otherBookKey) && (
+      {(f.types?.length || f.otherBookKey || f.flag) && (
         <div class="filters" style="padding-top:0">
+          {f.flag && (
+            <button class="chip" aria-pressed onClick={() => s.setFilter({ flag: undefined })} title="ביטול הסינון לפי סימון">
+              {DB_LINK_FLAG_LABELS[f.flag].he} <Icon name="fl_dismiss" size={12} />
+            </button>
+          )}
           {f.otherBookKey && (
             <button class="chip" aria-pressed onClick={() => s.setFilter({ otherBookKey: undefined })} title="ביטול הסינון לפי ספר">
               {summary.byBook.find((b) => b.bookKey === f.otherBookKey)?.title} <Icon name="fl_dismiss" size={12} />
@@ -193,6 +200,43 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       )}
       {list && !list.loading && !list.total && <p class="empty">אין קישורים שמתאימים לסינון.</p>}
     </>
+  );
+}
+
+/**
+ * The flags a personal database's links carry in this book (the summary counts them): one chip per flag narrows the list to
+ * the links that carry it, and what a flag means is said in words below. Not shown when the book has none.
+ */
+function FlagFilter({ summary }: { summary: DbLinkSummary }) {
+  const s = useStore().dbLinks;
+  const cur = s.filter.value.flag;
+  // open once a flag is chosen, and stays as the user leaves it (cancelling the flag must not fold it under their hands)
+  const [opened, setOpened] = useState(!!cur);
+  useEffect(() => void (cur && setOpened(true)), [cur]);
+  if (!summary.flags?.length) return null;
+  return (
+    <details class="dbl-flags-sum" open={opened} onToggle={(e) => setOpened(e.currentTarget.open)}>
+      <summary>
+        סימוני בדיקה בקישורים של הספר ({summary.flags.length.toLocaleString("he")} {summary.flags.length === 1 ? "סוג" : "סוגים"})
+      </summary>
+      <p class="muted small">
+        המסד לא נשנה: הסימון רק אומר מה כדאי לבדוק בקישור לפני שסומכים עליו. אפשר לסנן לפי סימון, ולהעתיק לפרויקט רק את מה שבדקתם.
+      </p>
+      <div class="filters" role="group" aria-label="סינון לפי סימון בדיקה">
+        {summary.flags.map(({ flag, count }) => (
+          <button key={flag} class="chip" aria-pressed={cur === flag} onClick={() => s.setFilter({ flag: cur === flag ? undefined : flag })} title={DB_LINK_FLAG_LABELS[flag].hint}>
+            {DB_LINK_FLAG_LABELS[flag].he} <span class="count">{count.toLocaleString("he")}</span>
+          </button>
+        ))}
+      </div>
+      <ul class="dbl-flag-legend">
+        {summary.flags.map(({ flag }) => (
+          <li key={flag}>
+            <b>{DB_LINK_FLAG_LABELS[flag].he}</b> — {DB_LINK_FLAG_LABELS[flag].hint}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -261,6 +305,11 @@ function LineView({ side }: { side: Side }) {
   );
 }
 
+/** A link end whose book no open source holds (a personal database's external_link row, ExternalLinksReader): key "unresolved:<title>". */
+const isUnresolved = (b: Link["source"]["book"]): boolean => b.key.startsWith("unresolved:");
+
+const typeText = typeShown;
+
 function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
   const store = useStore();
   const s = store.dbLinks;
@@ -274,7 +323,8 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
     const mine = s.side.value;
     const [own, other] = l.source.book.key === s.bookKey.value ? [l.source, l.target] : [l.target, l.source];
     store.reveal(mine, own.book.key, own.line);
-    store.reveal(mine === "source" ? "target" : "source", other.book.key, other.line);
+    // a book that is not open has no reader to show it in
+    if (!isUnresolved(other.book)) store.reveal(mine === "source" ? "target" : "source", other.book.key, other.line);
   };
   const anchors = l.dbAnchors?.length ?? 0;
   return (
@@ -286,13 +336,9 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         <span class="status dbl-status" title={DB_LINK_ORIGIN_LABELS[origin].hint}>
           {DB_LINK_ORIGIN_LABELS[origin].he}
         </span>
-        <span>
-          {l.source.book.title} {where(l.source.line, l.source.end)}
-        </span>
+        <End end={l.source} where={where} />
         <Icon name="oz_link" size={14} />
-        <span>
-          {l.target.book.title} {where(l.target.line, l.target.end)}
-        </span>
+        <End end={l.target} where={where} />
       </div>
       <div class="acts" onClick={(e) => e.stopPropagation()}>
         <button class="icon-btn" onClick={() => void s.adopt([l])} disabled={!!why || !!store.task.value} title={why ?? "העתקה לפרויקט"} aria-label="העתקה לפרויקט">
@@ -300,7 +346,7 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         </button>
       </div>
       <div class="muted">
-        {TYPE_LABELS[type].he}
+        {typeText(type)}
         {anchors > 0 && ` · ${anchors === 1 ? "עוגן" : `${anchors} עוגנים`}`}
         {(isRange(l.source) || isRange(l.target)) && " · טווח"}
         {l.dbSuppressed?.length ? " · מוסתר בצד אחד" : ""}
@@ -308,6 +354,36 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         {inProject === "same-lines" && <span class="dbl-in"> · בפרויקט בסוג אחר</span>}
         {l.heRef2 && <span> · {l.heRef2}</span>}
       </div>
+      {l.dbFlags?.length ? (
+        <ul class="dbl-flags" aria-label="מה כדאי לבדוק בקישור הזה">
+          {l.dbFlags.map((f) => (
+            <li key={f}>
+              <Icon name="fl_warning" size={14} />
+              <span>
+                <b>כדאי לבדוק: {DB_LINK_FLAG_LABELS[f].he}.</b> {DB_LINK_FLAG_LABELS[f].hint}.
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </li>
+  );
+}
+
+/** One end of a link: the book and its line — or, for a book that is not open, its name and why there is no line. */
+function End({ end, where }: { end: Link["source"]; where: (line: number, end?: number) => string }) {
+  if (isUnresolved(end.book))
+    return (
+      <span>
+        {end.book.title}{" "}
+        <span class="dbl-unresolved" title="הספר שהקישור מצביע אליו לא פתוח (למשל ספריית אוצריא), ולכן אין שורה להציג. פתחו אותו ואז אפשר יהיה להציג את השורה.">
+          הספר לא פתוח
+        </span>
+      </span>
+    );
+  return (
+    <span>
+      {end.book.title} {where(end.line, end.end)}
+    </span>
   );
 }

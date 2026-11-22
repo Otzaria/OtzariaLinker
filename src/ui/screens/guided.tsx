@@ -14,6 +14,8 @@ import { SourceBadge } from "../workspace/source-badge";
 import { StepView } from "../workspace/suggestions-panel";
 import { BulkApprove } from "../workspace/bulk-approve";
 import { MaxLinkJobView } from "../workspace/maxlink-job";
+import { ExistingLinks } from "./guided-existing";
+import { PairChoices } from "./guided-pairs";
 
 /*
  * The guided flow "link a folder (or several books) to Otzaria" (route "#/guided/<step>"): six
@@ -322,6 +324,8 @@ function PlanStep() {
           </li>
         ))}
       </ul>
+      <PairChoices />
+      <ExistingLinks />
       {skipped > 0 && <p class="muted">{skipped === 1 ? "ספר אחד לא יקושר" : `${n(skipped)} ספרים לא יקושרו`} — הסיבה בשלב "{GUIDED_STEP_TITLES.books}".</p>}
       <fieldset class="guided-purpose">
         <legend>בשביל מה הקישורים?</legend>

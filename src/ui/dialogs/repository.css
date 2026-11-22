@@ -1,0 +1,51 @@
+/* "ניתוח המאגר והשלמת קישורים" (repository-dialog.tsx). Colors only through tokens (AGENTS.md §7); logical properties for RTL. */
+dialog.repository { width: min(1100px, calc(100vw - 32px)); height: calc(100vh - 48px); }
+dialog.repository .dlg { height: 100%; display: flex; flex-direction: column; }
+dialog.repository .body { flex: 1; min-height: 0; }
+dialog.repository footer { align-items: center; gap: 8px; flex-wrap: wrap; }
+.repo-run { display: grid; gap: 6px; }
+.repo-progress { display: grid; gap: 4px; font-size: var(--fs-sm); }
+.repo-progress progress { inline-size: 100%; accent-color: var(--primary); }
+.repo-h { margin: 8px 0 0; font-size: var(--fs-md, 1rem); }
+.repo-more { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.repo-more > summary { cursor: pointer; padding: 6px 10px; font-weight: 600; font-size: var(--fs-sm); }
+.repo-more-body { padding: 0 10px 10px; display: grid; gap: 6px; }
+.repo-more-body h3, .repo-detail h4 { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.repo-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.repo-chips li { padding: 2px 10px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); font-size: var(--fs-sm); }
+.repo-flag-list { margin: 0; padding-inline-start: 1.2em; font-size: var(--fs-sm); display: grid; gap: 4px; }
+.repo-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.repo-controls .field { display: grid; gap: 2px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.repo-controls .field.grow { flex: 1 1 14rem; }
+.repo-grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 62rem) { .repo-grid:has(.repo-detail) { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } }
+.repo-books { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.repo-book, .repo-pair { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; }
+.repo-pair { align-items: start; }
+.repo-book.current { background: var(--secondary-container); color: var(--on-secondary-container); }
+.repo-title { flex: 1; min-width: 0; min-block-size: 28px; display: flex; align-items: center; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; overflow-wrap: anywhere; padding: 2px 0; }
+.repo-title:hover { text-decoration: underline; }
+.repo-meta { font-size: var(--fs-sm); white-space: nowrap; }
+.repo-none { color: var(--on-surface); }
+.repo-flagged svg { vertical-align: -2px; }
+@media (max-width: 600px) { .repo-book { flex-wrap: wrap; } .repo-meta { white-space: normal; flex-basis: 100%; } }
+@media (min-width: 62rem) { .repo-detail { position: sticky; inset-block-start: 0; max-block-size: 80vh; overflow: auto; } }
+dialog.repository .btn.small { min-block-size: 28px; }
+/* touch targets (WCAG 2.5.8: at least 24x24 CSS px; 44px for a finger) */
+dialog.repository input[type="checkbox"] { inline-size: 24px; block-size: 24px; flex: none; }
+dialog.repository .icon-btn { min-inline-size: 28px; min-block-size: 28px; }
+.repo-confirm { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--warning, var(--outline)); border-radius: var(--radius); background: var(--warning-container, var(--surface-container)); color: var(--on-warning-container, inherit); }
+@media (pointer: coarse) {
+  dialog.repository .btn, dialog.repository .btn.small, dialog.repository .icon-btn, dialog.repository .repo-title { min-block-size: 44px; }
+  dialog.repository .icon-btn { min-inline-size: 44px; }
+  dialog.repository input[type="checkbox"] { inline-size: 44px; block-size: 44px; }
+}
+.repo-detail { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 10px; display: grid; gap: 6px; background: var(--surface-container-low); min-width: 0; overflow-wrap: anywhere; }
+.repo-rel { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--fs-sm); }
+.repo-rel li { display: flex; gap: 8px; align-items: center; }
+.repo-pairs { display: grid; gap: 6px; }
+.repo-reasons { margin: 2px 0 0; padding-inline-start: 1.2em; }
+.repo-conf-high { background: var(--secondary-container); color: var(--on-secondary-container); }
+.repo-conf-medium { background: var(--surface-container-highest); }
+.repo-conf-low { background: var(--warning-container); color: var(--on-warning-container); }
+dialog.repository .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

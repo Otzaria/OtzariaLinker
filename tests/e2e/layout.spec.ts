@@ -22,22 +22,22 @@ test("a window made narrower switches to 'two texts and a side panel'; wider aga
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים ומסדים")).toBeVisible();
   await page.setViewportSize({ width: 1024, height: 768 });
   // the books moved to the side panel's tab
-  await expect(panel(page, "מקורות וספרים")).toHaveCount(0);
+  await expect(panel(page, "קבצים ומסדים")).toHaveCount(0);
   await page.getByRole("tab", { name: "ספרים" }).click();
   await expect(page.locator(".side-panel .book-list li")).toHaveCount(2);
   await expect(page.locator(".notice", { hasText: "החלון צר" })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים ומסדים")).toBeVisible();
   await expect(page.getByRole("tab", { name: "ספרים" })).toHaveCount(0);
 
   // a layout the user chose is kept, at any width
   await layoutMenu(page).click();
   await page.getByRole("menuitemradio", { name: "מקור מעל יעד" }).click();
   await page.setViewportSize({ width: 1024, height: 768 });
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await expect(panel(page, "קבצים ומסדים")).toBeVisible();
   await layoutMenu(page).click();
   await expect(page.getByRole("menuitemradio", { name: "מקור מעל יעד" })).toHaveAttribute("aria-checked", "true");
   expect(seen.errors).toEqual([]);
@@ -56,7 +56,7 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
 
   // four columns: each panel alone, hidden and shown again from the layout menu (its button counts them)
   for (const [hideLabel, region, menuLabel] of [
-    ["מקורות וספרים", "מקורות וספרים", "מקורות וספרים"],
+    ["קבצים ומסדים", "קבצים ומסדים", "קבצים ומסדים"],
     ["ספר המקור", "ספר המקור", "ספר המקור"],
     ["ספר היעד", "ספר היעד", "ספר היעד"],
     ["החלונית", "בונה וקישורים", "החלונית (בונה, קישורים, הצעות)"],
@@ -70,10 +70,10 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await expect(layoutMenu(page)).toHaveAccessibleName("פריסת סביבת העבודה");
 
   // everything hidden: the workspace itself says so and shows them again
-  for (const label of ["מקורות וספרים", "ספר המקור", "ספר היעד", "החלונית"]) await hide(label);
+  for (const label of ["קבצים ומסדים", "ספר המקור", "ספר היעד", "החלונית"]) await hide(label);
   await expect(layoutMenu(page)).toHaveAccessibleName("פריסת סביבת העבודה (4 פאנלים מוסתרים)");
   await page.getByRole("button", { name: "הצגת כל הפאנלים" }).click();
-  for (const region of ["מקורות וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
+  for (const region of ["קבצים ומסדים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
 
   // "source above target": the target hides alone (it shares the source's column) and comes back there
   await layoutMenu(page).click();
@@ -92,8 +92,8 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await layoutMenu(page).click();
   await page.getByRole("menuitemradio", { name: "שני טקסטים וחלונית צד" }).click();
   await expect(page.getByRole("tab", { name: "ספרים" })).toBeVisible();
-  await show("מקורות וספרים");
-  await expect(panel(page, "מקורות וספרים")).toBeVisible();
+  await show("קבצים ומסדים");
+  await expect(panel(page, "קבצים ומסדים")).toBeVisible();
   await expect(page.getByRole("tab", { name: "ספרים" })).toHaveCount(0);
 
   // reset: four columns, every panel shown
@@ -101,16 +101,76 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   await hide("ספר היעד");
   await layoutMenu(page).click();
   await page.getByRole("menuitem", { name: /איפוס הפריסה/ }).click();
-  for (const region of ["מקורות וספרים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
+  for (const region of ["קבצים ומסדים", "ספר המקור", "ספר היעד", "בונה וקישורים"]) await expect(panel(page, region)).toBeVisible();
   await layoutMenu(page).click();
   await expect(page.getByRole("menuitemradio", { name: "ארבעה טורים" })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 
   // a side panel's section folded away comes back from the same place: the "add a source" options
-  const add = page.getByRole("button", { name: /הוספת מקור/ });
+  const add = page.getByRole("button", { name: /הוספת קובץ או מסד/ });
   await expect(add).toHaveAttribute("aria-expanded", "false");
   await add.click();
   await expect(add).toHaveAttribute("aria-expanded", "true");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * Issue 26(b): the side panel dragged to its narrowest painted its content outside itself (the left edge
+ * was cut) when a book had a long name with no spaces: the builder's grid tracks were 'auto'/'1fr', whose
+ * minimum is the content's min-content, so one unbroken word stretched everything.
+ */
+test("the side panel at its narrowest keeps every element inside it, even with a long unbroken book name", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    BOOK("ביאורמפורטעלהתורהמאתרבימשהבןמיימוןזלהה", ["שורה אחת", "שורה שתיים"]),
+    BOOK("חידושיהרשבאעלמסכתבבאמציעאפרקשני", ["שורה אחת - פירוש"]),
+  ]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+
+  // the last border is the side panel's; ArrowLeft there shrinks the side panel
+  await page.getByRole("separator", { name: "שינוי רוחב הפאנלים" }).last().focus();
+  for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowLeft");
+  // both ends picked: the builder then also shows the "stored as" paragraph and the validation list
+  const books = page.locator(".book-list li");
+  await books.filter({ hasText: "ביאורמפורט" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: "חידושיהרשבא" }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.locator(".reader.source .ln").nth(1).click();
+  await page.locator(".reader.target .ln").nth(1).click();
+  await expect(page.locator(".builder .end.set")).toHaveCount(2);
+
+  const side = page.locator(".side-panel");
+  const outside = () =>
+    side.evaluate((p) => {
+      const pb = p.getBoundingClientRect();
+      const out: string[] = [];
+      p.querySelectorAll("*").forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.width && (b.left < pb.left - 1 || b.right > pb.right + 1)) out.push(`${el.tagName}.${(el as HTMLElement).className}`);
+        // a block whose text runs past its own box (clipped by the panel, so the box test alone misses it)
+        const cs = getComputedStyle(el);
+        if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && cs.overflowX === "visible" && cs.display !== "inline") out.push(`scroll:${el.tagName}.${(el as HTMLElement).className}`);
+      });
+      return out;
+    });
+  expect((await side.boundingBox())!.width, "the side panel keeps a usable minimum").toBeGreaterThanOrEqual(200);
+  expect(await outside()).toEqual([]);
+  // the tab strip shows every tab inside the panel, and no tab's content paints outside it either
+  const tabs = page.locator(".side-panel .tabs > [role=tablist] > [role=tab]");
+  expect(await tabs.count()).toBe(4);
+  for (let t = 0; t < 4; t++) {
+    const tab = tabs.nth(t);
+    await tab.click();
+    expect(await outside(), `tab ${t}`).toEqual([]);
+    const b = (await tab.boundingBox())!;
+    const pb = (await side.boundingBox())!;
+    expect(b.x).toBeGreaterThanOrEqual(pb.x - 1);
+    expect(b.x + b.width).toBeLessThanOrEqual(pb.x + pb.width + 1);
+  }
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });

@@ -6,7 +6,7 @@ import { distUrl, watchPage } from "./helpers";
 /*
  * Several sources at once (the owner's question: "I loaded a folder; now I want another folder, or
  * the Otzaria database, and to link between them — how?"): a folder, the real database slice and a
- * second folder are opened one after the other from the workspace's "הוספת מקור"; the books are
+ * second folder are opened one after the other from the workspace's "הוספת קובץ או מסד"; the books are
  * listed by source; a link is made from a folder book to a database book; max-link runs across all
  * three (folder → database, folder → folder); the export writes the folder books' links files.
  */
@@ -22,10 +22,10 @@ function folder(name: string, books: Record<string, string[]>): string {
   return dir;
 }
 
-/** In the workspace: "הוספת מקור" → one of its options → the picker. */
+/** In the workspace: "הוספת קובץ או מסד" → one of its options → the picker. */
 async function addSource(page: Page, option: "תיקייה" | "מסד נתונים" | "קבצים", files: string | (typeof DB)[]) {
-  const item = page.getByRole("group", { name: "סוג המקור להוספה" }).getByRole("button", { name: option, exact: true });
-  if (!(await item.isVisible())) await page.getByRole("button", { name: "הוספת מקור" }).click();
+  const item = page.getByRole("group", { name: "סוג הקובץ או המסד להוספה" }).getByRole("button", { name: option, exact: true });
+  if (!(await item.isVisible())) await page.getByRole("button", { name: "הוספת קובץ או מסד" }).click();
   const chooser = page.waitForEvent("filechooser");
   await item.click();
   await (await chooser).setFiles(files);
@@ -69,8 +69,8 @@ test("a folder, the Otzaria database and a second folder: grouped books, a link 
 
   // a link from a folder book to a database book
   const books = page.locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await expect(page.locator(".reader.source .panel-head .src-badge")).toHaveText("תיקייה");
   await expect(page.locator(".reader.target .panel-head .src-badge")).toHaveText("מסד אוצריא");
   await page.getByRole("tab", { name: "בונה" }).click();
@@ -128,4 +128,59 @@ test("a Hebrew database file name reads in order, extension last (audit F19)", a
   // one left-to-right unit, like the file manager shows it: never "db.אישי-פירושים"
   const label = page.locator(".source-row").getByText("אישי-פירושים.db");
   await expect(label).toHaveAttribute("dir", "ltr", { timeout: 30_000 }); // the database loads first; under parallel load this takes > 5 s
+});
+
+/*
+ * Issue 24: a long book name was cut with "…" in the reader's head, readable only by a mouse hover (`title`). The head
+ * now wraps the name over two lines, and the name is a button (keyboard and touch) that opens a strip with the full
+ * name, where the book comes from (its source kind and the source's own name) and its size.
+ */
+test("a reader's head: the book name wraps, and a button opens the full name and its source — by keyboard and by touch", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const LONG = "חידושי הרשב״א ובית הבחירה לרבינו מנחם המאירי על מסכת בבא מציעא פרק שני אלו מציאות";
+  const dir = folder("ספרים ארוכים", { [LONG]: [`<h1>${LONG}</h1>`, "שורה ראשונה", "שורה שנייה"] });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "תיקייה", exact: true }).click();
+  await (await chooser).setFiles(dir);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await addSource(page, "מסד נתונים", [DB]);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const books = page.locator(".book-list li");
+  await books.filter({ hasText: "חידושי הרשב" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+
+  const head = page.locator(".reader.source .panel-head");
+  const nameBtn = head.getByRole("button", { name: LONG });
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "false");
+  // the heading is still the book's name (screen readers, tests)
+  await expect(page.locator(".reader.source .panel-head h2")).toHaveText(LONG);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const info = page.locator(".reader.source .book-info");
+  await expect(info).toHaveCount(0);
+
+  // touch / mouse
+  await nameBtn.click();
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "true");
+  await expect(info).toContainText(LONG);
+  await expect(info).toContainText("תיקייה");
+  await expect(info).toContainText("ספרים ארוכים");
+  await expect(info).toContainText("3 שורות");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "no sideways scroll").toBe(true);
+  expect(await info.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "the strip wraps instead of overflowing").toBe(true);
+
+  // keyboard: Escape closes and keeps the focus on the name; Enter opens again
+  await page.keyboard.press("Escape");
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "false");
+  await expect(nameBtn).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(info).toBeVisible();
+
+  // the database side says where it comes from too
+  const tHead = page.locator(".reader.target .panel-head");
+  await tHead.locator("h2 button").click();
+  await expect(page.locator(".reader.target .book-info")).toContainText("מסד אוצריא");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
 });

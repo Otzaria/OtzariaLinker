@@ -20,9 +20,9 @@ test("pattern method → approve → range completion → undo", async ({ page }
     { name: "ספר.txt", mimeType: "text/plain", buffer: Buffer.from(MAIN) },
     { name: "שולחן.txt", mimeType: "text/plain", buffer: Buffer.from(TARGET) },
   ]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ has: page.getByTitle("ספר.txt", { exact: true }) }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ has: page.getByTitle("ספר.txt", { exact: true }) }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).locator('button.side-btn[data-side="target"]').click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption("pattern");
@@ -76,9 +76,9 @@ test("a structure preset in simple mode: a nested reference lands under h2 › h
     { name: "פירוש.txt", mimeType: "text/plain", buffer: Buffer.from(COMMENTARY) },
     { name: "שולחן.txt", mimeType: "text/plain", buffer: Buffer.from(NESTED) },
   ]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ has: page.getByTitle("פירוש.txt", { exact: true }) }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ has: page.getByTitle("פירוש.txt", { exact: true }) }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).locator('button.side-btn[data-side="target"]').click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption("pattern");

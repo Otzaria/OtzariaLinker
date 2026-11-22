@@ -1,13 +1,14 @@
 import { useEffect, useState } from "preact/hooks";
 import { chooseLayout, PRESETS, resetLayout, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
+import type { RoleLabels } from "../../state/roles";
 import { remainingText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
 import { Menu, MenuGroup, MenuItem } from "./menu";
 
-const PRESET_LABELS: Record<LayoutPreset, string> = { four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: "מקור מעל יעד" };
-const PANEL_LABELS: Record<PanelId, string> = { sources: "מקורות וספרים", source: "ספר המקור", target: "ספר היעד", side: "החלונית (בונה, קישורים, הצעות)" };
+const presetLabels = (r: RoleLabels): Record<LayoutPreset, string> => ({ four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: `${r.source.short} מעל ${r.target.short}` });
+const panelLabels = (r: RoleLabels): Record<PanelId, string> => ({ sources: "קבצים ומסדים", source: r.source.name, target: r.target.name, side: "החלונית (בונה, קישורים, הצעות)" });
 const THEME_LABELS: Record<ThemeSetting, string> = { system: "לפי המערכת", light: "בהיר", dark: "כהה" };
 
 export function AppBar({ onExport }: { onExport: () => void }) {
@@ -44,7 +45,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
                 <MenuGroup label="תבניות פריסה">
                   {(Object.keys(PRESETS) as LayoutPreset[]).map((p) => (
                     <MenuItem key={p} checked={layout.preset === p} onSelect={() => (chooseLayout(prefs, structuredClone(PRESETS[p])), close())}>
-                      {PRESET_LABELS[p]}
+                      {presetLabels(store.roles.value)[p]}
                     </MenuItem>
                   ))}
                 </MenuGroup>
@@ -52,7 +53,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
                   <MenuGroup label="פאנלים מוסתרים">
                     {hidden.map((p) => (
                       <MenuItem key={p} icon="fl_add" onSelect={() => (chooseLayout(prefs, showPanel(layout, p)), close())}>
-                        הצגת {PANEL_LABELS[p]}
+                        הצגת {panelLabels(store.roles.value)[p]}
                       </MenuItem>
                     ))}
                   </MenuGroup>

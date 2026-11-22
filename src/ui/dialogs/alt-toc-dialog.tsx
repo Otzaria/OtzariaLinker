@@ -131,6 +131,20 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
           <p class="muted" style="margin:0">
             חלוקה שנייה של ספר, לצד תוכן העניינים הרגיל: פרשות ועליות, ימי לימוד, נושאים. כל מבנה ייכתב לקובץ <code dir="ltr">alt_toc/{title || "…"}_alt_toc.json</code>, שמחליף בספרייה את כל מבני הכותרות של הספר.
           </p>
+          <details class="held alt-why">
+            <summary>למה יש מבנים אלטרנטיביים, ומתי צריך אחד</summary>
+            <div class="alt-why-body">
+              <p>
+                תוכן העניינים הרגיל של ספר באוצריא הוא עץ הכותרות שבתוך הטקסט. מבנה אלטרנטיבי הוא חלוקה שנייה של אותו ספר לשורות, בלי לגעת בטקסט: למשל פרשות ועליות בחומש, ימי לימוד, או נושאים. הוא מופיע בלשונית הכותרות של אוצריא, ליד העץ הרגיל.
+              </p>
+              <p>
+                <b>מתי צריך:</b> כשיש לספר חלוקה שאינה הכותרות שבו ורוצים אותה בלשונית הכותרות, או כשהכותרות שבטקסט חסרות או שגויות ואי אפשר לתקן את הטקסט עצמו.
+              </p>
+              <p>
+                <b>מתי לא:</b> אוצריא יוצרת בעצמה ארבעה מבנים: <code dir="ltr">Seifim</code> (סעיפים), <code dir="ltr">Topic</code> (נושאים), <code dir="ltr">SimanNames</code> (שמות סימנים) ו־<code dir="ltr">Chapters</code> (פרקים). קובץ שכותב אותם שוב יכפיל את המבנה בספרייה, ולכן הכלי לא טוען אותם מהמסד ומזהיר על מפתח כזה. עוד דבר שכדאי לדעת: כל קובץ alt_toc לספר מונע מאוצריא ליצור לו את המבנה <code dir="ltr">Chapters</code> לבד. ספר מספריא לא צריך קובץ: אוצריא מתעלמת מקובץ alt_toc של ספר ספריא.
+              </p>
+            </div>
+          </details>
           <label class="field">
             הספר
             <select value={title} onChange={(e) => setTitle(e.currentTarget.value)} aria-label="הספר">
@@ -222,6 +236,13 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
               </div>
               <p class="muted" style="margin:0">רמה 0 היא הרמה העליונה (פרשה), רמה 1 מה שתחתיה (עליה), וכן הלאה. מספר השורה הוא כמו בקורא: השורה הראשונה היא 1.</p>
               <div class="alt-rows" role="table" aria-label="צמתי המבנה">
+                <div class="alt-head" role="row">
+                  <span role="columnheader">רמה</span>
+                  <span role="columnheader">כותרת</span>
+                  <span role="columnheader">שורה</span>
+                  <span class="gap" aria-hidden="true" />
+                  <span class="gap" aria-hidden="true" />
+                </div>
                 {s.entries.slice(0, shown).map((e, i) => {
                   const bad = problems.some((p) => p.structure === cur && p.entry === i && p.severity === "error");
                   const name = e.heTitle || `צומת ${i + 1}`;

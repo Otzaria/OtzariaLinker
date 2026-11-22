@@ -13,3 +13,14 @@ export function watchPage(page: Page) {
   page.on("pageerror", (e) => errors.push(e.message));
   return { external, errors };
 }
+
+/**
+ * Home: a path's card, then the task inside it (the choice moved into the wizard, issue 20), then "המשך".
+ * The task ids are the old card ids; a guided task (several, folder-otzaria) then continues in the guided flow.
+ */
+export async function chooseTask(page: Page, path: "auto" | "repo" | "fix", task: string) {
+  await page.locator(`.task-card[data-path="${path}"]`).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.locator(`[role="radio"][data-task="${task}"]`).click();
+  await dlg.getByRole("button", { name: "המשך" }).click();
+}

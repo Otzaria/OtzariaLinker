@@ -44,6 +44,7 @@ interface Group {
 export function BookList({ query, onPick }: { query: string; onPick?: (side: Side, key: string) => void }) {
   const store = useStore();
   const { hits } = useBookSearch(query);
+  const roles = store.roles.value;
   const show = onPick ?? ((side: Side, key: string) => store.showBook(side, key));
   const sources = store.sources.value;
   const multi = sources.length > 1;
@@ -72,16 +73,15 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
           <span class="name">{b.title}</span>
           {(b.origin === "sefaria" || twin || b.path?.includes("/")) && (
             <span class="meta">
-              {[b.origin === "sefaria" && "ספריא", b.path?.includes("/") && b.path, twin && `גם במקור אחר — זה מ־${g.source.info.label}`].filter(Boolean).join(" · ")}
+              {[b.origin === "sefaria" && "ספריא", b.path?.includes("/") && b.path, twin && `גם בקובץ או במסד אחר — זה מ־${g.source.info.label}`].filter(Boolean).join(" · ")}
             </span>
           )}
         </button>
-        <button class="side-btn" aria-pressed={store.view.source.value === b.key} onClick={() => show("source", b.key)} title="להציג כספר המקור" aria-label={`מקור: ${b.title}`}>
-          מקור
-        </button>
-        <button class="side-btn" aria-pressed={store.view.target.value === b.key} onClick={() => show("target", b.key)} title="להציג כספר היעד" aria-label={`יעד: ${b.title}`}>
-          יעד
-        </button>
+        {(["source", "target"] as const).map((side) => (
+          <button key={side} class="side-btn" data-side={side} aria-pressed={store.view[side].value === b.key} onClick={() => show(side, b.key)} title={`להציג בתור ${roles[side].name} — ${roles[side].hint}`} aria-label={`${roles[side].short}: ${b.title}`}>
+            {roles[side].short}
+          </button>
+        ))}
       </li>
     );
   };
@@ -93,13 +93,13 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
       <>
         <ul class="book-list" aria-label="ספרים">{g.books.map((b) => row(b, g))}</ul>
         {g.total > g.books.length && <p class="muted" style="padding:0 12px">מוצגים {g.books.length} מתוך {g.total.toLocaleString("he")} — הקלידו כדי לצמצם.</p>}
-        {g.total === 0 && query.trim() && <p class="muted" style="padding:0 12px">אין ספר בשם הזה במקורות הפתוחים.</p>}
+        {g.total === 0 && query.trim() && <p class="muted" style="padding:0 12px">אין ספר בשם הזה בקבצים ובמסדים הפתוחים.</p>}
       </>
     );
   }
   const found = groups.reduce((n, g) => n + g.total, 0);
   return (
-    <div class="book-groups" aria-label="ספרים לפי מקור">
+    <div class="book-groups" aria-label="ספרים לפי קובץ או מסד">
       {groups.map((g) => {
         const shut = collapsed.has(g.source.info.id);
         return (
@@ -123,7 +123,7 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
           </section>
         );
       })}
-      {found === 0 && query.trim() && <p class="muted" style="padding:0 12px">אין ספר בשם הזה באף מקור פתוח.</p>}
+      {found === 0 && query.trim() && <p class="muted" style="padding:0 12px">אין ספר בשם הזה באף קובץ או מסד פתוח.</p>}
     </div>
   );
 }

@@ -42,6 +42,9 @@ describe("personalLinkRows — our links as rows", () => {
     const { rows, skipped } = personalLinkRows([link(side(PERSONAL, 4), side(OFFICIAL, 3), "reference")], ctx);
     expect(rows).toEqual([]);
     expect(skipped[0]!.code).toBe("csv/type");
+    // the reason names the type as the user sees it, not as the file spells it
+    expect(skipped[0]!.text).toContain("הפניה");
+    expect(skipped[0]!.text).not.toContain("reference");
   });
 
   it("skipped, each with its reason: both ends personal or both official, a heading or blank source line, no heading for the place, a deleted link", () => {

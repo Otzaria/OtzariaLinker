@@ -19,9 +19,9 @@ async function open(page: Page) {
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([BASE, COMM, LINKS]);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click({ timeout: 30_000 });
-  await books.filter({ hasText: /^בראשית/ }).getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
+  await books.filter({ hasText: /^בראשית/ }).locator('button.side-btn[data-side="target"]').click();
 }
 const source = (page: Page) => page.locator(".reader.source");
 const target = (page: Page) => page.locator(".reader.target");

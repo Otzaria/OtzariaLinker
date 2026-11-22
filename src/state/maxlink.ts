@@ -121,7 +121,10 @@ export class MaxLinkState {
   selection(scope: MaxLinkScope): string[] {
     if (scope.kind === "book") return this.host.books.value.has(scope.key) ? [scope.key] : [];
     if (scope.kind === "source") return this.host.sources.value.find((s) => s.info.id === scope.id)?.books.map((b) => b.key) ?? [];
-    if (scope.kind === "books") return scope.keys.filter((k, i) => this.host.books.value.has(k) && scope.keys.indexOf(k) === i);
+    if (scope.kind === "books") {
+      const seen = new Set<string>(); // each book once, in the order given (a scan of the list per key would be quadratic)
+      return scope.keys.filter((k) => this.host.books.value.has(k) && !seen.has(k) && !!seen.add(k));
+    }
     // several sources (the guided flow's folder, opened in more than one pick), in the order they were opened
     if (scope.kind === "sources") return this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).flatMap((s) => s.books.map((b) => b.key));
     return [...this.host.books.value.keys()];
@@ -129,14 +132,14 @@ export class MaxLinkState {
 
   scopeLabel(scope: MaxLinkScope): string {
     if (scope.kind === "book") return `הספר "${this.host.refOf(scope.key).title}"`;
-    if (scope.kind === "source") return `המקור "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
+    if (scope.kind === "source") return `הקובץ או המסד "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
     if (scope.kind === "books") {
       const titles = this.selection(scope).map((k) => `"${this.host.refOf(k).title}"`);
       return titles.length === 1 ? `הספר ${titles[0]}` : `הספרים ${titles.join(", ")}`;
     }
     if (scope.kind === "sources") {
       const labels = this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).map((s) => `"${s.info.label}"`);
-      return labels.length === 1 ? `המקור ${labels[0]}` : `המקורות ${labels.join(", ")}`;
+      return labels.length === 1 ? `הקובץ או המסד ${labels[0]}` : `הקבצים והמסדים ${labels.join(", ")}`;
     }
     return "כל הספרים הפתוחים";
   }
@@ -394,7 +397,7 @@ export class MaxLinkState {
     for (const s of this.host.sources.value) for (const b of s.books) if (!byTitle.has(b.title) || (labels.has(s.info.label) && !labels.has(this.labelOfKey(byTitle.get(b.title)!)))) byTitle.set(b.title, b.key);
     const keys = job.books.flatMap((b) => byTitle.get(b.title) ?? []);
     if (!keys.length) {
-      this.host.notify("warning", `כדי להמשיך, פתחו שוב את ${job.sources.length > 1 ? "המקורות" : "המקור"} ${job.sources.map((l) => `"${l}"`).join(", ")}.`);
+      this.host.notify("warning", `כדי להמשיך, פתחו שוב את ${job.sources.length > 1 ? "הקבצים והמסדים" : "הקובץ או המסד"} ${job.sources.map((l) => `"${l}"`).join(", ")}.`);
       return false;
     }
     const prefer = job.preferBase ? this.host.sources.value.find((s) => s.info.label === job.preferBase)?.info.id : undefined;

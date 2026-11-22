@@ -18,7 +18,7 @@ import { isGuidedStep } from "./guided-flow";
  * The routes are documented in docs/USER_GUIDE.md ("כתובות") and docs/ARCHITECTURE.md.
  */
 
-export type DialogId = "export" | "help" | "relink" | "alt-toc" | "start" | "compare";
+export type DialogId = "export" | "help" | "relink" | "alt-toc" | "start" | "compare" | "repository";
 export type SuggestMode = "pair" | "batch" | "maxlink";
 
 export interface Route {
@@ -33,9 +33,9 @@ export interface Route {
 }
 
 const TABS: readonly SideTab[] = ["builder", "links", "suggestions", "qa", "books"];
-const DIALOGS: readonly string[] = ["export", "help", "relink", "alt-toc", "start", "map-db", "import-records"];
+const DIALOGS: readonly string[] = ["export", "help", "relink", "alt-toc", "start", "repository", "map-db", "import-records"];
 /** dialogs that only make sense over open sources or links */
-const NEEDS_WORK = new Set(["export", "relink", "alt-toc", "map-db", "import-records"]);
+const NEEDS_WORK = new Set(["export", "relink", "alt-toc", "repository", "map-db", "import-records"]);
 
 /** "#/workspace/links" → a route; null when the hash is not one of ours. "" and "#" are home. */
 export function parseHash(hash: string): Route | null {

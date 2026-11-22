@@ -55,6 +55,14 @@ describe("planRelink", () => {
     expect(newLines[5]!.slice(a.rawStart, a.rawEnd)).toBe("הספר");
     expect(a.contentHash).toBeUndefined();
   });
+  it("a link moved to another edition does not carry the matched words of the old lines (issue #11: offsets of text that may be gone)", () => {
+    const p = planRelink({
+      links: [mk("m", 2, { matched: { source: { rawStart: 0, rawEnd: 4 }, target: { rawStart: 1, rawEnd: 3 } } })],
+      oldBook: OLD, newBook: NEW, mapping, oldLine: (i) => oldLines[i], newLine: (i) => newLines[i], isOld: (b) => b.key === OLD.key,
+    });
+    expect(p.items[0]!.moved).toBeDefined();
+    expect(p.items[0]!.moved).not.toHaveProperty("matched");
+  });
 });
 
 describe("planRelink: a line moved out of order", () => {

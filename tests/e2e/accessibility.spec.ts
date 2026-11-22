@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { clippedControls, focused, horizontalOverflow, lowContrast, tabTo, unnamedControls } from "./a11y";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * Accessibility regressions (docs/reviews/ACCESSIBILITY_AUDIT.md), in the built single file: the
@@ -87,7 +87,13 @@ test("keyboard only: the guided flow from the home card to the download", async 
   const main = page.locator("main.guided");
 
   // every Tab stop on the way shows where focus is (tabTo checks it)
-  await tabTo(page, /^תיקייה מול אוצריא/);
+  await tabTo(page, /^קישור אוטומטי/);
+  await page.keyboard.press("Enter");
+  // the sheet asks which task: the radio group (arrows move and choose), then "המשך"
+  await tabTo(page, /^ספר ופירוש/, { role: "radio" });
+  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("radio", { name: /^תיקייה מול אוצריא/ })).toBeChecked();
+  await tabTo(page, /^המשך$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/files$/);
   await tabTo(page, /^הספרים: תיקייה$/);
@@ -232,10 +238,10 @@ test("dialogs and menus keep focus inside, close with Esc and give focus back", 
       }
   };
 
-  // a task's sheet, opened from its card
-  const card = await tabTo(page, /^ספר ופירוש/);
+  // a path's first question (the choice of task), opened from its card
+  const card = await tabTo(page, /^קישור אוטומטי/);
   await page.keyboard.press("Enter");
-  const sheet = page.getByRole("dialog", { name: "ספר ופירוש" });
+  const sheet = page.getByRole("dialog", { name: "קישור אוטומטי" });
   await expect(sheet).toBeVisible();
   expect(await focused(page)).toMatchObject({ inDialog: true });
   await trapped();
@@ -283,14 +289,19 @@ test("every control has a name, and text has AA contrast, on each main screen", 
   await screenOk(page, "settings menu");
   await page.keyboard.press("Escape");
 
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  // the first question of a path (issue 20): every choice named, readable in both themes
+  await page.locator('.task-card[data-path="auto"]').click();
+  await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+  await screenOk(page, "home: the path's choice");
+  await page.keyboard.press("Escape");
+  await chooseTask(page, "auto", "folder-otzaria");
   await screenOk(page, "guided: files");
   await page.goto(distUrl);
 
   await workspace(page);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.locator('.reader.source .ln[data-i="3"] .tx').click();
   await page.locator('.reader.target .ln[data-i="2"] .tx').click();
   await screenOk(page, "workspace: builder");
@@ -338,7 +349,7 @@ test("every control has a name, and text has AA contrast, on each main screen", 
 
   // the mapping wizard, for a database in someone else's schema
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "הוספת מקור" }).click();
+  await page.getByRole("button", { name: "הוספת קובץ או מסד" }).click();
   await page.locator(".add-options").getByRole("button", { name: /^מסד נתונים/ }).click();
   await (await chooser).setFiles([{ name: "corpus.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/generic/books-lines.db")) }]);
   const wizard = page.getByRole("dialog", { name: /איך לקרוא את המסד/ });
@@ -354,9 +365,9 @@ test("a task's progress is said through a live region that was on the page befor
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(distUrl);
   await workspace(page);
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
 
   // the region is there, empty, before the task; what it says while the task runs is recorded
@@ -386,7 +397,7 @@ test("200% zoom at 1280px: no sideways scrolling and every control reachable", a
     expect(await clippedControls(page), `${what}: controls out of reach`).toEqual([]);
   };
   await check("home");
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   await check("guided: files");
   await page.goto(distUrl);
   await workspace(page);

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { rovingKeys, rovingTabIndex } from "../keyboard";
 import { ENGINES, type EngineId } from "../../linking/automatic";
-import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
+import { defaultFormValues, ENGINE_OPTION_SPECS, isEssential, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { sourceNameText } from "../shell/file-name";
-import { EngineOptions } from "./engine-options";
+import { BookChecklist } from "./book-checklist";
+import { EngineOptions, EssentialOptions } from "./engine-options";
 import "./maxlink.css";
 
 /*
@@ -18,8 +19,8 @@ import "./maxlink.css";
  * In advanced mode every engine of the plan has its settings (the same forms as a single run); they
  * reach the worker as MaxLinkRunOptions.engineOptions, and an invalid one blocks the run.
  */
-type ScopeKind = Exclude<MaxLinkScope["kind"], "sources" | "books">; // "books": the data is ready (state/maxlink.ts), the picker is the next UI step
-const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "מקור או תיקייה", all: "כל הספרים הפתוחים" };
+type ScopeKind = Exclude<MaxLinkScope["kind"], "sources">;
+const SCOPE_LABEL: Record<ScopeKind, string> = { book: "הספר הנוכחי", source: "קובץ, תיקייה או מסד", books: "ספרים שאבחר", all: "כל הספרים הפתוחים" };
 const ENGINE_TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const SHOWN_BOOKS = 200;
 
@@ -32,22 +33,27 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const askedSource = asked && sources.some((s) => s.info.id === asked) ? asked : undefined;
   const [kind, setKind] = useState<ScopeKind>(() => (store.intent.value?.allBooks ? "all" : askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
   const [sourceId, setSourceId] = useState<string>(() => askedSource ?? sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
+  /** the books ticked for "books I choose" (issue 26); none to begin with */
+  const [pickedRaw, setPicked] = useState<readonly string[]>([]);
+  /** the ticked books that are still open */
+  const openBooks = store.books.value;
+  const picked = useMemo(() => pickedRaw.filter((k) => openBooks.has(k)), [pickedRaw, openBooks]);
   const [off, setOff] = useState<ReadonlySet<EngineId>>(new Set());
   /** the source whose books are the bases when a base is open in several sources ("" = automatic) */
   const [prefer, setPrefer] = useState("");
-  const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : { kind };
+  const scope: MaxLinkScope | null = kind === "book" ? (current ? { kind, key: current } : null) : kind === "source" ? (sourceId ? { kind, id: sourceId } : null) : kind === "books" ? (picked.length ? { kind, keys: picked } : null) : { kind };
   const books = store.books.value;
 
   // the database's own links pair commentaries the titles do not (linking/plan.ts); read before planning
   // (by itself for a few books; a whole database waits for a click — it reads every selected book's links)
   const checkedCount = store.maxLink.checkedCount.value;
-  const pending = useMemo(() => (scope ? store.maxLink.evidencePending(scope).length : 0), [kind, current, sourceId, books, checkedCount]);
+  const pending = useMemo(() => (scope ? store.maxLink.evidencePending(scope).length : 0), [kind, current, sourceId, books, checkedCount, picked]);
   useEffect(() => {
     if (scope && pending > 0 && pending <= AUTO_EVIDENCE_BOOKS) void store.maxLink.gatherEvidence(scope);
-  }, [kind, current, sourceId, books]);
+  }, [kind, current, sourceId, books, picked]);
   const evidence = store.maxLink.evidence.value;
   const unchecked = store.maxLink.unchecked.value;
-  const full = useMemo(() => (scope ? store.maxLink.plan(scope, undefined, prefer || undefined) : null), [kind, current, sourceId, books, evidence, prefer]);
+  const full = useMemo(() => (scope ? store.maxLink.plan(scope, undefined, prefer || undefined) : null), [kind, current, sourceId, books, evidence, prefer, picked]);
   const enabled = useMemo(() => new Set((Object.keys(full?.perEngine ?? {}) as EngineId[]).filter((e) => !off.has(e))), [full, off]);
   const plan = useMemo(() => (scope && full ? (off.size ? store.maxLink.plan(scope, enabled, prefer || undefined) : full) : null), [full, enabled]);
   const unpaired = plan?.books.filter((b) => b.unpaired).length ?? 0;
@@ -60,7 +66,8 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const [formValues, setFormValues] = useState<Partial<Record<EngineId, FormValues>>>({});
   const checks = useMemo(() => {
     const out = new Map<EngineId, OptionsCheck>();
-    if (advanced) for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id)));
+    // basic mode: only the essential options count (the marker style of footnotes); advanced: all of them
+    for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id), advanced ? "all" : "essential"));
     return out;
   }, [advanced, engines.map((e) => e.id).join(), off, formValues]);
   const invalid = [...checks.values()].some((c) => Object.keys(c.errors).length > 0);
@@ -78,7 +85,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
         הכלי מזהה לבד אילו ספרים קשורים זה לזה — פירוש וספר הבסיס שלו, ספר הערות והספר שעליו נכתב — מריץ על כל אחד את כל השיטות שמתאימות לו, ומאחד את התוצאות לרשימה אחת בלי כפילויות.
       </p>
       <div class="filters" style="padding:0" role="radiogroup" aria-label="אילו ספרים לקשר" onKeyDown={rovingKeys}>
-        {(["book", "source", "all"] as const).map((k) => (
+        {(["book", "source", "books", "all"] as const).map((k) => (
           <button key={k} class="chip" role="radio" aria-checked={kind === k} tabIndex={rovingTabIndex(kind === k)} disabled={k === "book" && !current} onClick={() => setKind(k)}>
             {SCOPE_LABEL[k]}
           </button>
@@ -92,7 +99,7 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
       )}
       {kind === "source" && (
         <label class="field">
-          המקור
+          הקובץ או המסד
           <select value={sourceId} onChange={(e) => setSourceId(e.currentTarget.value)}>
             {sources.map((x) => (
               <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length.toLocaleString("he")} ספרים)</option>
@@ -100,6 +107,8 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           </select>
         </label>
       )}
+      {kind === "books" && <BookChecklist label="הספרים לקישור" selected={picked} onChange={setPicked} />}
+      {kind === "books" && !picked.length && <p class="muted">סמנו ספר אחד או יותר: הכלי יזהה לכל אחד את ספר הבסיס שלו, ויקשר רק אותם.</p>}
       {plan && (
         <section class="ml-plan" aria-label="התוכנית">
           <p class="ml-plan-line" role="status">
@@ -109,9 +118,9 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
           </p>
           {baseSources.length > 0 && (
             <label class="field">
-              ספרי הבסיס כשהם פתוחים בכמה מקורות ({baseSources.slice(0, 3).map((b) => `"${b.title}"`).join(", ")}{baseSources.length > 3 ? "…" : ""})
+              ספרי הבסיס כשהם פתוחים בכמה קבצים או מסדים ({baseSources.slice(0, 3).map((b) => `"${b.title}"`).join(", ")}{baseSources.length > 3 ? "…" : ""})
               <select value={prefer} onChange={(e) => setPrefer(e.currentTarget.value)}>
-                <option value="">אוטומטי: מאותו מקור כמו הפירוש</option>
+                <option value="">אוטומטי: מאותו קובץ או מסד כמו הפירוש</option>
                 {[...new Set(baseSources.flatMap((b) => b.sources))].map((id) => (
                   <option key={id} value={id}>מתוך "{labelOf(id)}"</option>
                 ))}
@@ -137,19 +146,24 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
               ))}
             </fieldset>
           )}
-          {advanced &&
-            engines
-              .filter((e) => !off.has(e.id))
-              .map((e) => (
+          {engines
+            .filter((e) => !off.has(e.id) && (advanced || ENGINE_OPTION_SPECS[e.id].some((s) => isEssential(s, formValues[e.id] ?? defaultFormValues(e.id)))))
+            .map((e) => (
                 <section key={e.id} aria-label={`הגדרות: ${e.title}`}>
                   <b style="font-size:var(--fs-sm)">{e.title}</b>
-                  <EngineOptions
+                  <EssentialOptions
+                    engine={e.id}
+                    values={formValues[e.id] ?? defaultFormValues(e.id)}
+                    check={checks.get(e.id)!}
+                    onChange={(key, v) => setFormValues((all) => ({ ...all, [e.id]: { ...(all[e.id] ?? defaultFormValues(e.id)), [key]: v } }))}
+                  />
+                  {advanced && <EngineOptions
                     engine={e.id}
                     values={formValues[e.id] ?? defaultFormValues(e.id)}
                     check={checks.get(e.id)!}
                     onChange={(key, v) => setFormValues((all) => ({ ...all, [e.id]: { ...(all[e.id] ?? defaultFormValues(e.id)), [key]: v } }))}
                     onReset={() => setFormValues((all) => ({ ...all, [e.id]: defaultFormValues(e.id) }))}
-                  />
+                  />}
                 </section>
               ))}
           <details class="held" open={(advanced || unpaired > 0) && plan.books.length <= 12}>

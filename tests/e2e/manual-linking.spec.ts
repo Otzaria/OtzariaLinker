@@ -32,9 +32,9 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 }); // opening a DB under CI load can be slow
 
   // source = the commentary, target = Bereshit
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "פירוש על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "פירוש על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   const source = page.locator(".reader.source");
   const target = page.locator(".reader.target");
   await expect(source.locator(".ln").nth(1)).toContainText("פירוש ראשון");
@@ -108,11 +108,67 @@ test("dark theme and narrow screen keep the workspace usable", async ({ page }) 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(distUrl);
   await openFiles(page);
-  await page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li").filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "מקור" }).click();
+  await page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li").filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="source"]').click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await shot(page, "6-dark");
   await page.setViewportSize({ width: 600, height: 900 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await shot(page, "7-narrow");
   expect(seen.errors).toEqual([]);
+});
+
+/*
+ * Issue 26a: the type picker groups the types the way Otzaria shows them: commentary types (the commentary panel)
+ * and link types (the links panel), as native optgroups; choosing a type from either group still works.
+ */
+test("the link type picker is grouped into commentary types and link types", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const select = page.locator(".builder").getByRole("combobox", { name: /^סוג הקשר/ });
+  const groups = await select.locator("optgroup").evaluateAll((els) => els.map((g) => ({ label: g.getAttribute("label"), options: [...g.querySelectorAll("option")].map((o) => o.value) })));
+  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  expect(groups[0]!.options).toEqual(expect.arrayContaining(["commentary", "targum", "footnotes"]));
+  expect(groups[1]!.options).toEqual(expect.arrayContaining(["reference", "quotation", "other"]));
+  expect(groups[1]!.options).not.toContain("commentary");
+  expect(groups[2]!.options).toEqual(["source"]);
+  await select.selectOption("quotation");
+  await expect(select).toHaveValue("quotation");
+  await select.selectOption("footnotes");
+  await expect(select).toHaveValue("footnotes");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * 3.5: one place that lists ALL the link types, grouped as Otzaria shows them, with the Hebrew name, a line on what it is,
+ * where it appears in Otzaria and what export does with it — a dialog with text on the page (no title-only hints), opened
+ * from the type picker, and usable by touch.
+ */
+test("link types help: every type, grouped, with where it shows in Otzaria and the export note — by tap too", async ({ browser }) => {
+  const ctx = await browser.newContext({ locale: "he-IL", offline: true, hasTouch: true, viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const seen = watchPage(page);
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /בונה/ }).click();
+  await page.getByRole("button", { name: "מה כל סוג אומר?" }).tap();
+  const dlg = page.getByRole("dialog", { name: "סוגי הקישור" });
+  await expect(dlg).toBeVisible();
+  // (locator.allTextContents crashes the page in Firefox with Playwright 1.65 here; toHaveText with an array asserts the same list, in order)
+  await expect(dlg.locator("section.types-group h3")).toHaveText(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  // every type a user can write, once, with its description as visible text
+  expect(await dlg.locator("li.type-item").count()).toBe(23);
+  await expect(dlg.locator("li.type-item", { hasText: "הערות שוליים" })).toContainText("הערות על הטקסט");
+  await expect(dlg.locator("section.types-group").first()).toContainText("פאנל המפרשים");
+  await expect(dlg.locator(".types-export")).toContainText("ייבוא אישי");
+  await expect(dlg.locator(".types-export")).toContainText("ציטוט בטקסט");
+  await dlg.getByRole("button", { name: "סגירה" }).last().tap();
+  await expect(dlg).toBeHidden();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+  await ctx.close();
 });

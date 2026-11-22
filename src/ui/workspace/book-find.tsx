@@ -166,7 +166,7 @@ export function clearMatches(side: Side): void {
   api.highlights.delete(names.current);
 }
 
-function rangesOf(el: HTMLElement, folded: string): Range[] {
+export function rangesOf(el: HTMLElement, folded: string): Range[] {
   const nodes: Text[] = [];
   const starts: number[] = [];
   let text = "";

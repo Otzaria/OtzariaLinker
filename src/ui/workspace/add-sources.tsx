@@ -88,11 +88,11 @@ export function AddSources({ startOpen }: { startOpen?: boolean }) {
     <div class="add-sources">
       <button class="btn outlined add-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="fl_add" size={16} />
-        <span class="grow" style="text-align:start">הוספת מקור</span>
+        <span class="grow" style="text-align:start">הוספת קובץ או מסד</span>
         <Icon name="fl_chevron_down" size={14} class={open ? "flip" : undefined} />
       </button>
       {open && (
-        <div class="add-options" role="group" aria-label="סוג המקור להוספה">
+        <div class="add-options" role="group" aria-label="סוג הקובץ או המסד להוספה">
           {SOURCE_OPTIONS.map((o) => (
             <button key={o.id} class="add-option" onClick={() => void add(o)} title={o.hint} aria-label={o.label}>
               <Icon name={o.icon} size={18} />

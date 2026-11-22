@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { expect, test, type Page } from "@playwright/test";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * The guided flow "link a folder to Otzaria" in the built single file, from the home card to the
@@ -72,7 +72,7 @@ test("guided flow: folder → books → database → plan → run → approve �
   await page.goto(distUrl);
 
   // the home card starts the flow
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   await expect(page).toHaveURL(/#\/guided\/files$/);
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
@@ -201,7 +201,7 @@ test("guided flow: the books already hold their bases — no database step; a wa
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("עם בסיס", { "ספר דוגמה": BOOKS["ספר דוגמה"], "הערות לספר דוגמה": BOOKS["הערות לספר דוגמה"] });
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "כמה ספרים יחד" }).click();
+  await chooseTask(page, "auto", "several");
   const main = page.locator("main.guided");
   const chooser = page.waitForEvent("filechooser");
   await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
@@ -236,7 +236,7 @@ test("guided flow: the run shows one bar, pause and stop, and the details on req
   const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`ביאור ${i + 1} על בראשית`, commentary(`ביאור ${i + 1} על בראשית`)]));
   const dir = folder("שלושים", many);
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
   const chooser = page.waitForEvent("filechooser");
@@ -294,7 +294,7 @@ test("guided flow: approving a group approves exactly the count it showed, and i
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("קבוצה", BOOKS);
   await page.goto(distUrl);
-  await page.locator(".task-card", { hasText: "תיקייה מול אוצריא" }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   const main = page.locator("main.guided");
   const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
   const chooser = page.waitForEvent("filechooser");
@@ -336,6 +336,183 @@ test("guided flow: approving a group approves exactly the count it showed, and i
   await bulk.getByRole("button", { name: "ביטול האישור" }).click();
   await expect.poll(links).toBe(0);
   await plain(page);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * Issues 21 and 26 (screens): before the run the plan says, per pair, whether the commentary's titles fit its base (the
+ * headings method is only right then) and why, lets the user name the method of one pair, and "force dibur-hamatchil for
+ * all pairs". Forcing a method where it does not fit warns. Basic mode keeps this folded; advanced opens it.
+ */
+test("guided flow: the plan's pairs — title fit with reasons, a method per pair, force dibur-hamatchil, warnings", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]!, "פירוש קצר על בראשית": BOOKS["פירוש קצר על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  // folded in simple mode; one line per pair inside, the verdict only when asked for
+  const pairs = main.locator("details.guided-pairs");
+  await expect(pairs).not.toHaveAttribute("open", "");
+  await pairs.locator("summary").click();
+  // each pair is a row named by its key (dependant>base); a commentary is also paired with the commentaries on the same base
+  const row = (dep: string) => pairs.locator(`.pair-row[data-pair="${dep}>בראשית"]`);
+  await expect(row("ביאור על בראשית").locator(".pair-fit")).toContainText("הכותרות מתאימות", { timeout: 30_000 });
+  await expect(row("פירוש קצר על בראשית").locator(".pair-fit")).toContainText("הכותרות לא מתאימות", { timeout: 30_000 });
+  await expect(row("פירוש קצר על בראשית").locator(".pair-fit")).toContainText("אין כותרות"); // the reason, with the number behind it
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toHaveCount(0);
+
+  // naming headings for the pair whose titles do not fit: allowed, with a warning that says why
+  await row("פירוש קצר על בראשית").getByLabel(/^שיטה לזוג/).selectOption("both");
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toContainText("אינן של ספר הבסיס");
+  await row("פירוש קצר על בראשית").getByLabel(/^שיטה לזוג/).selectOption("");
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toHaveCount(0);
+
+  // a pair with a method of its own: forcing dibur-hamatchil for all starts from the defaults (a named pair would bypass it)
+  await row("ביאור על בראשית").getByLabel(/^שיטה לזוג/).selectOption("headings");
+  // force dibur-hamatchil for all pairs: the plan then runs no other method
+  await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).check();
+  const methods = main.locator(".guided-books li b");
+  // it replaces the headings method only: notes and citations still run (owner decision)
+  await expect(methods).toContainText(["לפי דיבור המתחיל"]);
+  await expect(main.locator(".guided-books li b", { hasText: "לפי כותרות" })).toHaveCount(0);
+  await expect(main.locator(".pair-force-note")).toContainText("גם היכן שהכותרות מתאימות");
+  await expect(main.locator(".pair-force-note")).toContainText("במקום שיטת הכותרות");
+  await expect(row("ביאור על בראשית").getByLabel(/^שיטה לזוג/)).toHaveValue("");
+  await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).uncheck();
+  expect(await methods.count()).toBeGreaterThan(1);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * 3.4: one pair at a time — include it or not (simple mode: only that), its link type and the lowest confidence of its suggestions
+ * (advanced), the methods the plan will not run and why, and what the pair is expected to cost. Nothing is locked: "chosen by the
+ * tool" is where every control starts. A pair switched off stays on the list so that it can be switched back on.
+ */
+test("guided flow: the controls of one pair — include, link type, threshold, reasons and cost; a phone shows cards", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]!, "פירוש קצר על בראשית": BOOKS["פירוש קצר על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  const pairs = main.locator("details.guided-pairs");
+  await pairs.locator("summary").click();
+  const row = (dep: string) => pairs.locator(`.pair-row[data-pair="${dep}>בראשית"]`);
+  const A = row("ביאור על בראשית");
+  const B = row("פירוש קצר על בראשית");
+
+  // simple mode: only "include this pair"; the type, the threshold and the cost are for advanced mode
+  await expect(A.getByRole("checkbox", { name: /לכלול את הזוג/ })).toBeChecked();
+  await expect(A.getByLabel(/^סוג הקישור/)).toHaveCount(0);
+  await expect(A.getByLabel(/^הצעות מרמת ביטחון/)).toHaveCount(0);
+
+  // switch a pair off: it stays on the list, says so, and its steps leave the plan
+  const runs = async () => Number(((await main.locator(".stats").innerText()).match(/(\d+)\s*הרצות/) ?? [])[1]);
+  const stepsBefore = await runs();
+  await B.getByRole("checkbox", { name: /לכלול את הזוג/ }).uncheck();
+  await expect(B).toContainText("הזוג הושבת");
+  await expect(B.getByLabel(/^שיטה לזוג/)).toHaveCount(0);
+  await expect(A).not.toContainText("הזוג הושבת");
+  await expect.poll(runs).toBeLessThan(stepsBefore);
+  await B.getByRole("checkbox", { name: /לכלול את הזוג/ }).check();
+  await expect(B).not.toContainText("הזוג הושבת");
+  await expect.poll(runs).toBe(stepsBefore);
+
+  // advanced mode: the type (grouped picker), the threshold, the cost, and the methods that will not run, with the reason
+  await page.getByRole("checkbox", { name: "מצב מתקדם" }).check();
+  const type = A.getByLabel(/^סוג הקישור/);
+  const threshold = A.getByLabel(/^הצעות מרמת ביטחון/);
+  await expect(type).toHaveValue("");
+  await expect(threshold).toHaveValue("");
+  await expect(A.locator(".pair-cost")).toContainText(/זמן משוער/);
+  await expect(B.locator(".pair-skipped")).toContainText("שיטות שלא ירוצו על הזוג");
+  await expect(B.locator(".pair-skipped")).toContainText("הוא ספר פירוש, לא ספר הערות");
+  await type.selectOption("targum");
+  await threshold.selectOption("high");
+  await expect(type).toHaveValue("targum");
+  await expect(threshold).toHaveValue("high");
+  // the other pair is untouched
+  await expect(B.getByLabel(/^סוג הקישור/)).toHaveValue("");
+  // back to "chosen by the tool"
+  await type.selectOption("");
+  await threshold.selectOption("");
+  await expect(type).toHaveValue("");
+
+  // wide: three columns in a row; a phone: one column, a card, nothing cut off
+  const cols = async () => (await A.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length));
+  expect(await cols()).toBe(3);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await cols()).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(A.getByLabel(/^סוג הקישור/)).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
+ * 3.2: before the run the plan says how many links the chosen books ALREADY have (the project's and the open database's)
+ * and what will and will not go into the final file.
+ */
+test("guided flow: the plan counts the existing links of the chosen books and says what the file will hold and what is held", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("1 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  const existing = main.locator(".guided-existing");
+  await expect(existing).toContainText("בפרויקט 0", { timeout: 30_000 });
+  await expect(existing).toContainText(/במסד [\d,]+/, { timeout: 30_000 });
+  const dbCount = Number((await existing.textContent())!.match(/במסד ([\d,]+)/)![1]!.replace(/,/g, ""));
+  expect(dbCount).toBeGreaterThan(0); // the database slice links Bereshit to its commentaries
+  const final = main.locator(".guided-final");
+  await expect(final).toContainText("קישורי המסד לא נכתבים");
+  await expect(final).toContainText("מוחזק");
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });

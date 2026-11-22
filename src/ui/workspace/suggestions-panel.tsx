@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { CONFIDENCE_LABELS, ENGINES, type Confidence, type EngineId, type Suggestion } from "../../linking/automatic";
+import { parseConnectionType, typeShown } from "../../core/links/connection-type";
+import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type EngineId, type MatchedSpan, type Suggestion, type SuggestionSort } from "../../linking/automatic";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
+import { splitMatched } from "./matched-words";
 import type { SuggestionsView } from "../../state/preferences";
-import type { SuggestionState } from "../../state/suggestions";
+import { placeText, type SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { BookChecklist } from "./book-checklist";
 import { SourceFilterPreviewBox } from "./source-filter-preview";
 import { BulkApprove } from "./bulk-approve";
+import type { PairEngineId } from "../../linking/plan";
 import { jobStateText, jobWantsAttention, MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
@@ -44,7 +48,7 @@ export function SuggestionsPanel() {
   const view = store.prefs.suggestionsView.value;
   const engine = ENGINES.find((e) => e.id === run.engine);
   return (
-    <div style="display:flex;flex-direction:column;min-height:100%">
+    <div class="sug-results" style="display:flex;flex-direction:column;min-height:100%">
       <div class="sug-head">
         <div class="grow">
           <b>{run.maxlink ? "קישור מרבי" : engine?.title}</b>: {run.label}
@@ -54,6 +58,10 @@ export function SuggestionsPanel() {
             {run.maxlink && <MaxLinkSummary open={report} onToggle={() => setReport(!report)} />}
           </div>
         </div>
+        <button class="btn text" onClick={() => (store.sideTab.value = "qa")} title="בלשונית הבדיקה: אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן">
+          <Icon name="oz_link_check" size={16} />
+          כיסוי הספר
+        </button>
         <button class="btn text" onClick={() => setSetup(true)}>
           <Icon name="fl_arrow_sort" size={16} />
           הרצה חדשה
@@ -121,6 +129,12 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const store = useStore();
   const intent = store.intent.value;
   const [engine, setEngine] = useState<EngineId>(intent?.engine ?? "headings");
+  // the sides are named by the job (state/roles.ts): the form says which job this is
+  // (not in max-link, whose job mixes engines, and not after the form is gone)
+  useEffect(() => {
+    store.suggestions.formEngine.value = store.suggestMode.value === "maxlink" ? null : engine;
+    return () => void (store.suggestions.formEngine.value = null);
+  }, [engine, store.suggestMode.value]);
   // in the store, not here: the route names it (#/maxlink), and a guided task starts in it
   const mode = store.suggestMode.value;
   const setMode = (m: typeof mode) => (store.suggestMode.value = m);
@@ -131,7 +145,16 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const t = store.view.target.value;
   // a single-book engine (citations) needs only the source; its targets are all the open books
   const single = info.singleBook === true;
-  const ready = single ? !!s : mode === "pair" ? !!s && !!t && s !== t : !!batchSource;
+  /** more targets for the same book, and "every method that fits, merged" (issue 26): the run is then a pair plan (state/maxlink.ts pairPlan) */
+  const [extra, setExtra] = useState<readonly string[]>([]);
+  const [mergeAll, setMergeAll] = useState(false);
+  const commentaryEngine = engine === "headings" || engine === "dibur-hamatchil";
+  const multiEligible = mode === "pair" && !single && engine !== "pattern";
+  // ticked books that were closed, or became the book in a reader, no longer count
+  const live = extra.filter((k) => store.books.value.has(k) && k !== s && k !== t);
+  const targets = [...new Set([t, ...live].filter((k): k is string => !!k && k !== s))];
+  const multi = multiEligible && (live.length > 0 || (mergeAll && commentaryEngine));
+  const ready = single ? !!s : mode === "pair" ? (multi ? !!s && targets.length > 0 : !!s && !!t && s !== t) : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
     if (mode !== "batch" || !src) return [];
@@ -149,6 +172,13 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
 
   const start = async () => {
     const options = check.options;
+    if (multi) {
+      const methods: readonly PairEngineId[] | undefined = mergeAll && commentaryEngine ? undefined : [engine as PairEngineId];
+      const plan = store.maxLink.pairPlan(s!, targets, methods, engine === "footnotes" ? "notes" : undefined);
+      const label = `${store.refOf(s!).title} מול ${targets.map((k) => store.refOf(k).title).join(", ")}`;
+      if (await store.maxLink.run(plan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
+      return;
+    }
     const ok = single ? await store.suggestions.runCitations(s!, options) : mode === "pair" ? await store.suggestions.runEngine(engine, s!, t!, options) : await store.suggestions.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
@@ -187,11 +217,28 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
               <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
             </div>
           )}
+          {multiEligible && (
+            <>
+              <details class="held more-targets">
+                <summary>עוד ספרי יעד לאותו ספר (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
+                <BookChecklist label="עוד ספרי יעד" selected={live} onChange={setExtra} exclude={[s, t]} />
+              </details>
+              {commentaryEngine && (
+                <label class="check">
+                  <input type="checkbox" checked={mergeAll} onChange={(e) => setMergeAll(e.currentTarget.checked)} />
+                  <span>
+                    <b>כל השיטות שמתאימות, מאוחדות</b>
+                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת).</span>
+                  </span>
+                </label>
+              )}
+            </>
+          )}
         </>
       ) : (
         <>
           <label class="field">
-            המקור שבו נמצאים הפירושים
+            הקובץ או המסד שבו נמצאים הפירושים
             <select value={batchSource} onChange={(e) => setBatchSource(e.currentTarget.value)}>
               {sources.map((x) => (
                 <option key={x.info.id} value={x.info.id}>{sourceNameText(x.info.label)} ({x.books.length} ספרים)</option>
@@ -281,11 +328,13 @@ function TableView() {
   const [state, setState] = useState<SuggestionState | "all">("pending");
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
+  const ordered = store.suggestions.ordered.value;
+  const sortOrder = store.suggestions.sortOrder.value;
   const rows = useMemo(
-    () => run.result.suggestions.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
-    [run, conf, state, st],
+    () => ordered.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
+    [ordered, conf, state, st],
   );
-  useEffect(() => setSel(new Set()), [conf, state, run]);
+  useEffect(() => setSel(new Set()), [conf, state, run, sortOrder]);
   // the lines of the shown rows, for the start of each line's text (audit F17)
   useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
@@ -311,6 +360,7 @@ function TableView() {
             </button>
           ) : null,
         )}
+        <SortSelect onChange={() => setShown(PAGE)} />
       </div>
       <div class="row bulk">
         <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהכלי בטוח בהן לגמרי"}>
@@ -325,6 +375,7 @@ function TableView() {
         )}
       </div>
       <BulkApprove />
+      <div class="sug-wrap">
       <table class="sug-table" aria-label="הצעות">
         <thead>
           <tr>
@@ -335,16 +386,19 @@ function TableView() {
             </th>
             <th>שורה</th>
             <th>אל</th>
+            <th class="col-meta">שיטה</th>
+            <th class="col-meta">סוג</th>
             <th>ודאות</th>
             <th><span class="sr-only">החלטה</span></th>
           </tr>
         </thead>
         <tbody>
           {rows.slice(0, shown).map((s) => (
-            <SugRow key={s.id} s={s} state={st.get(s.id)!} checked={sel.has(s.id)} onCheck={(on) => setSel((p) => { const n = new Set(p); on ? n.add(s.id) : n.delete(s.id); return n; })} />
+            <SugRow key={s.id} s={s} state={st.get(s.id)!} showScore={sortOrder === "worst" || sortOrder === "best"} checked={sel.has(s.id)} onCheck={(on) => setSel((p) => { const n = new Set(p); on ? n.add(s.id) : n.delete(s.id); return n; })} />
           ))}
         </tbody>
       </table>
+      </div>
       {rows.length > shown && (
         <div style="padding:8px;text-align:center">
           <button class="btn outlined" onClick={() => setShown(shown + PAGE)}>הצגת עוד ({(rows.length - shown).toLocaleString("he")})</button>
@@ -355,34 +409,47 @@ function TableView() {
   );
 }
 
-function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: SuggestionState; checked: boolean; onCheck: (on: boolean) => void }) {
+function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; state: SuggestionState; checked: boolean; onCheck: (on: boolean) => void; showScore: boolean }) {
   const store = useStore();
   const end = (l: number, e?: number) => (e !== undefined && e > l ? `${l + 1}–${e + 1}` : `${l + 1}`);
   store.lines.tick.value; // re-render when the previews load
   // read from the user's book (audit F18), with the start of the target line's text (audit F17)
   const v = store.suggestions.display(s);
   const snippet = store.suggestions.snippet(v.to);
+  // the target's line number: the place name alone repeats down a chapter of a book without verse headings (issue 12);
+  // a cited span belongs to the record's own target, which is the displayed one unless the row is shown reversed
+  const place = placeText(v.to, v.reversed ? undefined : s);
+  // a merged (max-link) suggestion carries every method that found it
+  const engineText = (("engines" in s && Array.isArray(s.engines) ? (s.engines as readonly string[]) : [s.engine]) as readonly string[]).map((e) => ENGINES.find((x) => x.id === e)?.title ?? e).join(" + ");
+  const typeText = typeShown(parseConnectionType(s.declaredType).type);
   return (
     <tr
       class={`st-${state}`}
       tabIndex={0}
       onClick={() => store.suggestions.show(s.id)}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.suggestions.show(s.id))}
-      title={s.reasons.map((r) => r.text).join(" · ")}
+      title={[`ציון ${scorePercent(s)}`, ...s.reasons.map((r) => r.text)].join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
         {/* the label is the hit area: the bare checkbox is 13px (WCAG 2.5.8 asks 24) */}
         <label class="hit">
-          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}, ${place}`} />
         </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
       <td>
         <div>{v.toLabel}</div>
+        <div class="where muted">{place}</div>
+        {/* narrow: the method and the type under the target; wide (a container query): their own columns */}
+        <div class="meta-inline muted">{engineText} · {typeText}</div>
         {snippet && <div class="snippet muted">{snippet}</div>}
       </td>
+      <td class="col-meta">{engineText}</td>
+      <td class="col-meta">{typeText}</td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
+        {/* the numeric score, when the list is sorted by it: inside a level the order is by this number */}
+        {showScore && <span class="muted score"> {scorePercent(s)}</span>}
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
         {/* the row's decision, which the eye reads from its colour */}
         {state !== "pending" && <span class="sr-only">, {STATE_LABEL[state]}</span>}
@@ -431,14 +498,15 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
   const store = useStore();
   const run = store.suggestions.run.value!;
   const st = store.suggestions.state.value;
-  const list = run.result.suggestions;
+  const list = store.suggestions.ordered.value;
   const curId = store.suggestions.current.value;
   const idx = Math.max(0, list.findIndex((s) => s.id === curId));
   const s = list[idx];
 
+  // the neighbour in the SORTED list (the sort order of the table applies here too)
   const go = (dir: 1 | -1, pendingOnly = false) => {
-    for (let i = idx + dir; i >= 0 && i < list.length; i += dir)
-      if (!pendingOnly || st.get(list[i]!.id) === "pending") return store.suggestions.show(list[i]!.id);
+    const id = store.suggestions.neighbour(dir, pendingOnly);
+    if (id) store.suggestions.show(id);
   };
   useEffect(() => {
     if (s) store.suggestions.show(s.id);
@@ -466,17 +534,18 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
           <Icon name="fl_chevron_down" size={18} class="rot-left" />
         </button>
         <span class="grow" style="text-align:center">
-          {(idx + 1).toLocaleString("he")} מתוך {list.length.toLocaleString("he")} · <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span> · {STATE_LABEL[state]}
+          {(idx + 1).toLocaleString("he")} מתוך {list.length.toLocaleString("he")} · <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span> <span class="muted">({scorePercent(s)})</span> · {STATE_LABEL[state]}
         </span>
         <button class="icon-btn" onClick={() => go(1)} disabled={idx === list.length - 1} aria-label="הבאה" title="הבאה (←)">
           <Icon name="fl_chevron_down" size={18} class="rot-right" />
         </button>
       </div>
+      <SortSelect />
       {card && <CardTexts s={s} />}
       {!card && (
         <div class="end source set">
-          <span class="side-badge source">שורה {s.source.line + 1}</span>
-          <span>← {s.heRef2}</span>
+          <span class="side-badge source">{placeText(s.source)}</span>
+          <span>← {s.heRef2} · {placeText(s.target, s)}</span>
         </div>
       )}
       <ul class="problems">
@@ -517,23 +586,63 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
   );
 }
 
-function CardTexts({ s }: { s: Suggestion }) {
+/** The sort order of the suggestions (issue 8): one choice for the table and the one-at-a-time views. */
+function SortSelect({ onChange }: { onChange?: () => void }) {
+  const store = useStore();
+  return (
+    <label class="sort-select">
+      <span>מיון</span>
+      <select aria-label="מיון ההצעות" value={store.suggestions.sortOrder.value} onChange={(e) => (store.suggestions.setSort(e.currentTarget.value as SuggestionSort), onChange?.())}>
+        {SUGGESTION_SORTS.map((o) => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** The engine's score (0..1) as the percent the reviewer reasons in. */
+const scorePercent = (s: Suggestion): string => `${Math.round(s.score * 100)}%`;
+
+/**
+ * A line's text for the card, with the words the engine matched marked: underlined and tinted (never colour alone), and
+ * announced ("מילים שהותאמו") for a screen reader. A line with no known words is shown as it was.
+ */
+function LineText({ book, line, span }: { book: string; line: number; span: MatchedSpan | undefined }) {
   const store = useStore();
   store.lines.tick.value;
-  const text = (key: string, line: number) => {
-    const l = store.lines.line(key, line);
-    return l ? plainText(l.anchorText) : "…";
-  };
+  const l = store.lines.line(book, line);
+  if (!l) return <>…</>;
+  const p = splitMatched(l.anchorText, span);
+  if (!p) return <>{plainText(l.anchorText)}</>;
+  return (
+    <>
+      {p.clippedBefore && "… "}
+      {p.before}
+      <span class="sr-only">מילים שהותאמו: </span>
+      <mark class="match-hl">{p.match}</mark>
+      {p.after}
+      {p.clippedAfter && " …"}
+    </>
+  );
+}
+
+function CardTexts({ s }: { s: Suggestion }) {
   return (
     <>
       <div class="end source set">
-        <span class="side-badge source">{s.source.book.title} {s.source.line + 1}</span>
-        <span class="snip" style="-webkit-line-clamp:6">{text(s.source.book.key, s.source.line)}</span>
+        <span class="side-badge source">{s.source.book.title} · {placeText(s.source)}</span>
+        <span class="snip" style="-webkit-line-clamp:6"><LineText book={s.source.book.key} line={s.source.line} span={s.matched?.source} /></span>
       </div>
       <div class="end target set">
-        <span class="side-badge target">{s.heRef2}</span>
-        <span class="snip" style="-webkit-line-clamp:6">{text(s.target.book.key, s.target.line)}</span>
+        <span class="side-badge target">{s.heRef2} · {placeText(s.target, s)}</span>
+        <span class="snip" style="-webkit-line-clamp:6"><LineText book={s.target.book.key} line={s.target.line} span={s.matched?.target} /></span>
       </div>
+      {(s.matched?.source || s.matched?.target) && (
+        <p class="muted match-legend">
+          <span class="match-hl">מסומן</span> = המילים שהכלי התאים בין שתי השורות
+        </p>
+      )}
     </>
   );
 }

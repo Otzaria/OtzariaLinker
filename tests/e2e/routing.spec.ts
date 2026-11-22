@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { distUrl, watchPage } from "./helpers";
+import { chooseTask, distUrl, watchPage } from "./helpers";
 
 /*
  * The address follows the screens and dialogs (state/router.ts): a guided workflow's sheet, the
@@ -23,7 +23,7 @@ test("routes: a guided workflow, tabs, max-link, help and export; Back/Forward/E
 
   // the card "a folder against Otzaria" starts the guided flow; its first step links to the old sheet,
   // which asks for the folder, then the database
-  await page.getByRole("button", { name: /תיקייה מול אוצריא/ }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
   await expect.poll(() => hash(page)).toBe("#/guided/files");
   await page.getByRole("button", { name: 'לגיליון "תיקייה מול אוצריא"' }).click();
   const sheet = page.getByRole("dialog", { name: "תיקייה מול אוצריא" });
@@ -48,7 +48,7 @@ test("routes: a guided workflow, tabs, max-link, help and export; Back/Forward/E
   // it starts max-link on the folder
   await expect(sheet).toBeHidden();
   await expect.poll(() => hash(page)).toBe("#/maxlink");
-  await expect(page.getByRole("radio", { name: "מקור או תיקייה" })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "קובץ, תיקייה או מסד" })).toHaveAttribute("aria-checked", "true");
   await expect(page.locator("label.field select").first()).toHaveValue(/.+/);
   await expect(page.locator("label.field select").first().locator("option:checked")).toContainText("פירושים");
 

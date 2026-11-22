@@ -42,9 +42,9 @@ export function ReopenSources() {
   if (!missing.length) return null;
   if (store.missingSourcesFolded.value)
     return (
-      <button class="btn text reopen-folded" onClick={() => (store.missingSourcesFolded.value = false)} aria-expanded="false" title="הצגת המקורות של הפרויקט שעוד לא נפתחו">
+      <button class="btn text reopen-folded" onClick={() => (store.missingSourcesFolded.value = false)} aria-expanded="false" title="הצגת הקבצים והמסדים של הפרויקט שעוד לא נפתחו">
         <Icon name="fl_history" size={16} />
-        מקורות לפתוח מחדש ({missing.length.toLocaleString("he")})
+        קבצים ומסדים לפתוח מחדש ({missing.length.toLocaleString("he")})
       </button>
     );
   const reopen = async (s: MissingSource) => {
@@ -52,15 +52,15 @@ export function ReopenSources() {
     if (files.length) await store.openFiles(files);
   };
   return (
-    <section class="reopen-sources" aria-label="מקורות לפתוח מחדש">
+    <section class="reopen-sources" aria-label="קבצים ומסדים לפתוח מחדש">
       <header>
         <Icon name="fl_history" size={18} />
-        <b class="grow">מקורות לפתוח מחדש</b>
-        <button class="icon-btn" onClick={() => (store.missingSourcesFolded.value = true)} title="הסתרת הרשימה (נשארת שורה אחת שמציגה אותה שוב). הקישורים שבפרויקט נשארים." aria-label="הסתרת רשימת המקורות לפתוח מחדש">
+        <b class="grow">קבצים ומסדים לפתוח מחדש</b>
+        <button class="icon-btn" onClick={() => (store.missingSourcesFolded.value = true)} title="הסתרת הרשימה (נשארת שורה אחת שמציגה אותה שוב). הקישורים שבפרויקט נשארים." aria-label="הסתרת רשימת הקבצים ומסדים לפתוח מחדש">
           <Icon name="fl_dismiss" size={16} />
         </button>
       </header>
-      <p class="muted">הפרויקט נשמר בלי הספרים עצמם. בחרו שוב את המקורות האלה, והקישורים יחזרו למקומם בטקסט.</p>
+      <p class="muted">הפרויקט נשמר בלי הספרים עצמם. בחרו שוב את הקבצים והמסדים האלה, והקישורים יחזרו למקומם בטקסט.</p>
       <ul>
         {missing.map((s, i) => {
           const o = pickerOf(s);

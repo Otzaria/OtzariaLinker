@@ -10,6 +10,9 @@ import type { QualityState } from "./quality";
 import type { SuggestionsState } from "./suggestions";
 import type { BooksService, CallOptions } from "./services";
 
+/** re-exported for the screens (they do not import projects/) */
+export { COVERAGE_RANGES_MAX, type ProjectCoverage };
+
 /*
  * Coverage of a book by the project's links (issue #17, linking/coverage.ts): which lines are linked, partly
  * covered, linked to several places, or still unlinked. Data only for now — the screens that list the ranges and

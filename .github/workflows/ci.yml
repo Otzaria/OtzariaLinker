@@ -18,6 +18,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Not blocking: a known advisory in a runtime dependency (4 of them, pinned) is reported, and a person decides.
+      - name: Audit the runtime dependencies (reported, does not fail the run)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
       - run: npm run typecheck
       - name: Unit, integration and contract tests (property tests seeded from the commit)
         run: FC_SEED=$((16#${GITHUB_SHA:0:7})) npm test
@@ -41,7 +45,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: OtzariaLinker-html
-          path: dist/OtzariaLinker.html
+          # the file and its SHA-256 (written by scripts/package-release.mjs), to check a downloaded copy
+          path: |
+            dist/OtzariaLinker.html
+            dist/SHA256SUMS
 
   # Screenshots of every screen and dialog, light and dark, at three widths, against the committed
   # Windows baselines (tests/visual/__screenshots__/win32/, docs/TESTING.md §2a). On Windows because the

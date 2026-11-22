@@ -371,7 +371,16 @@ export interface PlanChoices {
    * Naming "headings" runs it even where the titles do not fit (no title gate): an explicit decision.
    */
   readonly methods?: Readonly<Record<string, readonly PairEngineId[]>>;
+  /**
+   * Per pair (pairMethodKey), the user's controls over a pair the plan found on its own: switched off, its link type, its
+   * confidence threshold. Unlike `pairs` it does not fix the relations, so every other pair stays automatic. A pair named
+   * in `pairs` keeps the controls it carries there.
+   */
+  readonly controls?: Readonly<Record<string, PairControl>>;
 }
+
+/** What the user may change about one pair without choosing its relation. */
+export type PairControl = Pick<UserPair, "enabled" | "connectionType" | "minConfidence">;
 
 export interface UserPair {
   /** title of the commentary, the notes book, or the book that quotes */
@@ -1018,7 +1027,18 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const { relations: user, unmade } = userRelations(input.choices?.pairs, input.library);
   // the per-pair controls of the user's pairs, by title
   const controls = new Map<string, UserPair>();
-  for (const p of input.choices?.pairs ?? []) controls.set(pairMethodKey(p.dependant, p.base), p);
+  for (const [key, c] of Object.entries(input.choices?.controls ?? {})) controls.set(key, { dependant: "", base: "", ...c });
+  // a pair the user chose keeps the controls it carries; what it does not say is filled in from `controls` (the guided plan's per-pair controls)
+  for (const p of input.choices?.pairs ?? []) {
+    const key = pairMethodKey(p.dependant, p.base);
+    const extra = input.choices?.controls?.[key];
+    controls.set(key, {
+      ...p,
+      ...(p.enabled === undefined && extra?.enabled !== undefined && { enabled: extra.enabled }),
+      ...(p.connectionType === undefined && extra?.connectionType !== undefined && { connectionType: extra.connectionType }),
+      ...(p.minConfidence === undefined && extra?.minConfidence !== undefined && { minConfidence: extra.minConfidence }),
+    });
+  }
   const disabledCount = new Map<string, number>();
   /** every open commentary on a base, selected or not: the intermediate commentators come from here */
   const commentariesOn = new Map<string, Relation[]>();
@@ -1160,7 +1180,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const perEngine: Partial<Record<EngineId, number>> = {};
   for (const s of steps) perEngine[s.engine] = (perEngine[s.engine] ?? 0) + 1;
   const identified = books.filter((r) => relations.has(r.book.key) || onBase.has(r.book.key)).length;
-  const choices = input.choices && (input.choices.pairs?.length || Object.keys(input.choices.methods ?? {}).length) ? input.choices : undefined;
+  const choices = input.choices && (input.choices.pairs?.length || Object.keys(input.choices.methods ?? {}).length || Object.keys(input.choices.controls ?? {}).length) ? input.choices : undefined;
   // a rough cost per step, where the books' lengths are known (COST_MS_PER_LINE)
   const lines = (k: string) => byKey.get(k)?.lineCount;
   let estimatedMs = 0;

@@ -1,3 +1,4 @@
+import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import type { BookRef, Link, LinkSide } from "../../core/links/model";
 import { csvField } from "../sefaria-csv/write";
 
@@ -61,6 +62,12 @@ export interface PersonalSkip {
   text: string;
 }
 
+/** A type as the user sees it ("הפניה"), or as written when it is not a known one. */
+function typeName(declared: string): string {
+  const t = parseConnectionType(declared);
+  return t.known ? TYPE_LABELS[t.type].he : declared;
+}
+
 const TYPE_OF: Readonly<Record<string, PersonalLinkType>> = { commentary: "פירוש", source: "פירוש", targum: "תרגום" };
 /**
  * Which end of a link the DEPENDENT book (the commentary, the translation) is, by what the generator stores (core/links/stored-form.ts,
@@ -89,7 +96,7 @@ export function personalLinkRows(links: readonly Link[], ctx: PersonalExportCont
     const other = mine === l.source ? l.target : l.source;
     const type = TYPE_OF[l.declaredType.trim().toLowerCase()];
     if (!type) {
-      skip(l, "csv/type", `לסוג "${l.declaredType}" אין מילה בקובץ הזה (רק פירוש ותרגום), ולכן לא נכתב.`);
+      skip(l, "csv/type", `לסוג "${typeName(l.declaredType)}" אין מילה בקובץ הזה (רק פירוש ותרגום), ולכן לא נכתב.`);
       continue;
     }
     const declared = l.declaredType.trim().toLowerCase();

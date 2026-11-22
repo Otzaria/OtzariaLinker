@@ -62,7 +62,7 @@ function fakeHost(work = true) {
 
 describe("routes", () => {
   it("every route reads back the same", async () => {
-    for (const h of ["#/", "#/workspace/builder", "#/workspace/links", "#/workspace/suggestions", "#/workspace/qa", "#/workspace/books", "#/maxlink", "#/export", "#/relink", "#/alt-toc", "#/help", "#/help/3-%D7%A4%D7%AA%D7%99%D7%97%D7%94", "#/start/folder-otzaria", "#/map-db", "#/import-records", "#/guided/files", "#/guided/plan", "#/guided/finish"])
+    for (const h of ["#/", "#/workspace/builder", "#/workspace/links", "#/workspace/suggestions", "#/workspace/qa", "#/workspace/books", "#/maxlink", "#/export", "#/relink", "#/alt-toc", "#/repository", "#/help", "#/help/3-%D7%A4%D7%AA%D7%99%D7%97%D7%94", "#/start/folder-otzaria", "#/map-db", "#/import-records", "#/guided/files", "#/guided/plan", "#/guided/finish"])
       expect(formatRoute(parseHash(h)!)).toBe(h);
   });
   it("short and unknown forms", async () => {

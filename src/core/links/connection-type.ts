@@ -137,6 +137,9 @@ export function appPanelOf(stored: ConnectionType): AppPanel {
 /** Types a user may choose when authoring a link file. LINKER is skipped by the generator; SOURCE is a direction. */
 export const AUTHORABLE_TYPES: readonly ConnectionType[] = CONNECTION_TYPES.filter((t) => t !== "LINKER");
 
+/** The type as a screen says it: "מקור" alone reads as a role of a book, so the direction type says which way it runs. */
+export const typeShown = (t: ConnectionType): string => (t === "SOURCE" ? "מקור — מפירוש אל ספר הבסיס" : TYPE_LABELS[t].he);
+
 export const TYPE_LABELS: Readonly<Record<ConnectionType, { he: string; hint: string }>> = {
   COMMENTARY: { he: "פירוש", hint: "מפרש על הטקסט" },
   SUPER_COMMENTARY: { he: "פירוש על פירוש", hint: 'ביאור על מפרש אחר (למשל ביאור על רש"י)' },
@@ -163,3 +166,33 @@ export const TYPE_LABELS: Readonly<Record<ConnectionType, { he: string; hint: st
   SUMMARY: { he: "סיכום", hint: "סיכום של היעד" },
   FOOTNOTES: { he: "הערות שוליים", hint: "הערות על הטקסט, מוצגות כמפרש עם סימון במספר ההערה" },
 };
+
+/**
+ * The type picker's groups (issue 26a): what Otzaria shows in its commentary panel ("commentaries"), what it shows in
+ * the links panel ("links"), and SOURCE, which is a direction rather than a kind (the file belongs to the dependent
+ * book and points at its base). Derived from `appPanelOf`, so the grouping cannot drift from the contract; order inside
+ * a group is the order of CONNECTION_TYPES. The idea of grouping the picker this way is Link-Notes' (Otzaria/Link-Notes
+ * index.html, optgroups "סוגי מפרש" / "סוגי קישור"); only the idea is taken, the code is ours.
+ */
+export interface TypeGroups {
+  commentaries: ConnectionType[];
+  links: ConnectionType[];
+  direction: ConnectionType[];
+}
+
+export function typeGroups(): TypeGroups {
+  const out: TypeGroups = { commentaries: [], links: [], direction: [] };
+  for (const t of AUTHORABLE_TYPES) {
+    if (t === "SOURCE") out.direction.push(t);
+    else if (appPanelOf(t) === "commentaries") out.commentaries.push(t);
+    else out.links.push(t);
+  }
+  return out;
+}
+
+/** The group headings of the picker: what the group means, and where Otzaria shows its links. */
+export const TYPE_GROUP_LABELS = {
+  commentaries: "סוגי מפרש — יופיעו בפאנל המפרשים באוצריא",
+  links: "סוגי קישור — יופיעו בפאנל הקישורים באוצריא",
+  direction: "כיוון — מפירוש אל ספר הבסיס שלו",
+} as const;

@@ -163,7 +163,8 @@ function planOne(link: Link, inSource: boolean, inTarget: boolean, input: Relink
       }
     }
   }
-  const { anchor: _old, ...rest } = link;
+  // the matched words (issue #11) are offsets into the OLD lines; in another edition they may name other words
+  const { anchor: _old, matched: _matched, ...rest } = link;
   const moved: Link = {
     ...rest,
     source,

@@ -1,7 +1,7 @@
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
-import type { BookRef, Link, LinkSide } from "../core/links/model";
-import { CONFIDENCE_ORDER, compileSourceFilter, previewSourceFilter, recordsOf, type Confidence, type EngineId, type EngineResult, type Reason, type SourceFilter, type SourceFilterPreview, type Suggestion } from "../linking/automatic";
+import type { BookRef, Link, LinkMatched, LinkSide } from "../core/links/model";
+import { CONFIDENCE_ORDER, compileSourceFilter, previewSourceFilter, recordsOf, sortSuggestions, type Confidence, type EngineId, type EngineResult, type Reason, type SourceFilter, type SourceFilterPreview, type Suggestion, type SuggestionSort } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -122,6 +122,21 @@ export interface BulkPreview {
 /** The levels a bulk approval starts with; the others only when the user ticks them. */
 export const BULK_DEFAULT_LEVELS: readonly Confidence[] = ["certain", "high"];
 
+/**
+ * Where a suggestion's end is, in the words of the readers (1-based, like the line gutter and the links list): "שורה 12",
+ * a range "שורות 12–15", or — for a mention that names a whole place (Sefaria's cited unit) — the whole span, because the
+ * stored line is only its first (core/links/sefaria-owned.ts withoutRange).
+ */
+export function placeText(side: LinkSide, s?: Pick<Suggestion, "citedSpan">): string {
+  const span = s?.citedSpan && s.citedSpan.end > s.citedSpan.line ? s.citedSpan : undefined;
+  const from = span ? span.line : side.line;
+  const to = span ? span.end : side.end;
+  return to !== undefined && to > from ? `שורות ${from + 1}–${to + 1}` : `שורה ${from + 1}`;
+}
+
+/** The order of the decision states in the "by state" sort: what still needs a decision first. */
+const STATE_RANK: Readonly<Record<SuggestionState, number>> = { pending: 0, approved: 1, rejected: 2, exists: 3 };
+
 export class SuggestionsState {
   readonly run = signal<SuggestionRun | null>(null);
   /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
@@ -134,6 +149,21 @@ export class SuggestionsState {
   readonly rejected = computed<ReadonlySet<string>>(() => this.host.linkState.value.rejected);
   /** the suggestion shown in the inline/card views */
   readonly current = signal<string | null>(null);
+  /** the engine picked in the run form, before any run: it decides what the two sides are called (state/roles.ts) */
+  readonly formEngine = signal<EngineId | null>(null);
+  /** the suggestion the one-at-a-time views and the readers show now */
+  readonly currentSuggestion = computed<Suggestion | null>(() => this.run.value?.result.suggestions.find((s) => s.id === this.current.value) ?? null);
+  /** the decision states as they were when "by state" was chosen: deciding must not reshuffle the list under the reviewer */
+  private readonly rankSnapshot = signal<ReadonlyMap<string, SuggestionState> | null>(null);
+  /** how the list is ordered for the user (issue 8); the run itself keeps the engine's order */
+  readonly sortOrder = signal<SuggestionSort>("book");
+  /** the run's suggestions in the chosen order: the table and the one-at-a-time views read this one list */
+  readonly ordered = computed<readonly Suggestion[]>(() => {
+    const list = this.run.value?.result.suggestions ?? [];
+    const order = this.sortOrder.value;
+    // the decision state is read only when it is the order, so a decision does not reshuffle the other orders
+    return sortSuggestions(list, order, order === "state" ? ((st) => (s: Suggestion) => STATE_RANK[st.get(s.id) ?? "pending"])(this.rankSnapshot.value ?? this.state.value) : undefined);
+  });
 
   readonly state = computed(() => {
     const run = this.run.value;
@@ -174,6 +204,17 @@ export class SuggestionsState {
     private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines">,
   ) {}
 
+  /** A new run replaces the one on the screen: it starts in the engine's order (not the sort of the last run), the card on its first suggestion. */
+  private startRun(run: SuggestionRun): void {
+    batch(() => {
+      this.run.value = run;
+      this.sortOrder.value = "book";
+      this.rankSnapshot.value = null;
+      this.current.value = run.result.suggestions[0]?.id ?? null;
+      this.host.sideTab.value = "suggestions";
+    });
+  }
+
   /**
    * Which lines of a source book a line filter (issue #27, linking/automatic/source-filter.ts) lets into the engine, with a few of each side,
    * read from the book the way the engine reads it (the line as the generator counts anchors). `error`: the filter is not valid; null: the
@@ -195,11 +236,7 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.current.value = result.suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) this.host.notify("warning", partialNotice(result.suggestions.length));
     else this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -216,11 +253,7 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    batch(() => {
-      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.current.value = result.suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) return this.host.notify("warning", partialNotice(result.suggestions.length)), true;
     this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -239,7 +272,7 @@ export class SuggestionsState {
     const pairs = pairByTitle(commentaries, bases);
     const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
     if (!runnable.length) {
-      this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר במקור הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
+      this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר בקובץ או במסד הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
     const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }));
@@ -263,11 +296,7 @@ export class SuggestionsState {
       }
       for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
-    batch(() => {
-      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.current.value = suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;
     const failed = rows.filter((r) => r.problem).length;
     this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
@@ -342,6 +371,7 @@ export class SuggestionsState {
           // every engine's reference, never blank (B3): the target's title and line otherwise
           heRef2: r.heRef2.trim() ? r.heRef2 : `${at.target.book.title} ${at.target.line + 1}`,
           ...(s.anchor && { anchor: s.anchor }),
+          ...matchedOf(s, at),
         };
       })
       .filter((l) => records.length === 1 || !existing.has(linePairKey(l)));
@@ -473,6 +503,24 @@ export class SuggestionsState {
         }
   }
 
+  /** Chooses the order, and puts the one-at-a-time views on the top of the new list. */
+  setSort(order: SuggestionSort): void {
+    batch(() => {
+      this.rankSnapshot.value = order === "state" ? new Map(this.state.peek()) : null;
+      this.sortOrder.value = order;
+      this.current.value = this.ordered.value[0]?.id ?? null;
+    });
+  }
+
+  /** The id next to the current suggestion in the sorted list (dir 1 = next), skipping decided ones when `pendingOnly`; null at the end. */
+  neighbour(dir: 1 | -1, pendingOnly = false): string | null {
+    const list = this.ordered.value;
+    const st = this.state.value;
+    const at = list.findIndex((s) => s.id === this.current.value);
+    for (let i = Math.max(0, at) + dir; i >= 0 && i < list.length; i += dir) if (!pendingOnly || st.get(list[i]!.id) === "pending") return list[i]!.id;
+    return null;
+  }
+
   /** Moves the inline/card view to a suggestion and shows both ends in the readers. */
   show(id: string): void {
     const s = this.run.value?.result.suggestions.find((x) => x.id === id);
@@ -497,6 +545,18 @@ export class SuggestionsState {
 }
 
 /** One record of a suggestion: the suggestion with its target moved to that line (recordsOf). */
+/**
+ * The matched words an approved record keeps (issue #11). The spans are offsets in the line of the suggestion's own `source`
+ * and `target`: a record written on another line of a span (spanLines) keeps only the side whose line is still the one the
+ * engine measured.
+ */
+function matchedOf(s: Suggestion, at: { source: LinkSide; target: LinkSide }): { matched?: LinkMatched } {
+  const m = s.matched;
+  const source = at.source.line === s.source.line ? m?.source : undefined;
+  const target = at.target.line === s.target.line ? m?.target : undefined;
+  return source || target ? { matched: { ...(source && { source: { rawStart: source.rawStart, rawEnd: source.rawEnd } }), ...(target && { target: { rawStart: target.rawStart, rawEnd: target.rawEnd } }) } } : {};
+}
+
 function recordAt(s: Suggestion, line: number): { source: LinkSide; target: LinkSide } {
   return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
 }

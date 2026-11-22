@@ -21,6 +21,14 @@
 .dbl-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .status.dbl-status { background: var(--surface-container-highest); color: var(--on-surface-variant); }
 .dbl-in { color: var(--tertiary); font-weight: 600; }
+/* flags: words and an icon, the colour only supports them */
+.dbl-flags-sum { margin: 0 6px 6px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.dbl-flags-sum > summary { cursor: pointer; padding: 6px 8px; font-size: var(--fs-sm); font-weight: 600; }
+.dbl-flags-sum > p { margin: 0; padding: 0 8px 4px; }
+.dbl-flag-legend { margin: 0; padding: 4px 8px 8px; padding-inline-start: 1.6em; font-size: var(--fs-sm); color: var(--on-surface-variant); display: grid; gap: 2px; }
+.dbl-flags { list-style: none; margin: 4px 0 0; padding: 4px 8px; grid-column: 1 / -1; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); display: grid; gap: 2px; }
+.dbl-flags li { display: flex; gap: 6px; align-items: start; }
+.dbl-flags svg { flex: none; margin-block-start: 2px; }
 /* the export dialog's "load the book's links file first" box (dialogs/db-copy-files.tsx) */
 .dbcopy-files { padding: 8px 10px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); display: grid; gap: 4px; }
 .dbcopy-files b { display: flex; align-items: center; gap: 6px; }

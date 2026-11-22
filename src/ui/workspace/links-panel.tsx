@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { parseConnectionType, TYPE_LABELS, type ConnectionType } from "../../core/links/connection-type";
+import { TYPE_LABELS, type ConnectionType } from "../../core/links/connection-type";
 import type { Link } from "../../core/links/model";
 import { CONFIDENCE_LABELS, CONFIDENCE_ORDER, ENGINES, type Confidence } from "../../linking/automatic";
 import { filterRows, sortRows, tableRows, type SortKey, type TableFilter, type TableRow } from "../../state/links-table";
-import { TYPE_CHOICES } from "../../state/store";
+import { TypesHelpButton } from "../dialogs/types-help-dialog";
+import { TypeOptions } from "./type-options";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { rovingKeys, rovingTabIndex } from "../keyboard";
@@ -217,10 +218,9 @@ function GroupActions({ sel, rows, clear }: { sel: ReadonlySet<string>; rows: re
           <button class="btn text small" onClick={() => store.restoreLinks(ids)}>שחזור</button>
           <select aria-label="שינוי סוג הקשר" value="" onChange={(e) => e.currentTarget.value && store.setType(ids, e.currentTarget.value)}>
             <option value="">שינוי סוג…</option>
-            {TYPE_CHOICES.map((t) => (
-              <option key={t} value={t}>{TYPE_LABELS[parseConnectionType(t).type].he}</option>
-            ))}
+            <TypeOptions />
           </select>
+          <TypesHelpButton />
           <span class="lt-target">
             <input list="lt-titles" placeholder="ספר יעד חדש…" aria-label="ספר יעד חדש" value={title} onInput={(e) => setTitle(e.currentTarget.value)} />
             <datalist id="lt-titles">{[...store.booksByTitle.value.keys()].map((t) => <option key={t} value={t} />)}</datalist>
