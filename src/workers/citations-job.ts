@@ -1,6 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import type { EngineContext, EngineResult } from "../linking/automatic";
-import { AliasIndex, dafStructureFromAltToc, type DafStructure, buildHeadingsIndex, buildRefIndex, CitationRun, NamedUnitIndex, unitKindOf, unitsFromAltToc, type CatalogBook, type CitationsOptions, type NamedUnit, type NamedUnitSource, type TargetIndex, type UnitKind } from "../linking/automatic/citations";
+import { AliasIndex, dafStructureFromAltToc, type DafStructure, buildHeadingsIndex, buildRefIndex, CitationRun, NamedUnitIndex, unitKindOf, unitsFromAltToc, type CatalogBook, type CitationsOptions, type NamedUnit, type NamedUnitSource, type TargetIndex, type UnitKind, hasCitationHint } from "../linking/automatic/citations";
 import type { SourceRegistry } from "../sources/registry";
 
 /** Lines read per step of the source scan (as the in-book search). */
@@ -39,7 +39,17 @@ const MAX_PAGES = 50;
  * Keep the signature: the max-linking orchestrator calls it as is.
  */
 export async function citationsJob(registry: SourceRegistry, source: BookRef, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+  // not without a reason (2.1): a book none of whose lines shows a sign of a reference has nothing to find. The look stops at the
+  // first line that does, so a book with references pays one chunk; one without pays a read of its lines, far below the scanner.
   const { aliases, units } = await aliasesOf(registry);
+  if (!(await anyCitationHint(registry, source, (key) => aliases.hasFirstWord(key)))) {
+    ctx.progress?.(1000, 1000);
+    return {
+      suggestions: [],
+      notes: [{ code: "citations/skipped-no-references", text: `בספר "${source.title}" אין אף שורה עם סימן של הפניה (דף, פרק, סימן, סעיף, פסוק, שם של ספר מקור), ולכן שיטת מראי המקומות לא הורצה עליו.` }],
+      unmatched: [],
+    };
+  }
   const run = new CitationRun(source, aliases, options as CitationsOptions, units);
   let last = Date.now();
   // a cancel (or the benchmark's time cap) stops the scan and the resolution, never throws: finish() still ranks
@@ -79,6 +89,16 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
   const result = run.finish(ctx.signal ? { signal: ctx.signal } : {});
   ctx.progress?.(1000, 1000);
   return result;
+}
+
+/** Whether any non-heading line of the book shows a sign of a reference (suitability.ts); true when the read fails or is cancelled (then the engine decides). */
+async function anyCitationHint(registry: SourceRegistry, source: BookRef, knowsName: (key: string) => boolean): Promise<boolean> {
+  try {
+    for await (const chunk of registry.scan(source.key, CHUNK)) for (const l of chunk.lines) if (l.heading === null && hasCitationHint(l.anchorText, knowsName)) return true;
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**

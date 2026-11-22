@@ -524,6 +524,11 @@ export class AliasIndex {
   }
 
   /** A whole name as written (for "ibid" book words and tests). */
+  /** Does any name of the library begin with this word (a search key)? The cheap first look of the suitability check. */
+  hasFirstWord(key: string): boolean {
+    return this.byFirst.has(key);
+  }
+
   lookup(name: string): AliasEntry | undefined {
     const w = nameWords(normTitle(name));
     return w ? this.byKey.get(wordsKey(w)) : undefined;

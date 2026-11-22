@@ -7,3 +7,4 @@ export { parseAddress, type AddrElem, type Address } from "./address";
 export { citationTokens } from "./text";
 export { dafStructureFromAltToc, resolveAltDaf, type DafStructure } from "./altdaf";
 export { numeralOf, strictValue } from "./numbers";
+export { hasCitationHint } from "./suitability";
