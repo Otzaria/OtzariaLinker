@@ -118,3 +118,4 @@ export function* engineSteps(id: EngineId, source: EngineBook, target: EngineBoo
 
 export * from "./types";
 export { runSliced, runToEnd, SLICE_MS, type EngineSteps } from "./steps";
+export * from "./sort";

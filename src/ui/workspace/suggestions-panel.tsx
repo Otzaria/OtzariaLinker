@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { CONFIDENCE_LABELS, ENGINES, type Confidence, type EngineId, type Suggestion } from "../../linking/automatic";
+import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type EngineId, type Suggestion, type SuggestionSort } from "../../linking/automatic";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import type { SuggestionsView } from "../../state/preferences";
@@ -279,11 +279,13 @@ function TableView() {
   const [state, setState] = useState<SuggestionState | "all">("pending");
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
+  const ordered = store.suggestions.ordered.value;
+  const sortOrder = store.suggestions.sortOrder.value;
   const rows = useMemo(
-    () => run.result.suggestions.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
-    [run, conf, state, st],
+    () => ordered.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
+    [ordered, conf, state, st],
   );
-  useEffect(() => setSel(new Set()), [conf, state, run]);
+  useEffect(() => setSel(new Set()), [conf, state, run, sortOrder]);
   // the lines of the shown rows, for the start of each line's text (audit F17)
   useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
@@ -309,6 +311,7 @@ function TableView() {
             </button>
           ) : null,
         )}
+        <SortSelect onChange={() => setShown(PAGE)} />
       </div>
       <div class="row bulk">
         <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהכלי בטוח בהן לגמרי"}>
@@ -339,7 +342,7 @@ function TableView() {
         </thead>
         <tbody>
           {rows.slice(0, shown).map((s) => (
-            <SugRow key={s.id} s={s} state={st.get(s.id)!} checked={sel.has(s.id)} onCheck={(on) => setSel((p) => { const n = new Set(p); on ? n.add(s.id) : n.delete(s.id); return n; })} />
+            <SugRow key={s.id} s={s} state={st.get(s.id)!} showScore={sortOrder === "worst" || sortOrder === "best"} checked={sel.has(s.id)} onCheck={(on) => setSel((p) => { const n = new Set(p); on ? n.add(s.id) : n.delete(s.id); return n; })} />
           ))}
         </tbody>
       </table>
@@ -353,7 +356,7 @@ function TableView() {
   );
 }
 
-function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: SuggestionState; checked: boolean; onCheck: (on: boolean) => void }) {
+function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; state: SuggestionState; checked: boolean; onCheck: (on: boolean) => void; showScore: boolean }) {
   const store = useStore();
   const end = (l: number, e?: number) => (e !== undefined && e > l ? `${l + 1}–${e + 1}` : `${l + 1}`);
   store.lines.tick.value; // re-render when the previews load
@@ -366,7 +369,7 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       tabIndex={0}
       onClick={() => store.suggestions.show(s.id)}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.suggestions.show(s.id))}
-      title={s.reasons.map((r) => r.text).join(" · ")}
+      title={[`ציון ${scorePercent(s)}`, ...s.reasons.map((r) => r.text)].join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
         {/* the label is the hit area: the bare checkbox is 13px (WCAG 2.5.8 asks 24) */}
@@ -381,6 +384,8 @@ function SugRow({ s, state, checked, onCheck }: { s: Suggestion; state: Suggesti
       </td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
+        {/* the numeric score, when the list is sorted by it: inside a level the order is by this number */}
+        {showScore && <span class="muted score"> {scorePercent(s)}</span>}
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
         {/* the row's decision, which the eye reads from its colour */}
         {state !== "pending" && <span class="sr-only">, {STATE_LABEL[state]}</span>}
@@ -429,14 +434,15 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
   const store = useStore();
   const run = store.suggestions.run.value!;
   const st = store.suggestions.state.value;
-  const list = run.result.suggestions;
+  const list = store.suggestions.ordered.value;
   const curId = store.suggestions.current.value;
   const idx = Math.max(0, list.findIndex((s) => s.id === curId));
   const s = list[idx];
 
+  // the neighbour in the SORTED list (the sort order of the table applies here too)
   const go = (dir: 1 | -1, pendingOnly = false) => {
-    for (let i = idx + dir; i >= 0 && i < list.length; i += dir)
-      if (!pendingOnly || st.get(list[i]!.id) === "pending") return store.suggestions.show(list[i]!.id);
+    const id = store.suggestions.neighbour(dir, pendingOnly);
+    if (id) store.suggestions.show(id);
   };
   useEffect(() => {
     if (s) store.suggestions.show(s.id);
@@ -464,12 +470,13 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
           <Icon name="fl_chevron_down" size={18} class="rot-left" />
         </button>
         <span class="grow" style="text-align:center">
-          {(idx + 1).toLocaleString("he")} מתוך {list.length.toLocaleString("he")} · <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span> · {STATE_LABEL[state]}
+          {(idx + 1).toLocaleString("he")} מתוך {list.length.toLocaleString("he")} · <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span> <span class="muted">({scorePercent(s)})</span> · {STATE_LABEL[state]}
         </span>
         <button class="icon-btn" onClick={() => go(1)} disabled={idx === list.length - 1} aria-label="הבאה" title="הבאה (←)">
           <Icon name="fl_chevron_down" size={18} class="rot-right" />
         </button>
       </div>
+      <SortSelect />
       {card && <CardTexts s={s} />}
       {!card && (
         <div class="end source set">
@@ -514,6 +521,24 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
     </div>
   );
 }
+
+/** The sort order of the suggestions (issue 8): one choice for the table and the one-at-a-time views. */
+function SortSelect({ onChange }: { onChange?: () => void }) {
+  const store = useStore();
+  return (
+    <label class="sort-select">
+      <span>מיון</span>
+      <select aria-label="מיון ההצעות" value={store.suggestions.sortOrder.value} onChange={(e) => (store.suggestions.setSort(e.currentTarget.value as SuggestionSort), onChange?.())}>
+        {SUGGESTION_SORTS.map((o) => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** The engine's score (0..1) as the percent the reviewer reasons in. */
+const scorePercent = (s: Suggestion): string => `${Math.round(s.score * 100)}%`;
 
 function CardTexts({ s }: { s: Suggestion }) {
   const store = useStore();

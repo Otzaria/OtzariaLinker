@@ -45,3 +45,56 @@ test("headings engine: run in the worker → table → approve all certain → c
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 8: the table (and the card view) can be sorted — weakest suggestions first, so the ones that need a human eye
+ * come before the certain ones — and the choice is kept when the view changes. Default: the book's order.
+ */
+test("sort the suggestions: weakest first, strongest first, and back to the book's order; the card view follows", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  // Rashi on Bereshit against Bereshit by the opening words (the real database slice): the levels differ from line to line
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await page.getByRole("button", { name: "הכול", exact: true }).click({ timeout: 30_000 });
+  await expect(page.locator("table.sug-table tbody tr").first()).toBeVisible({ timeout: 30_000 });
+
+  const sort = page.getByLabel("מיון ההצעות");
+  await expect(sort).toHaveValue("book");
+  const levels = () => page.locator("table.sug-table tbody tr .conf").allTextContents();
+  const lines = () => page.locator("table.sug-table tbody tr td:nth-child(2)").allTextContents();
+  const RANK = ["ודאית", "גבוהה", "אפשרית", "עמומה", "אין התאמה"];
+  const book = await lines();
+  const bookLevels = await levels();
+  expect(new Set(bookLevels).size, "the sample has more than one level").toBeGreaterThan(1);
+
+  await sort.selectOption("worst");
+  const worst = (await levels()).map((l) => RANK.indexOf(l));
+  expect(worst).toEqual([...worst].sort((a, b) => b - a));
+  await expect(page.locator("table.sug-table tbody tr .score").first()).toContainText("%");
+
+  await sort.selectOption("best");
+  const best = (await levels()).map((l) => RANK.indexOf(l));
+  expect(best).toEqual([...best].sort((a, b) => a - b));
+  expect(best[0]).toBe(Math.min(...best));
+
+  // the card view reads the same order: it starts on the table's first row... and stepping goes down the same list
+  await page.getByRole("radio", { name: "כרטיס" }).click();
+  await expect(page.getByLabel("מיון ההצעות")).toHaveValue("best");
+  await expect(page.locator(".builder .conf").first()).toHaveText(RANK[Math.min(...best)]!);
+
+  await page.getByRole("radio", { name: "טבלה" }).click();
+  await page.getByLabel("מיון ההצעות").selectOption("book");
+  await page.getByRole("button", { name: "הכול", exact: true }).click();
+  expect(await lines()).toEqual(book);
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});

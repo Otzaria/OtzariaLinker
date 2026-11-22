@@ -1,7 +1,7 @@
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
-import { CONFIDENCE_ORDER, recordsOf, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { CONFIDENCE_ORDER, recordsOf, sortSuggestions, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion, type SuggestionSort } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -122,6 +122,9 @@ export interface BulkPreview {
 /** The levels a bulk approval starts with; the others only when the user ticks them. */
 export const BULK_DEFAULT_LEVELS: readonly Confidence[] = ["certain", "high"];
 
+/** The order of the decision states in the "by state" sort: what still needs a decision first. */
+const STATE_RANK: Readonly<Record<SuggestionState, number>> = { pending: 0, approved: 1, rejected: 2, exists: 3 };
+
 export class SuggestionsState {
   readonly run = signal<SuggestionRun | null>(null);
   /** line pairs the open databases already link, for the books of the current run (see linePairKey) */
@@ -134,6 +137,15 @@ export class SuggestionsState {
   readonly rejected = computed<ReadonlySet<string>>(() => this.host.linkState.value.rejected);
   /** the suggestion shown in the inline/card views */
   readonly current = signal<string | null>(null);
+  /** how the list is ordered for the user (issue 8); the run itself keeps the engine's order */
+  readonly sortOrder = signal<SuggestionSort>("book");
+  /** the run's suggestions in the chosen order: the table and the one-at-a-time views read this one list */
+  readonly ordered = computed<readonly Suggestion[]>(() => {
+    const list = this.run.value?.result.suggestions ?? [];
+    const order = this.sortOrder.value;
+    // the decision state is read only when it is the order, so a decision does not reshuffle the other orders
+    return sortSuggestions(list, order, order === "state" ? ((st) => (s: Suggestion) => STATE_RANK[st.get(s.id) ?? "pending"])(this.state.value) : undefined);
+  });
 
   readonly state = computed(() => {
     const run = this.run.value;
@@ -458,6 +470,23 @@ export class SuggestionsState {
         } catch {
           /* a preview is best effort: a book closed meanwhile shows the place name alone */
         }
+  }
+
+  /** Chooses the order, and puts the one-at-a-time views on the top of the new list. */
+  setSort(order: SuggestionSort): void {
+    batch(() => {
+      this.sortOrder.value = order;
+      this.current.value = this.ordered.value[0]?.id ?? null;
+    });
+  }
+
+  /** The id next to the current suggestion in the sorted list (dir 1 = next), skipping decided ones when `pendingOnly`; null at the end. */
+  neighbour(dir: 1 | -1, pendingOnly = false): string | null {
+    const list = this.ordered.value;
+    const st = this.state.value;
+    const at = list.findIndex((s) => s.id === this.current.value);
+    for (let i = Math.max(0, at) + dir; i >= 0 && i < list.length; i += dir) if (!pendingOnly || st.get(list[i]!.id) === "pending") return list[i]!.id;
+    return null;
   }
 
   /** Moves the inline/card view to a suggestion and shows both ends in the readers. */
