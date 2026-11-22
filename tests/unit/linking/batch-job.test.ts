@@ -42,6 +42,11 @@ describe("the batch job's pure parts", () => {
     expect(stepsSignature([pair("headings", { declaredType: "targum" })])).not.toBe(stepsSignature([pair("headings")]));
   });
 
+  it("a headings step that ran behind the title gate and the same step named by the user are different work (review: a skipped result must not be reused)", () => {
+    const gated = { ...pair("headings"), titleGate: true } as PlanStep;
+    expect(stepsSignature([gated])).not.toBe(stepsSignature([pair("headings")]));
+  });
+
   it("a book's status: done, 'no match', failed with the reasons; per engine done and failed", () => {
     expect(finishBook(book(), [{ engine: "headings", suggestions: 5 }, { engine: "citations", suggestions: 0 }], 10, "fp")).toMatchObject({ status: "done", suggestions: 5, engines: { headings: [1, 1, 0], citations: [1, 1, 0] }, fingerprint: "fp" });
     expect(finishBook(book(), [{ engine: "headings", suggestions: 0 }, { engine: "citations", suggestions: 0 }], 10, "fp").status).toBe("no-match");

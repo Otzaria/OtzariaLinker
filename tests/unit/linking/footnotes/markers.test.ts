@@ -232,6 +232,15 @@ describe('style "digits" (bare numbers glued to a word)', () => {
     expect(detectMarkers('<i data-label="5">שלום</i> <sup>7</sup> <a href="x1">ק</a>', "digits")).toEqual([]);
     expect(detectMarkers("שלום1990", "digits")).toEqual([]);
   });
+  it("does not read parts of ordinary numbers: a citation 'כג:5', '1,200', '3.5', and a number inside nested <sup><b>", () => {
+    expect(detectMarkers("תהלים כג:5 ושלום", "digits")).toEqual([]);
+    expect(detectMarkers("שלום 1,200 ועוד", "digits")).toEqual([]);
+    expect(detectMarkers("שלום3.5 ועוד", "digits")).toEqual([]);
+    expect(detectMarkers("שלום<sup><b>1</b></sup> ועוד", "digits")).toEqual([]);
+    // but a marker after a comma or a period still reads
+    expect(detectMarkers("שלום,3 עולם.4", "digits").map((m) => m.num)).toEqual([3, 4]);
+  });
+
   it("on a note line the number opens the line, with or without a dot", () => {
     expect(leadingMarker("12. הערה", "digits")?.num).toBe(12);
     expect(leadingMarker("12 הערה", "digits")?.num).toBe(12);

@@ -354,6 +354,18 @@ describe("bare-number markers (#14)", () => {
     expect(res.notes.find((n) => n.code === "footnotes/swapped")!.text).toContain("בסדר הפוך");
   });
 
+  it("auto does not choose bare numbers on a single coincidence (one number of the text equals a note number)", () => {
+    const res = run(["<h1>ספר</h1>", "שלום עולם1 ועוד דברים"], ["<h1>הערות לספר</h1>", "1. א", "2. ב", "3. ג", "4. ד", "5. ה", "6. ו"]);
+    expect(codes(res.notes).filter((c) => c === "footnotes/style-auto")).toHaveLength(1);
+    expect(res.notes.find((n) => n.code === "footnotes/style-auto")!.text).not.toContain("צמודים");
+  });
+
+  it("no 'swapped' claim for one stray number glued to a word in the other book (a page or verse number in prose)", () => {
+    const res = run(["1. הערה", "2. הערה", "3. הערה"], ["דברים רגילים בעמוד5 של הספר", "ועוד שורה בלי שום סימן"]);
+    expect(codes(res.notes)).not.toContain("footnotes/swapped");
+    expect(codes(res.notes)).toContain("footnotes/no-notes");
+  });
+
   it("no 'swapped' claim when the other book has no markers either", () => {
     const res = run(["שלום עולם"], ["הערה בלי מספר"]);
     expect(codes(res.notes)).toContain("footnotes/no-notes");

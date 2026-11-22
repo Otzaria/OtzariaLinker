@@ -809,11 +809,14 @@ function looksSwapped(main: EngineBook, notes: EngineBook, includeInline: boolea
     if (leadingMarker(text, "auto", { includeInlineNoteMarkers: includeInline })) opening++;
   }
   if (!content || opening < content * 0.5) return false;
-  const styles: MarkerStyle[] = ["sup", "sub", "parentheses", "digits"];
+  // tag and parentheses markers settle it; bare digits are weak (a page or verse number in prose): at least three, mid-line
+  const styles: MarkerStyle[] = ["sup", "sub", "parentheses"];
+  let bare = 0;
   for (const l of notes.lines) {
     if (l.heading !== null) continue;
     const text = withoutBom(l.text);
     for (const s of styles) if (detectMarkers(text, s, { includeInlineNoteMarkers: includeInline }).length) return true;
+    for (const m of detectMarkers(text, "digits")) if (stripTags(text.slice(0, m.rawStart)).trim() && ++bare >= 3) return true;
   }
   return false;
 }
@@ -854,7 +857,8 @@ function chooseMainStyle(
         if (l.heading !== null) continue;
         for (const m of detectMarkers(withoutBom(l.text), c.compiled, opts)) if (noteNums.has(m.num)) matched++;
       }
-      if (matched > 0) best = { style: c.compiled, matched, found: matched };
+      // a few coincidences (a number of the text equal to a note number) are not a marker style
+      if (matched >= Math.min(noteNums.size, Math.max(2, Math.ceil(noteNums.size * 0.3)))) best = { style: c.compiled, matched, found: matched };
     }
   }
   runNotes.push(r("footnotes/style-auto", `סגנון הסימון בספר נבחר אוטומטית: ${describeStyle(best!.style)}.`));

@@ -171,7 +171,7 @@ export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "
  * the book again even when no text changed.
  */
 export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRecord["engineOptions"]): string {
-  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}`).sort();
+  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}`).sort();
   const engines = [...new Set(steps.map((s) => s.engine))].sort();
   return JSON.stringify([parts, engines.map((e) => engineOptions?.[e] ?? null)]);
 }
@@ -295,7 +295,6 @@ function storedEngineOptions(stored: object): NonNullable<JobRecord["engineOptio
   return out;
 }
 
-/** Parses a stored record; null when it is not one (an older or damaged entry is dropped, never trusted). */
 /** PlanChoices read back from storage: only well-formed entries survive (a damaged one plans as if never chosen). */
 function parseChoices(raw: unknown): { choices?: PlanChoices } {
   if (!raw || typeof raw !== "object") return {};
@@ -318,6 +317,7 @@ function parseChoices(raw: unknown): { choices?: PlanChoices } {
 
 const USER_KINDS: readonly RelationKind[] = ["commentary", "notes", "mishnah-in-talmud"];
 
+/** Parses a stored record; null when it is not one (an older or damaged entry is dropped, never trusted). */
 export function parseJobRecord(text: string | null | undefined): JobRecord | null {
   if (!text) return null;
   try {

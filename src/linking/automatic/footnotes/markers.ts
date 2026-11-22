@@ -255,22 +255,24 @@ function detectParentheses(map: VisibleMap, opts: DetectOptions): Marker[] {
 
 
 /** what may stand right before a bare number: a Hebrew letter or the punctuation that closes a phrase */
-const BEFORE_DIGITS = /[א-ת.,:;"'׳״)\]!?]/;
-const IN_SUP_OPEN = /<\s*(?:sup|sub)\b[^>]*>$/i;
+const BEFORE_DIGITS = /[א-ת.,;"'׳״)\]!?]/;
+const IN_SUP_OPEN = /<\s*(?:sup|sub)\b[^>]*>\s*(?:<[^>]*>\s*)*$/i;
 
 function detectDigits(html: string, map: VisibleMap, opts: DetectOptions): Marker[] {
   const out: Marker[] = [];
+  const firstText = map.text.search(/\S/);
   for (const m of map.text.matchAll(/\d+/g)) {
     if (m[0].length > 3) continue;
     const at = m.index;
     const prev = at > 0 ? map.text[at - 1]! : "";
-    const lineStart = !/\S/.test(map.text.slice(0, at));
+    const lineStart = at === firstText;
     if (!lineStart && !BEFORE_DIGITS.test(prev)) continue;
-    // "3.5": the digit after the point of a decimal
-    if (prev === "." && /\d/.test(map.text[at - 2] ?? "")) continue;
+    // part of a larger number: "3.5" and "1,200" (before and after the separator)
+    if ((prev === "." || prev === ",") && /\d/.test(map.text[at - 2] ?? "")) continue;
+    if (/^[.,]\d/.test(map.text.slice(at + m[0].length, at + m[0].length + 2))) continue;
     const rawStart = map.starts[at]!;
-    // a <sup>/<sub> number belongs to those styles, and a digit in an element of its own is no bare number
-    if (IN_SUP_OPEN.test(html.slice(0, rawStart))) continue;
+    // a <sup>/<sub> number belongs to those styles (also inside nested tags: <sup><b>1</b></sup>); looked at in a window, not the whole line
+    if (IN_SUP_OPEN.test(html.slice(Math.max(0, rawStart - 200), rawStart))) continue;
     const p = parseMarkerToken(m[0]);
     if (!p || !accept(p, opts)) continue;
     const rawEnd = map.ends[at + m[0].length - 1]!;
