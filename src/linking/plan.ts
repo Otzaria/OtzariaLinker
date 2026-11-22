@@ -330,6 +330,12 @@ export interface UserPair {
   readonly base: string;
   /** default: a notes book when the title says so (notesBaseTitle), else a commentary */
   readonly kind?: RelationKind;
+  /**
+   * The very books the user picked, when the title is open in more than one source (session keys: never stored in a
+   * job). Without them a title binds the FIRST book of that title and the plan says so.
+   */
+  readonly dependantKey?: string;
+  readonly baseKey?: string;
 }
 
 /** The key of a pair in PlanChoices.methods. */
@@ -881,15 +887,24 @@ function stepsFor(rel: Relation, depBook: PlanBook): StepSpec[] {
  * A title that names no open book gives the dependant a problem instead (the plan says which).
  */
 function userRelations(pairs: readonly UserPair[] | undefined, library: readonly PlanBook[]): { relations: Map<string, Relation[] | { problem: string }>; unmade: Map<string, string[]> } {
+  /* `unmade` also carries the notes of a pair that WAS made (a title open twice) */
   const relations = new Map<string, Relation[] | { problem: string }>();
   const bad = new Map<string, string[]>();
   if (!pairs?.length) return { relations, unmade: bad };
   const byTitle = new Map<string, PlanBook>();
-  for (const b of library) if (!byTitle.has(b.title)) byTitle.set(b.title, b);
+  const copies = new Map<string, number>();
+  const byKey = new Map(library.map((b) => [b.key, b] as const));
+  for (const b of library) {
+    copies.set(b.title, (copies.get(b.title) ?? 0) + 1);
+    if (!byTitle.has(b.title)) byTitle.set(b.title, b);
+  }
   for (const p of pairs) {
-    const dep = byTitle.get(p.dependant);
-    const base = byTitle.get(p.base);
+    const dep = (p.dependantKey && byKey.get(p.dependantKey)) || byTitle.get(p.dependant);
+    const base = (p.baseKey && byKey.get(p.baseKey)) || byTitle.get(p.base);
     if (!dep) continue;
+    // a title open in more than one source, bound by title alone: the first copy; the user is told
+    for (const [t, key, bound] of [[p.dependant, p.dependantKey, dep], [p.base, p.baseKey, base]] as const)
+      if (bound && !(key && byKey.has(key)) && (copies.get(t) ?? 0) > 1) pushTo(bad, dep.key, `${quote(t)} פתוח ביותר ממקור אחד; נבחר העותק הראשון`);
     if (!base || base.key === dep.key) {
       pushTo(bad, dep.key, base ? `${quote(p.base)} הוא אותו ספר` : `הספר ${quote(p.base)} שבחרתם אינו פתוח`);
       continue;
@@ -997,7 +1012,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
     // a pair the user asked for that could not be made, said even when the book's other pairs were made
     const missed = unmade.get(k);
-    if (missed?.length && all.length) decisions.push(`לא נוצר קישור לפי בחירתכם: ${missed.join("; ")}.`);
+    if (missed?.length && all.length) decisions.push(`הערה לגבי הבחירה שלכם: ${missed.join("; ")}.`);
     const n = touches.get(k) ?? 0;
     let skipped: string | undefined;
     if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;

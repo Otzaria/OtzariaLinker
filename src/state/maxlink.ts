@@ -213,7 +213,7 @@ export class MaxLinkState {
     const title = (k: string) => this.host.refOf(k).title;
     const bases = [...new Set(baseKeys)].filter((k) => k !== dependantKey && this.host.books.value.has(k));
     const dependant = title(dependantKey);
-    const pairs = bases.map((k) => ({ dependant, base: title(k), ...(kind && { kind }) }));
+    const pairs = bases.map((k) => ({ dependant, base: title(k), dependantKey, baseKey: k, ...(kind && { kind }) }));
     const chosen: Record<string, readonly PairEngineId[]> = {};
     if (methods?.length) for (const k of bases) chosen[pairMethodKey(dependant, title(k))] = methods;
     return this.plan({ kind: "books", keys: [dependantKey] }, new Set(PAIR_ENGINES), undefined, { pairs, ...(Object.keys(chosen).length && { methods: chosen }) });
@@ -258,7 +258,8 @@ export class MaxLinkState {
       engines: Object.keys(plan.perEngine) as EngineId[],
       ...(options.engineOptions && Object.keys(options.engineOptions).length && { engineOptions: options.engineOptions }),
       ...(preferBase && { preferBase }),
-      ...(plan.choices && { choices: plan.choices }),
+      // the books by title only: session keys are not kept in a job (a resumed job plans from the titles)
+      ...(plan.choices && { choices: { ...plan.choices, ...(plan.choices.pairs && { pairs: plan.choices.pairs.map(({ dependantKey: _d, baseKey: _b, ...rest }) => rest) }) } }),
     });
     this.dropStored(this.job.peek());
     this.results.clear();

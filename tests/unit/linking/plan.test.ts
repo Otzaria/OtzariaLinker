@@ -695,6 +695,15 @@ describe("planMaxLink — title gate, explicit pairs and per-pair methods", () =
     expect(p.books[0]!.decisions.join(" ")).toContain("ספר שלא נפתח");
   });
 
+  it("the same title open in two sources: a pair by key binds that copy, one by title only says which it took (QA)", () => {
+    const twin = [...lib, { ...book("b2:2", "ספר ב"), origin: "personal" as const }];
+    const byKey = planPairs({ selected: ["u:1"], library: twin, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", baseKey: "b2:2" }] } });
+    expect(byKey.steps.every((s) => s.kind === "pair" && s.target.key === "b2:2")).toBe(true);
+    const byTitle = planPairs({ selected: ["u:1"], library: twin, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב" }] } });
+    expect(byTitle.steps.every((s) => s.kind === "pair" && s.target.key === "b:2")).toBe(true);
+    expect(byTitle.books[0]!.decisions.join(" ")).toContain("פתוח ביותר ממקור אחד");
+  });
+
   it("an explicit notes relation runs footnotes with the main book as the source", () => {
     const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", kind: "notes" }] } });
     expect(steps(p)).toEqual(["footnotes:ספר ב>חיבור כלשהו"]);

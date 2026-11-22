@@ -217,7 +217,8 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
     const run = store.suggestions.run.value!;
     expect(run.maxlink!.steps.length).toBe(4);
     // the second target is not a base of it: the merge puts everything in one run
-    expect(store.maxLink.job.value!.choices).toEqual(plan.choices);
+    // the job keeps the books by title, without the session keys the plan was made with
+    expect(store.maxLink.job.value!.choices!.pairs!.map((x) => [x.dependant, x.base])).toEqual(plan.choices!.pairs!.map((x) => [x.dependant, x.base]));
   });
 
   it("pair mode with two targets: a line that fits both is not linked to both (the candidates are folded or left ambiguous)", async () => {
@@ -237,6 +238,14 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
     const { store, key } = await opened();
     expect((await store.maxLink.titleFit(key("ביאור על בראשית"), key("בראשית")))!.verdict).toBe("fit");
     expect((await store.maxLink.titleFit(key("חידושים"), key("בראשית")))!.verdict).toBe("unfit");
+  });
+
+  it("pairPlan binds the books the user picked by key, but the job keeps the choices by title only (session keys are not kept)", async () => {
+    const { store, key } = await opened();
+    const plan = store.maxLink.pairPlan(key("חידושים"), [key("בראשית")]);
+    expect(plan.choices!.pairs![0]).toMatchObject({ dependantKey: key("חידושים"), baseKey: key("בראשית") });
+    await store.maxLink.run(plan, "זוג");
+    expect(store.maxLink.job.value!.choices!.pairs).toEqual([{ dependant: "חידושים", base: "בראשית" }]);
   });
 
   it("the choices travel with the job: a resumed job plans the same pairs", async () => {
