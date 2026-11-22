@@ -401,6 +401,86 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
 });
 
 /*
+ * 3.4: one pair at a time — include it or not (simple mode: only that), its link type and the lowest confidence of its suggestions
+ * (advanced), the methods the plan will not run and why, and what the pair is expected to cost. Nothing is locked: "chosen by the
+ * tool" is where every control starts. A pair switched off stays on the list so that it can be switched back on.
+ */
+test("guided flow: the controls of one pair — include, link type, threshold, reasons and cost; a phone shows cards", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]!, "פירוש קצר על בראשית": BOOKS["פירוש קצר על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  const pairs = main.locator("details.guided-pairs");
+  await pairs.locator("summary").click();
+  const row = (dep: string) => pairs.locator(`.pair-row[data-pair="${dep}>בראשית"]`);
+  const A = row("ביאור על בראשית");
+  const B = row("פירוש קצר על בראשית");
+
+  // simple mode: only "include this pair"; the type, the threshold and the cost are for advanced mode
+  await expect(A.getByRole("checkbox", { name: /לכלול את הזוג/ })).toBeChecked();
+  await expect(A.getByLabel(/^סוג הקישור/)).toHaveCount(0);
+  await expect(A.getByLabel(/^רמת הביטחון/)).toHaveCount(0);
+
+  // switch a pair off: it stays on the list, says so, and its steps leave the plan
+  const runs = async () => Number(((await main.locator(".stats").innerText()).match(/(\d+)\s*הרצות/) ?? [])[1]);
+  const stepsBefore = await runs();
+  await B.getByRole("checkbox", { name: /לכלול את הזוג/ }).uncheck();
+  await expect(B).toContainText("הזוג הושבת");
+  await expect(B.getByLabel(/^שיטה לזוג/)).toHaveCount(0);
+  await expect(A).not.toContainText("הזוג הושבת");
+  await expect.poll(runs).toBeLessThan(stepsBefore);
+  await B.getByRole("checkbox", { name: /לכלול את הזוג/ }).check();
+  await expect(B).not.toContainText("הזוג הושבת");
+  await expect.poll(runs).toBe(stepsBefore);
+
+  // advanced mode: the type (grouped picker), the threshold, the cost, and the methods that will not run, with the reason
+  await page.getByRole("checkbox", { name: "מצב מתקדם" }).check();
+  const type = A.getByLabel(/^סוג הקישור/);
+  const threshold = A.getByLabel(/^רמת הביטחון/);
+  await expect(type).toHaveValue("");
+  await expect(threshold).toHaveValue("");
+  await expect(A.locator(".pair-cost")).toContainText(/זמן משוער/);
+  await expect(B.locator(".pair-skipped")).toContainText("שיטות שלא ירוצו על הזוג");
+  await expect(B.locator(".pair-skipped")).toContainText("הוא ספר פירוש, לא ספר הערות");
+  await type.selectOption("targum");
+  await threshold.selectOption("high");
+  await expect(type).toHaveValue("targum");
+  await expect(threshold).toHaveValue("high");
+  // the other pair is untouched
+  await expect(B.getByLabel(/^סוג הקישור/)).toHaveValue("");
+  // back to "chosen by the tool"
+  await type.selectOption("");
+  await threshold.selectOption("");
+  await expect(type).toHaveValue("");
+
+  // wide: three columns in a row; a phone: one column, a card, nothing cut off
+  const cols = async () => (await A.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length));
+  expect(await cols()).toBe(3);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await cols()).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(A.getByLabel(/^סוג הקישור/)).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
  * 3.2: before the run the plan says how many links the chosen books ALREADY have (the project's and the open database's)
  * and what will and will not go into the final file.
  */

@@ -1,7 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
 import type { BookRef } from "../../core/links/model";
 import { ENGINES } from "../../linking/automatic";
-import { pairMethodKey, type PairEngineId, type PlanStep } from "../../linking/plan";
+import { CONFIDENCE_LABELS } from "../../linking/automatic";
+import { notesBaseTitle, pairMethodKey, type PairControl, type PairEngineId, type PlanStep, type PlanUnsuitable } from "../../linking/plan";
+import { durationText } from "../../state/guided-flow";
+import { TypeOptions } from "../workspace/type-options";
 import type { TitleFitReport, TitleFitVerdict } from "../../linking/title-fit";
 import { useStore } from "../context";
 
@@ -12,8 +15,18 @@ import { useStore } from "../context";
  * explicit decision — and says what will go wrong. Folded in simple mode (the plan already skips headings where titles do
  * not fit, and says so); advanced mode opens it. Over GuidedFlowState.setMethods / setPairMethods; nothing here plans.
  *
- * Not offered (no data layer for it yet): switching one pair off, a link type or a confidence threshold per pair.
+ * Per pair, too (V6 3.4, over setPairControl): whether the pair runs at all, the type its links are written with, the lowest
+ * confidence of its suggestions, the plan's reasons for the methods it does not run, and what the pair is expected to cost.
+ * The simple mode shows only "include this pair"; the advanced mode shows the rest, as a row on a wide screen and a card on a
+ * phone. Every control starts on "chosen by the tool" and never locks anything: a pair nobody touched stays automatic.
  */
+const THRESHOLDS: ReadonlyArray<{ value: NonNullable<PairControl["minConfidence"]> | ""; label: string }> = [
+  { value: "", label: "כל ההצעות" },
+  { value: "possible", label: `${CONFIDENCE_LABELS.possible} ומעלה` },
+  { value: "high", label: `${CONFIDENCE_LABELS.high} ומעלה` },
+  { value: "certain", label: `${CONFIDENCE_LABELS.certain} בלבד` },
+];
+const engineTitle = (id: string): string => ENGINES.find((e) => e.id === id)?.title ?? id;
 type Choice = "" | "headings" | "dh" | "both";
 const CHOICES: Record<Choice, { label: string; methods: readonly PairEngineId[] | null }> = {
   "": { label: "ברירת המחדל של הכלי", methods: null },
@@ -32,7 +45,8 @@ interface Pair {
   notes: boolean;
 }
 
-function pairsOf(steps: readonly PlanStep[]): Pair[] {
+/** The plan's pairs, and the ones the user switched off (they have no steps, but must stay on the list to be switched back on). */
+function pairsOf(steps: readonly PlanStep[], unsuitable: readonly PlanUnsuitable[]): Pair[] {
   const seen = new Map<string, Pair>();
   for (const s of steps) {
     if (s.kind !== "pair") continue;
@@ -40,7 +54,23 @@ function pairsOf(steps: readonly PlanStep[]): Pair[] {
     const k = pairMethodKey(dependant.title, base.title);
     if (!seen.has(k)) seen.set(k, { dependant, base, notes: kind === "notes" });
   }
+  for (const u of unsuitable) {
+    if (u.reason !== "disabled") continue;
+    const k = pairMethodKey(u.dependant.title, u.base.title);
+    if (!seen.has(k)) seen.set(k, { dependant: u.dependant, base: u.base, notes: notesBaseTitle(u.dependant.title) !== null });
+  }
   return [...seen.values()];
+}
+
+/** What a pair is expected to cost: the sum of its steps' estimates, or null when one of them cannot be estimated. */
+function costOf(steps: readonly PlanStep[], p: Pair): number | null {
+  let ms = 0;
+  for (const s of steps) {
+    if (s.kind !== "pair" || s.relation.dependant.title !== p.dependant.title || s.relation.base.title !== p.base.title) continue;
+    if (!s.estimate) return null;
+    ms += s.estimate.ms;
+  }
+  return ms;
 }
 
 export function PairChoices() {
@@ -51,7 +81,10 @@ export function PairChoices() {
   const chosen = g.pairMethods.value;
   const forced = g.methods.value;
   const [fits, setFits] = useState<Record<string, TitleFitReport | null | "loading">>({});
-  const pairs = plan ? pairsOf(plan.steps) : [];
+  const controls = g.pairControls.value;
+  const pairs = plan ? pairsOf(plan.steps, plan.unsuitable) : [];
+  const control = (k: string, p: Pair, change: Partial<Record<keyof PairControl, string | boolean | undefined>>) =>
+    g.setPairControl(p.dependant.title, p.base.title, { ...controls[k], ...change } as PairControl);
   const forceDh = !!forced && forced.size === 1 && forced.has("dibur-hamatchil");
 
   const check = async (p: Pair) => {
@@ -97,21 +130,28 @@ export function PairChoices() {
             דיבור המתחיל ירוץ במקום שיטת הכותרות בכל הזוגות, גם היכן שהכותרות מתאימות; הערות שוליים ומראי מקומות ממשיכים לרוץ כרגיל. הוא איטי יותר, ושורות בלי ד"ה ברור יקבלו הצעות חלשות. בדקו את ההצעות בקפידה.
           </p>
         )}
-        <ul class="pair-list">
+        <ul class={`pair-list${advanced ? " adv" : ""}`}>
           {pairs.map((p) => {
             const k = pairMethodKey(p.dependant.title, p.base.title);
             const fit = fits[fitKey(p)];
             const choice = choiceOf(k);
+            const ctl = controls[k] ?? {};
+            const off = ctl.enabled === false;
+            const cost = off ? 0 : costOf(plan.steps, p);
+            const skipped = plan.unsuitable.filter((u) => u.reason !== "disabled" && u.dependant.title === p.dependant.title && u.base.title === p.base.title);
             const risky = (choice === "headings" || choice === "both") && fit && fit !== "loading" && fit.verdict === "unfit";
             return (
-              <li key={k} class="pair-row" data-pair={k}>
+              <li key={k} class={`pair-row${off ? " off" : ""}`} data-pair={k}>
                 <div class="pair-names">
                   <b class="pair-dep">{p.dependant.title}</b>
                   <span aria-hidden="true"> ← </span>
                   <span class="sr-only">על </span>
                   <span class="pair-base">{p.base.title}</span>
                 </div>
-                {p.notes ? (
+                <div class="pair-main">
+                {off ? (
+                  <p class="muted pair-off">הזוג הושבת, ולכן שום שיטה לא תרוץ עליו. סמנו "לכלול את הזוג" כדי להחזיר אותו.</p>
+                ) : p.notes ? (
                   <div class="muted">ספר הערות: תרוץ שיטת הערות השוליים.</div>
                 ) : (
                   <>
@@ -157,6 +197,47 @@ export function PairChoices() {
                     )}
                   </>
                 )}
+                </div>
+                <div class="pair-ctl">
+                  <label class="check">
+                    <input type="checkbox" checked={!off} onChange={(e) => control(k, p, { enabled: e.currentTarget.checked ? undefined : false })} />
+                    <span>לכלול את הזוג{advanced ? "" : " בריצה"}<span class="sr-only">: {p.dependant.title} ← {p.base.title}</span></span>
+                  </label>
+                  {advanced && !off && (
+                    <>
+                      <label class="field">
+                        <span>סוג הקישור</span>
+                        <select aria-label={`סוג הקישור לזוג: ${p.dependant.title} ← ${p.base.title}`} value={ctl.connectionType ?? ""} onChange={(e) => control(k, p, { connectionType: e.currentTarget.value || undefined })}>
+                          <option value="">לפי בחירת הכלי</option>
+                          <TypeOptions />
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>הצעות מרמת ביטחון</span>
+                        <select aria-label={`רמת הביטחון הנמוכה ביותר לזוג: ${p.dependant.title} ← ${p.base.title}`} value={ctl.minConfidence ?? ""} onChange={(e) => control(k, p, { minConfidence: e.currentTarget.value || undefined })}>
+                          {THRESHOLDS.map((t) => (
+                            <option key={t.value} value={t.value}>{t.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <p class="pair-cost muted small">
+                        {cost === null ? "זמן משוער: עדיין לא ידוע, כי אורך אחד הספרים של הזוג עוד לא נקרא." : `זמן משוער לזוג: ${durationText(cost)}.`}
+                      </p>
+                      {skipped.length > 0 && (
+                        <div class="pair-skipped small">
+                          <b>שיטות שלא ירוצו על הזוג:</b>
+                          <ul>
+                            {skipped.map((u) => (
+                              <li key={u.engine}>
+                                {engineTitle(u.engine)} — {u.why}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </li>
             );
           })}
