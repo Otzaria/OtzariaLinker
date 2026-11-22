@@ -122,6 +122,8 @@ test("home: five paths; the choice is inside the wizard; old #/start/<id> addres
   expect(new URL(page.url()).hash).toBe("#/start/auto");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  // closing the dialog takes the address back (history.back, asynchronous): a hash set before it lands would be undone by it
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^(#\/?)?$/);
 
   // the old addresses of the merged cards open their tasks, and the new paths are addresses too
   for (const [id, title] of [["commentary", "ספר ופירוש"], ["notes", "ספר והערות שוליים"], ["citations", "מראי מקומות"], ["db-db", "מסד מול מסד"], ["relink", "תיקון קישורים אחרי שינוי ספר"], ["fix", "בדיקה, תיקון ומיזוג קישורים"]] as const) {
