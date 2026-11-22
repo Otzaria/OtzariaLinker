@@ -115,41 +115,38 @@ export function citationHintStrength(html: string, knowsName?: (key: string) => 
     if (/^\d/.test(n) || isNumeral(n)) return "strong";
   }
   if (knowsName) {
+    // the name of an open book and TWO numbers after it ("בראשית א, ב", "ישעיה ב ג"): chapter and verse. One number is not enough: a word that
+    // begins the title of a book and a single letter follow each other all the time in prose (measured: the one-number form passed 98% of lines)
     const tokens = hebrewTokens(text);
-    for (let i = 0; i < tokens.length - 1; i++) {
+    const num = (k: string | undefined) => k !== undefined && (/^\d+$/.test(k) || (k.length <= 3 && isNumeral(k)));
+    for (let i = 0; i < tokens.length - 2; i++) {
       const k = tokens[i]!.key;
       if (!(knowsName(k) || (k.length > 3 && knowsName(k.slice(1))) || (k.length > 4 && knowsName(k.slice(2))))) continue;
-      const next = tokens[i + 1]!;
-      if (/^\d+$/.test(next.key) || (next.key.length <= 3 && isNumeral(next.key))) return "strong";
+      if (num(tokens[i + 1]!.key) && num(tokens[i + 2]!.key)) return "strong";
     }
   }
   return hasCitationHint(html, knowsName) ? "weak" : "none";
 }
 
 /**
- * The book-level gate of the citations engine (workers/citations-job.ts): a book is run when ONE line has a strong sign of a place (a place word and
- * a number, an amud, a chapter abbreviation) or TEN lines have the weak hint without the names of the open books. Before the fix round it was "one
- * line with any weak hint, names of the open books included", which passed every book (150 of 150 in a seeded sample of the official library:
- * "שם" or any word that begins a book's title is enough). The numbers behind these two are in docs/AUTOMATION_ENGINE.md §6.9: on that sample the new
- * gate skips 2 of the 8 books the engine finds nothing certain in, and one book the engine does find something in (15 suggestions of high or certain
- * confidence), a book that cites by a name and numbers alone. The user can run the engine on such a book anyway (CitationsOptions.noGate).
+ * The book-level gate of the citations engine (workers/citations-job.ts): a book is run when ONE line has a strong sign of an address — a place word and a
+ * number, an amud, a chapter abbreviation, or the name of an open book and two numbers ("(בראשית א, ב)"). A reference with no number has no address to
+ * link to, so lines that only mention a place or a source ("ראה בסימן שלמעלה", a bare "שם") open nothing. Before the fix round it was "one line with
+ * any weak hint, the names of the open books included", which passed every book (150 of 150 in a seeded sample of the official library). The numbers
+ * behind the new one are in docs/AUTOMATION_ENGINE.md §10.7. The user can run the engine on a book it skips anyway (CitationsOptions.noGate).
  */
-export const CITATION_GATE = { strongLines: 1, hintLines: 10 } as const;
+export const CITATION_GATE = { strongLines: 1 } as const;
 
-/** Counts the signs of references over the non-heading lines of a book, one line at a time; `add` says when the gate is open. */
-export function citationGate(): { add(html: string): boolean; readonly weak: number; readonly strong: number } {
-  const state = { weak: 0, strong: 0 };
+/** Counts the strong signs over the non-heading lines of a book, one line at a time; `add` says when the gate is open. */
+export function citationGate(knowsName?: (key: string) => boolean): { add(html: string): boolean; readonly strong: number } {
+  let strong = 0;
   return {
     add(html: string): boolean {
-      if (hasCitationHint(html)) state.weak++;
-      if (citationHintStrength(html) === "strong") state.strong++;
-      return state.strong >= CITATION_GATE.strongLines || state.weak >= CITATION_GATE.hintLines;
-    },
-    get weak() {
-      return state.weak;
+      if (citationHintStrength(html, knowsName) === "strong") strong++;
+      return strong >= CITATION_GATE.strongLines;
     },
     get strong() {
-      return state.strong;
+      return strong;
     },
   };
 }

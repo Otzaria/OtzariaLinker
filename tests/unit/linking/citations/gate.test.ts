@@ -29,17 +29,21 @@ describe("citationHintStrength", () => {
 
 describe("citationGate — when the book-level gate opens", () => {
   const lines = (g: ReturnType<typeof citationGate>, ts: readonly string[]) => ts.map((t) => g.add(t));
-  it("one strong line, or ten weak ones", () => {
-    expect(CITATION_GATE).toEqual({ strongLines: 1, hintLines: 10 });
+  it("one strong line opens it; a bare 'שם' or a place with no number, any number of times, does not", () => {
+    expect(CITATION_GATE).toEqual({ strongLines: 1 });
     expect(lines(citationGate(), ["ושם", 'עיין ע"א', "ושם"])).toEqual([false, true, true]);
     const g = citationGate();
-    expect(Array.from({ length: 10 }, () => g.add("ושם נאמר")).filter(Boolean)).toHaveLength(1);
-    const nine = citationGate();
-    expect(Array.from({ length: 9 }, () => nine.add("ושם נאמר")).some(Boolean)).toBe(false);
+    for (let i = 0; i < 500; i++) expect(g.add(i % 2 ? "ושם נאמר" : "ראה בסימן ובסעיף שלמעלה")).toBe(false);
+    expect(g.strong).toBe(0);
+  });
+  it("with the names of the open books: a name and two numbers opens it, a name and one number does not", () => {
+    const names = (k: string) => k === "בראשית";
+    expect(citationGate(names).add("כמו שנאמר (בראשית א, ב) ועוד")).toBe(true);
+    expect(citationGate(names).add("כמו שנאמר בראשית א ועוד")).toBe(false);
   });
   it("lines with no sign count for nothing", () => {
     const g = citationGate();
     for (let i = 0; i < 500; i++) expect(g.add("הלך האיש אל השוק")).toBe(false);
-    expect(g.weak + g.strong).toBe(0);
+    expect(g.strong).toBe(0);
   });
 });

@@ -39,15 +39,15 @@ const MAX_PAGES = 50;
  * Keep the signature: the max-linking orchestrator calls it as is.
  */
 export async function citationsJob(registry: SourceRegistry, source: BookRef, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
-  // not without a reason (2.1): a book with no sign of a place in it (suitability.ts CITATION_GATE: one line with a place word and a number, or ten
-  // with a place word or the name of a source) has little to find. The look stops as soon as the gate opens, so a book with references pays one
+  // not without a reason (2.1): a book with no sign of a place in it (suitability.ts CITATION_GATE: one line with a place word and a number, or with the
+  // name of an open book and two numbers) has little to find. The look stops as soon as the gate opens, so a book with references pays one
   // chunk; one without pays a read of its lines, far below the scanner. A user who knows better runs it anyway (CitationsOptions.noGate).
   const { aliases, units } = await aliasesOf(registry);
-  if ((options as CitationsOptions).noGate !== true && !(await showsReferences(registry, source))) {
+  if ((options as CitationsOptions).noGate !== true && !(await showsReferences(registry, source, (key) => aliases.hasFirstWord(key)))) {
     ctx.progress?.(1000, 1000);
     return {
       suggestions: [],
-      notes: [{ code: "citations/skipped-no-references", text: `בספר "${source.title}" אין סימן ברור של הפניה (שורה עם דף, פרק, סימן, סעיף או פסוק ומספר, או עשר שורות שמזכירות מקום או שם של ספר מקור), ולכן שיטת מראי המקומות לא הורצה עליו. ספר שמצטט רק בשם הספר ובמספרים ("בראשית א, ב") ייתכן שנדלג בטעות: אפשר להריץ אותו בכל זאת באפשרות "להריץ גם על ספר בלי סימני הפניה".` }],
+      notes: [{ code: "citations/skipped-no-references", text: `בספר "${source.title}" אין סימן ברור של הפניה (שורה עם דף, פרק, סימן, סעיף או פסוק ומספר, או שם של ספר פתוח ושני מספרים כמו "בראשית א, ב"), ולכן שיטת מראי המקומות לא הורצה עליו. ספר שמצטט בצורה אחרת ייתכן שנדלג בטעות: אפשר להריץ אותו בכל זאת באפשרות "להריץ גם על ספר בלי סימני הפניה".` }],
       unmatched: [],
     };
   }
@@ -93,9 +93,9 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
 }
 
 /** Whether the book shows the signs of references the gate asks for (suitability.ts CITATION_GATE); true when the read fails or is cancelled (then the engine decides). */
-async function showsReferences(registry: SourceRegistry, source: BookRef): Promise<boolean> {
+async function showsReferences(registry: SourceRegistry, source: BookRef, knowsName: (key: string) => boolean): Promise<boolean> {
   try {
-    const gate = citationGate();
+    const gate = citationGate(knowsName);
     for await (const chunk of registry.scan(source.key, CHUNK)) for (const l of chunk.lines) if (l.heading === null && gate.add(l.anchorText)) return true;
     return false;
   } catch {

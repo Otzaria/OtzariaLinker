@@ -5,10 +5,11 @@ import { citationsJob } from "../../../src/workers/citations-job";
 
 /*
  * Fix round, claim 11 (issue #23): the suitability gate of the citations engine barely filtered books: any word that begins the title of an open book
- * opened it (the names of the open books were part of the test), and so did one bare "שם" or "משנה". It now asks for ONE line with a place word and a
- * number, or TEN lines with a place word or a source; the names of the open books no longer open it. A user who knows better runs the engine anyway.
- * Measured (docs/AUTOMATION_ENGINE.md §6.9, tests/validation/citations-gate.test.ts): it still passes nearly every book, and the known limit is that ten
- * lines of prose with "שם" open it — taking those words out lost more real links in the sample than it saved runs.
+ * opened it (the names of the open books were part of the test), and so did one bare "שם" or "משנה". It now asks for ONE line with an address: a place
+ * word and a number, or the name of an open book and two numbers ("(בראשית א, ב)"). Lines that only mention a place or a source open nothing: a
+ * reference with no number has no address to link to. A user who knows better runs the engine anyway (noGate).
+ * Measured (docs/AUTOMATION_ENGINE.md §10.7, tests/validation/citations-gate.test.ts, two samples of 150 books): it skips 3 of 20 books in which the engine
+ * finds nothing certain, and loses none of the 280 in which it does. It still passes almost every book: nearly all books of the library have an address.
  * Synthetic lines, neutral words; no book text.
  */
 const text = (path: string, lines: string[]) => ({ path, blob: new Blob([strToU8(lines.join("\n"))]) });
@@ -41,9 +42,14 @@ describe("citationsJob — the gate asks for a place, not for the name of a book
     expect(r.suggestions.length).toBeGreaterThan(0);
   });
 
-  it("ten lines that mention a place or a source open it even with no number (a book that cites by words); nine do not", async () => {
-    const ten = Array.from({ length: 10 }, () => "ראה בסימן ובסעיף שלמעלה");
-    expect(skipped(await run(["<h1>ספר</h1>", ...ten]))).toBe(false);
-    expect(skipped(await run(["<h1>ספר</h1>", ...ten.slice(0, 9)]))).toBe(true);
+  it("a name and two numbers opens it with no place word at all, as 'ישעיה ב, ג' does (a book that cites the way Tanakh is cited)", async () => {
+    // (the one-line base here has no verse to resolve to: what is asked is whether the engine RUNS)
+    expect(skipped(await run(["<h1>ספר</h1>", ...MENTIONS, "כמו שנאמר (בראשית א, א) ועוד"]))).toBe(false);
+  });
+
+  it("lines that only mention a place or a source, with no number, open nothing however many there are: there is no address to link to", async () => {
+    const lines = ["<h1>ספר</h1>", ...Array.from({ length: 60 }, () => "ראה בסימן ובסעיף שלמעלה ושם בגמרא")];
+    expect(skipped(await run(lines))).toBe(true);
+    expect(skipped(await run(lines, { noGate: true }))).toBe(false);
   });
 });
