@@ -181,3 +181,49 @@ test("the sides are named by the job: commentary and base, body and notes, citin
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 11: the words the dibur-hamatchil engine matched are marked on both texts — in the card (tinted and underlined,
+ * announced to a screen reader) and, where the browser supports the highlight API, in the readers.
+ */
+test("dibur hamatchil: the matched words are marked on both texts in the card and in the readers", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await page.getByRole("button", { name: "הכול", exact: true }).click({ timeout: 30_000 });
+  await expect(page.locator("table.sug-table tbody tr").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("radio", { name: "כרטיס" }).click();
+
+  const marks = page.locator(".builder mark.match-hl");
+  await expect(marks).toHaveCount(2, { timeout: 15_000 });
+  // each marked run is a piece of the line it is in, and it is announced
+  for (const side of ["source", "target"] as const) {
+    const box = page.locator(`.builder .end.${side}.set .snip`);
+    const marked = (await box.locator("mark.match-hl").textContent())!;
+    expect(marked.trim().length).toBeGreaterThan(1);
+    expect((await box.textContent())!).toContain(marked);
+    await expect(box.locator(".sr-only")).toHaveText(/מילים שהותאמו/);
+  }
+  // not colour alone: the mark is underlined
+  expect(await marks.first().evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain("underline");
+  await expect(page.locator(".match-legend")).toBeVisible();
+
+  // in the readers: the same words painted with the highlight API (Chrome and Edge have it; Firefox shows the card only)
+  const painted = await page.evaluate(() => {
+    const h = (globalThis as unknown as { CSS?: { highlights?: Map<string, { size: number }> } }).CSS?.highlights;
+    if (!h) return null;
+    return ["match-source", "match-target"].map((n) => h.get(n)?.size ?? 0);
+  });
+  if (painted) expect(painted.reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});

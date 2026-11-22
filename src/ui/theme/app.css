@@ -108,6 +108,10 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
   /* the badge would push a button onto a row of its own; the name button's strip shows it (and a twin title keeps its badge) */
   .panel-head .src-badge:not(.twin) { display: none; }
 }
+/* the words the engine matched: tinted AND underlined (not colour alone), in the card and in the readers */
+.match-hl { background: color-mix(in srgb, var(--highlight) 75%, transparent); color: inherit; border-radius: var(--radius-xs); text-decoration: underline 2px; text-decoration-color: var(--primary); text-underline-offset: 3px; font-weight: 700; padding-inline: 1px; }
+::highlight(match-source), ::highlight(match-target) { background-color: color-mix(in srgb, var(--highlight) 75%, transparent); text-decoration: underline 2px; text-decoration-color: var(--primary); }
+.match-legend { margin: 0; font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }

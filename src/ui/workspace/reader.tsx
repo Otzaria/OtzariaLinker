@@ -10,6 +10,8 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
 import { clearMatches, FindBar, paintMatches } from "./book-find";
+import { clearMatched, paintMatched } from "./matched-paint";
+import { splitMatched } from "./matched-words";
 import { BookInfo } from "./book-info";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
@@ -176,6 +178,24 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
     return () => cancelAnimationFrame(id);
   }, [hits, currentHit, tick, active]);
   useEffect(() => () => clearMatches(side), []);
+
+  // the words the engine matched in the suggestion being reviewed (issue #11), on whichever of its lines this reader holds
+  const reviewed = store.sideTab.value === "suggestions" ? store.suggestions.currentSuggestion.value : null;
+  const matchHere = (() => {
+    if (!reviewed?.matched) return null;
+    for (const [end, span] of [[reviewed.source, reviewed.matched.source], [reviewed.target, reviewed.matched.target]] as const) {
+      if (end.book.key !== bookKey || !span) continue;
+      const line = store.lines.peek(bookKey, end.line);
+      const words = line ? splitMatched(line.anchorText, span)?.match : undefined;
+      if (words) return { line: end.line, words };
+    }
+    return null;
+  })();
+  useEffect(() => {
+    const id = requestAnimationFrame(() => paintMatched(scroller.current, side, matchHere?.line ?? null, matchHere?.words ?? null));
+    return () => cancelAnimationFrame(id);
+  }, [matchHere?.line, matchHere?.words, tick, active, reviewed?.id]);
+  useEffect(() => () => clearMatched(side), []);
 
   const marks = useLineMarks(side, bookKey);
   const pick = store.pick[side].value;

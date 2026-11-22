@@ -151,6 +151,8 @@ export class SuggestionsState {
   readonly current = signal<string | null>(null);
   /** the engine picked in the run form, before any run: it decides what the two sides are called (state/roles.ts) */
   readonly formEngine = signal<EngineId | null>(null);
+  /** the suggestion the one-at-a-time views and the readers show now */
+  readonly currentSuggestion = computed<Suggestion | null>(() => this.run.value?.result.suggestions.find((s) => s.id === this.current.value) ?? null);
   /** the decision states as they were when "by state" was chosen: deciding must not reshuffle the list under the reviewer */
   private readonly rankSnapshot = signal<ReadonlyMap<string, SuggestionState> | null>(null);
   /** how the list is ordered for the user (issue 8); the run itself keeps the engine's order */

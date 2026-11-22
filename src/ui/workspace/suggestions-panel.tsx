@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type EngineId, type Suggestion, type SuggestionSort } from "../../linking/automatic";
+import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type EngineId, type MatchedSpan, type Suggestion, type SuggestionSort } from "../../linking/automatic";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
+import { splitMatched } from "./matched-words";
 import type { SuggestionsView } from "../../state/preferences";
 import { placeText, type SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
@@ -550,23 +551,45 @@ function SortSelect({ onChange }: { onChange?: () => void }) {
 /** The engine's score (0..1) as the percent the reviewer reasons in. */
 const scorePercent = (s: Suggestion): string => `${Math.round(s.score * 100)}%`;
 
-function CardTexts({ s }: { s: Suggestion }) {
+/**
+ * A line's text for the card, with the words the engine matched marked: underlined and tinted (never colour alone), and
+ * announced ("מילים שהותאמו") for a screen reader. A line with no known words is shown as it was.
+ */
+function LineText({ book, line, span }: { book: string; line: number; span: MatchedSpan | undefined }) {
   const store = useStore();
   store.lines.tick.value;
-  const text = (key: string, line: number) => {
-    const l = store.lines.line(key, line);
-    return l ? plainText(l.anchorText) : "…";
-  };
+  const l = store.lines.line(book, line);
+  if (!l) return <>…</>;
+  const p = splitMatched(l.anchorText, span);
+  if (!p) return <>{plainText(l.anchorText)}</>;
+  return (
+    <>
+      {p.clippedBefore && "… "}
+      {p.before}
+      <span class="sr-only">מילים שהותאמו: </span>
+      <mark class="match-hl">{p.match}</mark>
+      {p.after}
+      {p.clippedAfter && " …"}
+    </>
+  );
+}
+
+function CardTexts({ s }: { s: Suggestion }) {
   return (
     <>
       <div class="end source set">
         <span class="side-badge source">{s.source.book.title} · {placeText(s.source)}</span>
-        <span class="snip" style="-webkit-line-clamp:6">{text(s.source.book.key, s.source.line)}</span>
+        <span class="snip" style="-webkit-line-clamp:6"><LineText book={s.source.book.key} line={s.source.line} span={s.matched?.source} /></span>
       </div>
       <div class="end target set">
         <span class="side-badge target">{s.heRef2} · {placeText(s.target, s)}</span>
-        <span class="snip" style="-webkit-line-clamp:6">{text(s.target.book.key, s.target.line)}</span>
+        <span class="snip" style="-webkit-line-clamp:6"><LineText book={s.target.book.key} line={s.target.line} span={s.matched?.target} /></span>
       </div>
+      {(s.matched?.source || s.matched?.target) && (
+        <p class="muted match-legend">
+          <span class="match-hl">מסומן</span> = המילים שהכלי התאים בין שתי השורות
+        </p>
+      )}
     </>
   );
 }
