@@ -1,6 +1,7 @@
 import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
+import { stripTags } from "../core/text/html";
 import { coverageSummary, type CoverageBook, type CoverageSummary } from "../linking/coverage";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
@@ -24,20 +25,24 @@ export interface CoverageHost {
 
 export interface CoverageOptions {
   /**
-   * Count the links the database already has as coverage. The project's links never include them (they live in
-   * the database's own list, DbLinksState), so a caller that wants them passes them here, already as `Link`s.
+   * Count the links the open database already has (default: yes — a commentary the library already links is not
+   * "100% unlinked"). Read through the same call the max-link job uses (BooksService.existingLinks); a source with
+   * no links (text files) gives none. False: the project's own links only.
    */
+  includeDb?: boolean;
+  /** other links to count, already as `Link`s */
   extraLinks?: readonly Link[];
-  /** lines the caller knows to be blank or too short to link (CoverageBook.unsuitable) */
+  /** lines that cannot carry a link, instead of the ones read from the book (blank, fewer than two Hebrew letters) */
   unsuitable?: ReadonlySet<number>;
 }
 
 export class CoverageState {
   private readonly headingCache = new Map<string, ReadonlySet<number>>();
+  private readonly unsuitableCache = new Map<string, ReadonlySet<number>>();
 
   constructor(
     private readonly host: CoverageHost,
-    private readonly service: Pick<BooksService, "headings">,
+    private readonly service: Pick<BooksService, "headings" | "lines" | "existingLinks">,
   ) {}
 
   /** The book as the coverage rules see it; null when it is not open, or the read was cancelled. */
@@ -55,10 +60,36 @@ export class CoverageState {
     return { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount, headings, ...(unsuitable && { unsuitable }) };
   }
 
-  /** The coverage of a book by the project's links as they are now; null when the book is not open or its length is not known yet. */
+  /** The lines that can carry a link: at least two Hebrew letters (as the headings engine skips the rest). Read once per book. */
+  private async suitable(bookKey: string): Promise<ReadonlySet<number> | null> {
+    let set = this.unsuitableCache.get(bookKey);
+    if (!set) {
+      const lines = await this.host.runTask("קורא את שורות הספר…", (opts) => this.service.lines(bookKey, 0, Number.MAX_SAFE_INTEGER, opts));
+      if (lines === null) return null;
+      set = new Set(lines.filter((l) => (stripTags(l.text).match(/[\u05d0-\u05ea]/g)?.length ?? 0) >= 2).map((l) => l.index));
+      this.unsuitableCache.set(bookKey, set);
+    }
+    return set;
+  }
+
+  /**
+   * The coverage of a book by the project's links as they are now, and (default) the open database's links of the book;
+   * null when the book is not open, its length is not known, or the read was cancelled.
+   */
   async summary(bookKey: string, options: CoverageOptions = {}): Promise<CoverageSummary | null> {
-    const book = await this.book(bookKey, options.unsuitable);
-    if (!book || book.lineCount <= 0) return null;
-    return coverageSummary([...this.host.linkState.value.links.values(), ...(options.extraLinks ?? [])], book);
+    const suitable = options.unsuitable ? null : await this.suitable(bookKey);
+    if (!options.unsuitable && !suitable) return null;
+    const first = await this.book(bookKey, options.unsuitable);
+    if (!first || first.lineCount <= 0) return null;
+    // a line with no row (a hole in a slice, an empty heading the generator did not create) or with no letters is not suitable
+    const unsuitable = options.unsuitable ?? new Set(Array.from({ length: first.lineCount }, (_, i) => i).filter((i) => !suitable!.has(i)));
+    const book: CoverageBook = { ...first, unsuitable };
+    let db: readonly Link[] = [];
+    if (options.includeDb !== false) {
+      const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts).catch(() => [] as Link[]));
+      if (got === null) return null;
+      db = got;
+    }
+    return coverageSummary([...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])], book);
   }
 }

@@ -45,6 +45,43 @@ describe("AppStore — coverage", () => {
     expect((await store.coverage.summary(key("ביאור על בראשית")))!.unlinked).toBe(11);
   });
 
+  it("blank and one-letter lines are not suitable, so they are not 'unlinked' (QA)", async () => {
+    const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([{ path: "פירוש.txt", blob: new Blob([strToU8(["<h1>פירוש</h1>", "", "ביאור ארוך כאן עם מילים", "א", "   ", "ביאור נוסף עם מילים"].join(String.fromCharCode(10)))]) }]);
+    const key = [...store.books.value.values()].find((b) => b.title === "פירוש")!.key;
+    const s = (await store.coverage.summary(key))!;
+    expect(s.byBucket).toMatchObject({ "not-suitable": 4, unlinked: 2 });
+    expect(s.ranges).toEqual([{ start: 2, end: 2 }, { start: 5, end: 5 }]);
+  });
+
+  it("the links the open database already has count by default: Onkelos is linked to Bereshit there (QA)", async () => {
+    const { store, key } = await opened();
+    const book = key("תרגום אונקלוס על בראשית");
+    const withDb = (await store.coverage.summary(book))!;
+    expect(withDb.byBucket.linked).toBeGreaterThan(100);
+    // the slice has holes (lines kept only for other links): a line that is not in the book is not "unlinked"
+    expect(withDb.unlinkedShare).toBeLessThan(0.1);
+    const projectOnly = (await store.coverage.summary(book, { includeDb: false }))!;
+    expect(projectOnly.byBucket.linked).toBe(0);
+    expect(projectOnly.unlinkedShare).toBe(1);
+  });
+
+  it("a link in the project and the same link in the database are one place: linked, not multiple", async () => {
+    const service = registryService(new SourceRegistry());
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    await store.openFiles([DB]);
+    const book = [...store.books.value.values()].find((b) => b.title === "תרגום אונקלוס על בראשית")!.key;
+    const [first] = await service.existingLinks(book, 0, 5);
+    expect(first).toBeDefined();
+    const before = (await store.coverage.summary(book))!;
+    // the same two lines as a project link, with the OTHER end's book spelled by another session key
+    const otherSide = first!.source.book.key === book ? "target" : "source";
+    const dup = { ...first!, id: "p1", status: "new" as const, provenance: "user" as const, [otherSide]: { ...first![otherSide], book: { ...first![otherSide].book, key: "other-session-key" } } };
+    store.linkState.value = { ...store.linkState.value, links: new Map([[dup.id, dup]]) };
+    const after = (await store.coverage.summary(book))!;
+    expect(after.byBucket).toEqual(before.byBucket);
+  });
+
   it("a book that is not open has no coverage", async () => {
     const { store } = await opened();
     expect(await store.coverage.summary("ghost:1")).toBeNull();

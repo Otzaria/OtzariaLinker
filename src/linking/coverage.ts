@@ -39,7 +39,9 @@ export interface LineRange {
 }
 
 const live = (l: Link) => l.status !== "deleted";
-const placeKey = (s: LinkSide) => `${s.book.key}#${s.line}-${s.end ?? s.line}`;
+// the book's TITLE, not its key: the same place reached by a project link and by the database's link may spell the key of
+// a book differently (session keys, imported files), and one place must not become two ("multiple")
+const placeKey = (s: LinkSide) => `${s.book.title}#${s.line}-${s.end ?? s.line}`;
 
 /** The bucket of every line, by line index. A line outside [0, lineCount) has none. */
 export function coverageOfLines(links: readonly Link[], book: CoverageBook): LineCoverage[] {
