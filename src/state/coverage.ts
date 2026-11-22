@@ -2,9 +2,11 @@ import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
-import { coverageSummary, type CoverageBook, type CoverageSummary } from "../linking/coverage";
+import { candidateLines, coverageSummary, doubtfulLines, type CoverageBook, type CoverageSummary } from "../linking/coverage";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
+import type { QualityState } from "./quality";
+import type { SuggestionsState } from "./suggestions";
 import type { BooksService, CallOptions } from "./services";
 
 /*
@@ -21,6 +23,10 @@ export interface CoverageHost {
   readonly lines: Pick<LineStore, "count" | "learnCount">;
   sameBook(ref: BookRef, bookKey: string): boolean;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  /** the run on the screen and the user's decisions on it: its pending suggestions are the candidates */
+  readonly suggestions: Pick<SuggestionsState, "run" | "state">;
+  /** the last quality report: the links it flags are the doubtful ones (as of its last run) */
+  readonly quality: Pick<QualityState, "report">;
 }
 
 export interface CoverageOptions {
@@ -30,6 +36,10 @@ export interface CoverageOptions {
    * no links (text files) gives none. False: the project's own links only.
    */
   includeDb?: boolean;
+  /** mark the lines of pending suggestions 'candidate' (default: yes) */
+  includeCandidates?: boolean;
+  /** mark the links of the last QA report 'doubtful' (default: yes, when there is a report) */
+  includeQa?: boolean;
   /** other links to count, already as `Link`s */
   extraLinks?: readonly Link[];
   /** lines that cannot carry a link, instead of the ones read from the book (blank, fewer than two Hebrew letters) */
@@ -83,7 +93,13 @@ export class CoverageState {
     if (!first || first.lineCount <= 0) return null;
     // a line with no row (a hole in a slice, an empty heading the generator did not create) or with no letters is not suitable
     const unsuitable = options.unsuitable ?? new Set(Array.from({ length: first.lineCount }, (_, i) => i).filter((i) => !suitable!.has(i)));
-    const book: CoverageBook = { ...first, unsuitable };
+    const owns = first.owns;
+    const run = this.host.suggestions.run.value;
+    const state = this.host.suggestions.state.value;
+    const candidates = options.includeCandidates === false || !run ? undefined : candidateLines(run.result.suggestions, (id) => state.get(id) === "pending", owns);
+    const report = this.host.quality.report.value;
+    const doubtful = options.includeQa === false || !report ? undefined : doubtfulLines(report.issues, owns);
+    const book: CoverageBook = { ...first, unsuitable, ...(candidates && { candidates }), ...(doubtful && { doubtful }) };
     let db: readonly Link[] = [];
     if (options.includeDb !== false) {
       const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts).catch(() => [] as Link[]));

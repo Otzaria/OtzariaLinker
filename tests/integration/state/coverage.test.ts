@@ -40,9 +40,12 @@ describe("AppStore — coverage", () => {
     store.suggestions.approve(certain);
     const after = (await store.coverage.summary(key("ביאור על בראשית")))!;
     expect(after.byBucket.linked).toBe(10);
-    expect(after.unlinked).toBe(1); // the last line, under a chapter heading with no verse heading
+    // the last line (under a chapter heading with no verse heading) has a weaker suggestion pending: found, not approved
+    expect(after.byBucket).toMatchObject({ candidate: 1, unlinked: 0 });
     store.undo();
-    expect((await store.coverage.summary(key("ביאור על בראשית")))!.unlinked).toBe(11);
+    // the same suggestions are pending again: found, not approved (without them, nothing is linked)
+    expect((await store.coverage.summary(key("ביאור על בראשית")))!.byBucket).toMatchObject({ candidate: 11, unlinked: 0, linked: 0 });
+    expect((await store.coverage.summary(key("ביאור על בראשית"), { includeCandidates: false }))!.unlinked).toBe(11);
   });
 
   it("blank and one-letter lines are not suitable, so they are not 'unlinked' (QA)", async () => {
@@ -80,6 +83,33 @@ describe("AppStore — coverage", () => {
     store.linkState.value = { ...store.linkState.value, links: new Map([[dup.id, dup]]) };
     const after = (await store.coverage.summary(book))!;
     expect(after.byBucket).toEqual(before.byBucket);
+  });
+
+  it("a pending suggestion makes its lines 'candidate' until approved (found, not approved), then 'linked'", async () => {
+    const { store, key } = await opened();
+    const book = key("ביאור על בראשית");
+    const scope = { kind: "book", key: book } as const;
+    await store.maxLink.run(store.maxLink.plan(scope, new Set(["headings"])), store.maxLink.scopeLabel(scope));
+    const pending = (await store.coverage.summary(book))!;
+    expect(pending.byBucket).toMatchObject({ candidate: 11, linked: 0, unlinked: 0 });
+    expect((await store.coverage.summary(book, { includeCandidates: false }))!.byBucket).toMatchObject({ candidate: 0, unlinked: 11 });
+    store.suggestions.approve(store.suggestions.pendingAtLeast("certain"));
+    expect((await store.coverage.summary(book))!.byBucket).toMatchObject({ candidate: 1, linked: 10, unlinked: 0 });
+  });
+
+  it("a link the QA flags (an anchor outside its line) is 'doubtful' once the QA has run", async () => {
+    const { store, key } = await opened();
+    const book = key("ביאור על בראשית");
+    const base = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    const mine = store.refOf(book);
+    // line 3 is the first verse's text of the commentary; the anchor starts far beyond its end
+    const bad = { id: "q1", status: "new" as const, provenance: "user" as const, source: { book: mine, line: 3 }, target: { book: store.refOf(base.key), line: 2 }, declaredType: "commentary", heRef2: "", anchor: { rawStart: 9999, rawEnd: 10005 } };
+    store.linkState.value = { ...store.linkState.value, links: new Map([[bad.id, bad]]) };
+    expect((await store.coverage.summary(book))!.byBucket).toMatchObject({ linked: 1, doubtful: 0 });
+    await store.quality.run();
+    expect(store.quality.report.value!.issues.some((i) => i.link.id === "q1")).toBe(true);
+    expect((await store.coverage.summary(book))!.byBucket).toMatchObject({ linked: 0, doubtful: 1 });
+    expect((await store.coverage.summary(book, { includeQa: false }))!.byBucket).toMatchObject({ linked: 1, doubtful: 0 });
   });
 
   it("a book that is not open has no coverage", async () => {
