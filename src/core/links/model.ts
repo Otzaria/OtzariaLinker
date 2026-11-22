@@ -52,7 +52,7 @@ export interface DbAnchor {
  * of two books (the database's own and the library's), so which one was meant is not known. Only a note on a "db"
  * link: it is never exported, and a copy to the project does not carry it.
  */
-export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title"] as const;
+export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title", "source-out-of-range"] as const;
 export type DbLinkFlag = (typeof DB_LINK_FLAGS)[number];
 
 export type LinkStatus = "new" | "edited" | "existing" | "deleted";

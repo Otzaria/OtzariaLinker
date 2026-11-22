@@ -35,6 +35,7 @@ export class LinkListing {
     private readonly fetch: (refs: number[]) => Promise<Link[]>,
     readonly method: DbLinkSummary["method"],
     readonly ms: number,
+    private readonly unlisted?: DbLinkSummary["unlisted"],
   ) {
     const n = rows.ref.length;
     const order = new Int32Array(n);
@@ -74,6 +75,7 @@ export class LinkListing {
       bookKey: this.bookKey,
       total: dir.length,
       ...(flagCounts.length && { flags: flagCounts }),
+      ...(this.unlisted && (this.unlisted.badLine || this.unlisted.noPlace || this.unlisted.orphanSource) && { unlisted: this.unlisted }),
       out,
       in: dir.length - out,
       byType: types.filter((t) => t.out + t.in > 0),

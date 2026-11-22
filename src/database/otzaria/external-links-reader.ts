@@ -31,6 +31,18 @@ export interface ExternalLinkRow {
   targetLine: number | null;
   /** the stored text; null = REFERENCE */
   typeName: string | null;
+  /** sourceLineIndex is not a non-negative whole number: the row is not a link (lineIndex is then -1) */
+  badSource?: true;
+  /** targetLineIndex is there but is not a non-negative whole number (targetLine is then null): usable only through its ref */
+  badTarget?: true;
+}
+
+/** What a book's external_link rows could not become, so a summary can say it instead of dropping them unseen. */
+export interface UnlistedCounts {
+  /** rows whose line numbers are not whole non-negative numbers, and that have no ref to go by */
+  badLine: number;
+  /** rows with neither a targetLineIndex nor a targetRef */
+  noPlace: number;
 }
 
 /** Links whose target is a book of the same database, as parallel arrays sorted by target book (≈ 725K rows in a real one: ~20 MB). */
@@ -55,7 +67,19 @@ export interface InternalLinks {
   readonly range: ReadonlyMap<number, readonly [number, number]>;
   /** rows whose target line is unknown (no targetLineIndex): left out */
   readonly skipped: number;
+  /** the rows left out that point INTO a book (target book id → counts), also the odd ones among the rest */
+  readonly unlistedByTarget: ReadonlyMap<number, UnlistedCounts>;
+  /** rows whose sourceBookId is no book of this database (database-wide): left out */
+  readonly orphanSource: number;
 }
+
+const MAX_LINE = 2 ** 31 - 1;
+/** whether a stored value is a non-negative whole number (SQLite keeps a text or a fraction in an INTEGER column) */
+export const isLineNumber = (v: unknown): boolean => {
+  if (v === null || v === undefined || v === "") return false;
+  const n = typeof v === "number" ? v : typeof v === "bigint" ? Number(v) : Number(String(v).trim());
+  return Number.isInteger(n) && n >= 0 && n <= MAX_LINE;
+};
 
 /** below this many lines a range is read with one seek per line; above, the book's rows are read and filtered */
 const SEEK_LINES = 400;
@@ -69,14 +93,26 @@ export class ExternalLinksReader {
     private readonly ix: IndexInfo | null,
   ) {}
 
-  /** null when the database has no usable external_link (the table, or its three required columns, are missing) */
-  static async open(file: SqliteFile, caps: DbCapabilities): Promise<ExternalLinksReader | null> {
+  /**
+   * null when the database has no usable external_link: the table is missing, a required column is missing, or it is
+   * declared WITHOUT ROWID (the reader reads rows by rowid). In the last two cases `problem` is told why.
+   */
+  static async open(file: SqliteFile, caps: DbCapabilities, problem?: (p: { code: string; message: string }) => void): Promise<ExternalLinksReader | null> {
     if (!caps.externalLinks) return null;
     const t = await file.table("external_link");
     if (!t) return null;
     const at = (n: string) => t.columns.findIndex((x) => x.name.toLowerCase() === n.toLowerCase());
     const c = { book: at("sourceBookId"), line: at("sourceLineIndex"), source: at("targetSource"), title: at("targetTitle"), ref: at("targetRef"), target: at("targetLineIndex"), type: at("connectionType") };
-    if (c.book < 0 || c.line < 0 || c.title < 0) return null;
+    const required = { sourceBookId: c.book, sourceLineIndex: c.line, targetTitle: c.title };
+    const missing = Object.entries(required).filter(([, i]) => i < 0).map(([n]) => n);
+    if (missing.length) {
+      problem?.({ code: "db/external-links-columns-missing", message: `בטבלת הקישורים החיצוניים (external_link) חסרות עמודות חובה: ${missing.join(", ")}. הקישורים החיצוניים של המסד לא נקראים.` });
+      return null;
+    }
+    if (t.withoutRowid) {
+      problem?.({ code: "db/external-links-without-rowid", message: "הטבלה external_link מוגדרת WITHOUT ROWID, ואוצריא קוראת את הקישורים החיצוניים לפי מספר השורה (rowid). הקישורים החיצוניים של המסד לא נקראים." });
+      return null;
+    }
     return new ExternalLinksReader(file, t, c, await file.findIndex("external_link", ["sourceBookId"]));
   }
 
@@ -88,15 +124,20 @@ export class ExternalLinksReader {
   private row(rowid: number, v: readonly unknown[]): ExternalLinkRow {
     const str = (i: number) => (i < 0 || v[i] === null || v[i] === undefined ? null : String(v[i]));
     const num = (i: number) => (i < 0 || v[i] === null || v[i] === undefined ? null : Number(v[i]));
+    const rawTarget = num(this.c.target);
+    const goodSource = isLineNumber(v[this.c.line]);
+    const goodTarget = rawTarget === null || isLineNumber(v[this.c.target]);
     return {
       rowid,
       bookId: Number(v[this.c.book]),
-      lineIndex: Number(v[this.c.line]),
+      lineIndex: goodSource ? Number(v[this.c.line]) : -1,
       targetSource: str(this.c.source),
       targetTitle: String(v[this.c.title] ?? ""),
       targetRef: str(this.c.ref),
-      targetLine: num(this.c.target),
+      targetLine: goodTarget ? rawTarget : null,
       typeName: str(this.c.type),
+      ...(!goodSource && { badSource: true as const }),
+      ...(!goodTarget && { badTarget: true as const }),
     };
   }
 
@@ -144,20 +185,34 @@ export class ExternalLinksReader {
    * its books (`titles`: title → book id). Rows to the library ('official') or to other databases are not in it;
    * rows with no targetLineIndex are counted in `skipped`.
    */
-  async internal(libraryId: string | undefined, titles: ReadonlyMap<string, number>, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<InternalLinks> {
+  async internal(libraryId: string | undefined, titles: ReadonlyMap<string, number>, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}, bookIds?: ReadonlySet<number>): Promise<InternalLinks> {
     const cap = { rowid: [] as number[], sb: [] as number[], sl: [] as number[], tb: [] as number[], tl: [] as number[], ty: [] as number[], nul: [] as number[] };
     let skipped = 0;
+    let orphanSource = 0;
+    const unlistedByTarget = new Map<number, UnlistedCounts>();
+    const unlisted = (tb: number) => unlistedByTarget.get(tb) ?? (unlistedByTarget.set(tb, { badLine: 0, noPlace: 0 }), unlistedByTarget.get(tb)!);
     let n = 0;
     {
       for await (const r of this.file.scan(this.t)) {
         if (++n % 50_000 === 0) ctx.signal?.throwIfAborted();
         const v = r.values;
+        if (bookIds && !bookIds.has(Number(v[this.c.book]))) {
+          orphanSource++;
+          continue;
+        }
         const source = this.c.source < 0 ? null : (v[this.c.source] ?? null);
         if (source !== null && source !== libraryId) continue;
         const tb = titles.get(String(v[this.c.title]));
         if (tb === undefined) continue;
+        const hasRef = this.c.ref >= 0 && v[this.c.ref] !== null && v[this.c.ref] !== undefined && String(v[this.c.ref]).trim() !== "";
         if (this.c.target < 0 || v[this.c.target] === null || v[this.c.target] === undefined) {
           skipped++;
+          if (!hasRef && Number(v[this.c.book]) !== tb) unlisted(tb).noPlace++;
+          continue;
+        }
+        // a line number that is not a whole non-negative number is no line: left out and counted, never NaN or 0 in an Int32Array
+        if (!isLineNumber(v[this.c.target]) || !isLineNumber(v[this.c.line])) {
+          if ((!hasRef || !isLineNumber(v[this.c.line])) && Number(v[this.c.book]) !== tb) unlisted(tb).badLine++;
           continue;
         }
         cap.rowid.push(Number(r.rowid));
@@ -190,6 +245,8 @@ export class ExternalLinksReader {
     const bySource = Int32Array.from({ length: m }, (_, i) => i).sort(cmp);
     const reverse = new Uint8Array(m);
     for (let i = 0; i < m; i++) {
+      // a line linked to itself is its own reverse in the arithmetic, but it is one link, not a pair
+      if (out.sourceBook[i] === out.targetBook[i] && out.sourceLine[i] === out.targetLine[i]) continue;
       let lo = 0;
       let hi = m - 1;
       while (lo <= hi) {
@@ -217,7 +274,7 @@ export class ExternalLinksReader {
       }
       return -1;
     };
-    return { ...out, reverse, positionOf, range, skipped };
+    return { ...out, reverse, positionOf, range, skipped, unlistedByTarget, orphanSource };
   }
 
   /** NULL (or empty) is REFERENCE; every other text goes through the generator's parser (unknown → OTHER) */

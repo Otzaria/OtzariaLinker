@@ -12,6 +12,7 @@ import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
 import type { ExternalTargetResolver } from "./external-target";
 import { LinkListing, type ListingRows } from "./link-listing";
+import { SharedRun, type RunContext } from "./shared-run";
 
 /*
  * An Otzaria-family database as a book source. Read-only by construction: nothing here can write.
@@ -21,7 +22,7 @@ import { LinkListing, type ListingRows } from "./link-listing";
 export class DbBookSource implements BookSource {
   private booksById = new Map<number, DbBook>();
   /** listings of the last few books shown in the links panel (a big base book holds ~235k links) */
-  private readonly listings = new Map<number, Promise<LinkListing>>();
+  private readonly listings = new Map<number, SharedRun<LinkListing>>();
   /** book_base_text, read once at open */
   private bases = new Map<number, number[]>();
   /** default_commentator, commentary → the books it is a default commentator of; read once at open */
@@ -40,20 +41,24 @@ export class DbBookSource implements BookSource {
   /** where an external_link row's target lives (other sources): set by the registry, absent in a lone source */
   private resolver: ExternalTargetResolver | null = null;
   /** the links between books of this database, from one scan of external_link (built on demand, cached) */
-  private internalLinks: Promise<InternalLinks> | null = null;
+  private internalRun: SharedRun<InternalLinks> | null = null;
+  /** why external_link is not read, when the database has one that cannot be (open() warned already) */
+  private extProblem = "";
   private titleToId: Map<string, number> | null = null;
 
   static async open(id: string, label: string, src: ByteSource): Promise<DbBookSource> {
     const reader = await OtzariaDbReader.open(src);
     const links = await DbLinksReader.open(reader.file, reader.caps);
     // a database with both tables lists the links of both, each once (mergeParts); external_link alone is a personal database (#13)
-    const ext = await ExternalLinksReader.open(reader.file, reader.caps);
-    const warnings = [...reader.caps.warnings];
+    const extProblems: { code: string; message: string }[] = [];
+    const ext = await ExternalLinksReader.open(reader.file, reader.caps, (p) => extProblems.push(p));
+    const warnings = [...reader.caps.warnings, ...extProblems];
     if (ext && !ext.indexed)
       warnings.push({ code: "db/external-links-unindexed", message: "לטבלת הקישורים החיצוניים (external_link) במסד אין אינדקס לפי ספר, ולכן הצגת הקישורים של ספר תסרוק את כל הטבלה: איטי במסד גדול. כדי להאיץ, צרו במסד אינדקס על (sourceBookId, sourceLineIndex) בכלי שיצר אותו." });
     if (links && !links.indexed)
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links, ext);
+    s.extProblem = extProblems.map((p) => p.message).join(" ");
     for (const b of await reader.books()) s.booksById.set(b.id, b);
     const badTotals = [...s.booksById.values()].filter((b) => b.declaredTotalInvalid !== undefined);
     if (badTotals.length)
@@ -121,16 +126,18 @@ export class DbBookSource implements BookSource {
    * only for the page shown.
    */
   async linkListing(bookKey: string, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<LinkListing | string> {
-    if (!this.links && !this.ext) return `במסד "${this.info.label}" אין טבלת קישורים (link) ואין בו קישורים חיצוניים (external_link). ייתכן שזו גרסה ישנה או מסד אישי בלי קישורים.`;
+    if (!this.links && !this.ext) return `במסד "${this.info.label}" אין טבלת קישורים (link) ואין בו קישורים חיצוניים (external_link). ${this.extProblem || "ייתכן שזו גרסה ישנה או מסד אישי בלי קישורים."}`;
     const id = this.idOf(bookKey);
-    let p = this.listings.get(id);
-    if (!p) {
-      p = this.buildAnyListing(bookKey, id, ctx);
-      this.listings.set(id, p);
-      p.catch(() => this.listings.delete(id)); // a cancelled or failed read is not cached
+    let run = this.listings.get(id);
+    if (!run || run.cancelled) {
+      // the read is shared by every caller and has its own signal: it stops only when all the callers that can stop it have
+      const fresh = new SharedRun((c) => this.buildAnyListing(bookKey, id, c));
+      run = fresh;
+      this.listings.set(id, fresh);
+      fresh.result.catch(() => this.listings.get(id) === fresh && this.listings.delete(id)); // a cancelled or failed read is not cached
       while (this.listings.size > 3) this.listings.delete(this.listings.keys().next().value!);
     }
-    return p;
+    return run.join(ctx);
   }
 
   /**
@@ -198,12 +205,14 @@ export class DbBookSource implements BookSource {
     return this.titleToId;
   }
 
-  private internal(ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<InternalLinks> {
-    if (!this.internalLinks) {
-      this.internalLinks = this.ext!.internal(this.libraryId, this.titles(), ctx);
-      this.internalLinks.catch(() => (this.internalLinks = null)); // a cancelled or failed scan is not cached
+  /** the one scan of external_link, shared by every caller (its own signal: see SharedRun); a cancelled or failed scan is not cached */
+  private internal(ctx: RunContext = {}): Promise<InternalLinks> {
+    if (!this.internalRun || this.internalRun.cancelled) {
+      const fresh = new SharedRun((c) => this.ext!.internal(this.libraryId, this.titles(), c, new Set(this.booksById.keys())));
+      this.internalRun = fresh;
+      fresh.result.catch(() => this.internalRun === fresh && (this.internalRun = null));
     }
-    return this.internalLinks;
+    return this.internalRun.join(ctx);
   }
 
   /** (source, title) → what the row's target is: memoized; cleared when the open sources change */
@@ -260,6 +269,8 @@ export class DbBookSource implements BookSource {
     const bit = (f: DbLinkFlag) => 1 << DB_LINK_FLAGS.indexOf(f);
     let f = 0;
     if (r.targetLine !== null && t.lineCount !== undefined && (t.own || !r.targetRef?.trim()) && r.targetLine >= t.lineCount) f |= bit("target-out-of-range");
+    const own = this.booksById.get(r.bookId)?.totalLines;
+    if (own != null && r.lineIndex >= own) f |= bit("source-out-of-range");
     if (toc && toc.has(r.bookId, r.lineIndex)) f |= bit("header-source");
     if (t.own) {
       if (toc && t.bookId !== undefined && r.targetLine !== null && toc.has(t.bookId, r.targetLine)) f |= bit("header-target");
@@ -300,10 +311,10 @@ export class DbBookSource implements BookSource {
   private async externalLinksAt(bookId: number, from: number, to: number): Promise<Link[]> {
     const rows = await this.ext!.atLines(bookId, from, to);
     const out = (await Promise.all(rows.map((r) => this.externalToLink(r, false)))).filter((l): l is Link => !!l);
-    // links INTO these lines from this database's own books — only once the scan that finds them has been made
-    // (the listing builds it; a click on a line must not wait for a scan of the whole table)
-    if (this.internalLinks) {
-      const ix = await this.internalLinks;
+    // links INTO these lines from this database's own books: always, so the answer does not depend on whether the
+    // links tab built the scan first (QA round 2, H1). The scan is one pass over the table, shared and kept.
+    {
+      const ix = await this.internal();
       const at = ix.range.get(bookId);
       if (at) {
         const ids: number[] = [];
@@ -324,8 +335,16 @@ export class DbBookSource implements BookSource {
     // a row that cannot be placed (no targetLineIndex, and no ref that an open book resolves) is no link: it is left
     // out of the counts exactly as externalToLink leaves it out of the pages
     const rows: ExternalLinkRow[] = [];
-    for (const r of await this.ext!.outgoing(id, ctx)) if (r.targetLine !== null || (await this.lineOf(r)) !== null) rows.push(r); // only a row with no targetLineIndex needs its ref resolved here
+    const unlisted = { badLine: 0, noPlace: 0, orphanSource: 0 };
+    for (const r of await this.ext!.outgoing(id, ctx)) {
+      if (r.badSource) unlisted.badLine++;
+      else if (r.targetLine !== null || (await this.lineOf(r)) !== null) rows.push(r); // only a row with no targetLineIndex needs its ref resolved here
+      else if (!r.targetRef?.trim()) unlisted[r.badTarget ? "badLine" : "noPlace"]++; // a row with a ref that no open book resolves is not corrupt: it waits for its book
+    }
     const ix = await this.internal(ctx);
+    const into = ix.unlistedByTarget.get(id);
+    if (into) (unlisted.badLine += into.badLine), (unlisted.noPlace += into.noPlace);
+    unlisted.orphanSource = ix.orphanSource;
     const toc = await this.tocLines();
     const incoming: number[] = [];
     const at = ix.range.get(id);
@@ -374,6 +393,7 @@ export class DbBookSource implements BookSource {
         return refs.map((x) => got.get(Math.abs(x))).filter((l): l is Link => !!l);
       },
       method: this.ext!.indexed ? "index" : "scan",
+      unlisted,
     };
   }
 
@@ -392,13 +412,14 @@ export class DbBookSource implements BookSource {
   }
 
   private async externalToLink(r: ExternalLinkRow, withFlags: boolean): Promise<Link | null> {
+    if (r.badSource) return null; // a source line that is no line: counted in the summary, not a link
     const book = await this.targetBook(r);
     const line = await this.lineOf(r, book);
     // no targetLineIndex and a ref that no open book resolves: the line is unknown, and a link to a guessed line is worse than none (AGENTS §8)
     if (line === null) return null;
     const target: BookRef = book ?? { key: `unresolved:${r.targetTitle}`, title: r.targetTitle, origin: "unknown" };
     // the flags are read from the scan and the table of contents the listing built (a page is shown after it)
-    const bits = withFlags ? await this.flagsOf(r, this.internalLinks ? await this.internalLinks : null, await this.tocLines()) : 0;
+    const bits = withFlags ? await this.flagsOf(r, await this.internal(), await this.tocLines()) : 0;
     const dbFlags = DB_LINK_FLAGS.filter((_, i) => (bits >> i) & 1);
     return {
       id: `${this.info.id}:ext:${r.rowid}`,
@@ -437,7 +458,8 @@ export class DbBookSource implements BookSource {
   close(): void {
     this.booksById.clear();
     this.listings.clear();
-    this.internalLinks = null;
+    this.internalRun = null;
+    this.reader.close();
     this.titleToId = null;
     this.targets.clear();
     this.libraryTitles.clear();
@@ -514,6 +536,8 @@ interface ListingPart {
   /** a ref of this part (a link id; for external_link -rowid) → the links, in order */
   fetch: (refs: number[]) => Promise<Link[]>;
   method: "index" | "scan";
+  /** external_link rows of the book that could not be listed (see DbLinkSummary.unlisted) */
+  unlisted?: { badLine: number; noPlace: number; orphanSource: number };
 }
 
 /** The same link in two tables: same stored ends (book and line) and type. */
@@ -525,7 +549,7 @@ const sameLink = (a: Link, b: Link) => a.source.book.key === b.source.book.key &
  * repeats a `link` row (same own line, other book, other line, type; known for rows that point out) is dropped.
  */
 function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkListing {
-  if (parts.length === 1) return new LinkListing(bookKey, parts[0]!.rows, parts[0]!.keys, parts[0]!.fetch, parts[0]!.method, ms);
+  if (parts.length === 1) return new LinkListing(bookKey, parts[0]!.rows, parts[0]!.keys, parts[0]!.fetch, parts[0]!.method, ms, parts[0]!.unlisted);
   const [link, ext] = parts as [ListingPart, ListingPart];
   const keys = [...link.keys];
   const keyAt = new Map(keys.map((k, i) => [k, i]));
@@ -567,5 +591,6 @@ function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkList
     },
     link.method === "index" && ext.method === "index" ? "index" : "scan",
     ms,
+    ext.unlisted,
   );
 }

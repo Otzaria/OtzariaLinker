@@ -10,6 +10,7 @@ export const DB_LINK_FLAG_LABELS: Readonly<Record<DbLinkFlag, { he: string; hint
   "header-source": { he: "המקור הוא כותרת", hint: "שורת המקור היא כותרת: אוצריא של הספרייה מדלגת על קישור כזה" },
   "reverse-duplicate": { he: "כפילות הפוכה", hint: "אותן שתי שורות מקושרות גם בכיוון ההפוך: באפליקציה זה קישור כפול" },
   "ambiguous-title": { he: "כותרת עמומה", hint: "שם ספר היעד הוא גם שם של ספר בספרייה הרשמית, ולא ידוע לאיזה מהם הקישור התכוון" },
+  "source-out-of-range": { he: "המקור מחוץ לספר", hint: "שורת המקור גדולה ממספר השורות של ספר המקור: השורה הזאת לא קיימת בספר" },
 };
 
 /*
@@ -77,6 +78,12 @@ export interface DbLinkSummary {
   byBook: DbLinkBookCount[];
   /** how many of the book's links carry each flag (only those with any; external_link databases only) */
   flags?: { flag: DbLinkFlag; count: number }[];
+  /**
+   * external_link rows that could not become a listed link, counted instead of dropped unseen (only when there are
+   * any): `badLine` a line number that is not a whole non-negative number (and no ref to go by), `noPlace` neither a
+   * target line nor a ref, `orphanSource` rows of the whole database whose source book does not exist.
+   */
+  unlisted?: { badLine: number; noPlace: number; orphanSource: number };
   /** "index": through idx_link_source_book/idx_link_target_book; "scan": the database has neither (slow) */
   method: "index" | "scan";
   /** what reading the summary cost, for the status line and the real-database test */
