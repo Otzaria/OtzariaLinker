@@ -121,7 +121,10 @@ export class MaxLinkState {
   selection(scope: MaxLinkScope): string[] {
     if (scope.kind === "book") return this.host.books.value.has(scope.key) ? [scope.key] : [];
     if (scope.kind === "source") return this.host.sources.value.find((s) => s.info.id === scope.id)?.books.map((b) => b.key) ?? [];
-    if (scope.kind === "books") return scope.keys.filter((k, i) => this.host.books.value.has(k) && scope.keys.indexOf(k) === i);
+    if (scope.kind === "books") {
+      const seen = new Set<string>(); // each book once, in the order given (a scan of the list per key would be quadratic)
+      return scope.keys.filter((k) => this.host.books.value.has(k) && !seen.has(k) && !!seen.add(k));
+    }
     // several sources (the guided flow's folder, opened in more than one pick), in the order they were opened
     if (scope.kind === "sources") return this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).flatMap((s) => s.books.map((b) => b.key));
     return [...this.host.books.value.keys()];

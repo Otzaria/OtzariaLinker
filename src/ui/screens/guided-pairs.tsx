@@ -7,6 +7,7 @@ import { durationText } from "../../state/guided-flow";
 import { TypeOptions } from "../workspace/type-options";
 import type { TitleFitReport, TitleFitVerdict } from "../../linking/title-fit";
 import { useStore } from "../context";
+import { fitKey, pairsToAutoCheck } from "./pair-fit";
 
 /*
  * The pairs of the guided plan (issues 21 and 26): for each commentary and the book it is written on, whether the titles
@@ -35,9 +36,6 @@ const CHOICES: Record<Choice, { label: string; methods: readonly PairEngineId[] 
   both: { label: "כותרות ודיבור המתחיל, בלי בדיקת התאמה", methods: ["headings", "dibur-hamatchil"] },
 };
 const VERDICT: Record<TitleFitVerdict, string> = { fit: "הכותרות מתאימות", partial: "הכותרות מתאימות חלקית", unfit: "הכותרות לא מתאימות" };
-const MAX_AUTO = 12;
-/** the verdicts are kept per pair of BOOKS (a same-titled book from another source is another pair) */
-const fitKey = (p: { dependant: BookRef; base: BookRef }): string => `${p.dependant.key}>${p.base.key}`;
 
 interface Pair {
   dependant: BookRef;
@@ -87,16 +85,16 @@ export function PairChoices() {
     g.setPairControl(p.dependant.title, p.base.title, { ...controls[k], ...change } as PairControl);
   const forceDh = !!forced && forced.size === 1 && forced.has("dibur-hamatchil");
 
-  const check = async (p: Pair) => {
+  const check = async (p: Pair, again = false) => {
     const k = fitKey(p);
-    if (fits[k]) return;
+    if (!again && fits[k]) return;
     setFits((f) => ({ ...f, [k]: "loading" }));
     const report = await store.maxLink.titleFit(p.dependant.key, p.base.key).catch(() => null);
     setFits((f) => ({ ...f, [k]: report }));
   };
   // a few pairs are checked at once; a long list is checked a pair at a time, on request
   useEffect(() => {
-    if (pairs.length && pairs.length <= MAX_AUTO) for (const p of pairs.filter((x) => !x.notes)) void check(p);
+    for (const p of pairsToAutoCheck(pairs, fits)) void check(p);
   }, [plan]);
 
   if (!plan || !pairs.length) return null;
@@ -174,7 +172,7 @@ export function PairChoices() {
                           )}
                         </>
                       ) : (
-                        <button class="btn text small" onClick={() => void check(p)}>בדיקת התאמת הכותרות</button>
+                        <button class="btn text small" onClick={() => void check(p, true)}>בדיקת התאמת הכותרות</button>
                       )}
                     </div>
                     <label class="field">
