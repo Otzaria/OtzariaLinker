@@ -91,3 +91,39 @@ describe("discoverPairs", () => {
     expect(only.proposals.map((p) => p.dependant.key)).toEqual(["p:2"]);
   });
 });
+
+describe("discoverPairs — QA round 2 (G)", () => {
+  const dep = (more: Partial<DiscoveryBook> = {}) => b("p:20", "ספר הנר על ברכות", "personal", { lineCount: 600, ...more });
+  const both = [b("o:1", "ברכות", "otzaria", { lineCount: 6000 }), b("p:8", "ברכות", "personal", { lineCount: 20 })];
+
+  it("a book with linked lines but no known length is 'unknown', not 'linked' (one line of 100,000 is not 'linked')", () => {
+    const p = discoverPairs([dep({ lineCount: undefined as never, linkedLines: 1, linkedKeys: { "o:1": 1 } }), ...both], { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.status).toBe("unknown");
+  });
+  it("with the length known the shares are as before", () => {
+    const st = (linked: number) => discoverPairs([dep({ linkedLines: linked, linkedKeys: { "o:1": linked } }), ...both], { dependants: (x) => x.key === "p:20" }).proposals[0]!.status;
+    expect([st(0), st(10), st(500)]).toEqual(["unlinked", "partly-linked", "linked"]);
+  });
+  it("a title that exists in BOTH databases is marked 'ambiguous-title', with the other books' keys, and the reasons say so", () => {
+    const p = discoverPairs([dep({ linkedLines: 500, linkedTo: { ברכות: 500 } }), ...both], { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.markers).toContain("ambiguous-title");
+    expect(p.sameTitleKeys).toEqual([p.base.key === "o:1" ? "p:8" : "o:1"]);
+    expect(p.reasons.join(" ")).toContain("כמה ספרים בשם");
+  });
+  it("links counted by TITLE alone say so in the reasons when two books share the title (they are not proof of which one)", () => {
+    const p = discoverPairs([dep({ linkedLines: 500, linkedTo: { ברכות: 500 } }), ...both], { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.reasons.join(" ")).toContain("לפי שם הספר בלבד");
+  });
+  it("links counted by book KEY do confirm it, and the marker still shows that the title is shared", () => {
+    const p = discoverPairs([dep({ linkedLines: 500, linkedTo: { ברכות: 500 }, linkedKeys: { "o:1": 500 } }), ...both], { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.base.key).toBe("o:1");
+    expect(p.confidence).toBe("high");
+    expect(p.markers).toContain("ambiguous-title");
+  });
+  it("a title only one book has carries no marker", () => {
+    const p = discoverPairs([dep(), b("o:1", "ברכות", "otzaria", { lineCount: 6000 })], { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.markers).toEqual([]);
+    expect(p.sameTitleKeys).toBeUndefined();
+  });
+});
+
