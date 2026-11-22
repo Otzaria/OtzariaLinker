@@ -384,8 +384,10 @@ export interface GuidedRecord {
 export const GUIDED_KEY = "guided:v1";
 
 function cleanPairMethods(raw: object): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+  // keys come from JSON.parse, so "__proto__" can be one: on a plain object `out[k] =` would set the prototype. No prototype, and that key is dropped.
+  const out: Record<string, string[]> = Object.create(null);
   for (const [k, v] of Object.entries(raw)) {
+    if (k === "__proto__") continue;
     const list = Array.isArray(v) ? v.filter((e): e is string => (PAIR_ENGINES as readonly unknown[]).includes(e)) : [];
     if (list.length) out[k] = list;
   }
@@ -452,8 +454,8 @@ export class GuidedFlowState {
   readonly preferSource = signal("");
   /**
    * The methods that may run, for every pair (null = every method that fits). "Force dibur-hamatchil for all pairs"
-   * is the set {dibur-hamatchil}. Not kept in the saved flow: a continued flow starts from the default again, while
-   * the job keeps the engines it ran with (JobRecord.engines).
+   * is the set {dibur-hamatchil}. Kept in the saved flow (GuidedRecord.methods) and restored by continueSaved(); start() resets it.
+   * The job also keeps the engines it ran with (JobRecord.engines).
    */
   readonly methods = signal<ReadonlySet<EngineId> | null>(null);
   /** the methods the user named for one pair (plan.ts pairMethodKey): exactly those run there, headings with no title gate */
@@ -541,6 +543,9 @@ export class GuidedFlowState {
       this.bookSources.value = adopt;
       this.preferSource.value = "";
       this.preferLabel = undefined;
+      // a new flow starts from the default methods: "dibur-hamatchil for all pairs" of the previous one must not leak into it
+      this.methods.value = null;
+      this.pairMethods.value = {};
       this.resumeTo.value = null;
       this.saved.value = null;
       this.bundle.value = null;
@@ -794,3 +799,4 @@ export class GuidedFlowState {
     return () => (clearTimeout(timer), stop());
   }
 }
+

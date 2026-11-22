@@ -207,3 +207,23 @@ describe("guided flow — through the store", () => {
     expect(store.guided.step.value).toBe("plan");
   });
 });
+
+describe("guided flow — a new flow starts clean, and a hostile record cannot reach the prototype (QA round 2, I)", () => {
+  it("start() forgets the previous flow's methods for all pairs and for single pairs", () => {
+    const { store } = makeStore();
+    const g = store.guided;
+    g.start();
+    g.setMethods(new Set(["dibur-hamatchil"]));
+    g.setPairMethods("ביאור א על בראשית", "בראשית", ["headings"]);
+    g.start();
+    expect(g.methods.value).toBeNull();
+    expect(g.pairMethods.value).toEqual({});
+  });
+  it("a saved record's pairMethods with a '__proto__' key is read without it, into an object with no prototype to write to", () => {
+    const text = '{"v":1,"step":"files","sources":[],"pairMethods":{"__proto__":["headings"],"א>ב":["headings"]}}';
+    const rec = parseGuidedRecord(text)!;
+    expect(Object.keys(rec.pairMethods!)).toEqual(["א>ב"]);
+    expect(Object.getPrototypeOf(rec.pairMethods)).toBeNull();
+    expect(Array.isArray(Object.getPrototypeOf(rec.pairMethods))).toBe(false);
+  });
+});
