@@ -145,6 +145,13 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .pick-list .check { display: flex; gap: 8px; align-items: start; padding: 2px 4px; overflow-wrap: anywhere; }
 .pick-count { margin: 0; font-size: var(--fs-sm); }
 .dbl-unresolved { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); border: 1px dashed var(--warning); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
+/* the types page (3.5) */
+.types-help { width: min(720px, calc(100vw - 32px)); }
+.types-group h3, .types-export h3 { margin: 8px 0 4px; font-size: var(--fs-md); }
+.types-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.type-item { padding: 6px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
+.type-item code { color: var(--on-surface-variant); }
+.types-export ul { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }

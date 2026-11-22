@@ -5,6 +5,7 @@ import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
 import type { Pick, Side } from "../../state/store";
 import { inRole } from "../../state/roles";
+import { TypesHelpButton } from "../dialogs/types-help-dialog";
 import { TYPE_CHOICES } from "../../state/store";
 import { TypeOptions } from "./type-options";
 import { useStore } from "../context";
@@ -76,6 +77,7 @@ export function Builder() {
         </select>
         <span class="muted">{TYPE_LABELS[parseConnectionType(store.draftType.value).type].hint}</span>
       </label>
+      <TypesHelpButton />
       {draft && <StoredAs />}
       {advanced && (
         <label class="field">

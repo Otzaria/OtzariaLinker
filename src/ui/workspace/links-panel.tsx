@@ -3,6 +3,7 @@ import { TYPE_LABELS, type ConnectionType } from "../../core/links/connection-ty
 import type { Link } from "../../core/links/model";
 import { CONFIDENCE_LABELS, CONFIDENCE_ORDER, ENGINES, type Confidence } from "../../linking/automatic";
 import { filterRows, sortRows, tableRows, type SortKey, type TableFilter, type TableRow } from "../../state/links-table";
+import { TypesHelpButton } from "../dialogs/types-help-dialog";
 import { TypeOptions } from "./type-options";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -219,6 +220,7 @@ function GroupActions({ sel, rows, clear }: { sel: ReadonlySet<string>; rows: re
             <option value="">שינוי סוג…</option>
             <TypeOptions />
           </select>
+          <TypesHelpButton />
           <span class="lt-target">
             <input list="lt-titles" placeholder="ספר יעד חדש…" aria-label="ספר יעד חדש" value={title} onInput={(e) => setTitle(e.currentTarget.value)} />
             <datalist id="lt-titles">{[...store.booksByTitle.value.keys()].map((t) => <option key={t} value={t} />)}</datalist>

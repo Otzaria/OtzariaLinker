@@ -141,3 +141,34 @@ test("the link type picker is grouped into commentary types and link types", asy
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * 3.5: one place that lists ALL the link types, grouped as Otzaria shows them, with the Hebrew name, a line on what it is,
+ * where it appears in Otzaria and what export does with it — a dialog with text on the page (no title-only hints), opened
+ * from the type picker, and usable by touch.
+ */
+test("link types help: every type, grouped, with where it shows in Otzaria and the export note — by tap too", async ({ browser }) => {
+  const ctx = await browser.newContext({ locale: "he-IL", offline: true, hasTouch: true, viewport: { width: 1440, height: 900 } });
+  const page = await ctx.newPage();
+  const seen = watchPage(page);
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /בונה/ }).click();
+  await page.getByRole("button", { name: "מה כל סוג אומר?" }).tap();
+  const dlg = page.getByRole("dialog", { name: "סוגי הקישור" });
+  await expect(dlg).toBeVisible();
+  const groups = await dlg.locator("section.types-group h3").allTextContents();
+  expect(groups).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  // every type a user can write, once, with its description as visible text
+  expect(await dlg.locator("li.type-item").count()).toBe(23);
+  await expect(dlg.locator("li.type-item", { hasText: "הערות שוליים" })).toContainText("הערות על הטקסט");
+  await expect(dlg.locator("section.types-group").first()).toContainText("פאנל המפרשים");
+  await expect(dlg.locator(".types-export")).toContainText("ייבוא אישי");
+  await expect(dlg.locator(".types-export")).toContainText("ציטוט בטקסט");
+  await dlg.getByRole("button", { name: "סגירה" }).last().tap();
+  await expect(dlg).toBeHidden();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+  await ctx.close();
+});
