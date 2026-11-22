@@ -2,7 +2,7 @@ import { signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
-import { candidateLines, coverageCounts, coverageSummary, doubtfulLines, type CoverageBook, type CoverageSummary } from "../linking/coverage";
+import { candidateLines, coverageCounts, coverageSummary, doubtfulLines, MAX_BOOK_LINES, type CoverageBook, type CoverageSummary } from "../linking/coverage";
 import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../projects/project-format";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
@@ -111,6 +111,11 @@ export class CoverageState {
       if (!b) continue;
       const lineCount = b.lineCount ?? this.host.lines.count(key) ?? (await this.host.lines.learnCount(key)) ?? 0;
       if (lineCount <= 0) continue;
+      // a database that reports an absurd length: a row that says so, with no per-book reads (headings, links) at all
+      if (lineCount > MAX_BOOK_LINES) {
+        yield { key, title: b.title, lineCount, counts: coverageCounts([], { owns: () => false, lineCount, headings: new Set() }), exact: false };
+        continue;
+      }
       let headings: ReadonlySet<number> = new Set();
       if (options.headings) {
         const hs = await this.service.headings(key, options.signal ? { signal: options.signal } : {});
@@ -147,18 +152,28 @@ export class CoverageState {
    * null when the book is not open, its length is not known, or the read was cancelled.
    */
   async summary(bookKey: string, options: CoverageOptions = {}): Promise<CoverageSummary | null> {
+    const b = this.host.books.value.get(bookKey);
+    if (!b) return null;
+    // an absurd reported length is answered before anything is read or allocated for it (the result says tooLarge, and is not saved)
+    const known = b.lineCount ?? this.host.lines.count(bookKey) ?? (await this.host.lines.learnCount(bookKey)) ?? 0;
+    if (known > MAX_BOOK_LINES) return coverageSummary([], { owns: () => false, lineCount: known, headings: new Set() });
     const suitable = options.unsuitable ? null : await this.suitable(bookKey);
     if (!options.unsuitable && !suitable) return null;
     const first = await this.book(bookKey, options.unsuitable);
     if (!first || first.lineCount <= 0) return null;
     // a line with no row (a hole in a slice, an empty heading the generator did not create) or with no letters is not suitable
-    const unsuitable = options.unsuitable ?? new Set(Array.from({ length: first.lineCount }, (_, i) => i).filter((i) => !suitable!.has(i)));
+    let unsuitable = options.unsuitable;
+    if (!unsuitable) {
+      const set = new Set<number>();
+      for (let i = 0; i < first.lineCount; i++) if (!suitable!.has(i)) set.add(i);
+      unsuitable = set;
+    }
     const owns = first.owns;
     const run = this.host.suggestions.run.value;
     const state = this.host.suggestions.state.value;
-    const candidates = options.includeCandidates === false || !run ? undefined : candidateLines(run.result.suggestions, (id) => state.get(id) === "pending", owns);
+    const candidates = options.includeCandidates === false || !run ? undefined : candidateLines(run.result.suggestions, (id) => state.get(id) === "pending", owns, first.lineCount);
     const report = this.host.quality.report.value;
-    const doubtful = options.includeQa === false || !report ? undefined : doubtfulLines(report.issues, owns);
+    const doubtful = options.includeQa === false || !report ? undefined : doubtfulLines(report.issues, owns, first.lineCount);
     const book: CoverageBook = { ...first, unsuitable, ...(candidates && { candidates }), ...(doubtful && { doubtful }) };
     let db: readonly Link[] = [];
     if (options.includeDb !== false) {
@@ -191,3 +206,4 @@ export class CoverageState {
     this.saved.value = new Map(list.map((c) => [c.title, c] as const));
   }
 }
+

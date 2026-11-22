@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link, LinkSide } from "../../../src/core/links/model";
 import type { Suggestion } from "../../../src/linking/automatic";
-import { candidateLines, coverageCounts, coverageOfLines, coverageSummary, doubtfulLines, unlinkedRanges, type CoverageBook } from "../../../src/linking/coverage";
+import { candidateLines, coverageCounts, coverageOfLines, coverageSummary, doubtfulLines, MAX_BOOK_LINES, unlinkedRanges, type CoverageBook } from "../../../src/linking/coverage";
 import type { QaIssue } from "../../../src/linking/qa";
 
 /* Pure coverage rules (issue #17); the state accessor and the real-book run are in tests/integration/state/coverage.test.ts. */
@@ -150,5 +150,45 @@ describe("coverageCounts — the table row, no ranges", () => {
     const c = coverageCounts(ls, book(4, [0]));
     expect(c).toEqual({ total: 4, byBucket: coverageSummary(ls, book(4, [0])).byBucket, suitable: 3, unlinked: 2, unlinkedShare: 2 / 3 });
     expect("ranges" in c).toBe(false);
+  });
+});
+
+describe("hostile sizes: a range end or a line count from a file must not become a loop or an allocation (QA round 2, A and B)", () => {
+  it("candidateLines and doubtfulLines clamp a range end of 2^53-1 to the book's lines, and finish at once", () => {
+    const huge = Number.MAX_SAFE_INTEGER;
+    const t0 = Date.now();
+    const sug = { id: "a", source: side(C, 2, huge), target: side(B, 1), confidence: "high" } as Suggestion;
+    expect([...candidateLines([sug], () => true, (r) => r.key === "c", 6)]).toEqual([2, 3, 4, 5]);
+    const issues = [{ link: link(side(C, 1, huge), side(B, 1)), problem: { severity: "error" }, category: "heading" }] as unknown as QaIssue[];
+    expect([...doubtfulLines(issues, (r) => r.key === "c", 4)]).toEqual([1, 2, 3]);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+  it("without a line count the clamp is the shared cap, so the set can never outgrow it", () => {
+    const sug = { id: "a", source: side(C, 0, Number.MAX_SAFE_INTEGER), target: side(B, 1), confidence: "high" } as Suggestion;
+    expect(candidateLines([sug], () => true, (r) => r.key === "c").size).toBe(MAX_BOOK_LINES);
+  });
+  it("the cap is 5 million lines", () => {
+    expect(MAX_BOOK_LINES).toBe(5_000_000);
+  });
+  it("a book just over the cap gets a clear 'tooLarge' result with no buckets, not an allocation", () => {
+    const s = coverageSummary([link(side(C, 1), side(B, 1))], book(6_000_000));
+    expect(s.tooLarge).toBe(true);
+    expect(s.total).toBe(6_000_000);
+    expect(s.ranges).toEqual([]);
+    expect(Object.values(s.byBucket).every((n) => n === 0)).toBe(true);
+    expect(coverageCounts([], book(6_000_000)).tooLarge).toBe(true);
+    expect(unlinkedRanges([], book(6_000_000))).toEqual([]);
+    expect(() => coverageOfLines([], book(6_000_000))).toThrow(RangeError);
+  });
+  it("a database that reports a billion lines is answered at once", () => {
+    const t0 = Date.now();
+    expect(coverageSummary([], book(1_000_000_000)).tooLarge).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+  it("a book at the cap is still counted exactly", () => {
+    const s = coverageSummary([link(side(C, 4_999_999), side(B, 1))], book(MAX_BOOK_LINES));
+    expect(s.tooLarge).toBeUndefined();
+    expect(s.byBucket.linked).toBe(1);
+    expect(s.unlinked).toBe(MAX_BOOK_LINES - 1);
   });
 });

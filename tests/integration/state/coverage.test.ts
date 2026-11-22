@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { signal } from "@preact/signals";
 import { strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
+import { CoverageState, type CoverageHost } from "../../../src/state/coverage";
 import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
 
@@ -197,5 +199,44 @@ describe("AppStore — coverage", () => {
   it("a book that is not open has no coverage", async () => {
     const { store } = await opened();
     expect(await store.coverage.summary("ghost:1")).toBeNull();
+  });
+});
+
+describe("a database that reports an absurd line count (QA round 2, B)", () => {
+  function hostile(lineCount: number) {
+    const book = { key: "k", title: "ספר ענק", origin: "otzaria", lineCount } as never;
+    const reads = { headings: 0, lines: 0, existing: 0 };
+    const host = {
+      linkState: signal({ links: new Map() }),
+      books: signal(new Map([["k", book]])),
+      lines: { count: () => lineCount, learnCount: async () => lineCount },
+      sameBook: () => true,
+      runTask: async (_label: string, run: (o: object) => Promise<unknown>) => run({}),
+      suggestions: { run: signal(null), state: signal(new Map()) },
+      quality: { report: signal(null) },
+    } as unknown as CoverageHost;
+    const service = {
+      headings: async () => (reads.headings++, []),
+      lines: async () => (reads.lines++, []),
+      existingLinks: async () => (reads.existing++, []),
+    };
+    return { state: new CoverageState(host, service as never), reads };
+  }
+  it("summary answers 'tooLarge' at once, reads nothing, and saves nothing to the project", async () => {
+    const { state, reads } = hostile(1_000_000_000);
+    const t0 = Date.now();
+    const s = (await state.summary("k"))!;
+    expect(s.tooLarge).toBe(true);
+    expect(s.total).toBe(1_000_000_000);
+    expect(reads).toEqual({ headings: 0, lines: 0, existing: 0 });
+    expect(state.snapshot()).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+  it("the table gives that book a row that says tooLarge, with no reads", async () => {
+    const { state, reads } = hostile(1_000_000_000);
+    const [row] = await state.table(["k"], { headings: true });
+    expect(row!.counts.tooLarge).toBe(true);
+    expect(row!.exact).toBe(false);
+    expect(reads).toEqual({ headings: 0, lines: 0, existing: 0 });
   });
 });
