@@ -383,6 +383,24 @@ export interface UserPair {
   readonly minConfidence?: "certain" | "high" | "possible" | "ambiguous";
 }
 
+/**
+ * The books a commentary is aimed at in more than one way: the targets of ONE source book's plain pair steps (a whole book against another
+ * whole book, by headings or by quotation) when there are two or more different ones. A line of such a book that has a suggestion in two of
+ * them is never linked to both blindly (merge.ts candidateBooks, step 4d): the surer one wins a step down, equally sure ones are both
+ * "ambiguous". Parts of a book (a scope), paths through another commentary, notes steps and "addressed only" steps are not competitors:
+ * they are about other lines, or say by name which book a line is on.
+ */
+export function competingTargets(steps: readonly PlanStep[]): string[] {
+  const bySource = new Map<string, Set<string>>();
+  for (const s of steps) {
+    if (s.kind !== "pair" || s.engine === "footnotes" || s.relation.kind !== "commentary" || s.relation.scope || s.relation.through || s.options?.["addressedOnly"]) continue;
+    const set = bySource.get(s.source.key);
+    if (set) set.add(s.target.key);
+    else bySource.set(s.source.key, new Set([s.target.key]));
+  }
+  return [...new Set([...bySource.values()].filter((t) => t.size > 1).flatMap((t) => [...t]))];
+}
+
 /** The key of a pair in PlanChoices.methods. */
 export const pairMethodKey = (dependantTitle: string, baseTitle: string): string => `${dependantTitle}>${baseTitle}`;
 

@@ -254,6 +254,14 @@ export const PAIR_DISAGREEMENT = { minConflicts: 10, ratio: 0.25 } as const;
  * so their agreement proves nothing there. Every other commentary stays far below (AUTOMATION_ENGINE.md §5.6).
  */
 export const REFERENCE_DISAGREEMENT = { minJudged: 20, ratio: 0.25 } as const;
+/**
+ * A place of the other book that at least this many lines of the focus book are linked to, in the library, is COARSE (a whole siman, a
+ * whole chapter): it stands for the stretch of the book up to the next place the library names. An exact suggestion inside that stretch
+ * refines the library's link; it does not contradict it (fix round, claim 10). A place linked from fewer lines is an exact link, and a
+ * different line is a contradiction, as before. The stretch of the LAST coarse place has no next place to end it, so it is as long as the
+ * longest stretch seen in the same pair (and a pair with one coarse place and nothing after it has none: nothing says how far it reaches).
+ */
+export const COARSE_PLACE_MIN = 3;
 const bookPair = (g: Group) => `${g.rep.fEnd.book.key}>${g.rep.oEnd.book.key}`;
 
 /** at least one member is "possible" or better: ambiguous and "none" give no support */
@@ -368,6 +376,27 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
       else refLines.set(k, [Number(y.slice(at + 1))]);
     }
   }
+  // per book pair (by title, like the reference keys): how many focus lines the library links to each line of the other book. A line with
+  // COARSE_PLACE_MIN or more is a coarse place: it stands for the stretch up to the next line the library names
+  const sections = new Map<string, { starts: number[]; ends: number[] }>();
+  if (refLines.size) {
+    const perPair = new Map<string, Map<number, number>>();
+    for (const [k, lines] of refLines) {
+      const pairKey = `${k.slice(0, k.lastIndexOf("#"))}>${k.slice(k.lastIndexOf(">") + 1)}`;
+      const m = perPair.get(pairKey) ?? new Map<number, number>();
+      for (const l of lines) m.set(l, (m.get(l) ?? 0) + 1);
+      perPair.set(pairKey, m);
+    }
+    for (const [pairKey, m] of perPair) {
+      const known = [...m.keys()].sort((a, b) => a - b);
+      const coarse = known.filter((l) => m.get(l)! >= COARSE_PLACE_MIN);
+      if (!coarse.length) continue;
+      const ends = coarse.map((l) => (known[known.indexOf(l) + 1] ?? Infinity) - 1);
+      const longest = Math.max(0, ...coarse.map((l, i) => (ends[i]! === Infinity ? 0 : ends[i]! - l + 1)));
+      // the last place has no next one: as long as the longest stretch seen, or no reach at all when none was seen
+      sections.set(pairKey, { starts: coarse, ends: ends.map((e, i) => (e === Infinity ? coarse[i]! + Math.max(0, longest - 1) : e)) });
+    }
+  }
   const versus = new Map<string, { judged: number; contradicted: number }>();
   if (refLines.size)
     for (const g of groups) {
@@ -376,7 +405,12 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
       if (!known) continue;
       const v = versus.get(bookPair(g)) ?? { judged: 0, contradicted: 0 };
       v.judged++;
-      if (!known.some((l) => l >= g.rep.oSpan.line && l <= endOf(g.rep.oSpan))) v.contradicted++;
+      const coarse = sections.get(`${g.rep.fEnd.book.title}>${g.rep.oEnd.book.title}`);
+      const refinesCoarse = (l: number) => {
+        const i = coarse?.starts.indexOf(l) ?? -1;
+        return i >= 0 && coarse!.starts[i]! <= g.rep.oSpan.line && endOf(g.rep.oSpan) <= coarse!.ends[i]!;
+      };
+      if (!known.some((l) => (l >= g.rep.oSpan.line && l <= endOf(g.rep.oSpan)) || refinesCoarse(l))) v.contradicted++;
       versus.set(bookPair(g), v);
     }
   const contradicted = new Map([...versus].filter(([, v]) => v.judged >= REFERENCE_DISAGREEMENT.minJudged && v.contradicted / v.judged >= REFERENCE_DISAGREEMENT.ratio));
