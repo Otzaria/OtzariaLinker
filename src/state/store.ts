@@ -32,6 +32,7 @@ import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from
 import { MaxLinkState } from "./maxlink";
 import { SuggestionsState } from "./suggestions";
 import { ExchangeState } from "./exchange";
+import { PersonalCsvState } from "./personal-csv";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
 
@@ -107,6 +108,8 @@ export class AppStore {
   readonly exchange: ExchangeState;
   /** the quality check and its report (state/quality.ts) */
   readonly quality: QualityState;
+  /** export of a personal book's links to the official library as the personal-database build's links.csv (state/personal-csv.ts) */
+  readonly personalCsv: PersonalCsvState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
 
@@ -231,6 +234,7 @@ export class AppStore {
     this.suggestions = new SuggestionsState(this, service);
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
+    this.personalCsv = new PersonalCsvState(this, service, saver);
     this.guided = new GuidedFlowState(this);
   }
 
