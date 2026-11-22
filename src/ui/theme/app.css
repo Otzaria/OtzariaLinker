@@ -421,6 +421,7 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .steps .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .steps .opened { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .steps .opened .icon { color: var(--tertiary); }
+.opened-offer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius); background: var(--surface-container); font-size: var(--fs-sm); }
 .steps .db-hint { margin-top: 8px; }
 /* the app bar on a tablet (820px): the brand keeps its icon in the workspace, without "מנהל הקישורים" — with "חזרה
    להדרכה" or a running task, "ייצוא" fell to a row of its own (V5 UX audit U19, the owner's choice A). The button's
