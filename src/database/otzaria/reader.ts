@@ -39,6 +39,15 @@ export interface DbLine {
   notes: NoteAt[];
 }
 
+/** one line of a book: its 0-based lineIndex and its line id */
+export interface LineEntry {
+  index: number;
+  id: number;
+}
+
+/** how many line entries the reader keeps across books (≈ 40 bytes each: 400,000 are some 16 MB) */
+const ENTRY_BUDGET = 400_000;
+
 export class OtzariaDbReader {
   private constructor(
     readonly file: SqliteFile,
@@ -72,6 +81,8 @@ export class OtzariaDbReader {
   /** The database is closed: its dictionaries leave the worker's pool. */
   close(): void {
     this.codec.release();
+    this.entries.clear();
+    this.entrySizes.clear();
   }
 
   async books(): Promise<DbBook[]> {
@@ -143,8 +154,43 @@ export class OtzariaDbReader {
     return out;
   }
 
-  /** (lineIndex, lineId) of every line of a book, in order — from the (bookId, lineIndex) index when present. */
-  async lineEntries(bookId: number): Promise<{ index: number; id: number }[]> {
+  /** the line entries of the last few books, by book id, in LRU order (the database is read-only, so an entry never goes stale) */
+  private readonly entries = new Map<number, Promise<readonly LineEntry[]>>();
+  private readonly entrySizes = new Map<number, number>();
+
+  /**
+   * (lineIndex, lineId) of every line of a book, in order. The tool walks a book in chunks of 200 lines, and every chunk
+   * (lines, existingLinks, heRefs…) needs the entries of its book: read once per book and kept (measured on the library's biggest
+   * book, 190,453 lines: 463 ms per chunk, 953 chunks). The cache is capped by the SUM of its entries, the newest book always stays.
+   */
+  lineEntries(bookId: number): Promise<readonly LineEntry[]> {
+    const hit = this.entries.get(bookId);
+    if (hit) {
+      this.entries.delete(bookId);
+      this.entries.set(bookId, hit);
+      return hit;
+    }
+    const read = this.readLineEntries(bookId);
+    this.entries.set(bookId, read);
+    read.then(
+      (list) => {
+        if (this.entries.get(bookId) !== read) return;
+        this.entrySizes.set(bookId, list.length);
+        let total = 0;
+        for (const n of this.entrySizes.values()) total += n;
+        for (const k of [...this.entries.keys()]) {
+          if (total <= ENTRY_BUDGET || this.entries.size <= 1 || k === bookId) break;
+          total -= this.entrySizes.get(k) ?? 0;
+          this.entries.delete(k);
+          this.entrySizes.delete(k);
+        }
+      },
+      () => void (this.entries.get(bookId) === read && this.entries.delete(bookId)), // a failed read is not cached
+    );
+    return read;
+  }
+
+  private async readLineEntries(bookId: number): Promise<LineEntry[]> {
     const ix = await this.file.findIndex("line", ["bookId", "lineIndex"]);
     const out: { index: number; id: number }[] = [];
     if (ix) {
