@@ -21,10 +21,18 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 export const INLINE_LINKER_TYPE = "INLINE_LINKER";
 export const INLINE_LINKER_LABEL = "ציטוט בטקסט";
 
-/** Whether a declared type is meant as INLINE_LINKER in any spelling the app might read (the library gate is this broad on purpose). */
+/**
+ * Whether a declared type means INLINE_LINKER in ANY spelling the app would read — the gate of the library
+ * purpose is this wide on purpose. The app (Otzaria/otzaria lib/models/link_types.dart, `LinkTypes.normalize`)
+ * trims, upper-cases and turns every run of whitespace or "-" into "_", so "inline-linker", "INLINE-LINKER",
+ * "inline<tab>linker" and a non-breaking space all mean it; the Hebrew label is matched after a trim
+ * (user_import_parser.dart). Beyond that, "InlineLinker" and a label with doubled spaces are held too: nothing that
+ * is meant as this private type may reach a library file.
+ */
 export function isInlineLinkerType(raw: unknown): boolean {
   const s = String(raw ?? "").trim();
-  return s === INLINE_LINKER_LABEL || s.toLowerCase().replaceAll(" ", "_") === "inline_linker";
+  if (s.replace(/\s+/g, " ") === INLINE_LINKER_LABEL) return true;
+  return /^inline_*linker$/i.test(s.replace(/[\s-]+/g, "_"));
 }
 
 /** The two spellings the app's documentation gives; the private export accepts only these. */

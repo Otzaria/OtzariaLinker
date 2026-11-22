@@ -137,3 +137,27 @@ describe("the documented record, through the file format and the export plan", (
     expect(lib.heldBack[0]!.problems.map((p) => p.code)).toContain("export/inline-linker-private-only");
   });
 });
+
+/*
+ * QA: the library gate must be as wide as the app's own reading of the type. Otzaria's LinkTypes.normalize
+ * (lib/models/link_types.dart, dev) trims, upper-cases and turns every run of whitespace or '-' into '_', so
+ * "inline-linker", "INLINE-LINKER", a tab or a non-breaking space all mean INLINE_LINKER there. Any spelling that
+ * means it is held for the library; for private use only the two documented spellings are written (the rest is an
+ * unknown type, which the app's import may reject as a whole).
+ */
+describe("every spelling of INLINE_LINKER is held for the library", () => {
+  const NBSP = String.fromCharCode(0xa0);
+  const SPELLINGS = ["inline-linker", "INLINE-LINKER", "Inline Linker", "inline\tlinker", `inline${NBSP}linker`, " inline  linker ", "inline--linker", "InlineLinker", "ציטוט  בטקסט", `ציטוט${NBSP}בטקסט`, "ציטוט\tבטקסט"];
+  for (const raw of SPELLINGS) {
+    it(JSON.stringify(raw), () => {
+      expect(isInlineLinkerType(raw)).toBe(true);
+      expect(errors(link({ declaredType: raw }), "submission")).toContain("export/inline-linker-private-only");
+      expect(errors(link({ declaredType: raw }))).toContain("export/inline-linker-private-only");
+      // private use: written only in the documented spellings; any other is an unknown type (an error for private use)
+      expect(errors(link({ declaredType: raw }), "private")).toContain("export/unknown-type");
+    });
+  }
+  it("a type that only contains the words is not one", () => {
+    for (const raw of ["inline", "linker", "inline linker x", "not inline linker", "ציטוט"]) expect(isInlineLinkerType(raw), raw).toBe(false);
+  });
+});
