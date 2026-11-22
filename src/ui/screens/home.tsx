@@ -41,7 +41,7 @@ interface TaskDef {
     tab: SideTab;
     engine?: EngineId;
     mode?: SuggestMode;
-    dialog?: "relink";
+    dialog?: "relink" | "repository";
     /** the step whose source max-link or a batch should run on */
     scopeStep?: number;
     /** max-link over every open book (several books together) */
@@ -117,6 +117,15 @@ export const TASKS: readonly TaskDef[] = [
     ],
     then: { tab: "suggestions", mode: "maxlink", scopeStep: 0 },
     guided: true,
+  },
+  {
+    // V6 3.9: an open database as a whole — counts, the books with no links, suggested pairs — and from there the guided flow
+    id: "analyze",
+    icon: "oz_search_in_links",
+    title: "ניתוח מאגר והשלמת קישורים",
+    hint: "כמה ספרים וקישורים יש במסד, אילו ספרים בלי קישורים, אילו זוגות מוצעים — ומשם להשלמת קישורים",
+    steps: [{ label: "המסד", hint: "מסד אוצריא (seforim.db) או מסד אישי. הניתוח רק קורא, ושום דבר לא נכתב למסד.", options: ["db"], dbHint: true }],
+    then: { tab: "books", dialog: "repository" },
   },
   {
     id: "db-db",

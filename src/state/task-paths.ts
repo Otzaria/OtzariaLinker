@@ -8,7 +8,7 @@
 /** A path that asks which task before it asks for sources. `id` is also a route: `#/start/<id>`. */
 export const TASK_PATHS = [
   { id: "auto", choose: ["commentary", "notes", "citations", "several", "folder-otzaria"] },
-  { id: "repo", choose: ["db-db", "within-db", "db-links", "coverage"] },
+  { id: "repo", choose: ["analyze", "db-db", "within-db", "db-links", "coverage"] },
   { id: "fix", choose: ["edit-links", "relink"] },
 ] as const;
 

@@ -8,6 +8,7 @@ import { ExportDialog } from "./dialogs/export-dialog";
 import { HelpDialog } from "./dialogs/help-dialog";
 import { RecordsDialog } from "./dialogs/records-dialog";
 import { RelinkDialog } from "./dialogs/relink-dialog";
+import { RepositoryDialog } from "./dialogs/repository-dialog";
 import { fromDataTransfer } from "./files";
 import { installFocusRescue } from "./keyboard";
 import { GuidedScreen } from "./screens/guided";
@@ -85,6 +86,7 @@ export function App() {
       {store.dialog.value === "relink" && <RelinkDialog onClose={() => store.closeDialog("relink")} />}
       {store.dialog.value === "help" && <HelpDialog section={store.helpSection.value} onSection={(id) => (store.helpSection.value = id)} onClose={() => store.closeDialog("help")} />}
       {store.dialog.value === "alt-toc" && <AltTocDialog onClose={() => store.closeDialog("alt-toc")} />}
+      {store.dialog.value === "repository" && <RepositoryDialog onClose={() => store.closeDialog("repository")} />}
       {store.dialog.value === "compare" && <CompareDialog onClose={() => store.closeDialog("compare")} />}
       {store.dialog.value === "start" && <StartTaskDialog onClose={() => store.closeDialog("start")} />}
       <DbMappingDialog />
