@@ -15,6 +15,14 @@ import { notesBaseTitle } from "./plan";
  *   medium  the title names a base found by its exact title, one book, nothing else says it
  *   low     the base was found only after a choice (a title two books share, another spelling): the note says which
  * A title that names a book that is not open, or names none, is `unresolved` with the reason.
+ *
+ * HOW the base was decided is a separate answer, `selection` (fix round before the merge of PR 2): a name alone never decides a base.
+ *   confirmed  the name AND another kind of evidence agree on this very book: links to it by KEY (or by title, when the title is unique),
+ *              or the same category; and the links, if their highest line is known, fit the book's length
+ *   review     the name alone (a unique title): a candidate for the user to look at, not to be linked on trust
+ *   ambiguous  another open book has the very same title and no link by KEY says which, or the links reach lines the chosen book does not
+ *              have (they were probably made to the other one): flagged, never to be linked automatically
+ * `confidence` keeps its meaning (how strongly the name and the link counts say so); it is NOT permission to link: only `selection` is.
  */
 export interface DiscoveryBook extends BookRef {
   /** the library folder path, when the source has one ("תלמוד בבלי") */
@@ -26,6 +34,11 @@ export interface DiscoveryBook extends BookRef {
   linkedKeys?: Readonly<Record<string, number>>;
   /** how many of its lines already carry a link (any) */
   linkedLines?: number;
+  /**
+   * The highest 0-based line index its links reach in the other book, by that book's KEY (when the source can tell): links that go past the
+   * end of the book they are assigned to say they were made to another book of the same title.
+   */
+  linkedMaxLine?: Readonly<Record<string, number>>;
 }
 
 export type PairConfidence = "high" | "medium" | "low";
@@ -35,7 +48,31 @@ export type PairConfidence = "high" | "medium" | "low";
  */
 export type PairStatus = "unlinked" | "partly-linked" | "linked" | "unknown";
 /** ambiguous-title: another open book has the very same title as the base (typically one in the personal database and one in the official) */
-export type ProposalMarker = "ambiguous-title";
+/**
+ * ambiguous-title: see above. links-exceed-base: the book's links to the base reach past the base's last line. (A proposal made on the name
+ * alone is not a marker: it is `selection: "review"` with `evidence.links: "none"`.)
+ */
+export type ProposalMarker = "ambiguous-title" | "links-exceed-base";
+
+/** How the base was decided (see the header): only "confirmed" may be linked without a person looking. */
+export type PairSelection = "confirmed" | "review" | "ambiguous";
+
+/** The kinds of evidence behind a proposal, for the screen to show and for the decision to be checked. */
+export interface PairEvidence {
+  /** the title names the base (always true: a proposal starts from a name) */
+  name: true;
+  /** the two books are in the same category/folder */
+  category: boolean;
+  /**
+   * key: links go to THIS book (by its key); title: by title, and the title is unique; title-shared: by title, but another book has the
+   * title too (no proof); none: no links known
+   */
+  links: "key" | "title" | "title-shared" | "none";
+  /** fits: the highest linked line is inside the base; exceeds: past its end; unknown: not known */
+  structure: "fits" | "exceeds" | "unknown";
+  /** how many OTHER open books have the base's exact title */
+  sameTitleBooks: number;
+}
 
 export interface PairProposal {
   dependant: DiscoveryBook;
@@ -45,6 +82,9 @@ export interface PairProposal {
   reasons: string[];
   baseIsOfficial: boolean;
   status: PairStatus;
+  /** how the base was decided: only "confirmed" may be linked without review */
+  selection: PairSelection;
+  evidence: PairEvidence;
   /** warnings about the proposal itself (empty: none) */
   markers: ProposalMarker[];
   /** keys of the OTHER open books with the base's exact title, when there are any (the user decides which one is meant) */
@@ -65,6 +105,7 @@ export interface DiscoverySummary {
   personalBase: number;
   byConfidence: Record<PairConfidence, number>;
   byStatus: Record<PairStatus, number>;
+  bySelection: Record<PairSelection, number>;
 }
 
 export interface DiscoveryOptions {
@@ -120,6 +161,12 @@ export function discoverPairs(books: readonly DiscoveryBook[], options: Discover
     if (sameFolder) reasons.push(`שני הספרים באותה קטגוריה ("${dep.category}").`);
     // links the book already has to that title confirm even a choice made between lookalikes; a folder only confirms a plain match
     const confidence: PairConfidence = toBase ? "high" : r.note && !byLinks ? "low" : sameFolder ? "high" : "medium";
+    // the decision, from what the books say and not from the name: see the header
+    const maxLine = dep.linkedMaxLine?.[base.key];
+    const structure: PairEvidence["structure"] = maxLine === undefined || !base.lineCount ? "unknown" : maxLine >= base.lineCount ? "exceeds" : "fits";
+    const linkEvidence: PairEvidence["links"] = keyConfirmed ? "key" : toBase ? (sameTitle.length ? "title-shared" : "title") : "none";
+    if (structure === "exceeds") reasons.push(`הקישורים של הספר אל "${base.title}" מגיעים עד שורה ${(maxLine! + 1).toLocaleString("he")}, מעבר לסוף הספר שנבחר (${base.lineCount!.toLocaleString("he")} שורות): ייתכן שהם נעשו לספר אחר באותו שם.`);
+    const selection: PairSelection = structure === "exceeds" || (sameTitle.length > 0 && !keyConfirmed) ? "ambiguous" : linkEvidence === "key" || linkEvidence === "title" || sameFolder ? "confirmed" : "review";
     const linked = dep.linkedLines;
     const status: PairStatus = !linked ? "unlinked" : !dep.lineCount ? "unknown" : linked / dep.lineCount < THIN_LINKED_SHARE ? "partly-linked" : "linked";
     proposals.push({
@@ -130,7 +177,9 @@ export function discoverPairs(books: readonly DiscoveryBook[], options: Discover
       reasons,
       baseIsOfficial: base.origin !== "personal",
       status,
-      markers: sameTitle.length ? ["ambiguous-title"] : [],
+      selection,
+      evidence: { name: true, category: sameFolder, links: linkEvidence, structure, sameTitleBooks: sameTitle.length },
+      markers: [...(sameTitle.length ? (["ambiguous-title"] as const) : []), ...(structure === "exceeds" ? (["links-exceed-base"] as const) : [])],
       ...(sameTitle.length && { sameTitleKeys: sameTitle.map((x) => x.key) }),
       ...(linked !== undefined && { existingLines: linked }),
       ...(toBase !== undefined && { existingToBase: toBase }),
@@ -145,10 +194,12 @@ export function discoverPairs(books: readonly DiscoveryBook[], options: Discover
     personalBase: proposals.filter((p) => !p.baseIsOfficial).length,
     byConfidence: { high: 0, medium: 0, low: 0 },
     byStatus: { unlinked: 0, "partly-linked": 0, linked: 0, unknown: 0 },
+    bySelection: { confirmed: 0, review: 0, ambiguous: 0 },
   };
   for (const p of proposals) {
     summary.byConfidence[p.confidence]++;
     summary.byStatus[p.status]++;
+    summary.bySelection[p.selection]++;
   }
   return { proposals, unresolved, summary };
 }
