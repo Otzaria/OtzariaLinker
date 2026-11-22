@@ -299,3 +299,21 @@ for (const [width, viewport] of WIDTHS) {
     });
   });
 }
+
+/* Desktop only: the side panel dragged to its narrowest (the splitter exists only in the multi-column layouts). */
+test.describe("desktop", () => {
+  test.use({ viewport: WIDTHS[0][1] });
+
+  test("side panel at its narrowest with a long unbroken book name (issue 26b)", async ({ page }) => {
+    await openFiles(page, [
+      txt("ביאורמפורטעלהתורהמאתרבימשהבןמיימוןזלהה.txt", ["<h1>ביאורמפורטעלהתורהמאתרבימשהבןמיימוןזלהה</h1>", "שורה אחת", "שורה שתיים"]),
+    ]);
+    await pickBooks(page, /ביאורמפורט/, /^בראשית/);
+    await page.locator(".reader.source .ln").nth(1).locator(".tx").click();
+    await page.locator(".reader.target .ln").nth(2).locator(".tx").click();
+    await page.getByRole("separator", { name: "שינוי רוחב הפאנלים" }).last().focus();
+    for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowLeft");
+    await expect(page.locator(".builder .end.set")).toHaveCount(2);
+    await snap(page, "side-panel-narrow");
+  });
+});

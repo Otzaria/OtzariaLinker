@@ -26,7 +26,8 @@ export function Workspace() {
   const stacked = layout.preset === "stack";
   const visible = layout.order.filter((p) => !layout.hidden.includes(p) || (stacked && p === "source" && !layout.hidden.includes("target")));
   const grid = useRef<HTMLDivElement>(null);
-  const columns = visible.map((p) => `minmax(160px, ${layout.sizes[p]}fr)`).join(" 8px ");
+  // the side panel (builder, links, suggestions) is unusable below ~200px; the readers and the sources list keep 160
+  const columns = visible.map((p) => `minmax(${p === "side" ? 200 : 160}px, ${layout.sizes[p]}fr)`).join(" 8px ");
   // arriving from the home screen or the guided flow, focus starts at the workspace, not at the top of the page
   useFocusOnMount(grid);
 

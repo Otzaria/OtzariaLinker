@@ -114,3 +114,63 @@ test("every panel that can be hidden comes back: from the layout menu, from the 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * Issue 26(b): the side panel dragged to its narrowest painted its content outside itself (the left edge
+ * was cut) when a book had a long name with no spaces: the builder's grid tracks were 'auto'/'1fr', whose
+ * minimum is the content's min-content, so one unbroken word stretched everything.
+ */
+test("the side panel at its narrowest keeps every element inside it, even with a long unbroken book name", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    BOOK("ביאורמפורטעלהתורהמאתרבימשהבןמיימוןזלהה", ["שורה אחת", "שורה שתיים"]),
+    BOOK("חידושיהרשבאעלמסכתבבאמציעאפרקשני", ["שורה אחת - פירוש"]),
+  ]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+
+  // the last border is the side panel's; ArrowLeft there shrinks the side panel
+  await page.getByRole("separator", { name: "שינוי רוחב הפאנלים" }).last().focus();
+  for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowLeft");
+  // both ends picked: the builder then also shows the "stored as" paragraph and the validation list
+  const books = page.locator(".book-list li");
+  await books.filter({ hasText: "ביאורמפורט" }).first().getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: "חידושיהרשבא" }).first().getByRole("button", { name: "יעד" }).click();
+  await page.locator(".reader.source .ln").nth(1).click();
+  await page.locator(".reader.target .ln").nth(1).click();
+  await expect(page.locator(".builder .end.set")).toHaveCount(2);
+
+  const side = page.locator(".side-panel");
+  const outside = () =>
+    side.evaluate((p) => {
+      const pb = p.getBoundingClientRect();
+      const out: string[] = [];
+      p.querySelectorAll("*").forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.width && (b.left < pb.left - 1 || b.right > pb.right + 1)) out.push(`${el.tagName}.${(el as HTMLElement).className}`);
+        // a block whose text runs past its own box (clipped by the panel, so the box test alone misses it)
+        const cs = getComputedStyle(el);
+        if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && cs.overflowX === "visible" && cs.display !== "inline") out.push(`scroll:${el.tagName}.${(el as HTMLElement).className}`);
+      });
+      return out;
+    });
+  expect((await side.boundingBox())!.width, "the side panel keeps a usable minimum").toBeGreaterThanOrEqual(200);
+  expect(await outside()).toEqual([]);
+  // the tab strip shows every tab inside the panel, and no tab's content paints outside it either
+  const tabs = page.locator(".side-panel .tabs > [role=tablist] > [role=tab]");
+  expect(await tabs.count()).toBe(4);
+  for (let t = 0; t < 4; t++) {
+    const tab = tabs.nth(t);
+    await tab.click();
+    expect(await outside(), `tab ${t}`).toEqual([]);
+    const b = (await tab.boundingBox())!;
+    const pb = (await side.boundingBox())!;
+    expect(b.x).toBeGreaterThanOrEqual(pb.x - 1);
+    expect(b.x + b.width).toBeLessThanOrEqual(pb.x + pb.width + 1);
+  }
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
