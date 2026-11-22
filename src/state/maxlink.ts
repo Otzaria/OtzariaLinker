@@ -7,7 +7,7 @@ import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFrom
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { applyPairMinimums, linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
 import type { TitleFitReport } from "../linking/title-fit";
-import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, PAIR_ENGINES, pairMethodKey, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PairEngineId, type PlanBook, type PlanChoices, type PlanStep, type RelationKind } from "../linking/plan";
+import { competingTargets, evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, PAIR_ENGINES, pairMethodKey, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PairEngineId, type PlanBook, type PlanChoices, type PlanStep, type RelationKind } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, KeyValueStore, OpenedSource, Saver } from "./services";
 import type { NoticeKind, SideTab } from "./store";
@@ -661,8 +661,9 @@ export class MaxLinkState {
     // "already exists": the database's links, and the project's — except the link a suggestion's own approval made
     const project = new Map<string, string[]>();
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
-    // the books the user named as targets of one book (PlanChoices.pairs): a line is never linked to several of them blindly
-    const userTargets = plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" ? [s.target.key] : []));
+    // the books a book is aimed at in more than one way (the user's own pairs, PlanChoices.pairs, and any commentary the plan relates to two
+    // whole books): a line is never linked to several of them blindly (merge.ts step 4d)
+    const userTargets = [...new Set([...plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" ? [s.target.key] : [])), ...competingTargets(plan.steps)])];
     const raw = mergeSuggestions(items, {
       reference: db,
       ...(userTargets.length > 1 && { candidateBooks: userTargets }),

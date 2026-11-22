@@ -65,6 +65,8 @@ export interface DbAnchor {
  */
 export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title", "source-out-of-range"] as const;
 export type DbLinkFlag = (typeof DB_LINK_FLAGS)[number];
+/** The table of a database link: the official `link`, or the `external_link` of a personal database (Personal-DB-Creator). */
+export type DbLinkTable = "link" | "external_link";
 
 export type LinkStatus = "new" | "edited" | "existing" | "deleted";
 
@@ -97,6 +99,8 @@ export interface Link {
   /** an approved suggestion's matched words, so the readers can show them again after a save and a reopen (see LinkMatched) */
   readonly matched?: LinkMatched;
   readonly dbAnchors?: readonly DbAnchor[];
+  /** database links only: the table the row was read from (a database can have both; the id says it too, this says it typed) */
+  readonly dbTable?: DbLinkTable;
   /** database links only: what to doubt about this link (see DbLinkFlag) */
   readonly dbFlags?: readonly DbLinkFlag[];
   /** database links only: stored sides Sefaria hides (link_suppressed_side) — not expressible in a file */

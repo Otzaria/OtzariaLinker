@@ -272,6 +272,17 @@ export type PlanStep =
        * user chose for the pair by name has no gate (issue #21: the title engine only where titles match).
        */
       titleGate?: true;
+      /**
+       * The user named the headings method for this pair (PlanChoices.methods): it runs whatever the title check says, and when the check does
+       * not approve it the result carries a warning and nothing of it is "certain" (workers/maxlink-job.ts).
+       */
+      titleForced?: true;
+      /**
+       * The base was chosen between open books that share its exact title (the dependant's own source first, or the official one) and
+       * the user chose neither the source nor the book: nothing says it is the right one. The job lowers what the step finds to "possible"
+       * (workers/maxlink-job.ts), so nothing of it is approved in bulk until the user names the book.
+       */
+      ambiguousBase?: true;
       /** a rough cost (estimateMs); absent when a book's length is not known */
       estimate?: StepEstimate;
     }
@@ -390,6 +401,24 @@ export interface UserPair {
   readonly connectionType?: string;
   /** suggestions of this pair below this confidence are not shown (state/maxlink.ts, at the merge); default: all */
   readonly minConfidence?: "certain" | "high" | "possible" | "ambiguous";
+}
+
+/**
+ * The books a commentary is aimed at in more than one way: the targets of ONE source book's plain pair steps (a whole book against another
+ * whole book, by headings or by quotation) when there are two or more different ones. A line of such a book that has a suggestion in two of
+ * them is never linked to both blindly (merge.ts candidateBooks, step 4d): the surer one wins a step down, equally sure ones are both
+ * "ambiguous". Parts of a book (a scope), paths through another commentary, notes steps and "addressed only" steps are not competitors:
+ * they are about other lines, or say by name which book a line is on.
+ */
+export function competingTargets(steps: readonly PlanStep[]): string[] {
+  const bySource = new Map<string, Set<string>>();
+  for (const s of steps) {
+    if (s.kind !== "pair" || s.engine === "footnotes" || s.relation.kind !== "commentary" || s.relation.scope || s.relation.through || s.options?.["addressedOnly"]) continue;
+    const set = bySource.get(s.source.key);
+    if (set) set.add(s.target.key);
+    else bySource.set(s.source.key, new Set([s.target.key]));
+  }
+  return [...new Set([...bySource.values()].filter((t) => t.size > 1).flatMap((t) => [...t]))];
 }
 
 /** The key of a pair in PlanChoices.methods. */
@@ -857,7 +886,7 @@ const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", 
  */
 const targumTypeOk = (dep: BookRef, base: BookRef): boolean => base.isBaseBook === true && titleDeclaresDependencyOn(dep.title, base.title);
 
-type StepSpec = { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>>; titleGate?: true };
+type StepSpec = { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>>; titleGate?: true; titleForced?: true };
 
 /** A method the user named for a pair that the relation does not give by itself (PlanChoices.methods). */
 function chosenStep(engine: PairEngineId, rel: Relation): StepSpec | null {
@@ -1024,6 +1053,10 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (touching.length) relations.set(b.key, touching);
   }
 
+  // a base whose exact title another open book has too, chosen by a rule and not by the user (a pair with its key, or the source for the bases)
+  const titleCopies = new Map<string, number>();
+  for (const b of input.library) titleCopies.set(b.title.trim(), (titleCopies.get(b.title.trim()) ?? 0) + 1);
+  const sharesTitle = (rel: Relation): boolean => rel.via !== "user" && !input.preferSource && (titleCopies.get(rel.base.title.trim()) ?? 0) > 1;
   const steps: PlanStep[] = [];
   const unsuitable: PlanUnsuitable[] = [];
   const unsuitableSeen = new Set<string>();
@@ -1045,15 +1078,19 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const type = ctl?.connectionType === undefined ? undefined : parseConnectionType(ctl.connectionType);
       if (ctl?.connectionType !== undefined && !type!.known) pushTo(unmade, depKey, `סוג הקישור "${ctl.connectionType}" שנבחר לזוג עם ${quote(rel.base.title)} אינו סוג מוכר, ולכן לא שונה`);
       const declared = type?.known ? ctl!.connectionType!.trim().toLowerCase().replaceAll(" ", "_") : undefined;
-      // the user named the methods of this pair: exactly those (headings then runs with no title gate)
+      // the user named the methods of this pair: exactly those for the matching of the two books (headings then runs with no title gate);
+      // the notes step of a notes book is a different job and goes on, unless the user turned the notes engine off (fix round, claim 5)
       const list: StepSpec[] = wanted
-        ? wanted.flatMap((e) => {
-            const found = own.find((x) => x.engine === e);
-            const step = found ?? chosenStep(e, rel);
-            if (!step) return [];
-            const { titleGate: _gate, ...free } = step;
-            return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
-          })
+        ? [
+            ...wanted.flatMap((e) => {
+              const found = own.find((x) => x.engine === e);
+              const step = found ?? chosenStep(e, rel);
+              if (!step) return [];
+              const { titleGate: _gate, ...free } = step;
+              return [{ ...free, ...(e === "headings" && { titleForced: true as const }), why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
+            }),
+            ...(wanted.includes("footnotes") || !enabled("footnotes") ? [] : own.filter((x) => x.engine === "footnotes")),
+          ]
         : own;
       if (!wanted)
         for (const engine of ["headings", "dibur-hamatchil", "footnotes"] as const) {
@@ -1073,7 +1110,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      steps.push({ id, kind: "pair", ...s, relation: rel });
+      steps.push({ id, kind: "pair", ...s, relation: rel, ...(sharesTitle(rel) && { ambiguousBase: true as const }) });
       bump(s.source.key);
       bump(s.target.key);
       }
@@ -1115,6 +1152,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (comm.length) decisions.push(comm.length === 1 ? `פירוש פתוח אחד כתוב עליו: ${quote(comm[0]!.dependant.title)}.` : `${comm.length} פירושים פתוחים כתובים עליו.`);
     if (notes.length) decisions.push(notes.length === 1 ? `יש לו ספר הערות פתוח: ${quote(notes[0]!.dependant.title)}.` : `יש לו ${notes.length} ספרי הערות פתוחים.`);
     for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
+    const shared = [...new Set(steps.filter((st) => st.kind === "pair" && st.ambiguousBase && st.source.key === k).map((st) => (st.kind === "pair" ? st.target.title : "")))];
+    for (const t of shared) decisions.push(`יש עוד ספר בשם ${quote(t)}, והבסיס נבחר לפי כלל (המקור של הספר, או המאגר הרשמי) ולא לפי ראיה. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו במפורש את הספר (בחירת מקור לספרי הבסיס, או זוג עם הספר עצמו).`);
     if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
     // a pair the user asked for that could not be made, said even when the book's other pairs were made
     const missed = unmade.get(k);

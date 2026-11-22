@@ -4,7 +4,7 @@ import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage"
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
-import { countCoverage, needsRecount, type FailedCount, type PanelSummary } from "./coverage-compute";
+import { countCoverage, coverageTrust, needsRecount, type FailedCount, type PanelSummary } from "./coverage-compute";
 import { plainText } from "./plain-text";
 
 /*
@@ -19,7 +19,7 @@ import { plainText } from "./plain-text";
 const PAGE = 50;
 const BUCKETS: readonly { id: LineCoverage; label: string; hint: string }[] = [
   { id: "linked", label: "מקושרות", hint: "השורה פותחת קישור אחד (או כמה אל אותו מקום)" },
-  { id: "partial", label: "מכוסות בטווח", hint: "קישור של שורה קודמת מגיע עד אליה בטווח" },
+  { id: "partial", label: "מקושרות חלקית", hint: "בשורה כמה יחידות (ציטוטים, הערות או הפניות) ורק חלקן מקושרות, או שרק טווח של שורה קודמת מגיע אליה" },
   { id: "multiple", label: "לכמה מקומות", hint: "שורה שמקושרת לשני מקומות שונים או יותר" },
   { id: "unlinked", label: "בלי קישור", hint: "שורת תוכן שאף קישור לא נוגע בה" },
   { id: "not-suitable", label: "כותרות", hint: "כותרת לא מקבלת קישור (אוצריא מוחקת אותו)" },
@@ -53,12 +53,13 @@ export function CoveragePanel() {
     if (!bookKey || busy) return;
     setBusy(true);
     setFailed(null);
-    const out = await countCoverage((k) => store.coverage.summary(k), bookKey, revision);
+    const out = await countCoverage((k) => store.coverage.summary(k), bookKey, revision, (k) => store.books.value.has(k));
     setBusy(false);
     if (!out.ok) {
       // remembered by book and revision, so the "links changed" rule below does not ask again by itself
       setFailed(out.failed);
-      return void store.notify("warning", out.failed.message);
+      // a count the user stopped is no failure: nothing is announced as one
+      return out.failed.cancelled ? undefined : void store.notify("warning", out.failed.message);
     }
     setSummary(out.summary);
     setShown(PAGE);
@@ -73,6 +74,8 @@ export function CoveragePanel() {
   const kept = book ? store.coverage.saved.value.get(book.title) : undefined;
   const current = fresh ?? (kept ? fromSaved(kept) : null);
   const stale = !fresh && !!kept;
+  // what the read of the database's links said: a failed or missing read is never shown as "no links" or "all unlinked"
+  const trust = coverageTrust(fresh?.links);
   const countedAt = kept?.at;
   // the start of the text of the ranges shown
   useEffect(() => {
@@ -110,9 +113,14 @@ export function CoveragePanel() {
           </button>
         </div>
         {!book && <p class="muted">בחרו ספר באחד הקוראים כדי לראות מה עוד לא מקושר בו.</p>}
-        {book && failed && failed.bookKey === bookKey && (
+        {book && failed && failed.bookKey === bookKey && !failed.cancelled && (
           <p class="warn-text" role="alert">
             {failed.message}
+          </p>
+        )}
+        {book && failed && failed.bookKey === bookKey && failed.cancelled && (
+          <p class="muted small" role="status">
+            החישוב הופסק. לחצו "חישוב כיסוי" כדי לחשב שוב.
           </p>
         )}
         {book && dbBook && (
@@ -120,7 +128,12 @@ export function CoveragePanel() {
             הספר הזה הוא מתוך מסד. הקישורים שיש לו במסד נקראים מהמסד ונספרים יחד עם קישורי הפרויקט, ולכן שורה שהמסד כבר מקשר לא תופיע כ"בלי קישור". בספר גדול הקריאה לוקחת כמה שניות.
           </p>
         )}
-        {current && (
+        {current && !trust.reliable && (
+          <p class="warn-text" role="alert" data-links={trust.kind}>
+            {trust.text}
+          </p>
+        )}
+        {current && trust.reliable && (
           <>
             {countedAt !== undefined && (
               <p class={`cov-stamp small ${stale ? "warn-text" : "muted"}`} role="note" data-stale={stale || undefined}>

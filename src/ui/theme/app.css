@@ -143,7 +143,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .pair-reasons .sign { display: inline-block; inline-size: 1.2em; }
 .fit-badge { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; border: 1px solid var(--outline-variant); }
 .fit-fit { background: var(--secondary-container); color: var(--on-secondary-container); }
-.fit-partial { background: var(--warning-container); color: var(--on-warning-container); }
+.fit-partial, .fit-undecided { background: var(--warning-container); color: var(--on-warning-container); }
 .fit-unfit { background: var(--error-container); color: var(--on-error-container); }
 .warn-text { margin: 0; padding: 6px 8px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
 /* ticking books (issue 26) */

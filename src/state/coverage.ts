@@ -2,7 +2,7 @@ import { signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
-import { candidateLines, coverageCounts, coverageSummary, doubtfulLines, MAX_BOOK_LINES, type CoverageBook, type CoverageSummary } from "../linking/coverage";
+import { candidateLines, contentUnits, coverageCounts, coverageSummary, doubtfulLines, MAX_BOOK_LINES, type CoverageBook, type CoverageReport, type CoverageSummary, type LinksReading } from "../linking/coverage";
 import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../projects/project-format";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
@@ -56,6 +56,8 @@ export interface CoverageRow {
   title: string;
   lineCount: number;
   counts: Omit<CoverageSummary, "ranges">;
+  /** what is known about the database's links of this book: "failed" and "unknown" are not "no links" (LinksReading) */
+  links: LinksReading;
   /**
    * false: the book's headings were not read (`headings: false`) and no text was, so its headings count as unlinked lines and
    * blank lines are not set aside — an upper bound of what is missing. true: headings are not suitable (blank lines still are not read).
@@ -69,6 +71,26 @@ export interface CoverageTableOptions {
   headings?: boolean;
   /** count the database's own links (default true) */
   includeDb?: boolean;
+}
+
+/** A cancel (the user's, or the caller's signal) is not a failure of the read. */
+const isCancel = (err: unknown, signal?: AbortSignal): boolean => {
+  const e = err as { code?: string; name?: string } | null;
+  return signal?.aborted === true || e?.code === "cancelled" || e?.name === "AbortError";
+};
+
+/**
+ * The database's links of a book, and what the read says about them: a failure is NOT an empty list (the book would look as if it had
+ * no links); a cancel is rethrown for the caller to treat as a cancel.
+ */
+async function readDbLinks(read: () => Promise<Link[]>, signal?: AbortSignal): Promise<{ links: Link[]; reading: LinksReading }> {
+  try {
+    const links = await read();
+    return { links, reading: links.length ? { state: "counted", count: links.length } : { state: "none" } };
+  } catch (err) {
+    if (isCancel(err, signal)) throw err;
+    return { links: [], reading: { state: "failed", message: err instanceof Error ? err.message : String(err) } };
+  }
 }
 
 export class CoverageState {
@@ -128,7 +150,7 @@ export class CoverageState {
       if (lineCount <= 0) continue;
       // a database that reports an absurd length: a row that says so, with no per-book reads (headings, links) at all
       if (lineCount > MAX_BOOK_LINES) {
-        yield { key, title: b.title, lineCount, counts: coverageCounts([], { owns: () => false, lineCount, headings: new Set() }), exact: false };
+        yield { key, title: b.title, lineCount, counts: coverageCounts([], { owns: () => false, lineCount, headings: new Set() }), links: { state: "unknown", why: "not-read" }, exact: false };
         continue;
       }
       let headings: ReadonlySet<number> = new Set();
@@ -136,11 +158,19 @@ export class CoverageState {
         const hs = await this.service.headings(key, options.signal ? { signal: options.signal } : {});
         headings = new Set(hs.map((h) => h.line));
       }
-      const db = options.includeDb === false ? [] : await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}).catch(() => [] as Link[]);
+      let read: { links: Link[]; reading: LinksReading };
+      if (options.includeDb === false) read = { links: [], reading: { state: "unknown", why: "not-requested" } };
+      else {
+        try {
+          read = await readDbLinks(() => this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}), options.signal);
+        } catch {
+          return; // cancelled: the table stops
+        }
+      }
       if (options.signal?.aborted) return;
       const book: CoverageBook = { owns: (ref) => this.host.sameBook(ref, key), lineCount, headings };
       const mine = new Set([...(byKey.get(key) ?? []), ...(unresolved.get(b.title) ?? [])]);
-      yield { key, title: b.title, lineCount, counts: coverageCounts([...mine, ...db], book), exact: options.headings === true };
+      yield { key, title: b.title, lineCount, counts: coverageCounts([...mine, ...read.links], book, read.reading), links: read.reading, exact: options.headings === true };
     }
   }
 
@@ -167,12 +197,12 @@ export class CoverageState {
    * The coverage of a book by the project's links as they are now, and (default) the open database's links of the book;
    * null when the book is not open, its length is not known, or the read was cancelled.
    */
-  async summary(bookKey: string, options: CoverageOptions = {}): Promise<CoverageSummary | null> {
+  async summary(bookKey: string, options: CoverageOptions = {}): Promise<CoverageReport | null> {
     const b = this.host.books.value.get(bookKey);
     if (!b) return null;
     // an absurd reported length is answered before anything is read or allocated for it (the result says tooLarge, and is not saved)
     const known = b.lineCount ?? this.host.lines.count(bookKey) ?? (await this.host.lines.learnCount(bookKey)) ?? 0;
-    if (known > MAX_BOOK_LINES) return coverageSummary([], { owns: () => false, lineCount: known, headings: new Set() });
+    if (known > MAX_BOOK_LINES) return { ...coverageSummary([], { owns: () => false, lineCount: known, headings: new Set() }), links: { state: "unknown", why: "not-read" } };
     const suitable = options.unsuitable ? null : await this.suitable(bookKey);
     if (!options.unsuitable && !suitable) return null;
     const first = await this.book(bookKey, options.unsuitable);
@@ -190,17 +220,24 @@ export class CoverageState {
     const candidates = options.includeCandidates === false || !run ? undefined : candidateLines(run.result.suggestions, (id) => state.get(id) === "pending", owns, first.lineCount);
     const report = this.host.quality.report.value;
     const doubtful = options.includeQa === false || !report ? undefined : doubtfulLines(report.issues, owns, first.lineCount);
-    const book: CoverageBook = { ...first, unsuitable, ...(candidates && { candidates }), ...(doubtful && { doubtful }) };
     let db: readonly Link[] = [];
+    let reading: LinksReading = { state: "unknown", why: "not-requested" };
     if (options.includeDb !== false) {
-      const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts).catch(() => [] as Link[]));
+      // a failed read is part of the answer (links.state "failed"), never an empty list; a cancel answers null
+      const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => readDbLinks(() => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts), opts.signal));
       if (got === null) return null;
-      db = got;
+      db = got.links;
+      reading = got.reading;
     }
-    const summary = coverageSummary([...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])], book);
-    // only the full picture is the project's "coverage": a count without the database's links, the candidates or the QA, with other links
-    // or another set of unsuitable lines describes something else, and a reopened project would show it as if it were the whole
-    const full = options.includeDb !== false && options.includeCandidates !== false && options.includeQa !== false && !options.extraLinks?.length && !options.unsuitable;
+    const projectLinks = [...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])];
+    // content units per line: the links and the pending suggestions of the line (a line of several units with one link is partial)
+    const units = run ? contentUnits(projectLinks, options.includeCandidates === false ? [] : run.result.suggestions, (id) => state.get(id) === "pending", owns, first.lineCount) : undefined;
+    const book: CoverageBook = { ...first, unsuitable, ...(candidates && { candidates }), ...(doubtful && { doubtful }), ...(units?.size && { units }) };
+    const summary: CoverageReport = { ...coverageSummary(projectLinks, book, reading), links: reading };
+    // only the full picture is the project's "coverage": a count without the database's links (not asked for, or the read failed), the
+    // candidates or the QA, with other links or another set of unsuitable lines describes something else, and a reopened project would
+    // show it as if it were the whole
+    const full = (reading.state === "counted" || reading.state === "none") && options.includeCandidates !== false && options.includeQa !== false && !options.extraLinks?.length && !options.unsuitable;
     if (full) this.remember(bookKey, book.lineCount, summary);
     return summary;
   }

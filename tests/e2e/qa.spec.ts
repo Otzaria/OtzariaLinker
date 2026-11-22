@@ -116,3 +116,51 @@ test("coverage: a fresh count shows when it was counted; a kept one says it may 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * PR 2's coverage contract (linking/coverage.ts LinksReading): when the database's links of the book could not be read, the panel says so and
+ * does NOT show "all unlinked" or a list of ranges that would say the book has no links; and a count the user stopped is no failure.
+ */
+test("coverage: a failed read of the links is said, never shown as 'all unlinked'; a stopped count is not a failure", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const nl = String.fromCharCode(10);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "ספר שלי.txt", mimeType: "text/plain", buffer: Buffer.from(["<h1>ספר שלי</h1>", "שורה שנייה", "שורה שלישית"].join(nl)) }]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /בדיקה/ }).click();
+  const cov = page.locator("details.coverage");
+  await cov.locator("summary").click();
+
+  const answer = (kind: "failed" | "unknown" | "cancel") =>
+    page.evaluate((k) => {
+      const store = (globalThis as unknown as { __linker: { coverage: { summary: unknown } } }).__linker;
+      const base = { total: 3, byBucket: { linked: 0, unlinked: 2, partial: 0, multiple: 0, "not-suitable": 1, candidate: 0, doubtful: 0 }, suitable: 2, unlinked: 2, unlinkedShare: 1, ranges: [{ start: 1, end: 2 }] };
+      store.coverage.summary = async () => (k === "cancel" ? null : { ...base, links: k === "failed" ? { state: "failed", message: "הדיסק נעלם" } : { state: "unknown", why: "not-read" } });
+    }, kind);
+
+  await answer("failed");
+  await cov.getByRole("button", { name: /^חישוב (כיסוי|מחדש)/ }).click();
+  const alert = cov.locator('[data-links="failed"]');
+  await expect(alert).toContainText("קריאת הקישורים של הספר מהמסד נכשלה");
+  await expect(alert).toContainText("הדיסק נעלם");
+  await expect(cov.locator(".cov-sum")).toHaveCount(0);
+  await expect(cov.locator(".cov-count")).toHaveCount(0);
+  await expect(cov.locator(".cov-range")).toHaveCount(0);
+
+  await answer("unknown");
+  await cov.getByRole("button", { name: /^חישוב (כיסוי|מחדש)/ }).click();
+  await expect(cov.locator('[data-links="unknown"]')).toContainText("לא ידוע");
+  await expect(cov.locator('[data-links="failed"]')).toHaveCount(0);
+  await expect(cov.locator(".cov-range")).toHaveCount(0);
+
+  // a stopped count: no warning, a neutral note, the numbers are not replaced by an error
+  await answer("cancel");
+  await cov.getByRole("button", { name: /^חישוב (כיסוי|מחדש)/ }).click();
+  await expect(cov.getByText("החישוב הופסק")).toBeVisible();
+  await expect(cov.locator('p[role="alert"]:not([data-links])')).toHaveCount(0); // (the earlier summary's own warning stays; no failure message is added)
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

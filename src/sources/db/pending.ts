@@ -13,7 +13,7 @@ let seq = 0;
  * A SQLite file that is not an Otzaria database: its schema preview and an automatic guess, for
  * the mapping wizard. The file handle is kept under a token so openMapped can read it later.
  */
-export async function pendingMapping(path: string, label: string, blob: Blob, pending: Map<string, { blob: Blob; label: string }>): Promise<PendingDb> {
+export async function pendingMapping(path: string, label: string, blob: Blob, pending: Map<string, { blob: Blob; label: string; identity?: string }>): Promise<PendingDb> {
   const file = await SqliteFile.open(blobSource(blob));
   const preview = await previewSchema(file);
   if (!preview.tables.length)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoverageSummary } from "../../../src/linking/coverage";
-import { countCoverage, needsRecount, type FailedCount, type PanelSummary } from "../../../src/ui/workspace/coverage-compute";
+import { countCoverage, coverageTrust, needsRecount, type FailedCount, type PanelSummary } from "../../../src/ui/workspace/coverage-compute";
 
 const SUMMARY: CoverageSummary = {
   total: 10,
@@ -30,6 +30,37 @@ async function runPanel(count: (k: string) => Promise<CoverageSummary | null>, s
   }
   return { calls, summary, failed, looped: true };
 }
+
+describe("coverage panel count: stopped, and what the read of the links says", () => {
+  it("a count the user stopped (null, the book is open) is not a failure: it is remembered by revision, with no message", async () => {
+    const out = await countCoverage(async () => null, "b", 3, () => true);
+    expect(out).toMatchObject({ ok: false, failed: { bookKey: "b", revision: 3, cancelled: true, message: "" } });
+  });
+
+  it("null for a book that is not open is still the 'not open' failure", async () => {
+    const out = await countCoverage(async () => null, "b", 3, () => false);
+    expect(out.ok === false && out.failed.message).toContain("הספר לא פתוח");
+    expect(out.ok === false && out.failed.cancelled).toBeUndefined();
+  });
+
+  it("a stopped count does not make the panel ask again by itself", () => {
+    const stale: PanelSummary = { ...SUMMARY, bookKey: "b", revision: 1 };
+    expect(needsRecount({ summary: stale, bookKey: "b", revision: 2, busy: false, failed: { bookKey: "b", revision: 2, message: "", cancelled: true } })).toBe(false);
+  });
+
+  it("coverageTrust: counted and none are reliable (a book with no links IS all unlinked); failed and unknown are not, and say why", () => {
+    expect(coverageTrust({ state: "counted", count: 3 })).toEqual({ reliable: true });
+    expect(coverageTrust({ state: "none" })).toEqual({ reliable: true });
+    expect(coverageTrust(undefined)).toEqual({ reliable: true }); // a saved coverage: only a reliable one is ever saved
+    const failed = coverageTrust({ state: "failed", message: "disk" });
+    expect(failed.reliable).toBe(false);
+    expect(failed.reliable === false && failed.text).toContain("נכשלה");
+    expect(failed.reliable === false && failed.kind).toBe("failed");
+    const unknown = coverageTrust({ state: "unknown", why: "not-read" });
+    expect(unknown.reliable === false && unknown.kind).toBe("unknown");
+    expect(unknown.reliable === false && unknown.text).not.toContain("נכשלה");
+  });
+});
 
 describe("coverage panel count", () => {
   it("a count that gives nothing is a failure with a message, not an exception", async () => {

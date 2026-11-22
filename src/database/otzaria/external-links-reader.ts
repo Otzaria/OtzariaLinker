@@ -81,8 +81,14 @@ export const isLineNumber = (v: unknown): boolean => {
   return Number.isInteger(n) && n >= 0 && n <= MAX_LINE;
 };
 
-/** below this many lines a range is read with one seek per line; above, the book's rows are read and filtered */
-const SEEK_LINES = 400;
+/**
+ * A range narrower than this is read by seeks (idx_external_link_source), SEEK_BATCH keys at a time; a wider one reads the book's
+ * rows and filters them. Measured on v52's biggest book (119,385 links, 33,484 lines): a call of 399 lines took 4 ms by seeks and
+ * of 1000 lines 379 ms by reading the book, so the old limit of 400 made a walk of the book in pieces of 1000 lines cost 13 s
+ * (rows × calls). The cost of seeks grows with the width, the cost of reading with the book, so the limit is where they meet.
+ */
+const SEEK_LINES = 20_000;
+const SEEK_BATCH = 400;
 const BATCH = 20_000;
 
 export class ExternalLinksReader {
@@ -168,13 +174,16 @@ export class ExternalLinksReader {
     return out;
   }
 
-  /** The links that start on the lines [from, to] of a book: one seek per line for a short range, else the book's rows filtered. */
+  /** The links that start on the lines [from, to] of a book: seeks for a range of fewer than SEEK_LINES lines, else the book's rows filtered. */
   async atLines(bookId: number, from: number, to: number): Promise<ExternalLinkRow[]> {
     if (this.ix && to - from < SEEK_LINES) {
-      const keys: number[][] = [];
-      for (let i = Math.max(0, from); i <= to; i++) keys.push([bookId, i]);
-      const recs = await this.file.seekIndexMany(this.ix, keys);
-      return this.byRowids(recs.map((r) => Number(r.at(-1))));
+      const ids: number[] = [];
+      for (let start = Math.max(0, from); start <= to; start += SEEK_BATCH) {
+        const keys: number[][] = [];
+        for (let i = start; i <= to && i < start + SEEK_BATCH; i++) keys.push([bookId, i]);
+        for (const r of await this.file.seekIndexMany(this.ix, keys)) ids.push(Number(r.at(-1)));
+      }
+      return this.byRowids(ids);
     }
     return (await this.outgoing(bookId)).filter((r) => r.lineIndex >= from && r.lineIndex <= to);
   }

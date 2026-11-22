@@ -84,6 +84,14 @@ export interface DbLinkSummary {
    * target line nor a ref, `orphanSource` rows of the whole database whose source book does not exist.
    */
   unlisted?: { badLine: number; noPlace: number; orphanSource: number };
+  /**
+   * Only for a database that has BOTH a `link` table and `external_link`: what the merge did. `link` and `externalLink` are
+   * the links of this book each table gave to the list; `duplicatesDropped` external_link rows were left out because the
+   * `link` table says the same link (same own line, other book, other line and type); `incomingUnchecked` external_link
+   * rows into this book are listed without being compared with the `link` table (its far end is not known without a
+   * lookup), so a link that both tables hold may appear twice among them.
+   */
+  tables?: { link: number; externalLink: number; duplicatesDropped: number; incomingUnchecked: number };
   /** "index": through idx_link_source_book/idx_link_target_book; "scan": the database has neither (slow) */
   method: "index" | "scan";
   /** what reading the summary cost, for the status line and the real-database test */

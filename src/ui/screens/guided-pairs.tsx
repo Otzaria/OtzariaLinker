@@ -5,9 +5,9 @@ import { CONFIDENCE_LABELS } from "../../linking/automatic";
 import { notesBaseTitle, pairMethodKey, type PairControl, type PairEngineId, type PlanStep, type PlanUnsuitable } from "../../linking/plan";
 import { durationText } from "../../state/guided-flow";
 import { TypeOptions } from "../workspace/type-options";
-import type { TitleFitReport, TitleFitVerdict } from "../../linking/title-fit";
+import type { TitleFitReport } from "../../linking/title-fit";
 import { useStore } from "../context";
-import { fitKey, pairsToAutoCheck } from "./pair-fit";
+import { fitBadge, fitKey, forcedHeadingsWarning, pairsToAutoCheck } from "./pair-fit";
 
 /*
  * The pairs of the guided plan (issues 21 and 26): for each commentary and the book it is written on, whether the titles
@@ -35,7 +35,6 @@ const CHOICES: Record<Choice, { label: string; methods: readonly PairEngineId[] 
   dh: { label: "רק לפי דיבור המתחיל", methods: ["dibur-hamatchil"] },
   both: { label: "כותרות ודיבור המתחיל, בלי בדיקת התאמה", methods: ["headings", "dibur-hamatchil"] },
 };
-const VERDICT: Record<TitleFitVerdict, string> = { fit: "הכותרות מתאימות", partial: "הכותרות מתאימות חלקית", unfit: "הכותרות לא מתאימות" };
 
 interface Pair {
   dependant: BookRef;
@@ -137,7 +136,7 @@ export function PairChoices() {
             const off = ctl.enabled === false;
             const cost = off ? 0 : costOf(plan.steps, p);
             const skipped = plan.unsuitable.filter((u) => u.reason !== "disabled" && u.dependant.title === p.dependant.title && u.base.title === p.base.title);
-            const risky = (choice === "headings" || choice === "both") && fit && fit !== "loading" && fit.verdict === "unfit";
+            const doubt = (choice === "headings" || choice === "both") && fit && fit !== "loading" ? forcedHeadingsWarning(fit) : null;
             return (
               <li key={k} class={`pair-row${off ? " off" : ""}`} data-pair={k}>
                 <div class="pair-names">
@@ -158,7 +157,7 @@ export function PairChoices() {
                         <span class="muted">בודק את הכותרות…</span>
                       ) : fit ? (
                         <>
-                          <span class={`fit-badge fit-${fit.verdict}`}>{VERDICT[fit.verdict]}</span>
+                          <span class={`fit-badge ${fitBadge(fit.verdict).cls}`}>{fitBadge(fit.verdict).text}</span>
                           {(advanced || fit.verdict !== "fit") && (
                             <ul class="pair-reasons">
                               {fit.reasons.map((r) => (
@@ -188,9 +187,9 @@ export function PairChoices() {
                         ))}
                       </select>
                     </label>
-                    {risky && (
+                    {doubt && (
                       <p class="pair-warn warn-text" role="status">
-                        הכותרות של הפירוש אינן של ספר הבסיס, ושיטת הכותרות תקשר שורות למקום שגוי. בחרתם בה במפורש, ולכן היא תרוץ בלי הבדיקה. בדקו את ההצעות שלה בקפידה.
+                        {doubt}
                       </p>
                     )}
                   </>

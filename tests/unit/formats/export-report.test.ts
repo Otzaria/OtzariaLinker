@@ -142,3 +142,35 @@ describe("_report.txt: suggestions and replaced files", () => {
     expect(report).toContain("[קובץ חדש"); // the all-new plan above still says so
   });
 });
+
+/*
+ * Fix round before merge (task 2): a file written although the library's file-name LIST (a snapshot) says the library has
+ * one is recorded in the report, with the snapshot's date, so the reader can check the existing file before submitting.
+ */
+describe("_report.txt: files the library's snapshot list says already exist", () => {
+  const LABEL = "תמונת מצב של רשימת קובצי הקישורים של הספרייה מ־2026-11-22 (3207ad3f)";
+  const listed = { ...ctx, linksFile: () => "missing" as const, libraryFileListed: (t: string) => t === S.title, libraryFileListLabel: LABEL };
+  const mk = (c: ValidationContext) => buildExportReport({ date: "1.1.2026, 10:00:00", app: "2.0.0-test", format: "json", links: planExport([link("a", 2), link("b", 5)], c), altToc });
+
+  it("names the books, the snapshot date, and says the file would replace an existing one", () => {
+    const text = mk(listed);
+    const at = text.indexOf("קבצים שהרשימה מציינת שכבר קיימים בספרייה");
+    expect(at).toBeGreaterThan(-1);
+    const section = text.slice(at, at + 700);
+    expect(section).toContain("2026-11-22");
+    expect(section).toContain("תמונת מצב");
+    expect(section).toContain("פירוש על בראשית_links.json (2 קישורים)");
+    expect(section).toMatch(/יחליף/);
+  });
+
+  it("has no such section when the list names nothing", () => {
+    expect(mk({ ...listed, libraryFileListed: () => false })).not.toContain("קבצים שהרשימה מציינת");
+    expect(report).not.toContain("קבצים שהרשימה מציינת");
+  });
+
+  it("does not hold or drop any link", () => {
+    const p = planExport([link("a", 2), link("b", 5)], listed);
+    expect(p.heldBack).toEqual([]);
+    expect(p.written).toHaveLength(2);
+  });
+});

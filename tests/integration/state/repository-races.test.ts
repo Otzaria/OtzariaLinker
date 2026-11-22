@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import { describe, expect, it } from "vitest";
-import type { CoverageSummary } from "../../../src/linking/coverage";
+import type { CoverageReport, CoverageSummary } from "../../../src/linking/coverage";
 import type { CoverageRow } from "../../../src/state/coverage";
 import { RepositoryState, type RepositoryHost } from "../../../src/state/repository";
 
@@ -18,7 +18,7 @@ const counts = (linked: number, unlinked: number): Omit<CoverageSummary, "ranges
   unlinked,
   unlinkedShare: unlinked / Math.max(1, linked + unlinked),
 });
-const summaryOf = (unlinked: number): CoverageSummary => ({ ...counts(10 - unlinked, unlinked), ranges: [] });
+const summaryOf = (unlinked: number): CoverageReport => ({ ...counts(10 - unlinked, unlinked), ranges: [], links: { state: "none" } });
 
 function gate() {
   let open!: () => void;
@@ -28,7 +28,9 @@ function gate() {
 
 function make(opts: {
   rows?: (keys: readonly string[]) => AsyncGenerator<CoverageRow>;
-  summary?: (key: string) => Promise<CoverageSummary | null>;
+  summary?: (key: string) => Promise<CoverageReport | null>;
+  /** the keys the host has open (default: none, as before) */
+  open?: readonly string[];
   read?: (key: string) => Promise<unknown>;
 }) {
   const sources = signal<readonly unknown[]>([source("A", 2), source("B", 1)]);
@@ -38,6 +40,7 @@ function make(opts: {
       rows: (keys: readonly string[]) => (opts.rows ? opts.rows(keys) : (async function* () {})()),
       summary: opts.summary ?? (async () => null),
     },
+    books: signal(new Map((opts.open ?? []).map((k) => [k, {}] as const))),
     isLibrarySource: () => false,
   } as unknown as RepositoryHost;
   const service = {
@@ -76,7 +79,7 @@ describe("repository state: counts that end late", () => {
     const { repo, sources } = make({
       rows: async function* (keys) {
         await g.opened;
-        yield { key: keys[0]!, title: "t", lineCount: 10, counts: counts(5, 5), exact: false };
+        yield { key: keys[0]!, title: "t", lineCount: 10, counts: counts(5, 5), links: { state: "none" }, exact: false };
       },
     });
     await repo.analyze();
@@ -96,7 +99,7 @@ describe("repository state: counts that end late", () => {
     const { repo } = make({
       rows: async function* (keys) {
         await g.opened;
-        yield { key: keys[0]!, title: "t", lineCount: 10, counts: counts(5, 5), exact: false };
+        yield { key: keys[0]!, title: "t", lineCount: 10, counts: counts(5, 5), links: { state: "none" }, exact: false };
       },
     });
     await repo.analyze();
@@ -117,7 +120,7 @@ describe("repository state: coverage failures", () => {
         for (const k of keys) {
           if (!first) throw new Error("db gone");
           first = false;
-          yield { key: k, title: "t", lineCount: 10, counts: counts(5, 5), exact: false };
+          yield { key: k, title: "t", lineCount: 10, counts: counts(5, 5), links: { state: "none" }, exact: false };
         }
       },
     });
@@ -132,10 +135,10 @@ describe("repository state: coverage failures", () => {
     expect(repo.error.value).toBeNull();
   });
 
-  it("a book the database says has links, whose count found no linked line, is unknown, not 100% unlinked", async () => {
+  it("a book whose links could not be read (links.state failed) is unknown, not 100% unlinked; one that has none (state none) is 100% unlinked", async () => {
     const { repo } = make({
       rows: async function* (keys) {
-        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(0, 10), exact: false };
+        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(0, 10), links: k === "A:1" ? ({ state: "failed", message: "disk" } as const) : ({ state: "none" } as const), exact: false };
       },
       read: async (key) => ({ bookKey: key, total: key.endsWith(":1") ? 4 : 0, out: 0, in: 0, byType: [], byBook: [] }),
     });
@@ -143,16 +146,45 @@ describe("repository state: coverage failures", () => {
     await repo.countCoverage(["A:1", "A:2"]);
     const withLinks = repo.rows.value.get("A:1")!;
     expect(withLinks.coverage).toBeUndefined();
-    expect(withLinks.coverageUnknown).toContain("הכיסוי לא ידוע");
+    expect(withLinks.coverageUnknown).toContain("קריאת הקישורים של הספר מהמסד נכשלה");
+    expect(withLinks.coverageUnknown).toContain("disk");
+    expect(withLinks.coverageFailed).toBe(true);
     // a book that really has no links is 100% unlinked, and says so
     expect(repo.rows.value.get("A:2")!.coverage).toMatchObject({ unlinked: 10, linked: 0 });
     expect(repo.rows.value.get("A:2")!.coverageUnknown).toBeUndefined();
   });
 
+  it("a read the count did not make (links.state unknown) is unknown too, never a zero; a book with links read (counted) shows its coverage", async () => {
+    const { repo } = make({
+      rows: async function* (keys) {
+        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(3, 7), links: k === "A:1" ? ({ state: "unknown", why: "not-read" } as const) : ({ state: "counted", count: 4 } as const), exact: false };
+      },
+    });
+    await repo.analyze();
+    await repo.countCoverage(["A:1", "A:2"]);
+    expect(repo.rows.value.get("A:1")!.coverage).toBeUndefined();
+    expect(repo.rows.value.get("A:1")!.coverageUnknown).toContain("לא נקראו");
+    expect(repo.rows.value.get("A:1")!.coverageFailed).toBeUndefined();
+    expect(repo.rows.value.get("A:2")!.coverage).toMatchObject({ unlinked: 7, linked: 3 });
+  });
+
+  it("a book the database said has links is not turned unknown by a guess: the read's own state decides", async () => {
+    const { repo } = make({
+      rows: async function* (keys) {
+        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(0, 10), links: { state: "none" }, exact: false };
+      },
+      read: async (key) => ({ bookKey: key, total: 4, out: 4, in: 0, byType: [], byBook: [] }),
+    });
+    await repo.analyze();
+    await repo.countCoverage(["A:1"]);
+    expect(repo.rows.value.get("A:1")!.coverage).toMatchObject({ unlinked: 10 });
+    expect(repo.rows.value.get("A:1")!.coverageUnknown).toBeUndefined();
+  });
+
   it("the row says whether the count is exact (headings read), as its comment promises", async () => {
     const { repo } = make({
       rows: async function* (keys) {
-        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(5, 5), exact: k === "A:1" };
+        for (const k of keys) yield { key: k, title: "t", lineCount: 10, counts: counts(5, 5), links: { state: "none" }, exact: k === "A:1" };
       },
     });
     await repo.analyze();
@@ -175,6 +207,22 @@ describe("repository state: one book's coverage", () => {
     gA.open();
     await slow;
     expect(repo.bookCoverage.value).toMatchObject({ bookKey: "A:2", summary: { unlinked: 2 } });
+    expect(repo.bookCoverageBusy.value).toBeNull();
+  });
+
+  it("the details keep what the read of the links said, so the screen can say 'failed' instead of 'all unlinked'", async () => {
+    const failed: CoverageReport = { ...summaryOf(10), links: { state: "failed", message: "disk" } };
+    const { repo } = make({ summary: async () => failed });
+    await repo.countBookCoverage("A:1");
+    expect(repo.bookCoverage.value).toMatchObject({ bookKey: "A:1", summary: { links: { state: "failed", message: "disk" } } });
+    expect(repo.error.value).toBeNull();
+  });
+
+  it("a count the user stopped (null for a book that is open) is not an error and shows nothing", async () => {
+    const { repo } = make({ summary: async () => null, open: ["A:1"] });
+    await repo.countBookCoverage("A:1");
+    expect(repo.error.value).toBeNull();
+    expect(repo.bookCoverage.value).toBeNull();
     expect(repo.bookCoverageBusy.value).toBeNull();
   });
 

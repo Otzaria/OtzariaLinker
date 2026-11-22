@@ -4,6 +4,8 @@ import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
 import type { PairConfidence, PairProposal } from "../../linking/discovery";
 import { isSuspicious, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoRow, type RepoSort } from "../../state/repository";
+import { linksReadingText } from "../../linking/coverage";
+import { coverageTrust } from "../workspace/coverage-compute";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import "./repository.css";
@@ -370,7 +372,7 @@ function BookRow({ title, row, checked, current, onPick, onOpen }: { title: stri
       </button>
       <span class="repo-meta muted">
         {!row ? "לא נבדק" : row.unavailable ? "אי אפשר לקרוא" : row.total === 0 ? <b class="repo-none">בלי קישורים</b> : many(row.total, "קישור אחד", "קישורים")}
-        {row?.coverageUnknown && " · הכיסוי לא ידוע"}
+        {row?.coverageUnknown && (row.coverageFailed ? " · קריאת הקישורים נכשלה" : " · הכיסוי לא ידוע")}
         {row && !row.unavailable && row.flags.length > 0 && (
           <span class="repo-flagged" title={row.flags.map((f) => `${DB_LINK_FLAG_LABELS[f.flag].he}: ${n(f.count)}`).join("\n")}>
             {" "}
@@ -393,6 +395,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
   // the coverage counted for this book's details: the state names its book, so a slow count of the previous book is never shown here
   const counted = repo.bookCoverage.value;
   const cov = counted && counted.bookKey === bookKey ? counted.summary : null;
+  const trust = coverageTrust(cov?.links);
   const busy = repo.bookCoverageBusy.value === bookKey;
   const box = useRef<HTMLElement>(null);
   const head = useRef<HTMLHeadingElement>(null);
@@ -509,8 +512,14 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
           פתיחה בקורא
         </button>
       </div>
-      {cov && (
+      {cov && !trust.reliable && (
+        <p class="warn-text small" role="alert" data-links={trust.kind}>
+          {trust.text}
+        </p>
+      )}
+      {cov && trust.reliable && (
         <>
+          {cov.links && <p class="muted small">{linksReadingText(cov.links)}</p>}
           <p class="small" role="status">
             {cov.unlinked === 0 ? "כל שורות התוכן מקושרות או מכוסות." : `${n(cov.unlinked)} מתוך ${n(cov.suitable)} שורות תוכן בלי קישור, ב־${n(cov.ranges.length)} קטעים.`}
           </p>

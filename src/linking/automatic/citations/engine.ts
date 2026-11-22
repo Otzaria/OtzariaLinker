@@ -1,4 +1,4 @@
-import { INLINE_LINKER_TYPE } from "../../../core/links/connection-type";
+import { INLINE_LINKER_TYPE, inlineLinkerVersionNote } from "../../../core/links/connection-type";
 import type { BookRef, LinkSide, RawAnchor } from "../../../core/links/model";
 import {
   confidenceOf,
@@ -65,6 +65,11 @@ export interface CitationsOptions extends SefariaOwnedOption {
   readonly thresholds?: ConfidenceThresholds;
   /** alternatives kept on each suggestion. Default 3. */
   readonly maxAlternatives?: number;
+  /**
+   * Run on a book although the suitability gate sees no sign of a place in it (suitability.ts CITATION_GATE): a book that cites by the name of a
+   * book and numbers alone, with no place word, may be skipped by it. Default false.
+   */
+  readonly noGate?: boolean;
 }
 
 const ENGINE = "citations" as const;
@@ -209,6 +214,7 @@ export class CitationRun {
       scope: options.scope ?? "all",
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
+      noGate: options.noGate ?? false,
     };
     this.sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
     this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid, self: source }, source.title, units);
@@ -541,7 +547,7 @@ export class CitationRun {
     if (!cache.size) return null;
     const without = [...cache.values()].filter((v) => !v).length;
     if (!without && this.opts.citationType === "inline-linker")
-      return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי".' };
+      return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote() };
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
     if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };

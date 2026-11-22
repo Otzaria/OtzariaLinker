@@ -1,4 +1,4 @@
-import { APP_DEPENDENT_TYPES, canonicalTypeString, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
+import { APP_DEPENDENT_TYPES, canonicalTypeString, inlineLinkerVersionNote, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
 import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
@@ -105,12 +105,21 @@ export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "miss
  */
 export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held", "export/inline-linker-private-only"]);
 
+/**
+ * The warning for a book the library's file-name list names (and the database does not mark): the list is a SNAPSHOT of
+ * the library from a given day, so it is a hint to check the file, not a fact that holds the export back.
+ */
+function librarySnapshotText(title: string, ctx: ValidationContext): string {
+  const file = `"${title}_links.json"`;
+  return `${ctx.libraryFileListLabel ?? "רשימת קובצי הקישורים של הספרייה (תמונת מצב)"} מציינת שיש בספרייה קובץ בשם ${file}. זו תמונת מצב: ייתכן שהקובץ נוסף או הוסר מאז. הייצוא כותב את הקובץ של ספר המקור, ואם הקובץ קיים בספרייה, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו. בדקו בספרייה אם הקובץ קיים, וטענו אותו מהספרייה אם כן. אם אין לספר קובץ, אפשר להתעלם מהאזהרה.`;
+}
+
 /** The hold on a book whose library file is not loaded: what is known about that file (#18). */
 function libraryFileText(title: string, ctx: ValidationContext): string {
   const file = `"${title}_links.json"`;
   const how = `טענו אותו מהספרייה, או אשרו שאין לספר קובץ.`;
   if (ctx.libraryFileListed?.(title) === true)
-    return `בספרייה יש קובץ בשם ${file} (לפי ${ctx.libraryFileListLabel ?? "רשימת הקבצים של הספרייה"}). הייצוא כותב את הקובץ של ספר המקור, ולכן קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו: ${how}`;
+    return `ייתכן שבספרייה יש קובץ בשם ${file}: הוא מופיע ב${ctx.libraryFileListLabel ?? "רשימת הקבצים של הספרייה (תמונת מצב)"}, שעלולה להיות ישנה. הייצוא כותב את הקובץ של ספר המקור, ולכן קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו: ${how}`;
   if (ctx.libraryFileListed?.(title) === false)
     return `במסד מסומן שיש ל"${title}" קישורים (הסימן רחב: הוא סופר גם קישורי ספריא וקישורים אוטומטיים), אבל ברשימת קובצי הקישורים של הספרייה (${ctx.libraryFileListLabel ?? "הרשימה שבכלי"}) אין קובץ בשם ${file}. אם נוסף מאז, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: ${how} פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`;
   return `הייצוא כותב את הקובץ של ספר המקור, ${file}, ובמסד מסומן שיש ל"${title}" קישורים. הסימן רחב (הוא סופר גם קישורי ספריא וקישורים אוטומטיים), ולכן ייתכן שבספרייה אין לו קובץ. אם יש, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: טענו אותו מהספרייה, או אשרו שאין לספר קובץ. פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`;
@@ -147,8 +156,11 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const sefariaOwnedBook = ctx.sefariaOwned ? ctx.sefariaOwned(s.book) : s.book.origin === "sefaria";
   const nameClash = !!ctx.sefariaTitle?.(s.book) && !sefariaOwnedBook;
   const listedHold = ctx.purpose !== "private" && !nameClash && ctx.libraryFileListed?.(s.book.title) === true;
-  if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && (ctx.libraryMayHaveFile?.(s.book.title) || listedHold))
-    add("error", "export/library-file-not-loaded", libraryFileText(s.book.title, ctx));
+  // The database's mark is current data and keeps its hold. The list is a snapshot (a date, a commit): it only warns, and the
+  // user decides (load the file, confirm there is none, or go on) — it never holds an export back by itself.
+  const fileMissing = fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file";
+  if (fileMissing && ctx.libraryMayHaveFile?.(s.book.title)) add("error", "export/library-file-not-loaded", libraryFileText(s.book.title, ctx));
+  else if (fileMissing && listedHold) add("warning", "export/library-file-snapshot", librarySnapshotText(s.book.title, ctx));
   const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
   if (match === "same-link")
     add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");
@@ -167,6 +179,7 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const inlinePrivate = inline && ctx.purpose === "private" && isDocumentedInlineLinker(link.declaredType);
   if (inline && ctx.purpose !== "private")
     add("error", "export/inline-linker-private-only", `הסוג "ציטוט בטקסט" (INLINE_LINKER) מוכר רק לייבוא האישי של אוצריא. ספריית אוצריא והסנכרון השבועי שלה לא מכירים אותו ויישמרו את הקישור כ"אחר", בלי הציטוט בגוף הטקסט. בחרו בחלון הייצוא "לשימוש פרטי", או בחרו סוג אחר.`, "Conection Type INLINE_LINKER");
+  if (inlinePrivate) add("warning", "export/inline-linker-version", inlineLinkerVersionNote());
   if (inlinePrivate) {
     // the app's own rules (user_import_parser.dart): start and an end after it, from one source line
     if (!link.anchor || link.anchor.rawEnd === undefined || link.anchor.rawEnd <= link.anchor.rawStart)

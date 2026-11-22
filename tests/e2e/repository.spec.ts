@@ -291,3 +291,47 @@ test("repository: with links in the project, no action of the screen removes or 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * PR 2's coverage contract on the repository screen: a book whose links were not read is "coverage unknown" (and a failed read says it
+ * failed), never "no links" or "all unlinked"; a book that has none, read successfully, IS all unlinked.
+ */
+test("repository: a failed or missing read of a book's links is never shown as 'all unlinked'", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  await dlg.getByLabel("חיפוש ספר").fill("ארצות החיים");
+  await dlg.locator(".repo-book", { hasText: "6 קישורים" }).first().getByRole("button", { name: /^פרטי הספר/ }).click();
+  const detail = dlg.getByRole("region", { name: /^פרטי הספר/ });
+  await expect(detail).toContainText("6", { timeout: 30_000 });
+
+  const show = (links: unknown) =>
+    page.evaluate((l) => {
+      const store = (globalThis as unknown as { __linker: { repository: { bookCoverage: { value: unknown }; bookCoverageBusy: { value: unknown } } } }).__linker;
+      const repo = (globalThis as unknown as { __linker: { repository: { books: { value: { key: string; title: string }[] } } } }).__linker.repository;
+      const book = repo.books.value.find((b) => b.title === "ארצות החיים")!;
+      store.repository.bookCoverage.value = { bookKey: book.key, summary: { total: 100, byBucket: { linked: 0, unlinked: 90, partial: 0, multiple: 0, "not-suitable": 10, candidate: 0, doubtful: 0 }, suitable: 90, unlinked: 90, unlinkedShare: 1, ranges: [{ start: 3, end: 90 }], links: l } };
+    }, links);
+
+  await show({ state: "failed", message: "הדיסק נעלם" });
+  const failed = detail.locator('[data-links="failed"]');
+  await expect(failed).toContainText("נכשלה");
+  await expect(failed).toContainText("הדיסק נעלם");
+  await expect(detail).not.toContainText("90 מתוך 90");
+  await expect(detail.getByRole("list", { name: "קטעים בלי קישור" })).toHaveCount(0);
+
+  await show({ state: "unknown", why: "not-read" });
+  await expect(detail.locator('[data-links="unknown"]')).toContainText("לא נקראו");
+  await expect(detail.getByRole("list", { name: "קטעים בלי קישור" })).toHaveCount(0);
+
+  // read, and the book has none: all unlinked IS the truth, and the read is said
+  await show({ state: "none" });
+  await expect(detail.locator("[data-links]")).toHaveCount(0);
+  await expect(detail).toContainText("אין לו קישורים שם");
+  await expect(detail).toContainText("90 מתוך 90 שורות תוכן בלי קישור");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

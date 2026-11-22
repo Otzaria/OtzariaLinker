@@ -4,7 +4,7 @@ import type { ConnectionType } from "../core/links/connection-type";
 import type { DbLinkFlag, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { UserPair } from "../linking/plan";
 import { discoverPairs, type DiscoveryBook, type PairProposal } from "../linking/discovery";
-import type { CoverageSummary } from "../linking/coverage";
+import { linksReadingText, type CoverageReport } from "../linking/coverage";
 import type { CoverageRow, CoverageState } from "./coverage";
 import type { BooksService, OpenedSource } from "./services";
 
@@ -41,11 +41,12 @@ export interface RepoRow {
   /** the lines by what links them, once counted (CoverageRow); `unlinked` is an upper bound unless `exact` (the book's headings were read) */
   coverage?: { suitable: number; unlinked: number; linked: number; partial: number; multiple: number; notSuitable: number; exact: boolean; at: number };
   /**
-   * why the coverage of this book is NOT shown although it was asked for: the database says it has links, but the count found no
-   * line they touch, which is what a failed read of the links looks like (linking/coverage.ts counts a failed read as "no links"),
-   * and "100% unlinked" would be a lie. Unknown is not zero.
+   * why the coverage of this book is NOT shown although it was asked for: the read of its links (linking/coverage.ts LinksReading, PR 2's
+   * contract) failed or was not made, and "100% unlinked" would say that the book has no links when nobody knows. Unknown is not zero.
    */
   coverageUnknown?: string;
+  /** coverageUnknown because the read FAILED (not merely not made): the list says so */
+  coverageFailed?: true;
 }
 
 /** A book is "suspicious" when at least this share of its links carry a flag (and at least SUSPICIOUS_MIN of them). */
@@ -74,6 +75,8 @@ export interface RepoTotals {
 export interface RepositoryHost {
   readonly sources: ReadonlySignal<readonly OpenedSource[]>;
   readonly coverage: Pick<CoverageState, "rows" | "summary">;
+  /** the books open in the app: a null coverage of one of them is a count that was stopped, not a book that is not open */
+  readonly books?: ReadonlySignal<ReadonlyMap<string, unknown>>;
   isLibrarySource(sourceId: string): boolean;
 }
 
@@ -110,7 +113,7 @@ export class RepositoryState {
   /** the last error of a count the user asked for (a coverage count that failed); null when the last one did not fail */
   readonly error = signal<string | null>(null);
   /** the coverage of ONE book, counted for its details: it names the book, so another book's details never show it */
-  readonly bookCoverage = signal<{ bookKey: string; summary: CoverageSummary } | null>(null);
+  readonly bookCoverage = signal<{ bookKey: string; summary: CoverageReport } | null>(null);
   /** the book whose details coverage is being counted */
   readonly bookCoverageBusy = signal<string | null>(null);
   private abort: AbortController | null = null;
@@ -327,7 +330,8 @@ export class RepositoryState {
       const summary = await this.host.coverage.summary(bookKey);
       if (run !== this.bookRun) return;
       if (summary) this.bookCoverage.value = { bookKey, summary };
-      else this.error.value = "אי אפשר לחשב כיסוי: הספר לא פתוח, או שאורכו עדיין לא ידוע.";
+      // null: the book is not open, or the user stopped the task. A stop is not an error.
+      else if (!this.host.books?.value.has(bookKey)) this.error.value = "אי אפשר לחשב כיסוי: הספר לא פתוח, או שאורכו עדיין לא ידוע.";
     } catch (err) {
       if (run === this.bookRun) this.error.value = `חישוב הכיסוי נכשל: ${(err as Error).message ?? err}`;
     } finally {
@@ -405,15 +409,15 @@ export class RepositoryState {
 }
 
 /**
- * The row with its counted coverage. The database says the book has links (`total`) but no line was found linked: the read of the
- * links failed (coverage.ts reports that as "no links"), so the coverage stays unknown instead of showing every line as unlinked.
+ * The row with its counted coverage, by what the read of the book's links said (CoverageRow.links): counted and none are a coverage (a
+ * book with no links IS all unlinked); failed and unknown are not, and the row says that its coverage is unknown and why instead.
  */
 function withCoverage(cur: RepoRow, row: CoverageRow): RepoRow {
-  const c = row.counts.byBucket;
-  if (cur.total > 0 && c.linked + c.partial + c.multiple === 0) {
-    const { coverage: _old, ...rest } = cur;
-    return { ...rest, coverageUnknown: "לספר יש קישורים במסד, אבל לא נמצאה אף שורה שהם נוגעים בה: כנראה שקריאת הקישורים נכשלה, ולכן הכיסוי לא ידוע." };
+  const { coverageUnknown: _u, coverageFailed: _f, ...rest } = cur;
+  if (row.links.state === "failed" || row.links.state === "unknown") {
+    const { coverage: _old, ...bare } = rest;
+    return { ...bare, coverageUnknown: linksReadingText(row.links), ...(row.links.state === "failed" && { coverageFailed: true as const }) };
   }
-  const { coverageUnknown: _gone, ...rest } = cur;
+  const c = row.counts.byBucket;
   return { ...rest, coverage: { suitable: row.counts.suitable, unlinked: row.counts.unlinked, linked: c.linked, partial: c.partial, multiple: c.multiple, notSuitable: c["not-suitable"], exact: row.exact, at: Date.now() } };
 }

@@ -38,9 +38,11 @@ const bytes = readFileSync("dist/OtzariaLinker.html").length;
 // size budget: the file is opened by double-click on ordinary machines; growth must be a decision
 // (1.5 MiB → 1.75 MiB on 2026-11-16: the citations reference data — Mishnah/Yerushalmi chapter openings, Rambam
 // topic names, ~40 KB — and the links compare/merge/table, ~33 KB; the fonts are ~190 KB of it)
-// (1.75 MiB → 1.9 MiB: the external_link reader, the library link-file names, per-pair controls, coverage, the personal links.csv
-// writer and the repository screens; the limit is 1.9 MiB = 1,992,294 bytes)
-const BUDGET = 1.9 * 1024 * 1024;
+// (the external_link reader, the library link-file names, per-pair controls, coverage, the personal links.csv writer and the repository screens of PR 3
+// took it past 1.9 MiB; the limit is now the one below)
+// (1.75 MiB → 2 MiB on 2026-11-22, on the owner's decision: the branch was already 11 KB from the cap and the V6 PR 2 fix round added ~22 KB —
+// line filter, title advisor, coverage states, discovery evidence, citations gate — of code and Hebrew text)
+const BUDGET = 2 * 1024 * 1024;
 if (bytes > BUDGET) {
   console.error(`Size budget exceeded: ${bytes} bytes > ${BUDGET}. Raise BUDGET in scripts/package-release.mjs only on purpose.`);
   process.exit(1);
