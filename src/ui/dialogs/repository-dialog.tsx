@@ -19,6 +19,8 @@ const PAGE = 100;
 const PAIRS_PAGE = 50;
 const COVERAGE_AT_ONCE = 200;
 const n = (x: number) => x.toLocaleString("he");
+/** "ספר אחד" / "5 ספרים": the Hebrew count, never "1 ספרים". */
+const many = (x: number, one: string, other: string) => (x === 1 ? one : `${n(x)} ${other}`);
 const FILTERS = {
   all: "כל הספרים",
   "no-links": "בלי קישורים",
@@ -54,7 +56,12 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [shown, setShown] = useState(PAGE);
   const [detail, setDetail] = useState<string | null>(null);
-  useEffect(() => ref.current?.showModal(), []);
+  useEffect(() => {
+    ref.current?.showModal();
+    repo.dropStale();
+    return () => repo.cancel();
+  }, []);
+  useEffect(() => repo.dropStale(), [repo.books.value]);
 
   // the list: filtered and sorted from the small rows; only a page of it is in the page
   const list = useMemo(() => {
@@ -69,6 +76,8 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
       if (filter === "suspicious") return isSuspicious(r);
       return (unlinkedShare(r) ?? 0) >= 0.5;
     });
+    const byName = new Intl.Collator("he");
+    if (sort === "title") out.sort((a, b) => byName.compare(a.title, b.title));
     const total = (k: string) => rows.get(k)?.total;
     const share = (k: string) => (rows.get(k) ? unlinkedShare(rows.get(k)!) : null);
     if (sort === "links-asc") out.sort((a, b) => (total(a.key) ?? Infinity) - (total(b.key) ?? Infinity));
@@ -102,7 +111,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
           ) : (
             <>
               <p class="muted" style="margin:0">
-                הניתוח קורא את הקישורים של כל ספר במסד, אחד אחד, ומראה איפה חסרים קישורים. הוא רק קורא: שום דבר לא נכתב למסד, ושום דבר לא רץ עד שתבחרו ספרים ותלחצו "השלמת קישורים".
+                הניתוח קורא את הקישורים של כל ספר במסד, אחד אחד, ומראה איפה חסרים קישורים. הוא רק קורא: שום דבר לא נכתב למסד, ושום דבר לא רץ בלי שתפעילו אותו: "השלמת קישורים" רק פותחת את התהליך המודרך עם הספרים שבחרתם, והוא מתחיל לרוץ כשתלחצו שם על "הפעלה".
               </p>
               {repo.repositories.value.length > 1 && (
                 <label class="field">
@@ -120,10 +129,12 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 <div class="row">
                   {!busy ? (
                     <>
-                      <button class="btn tonal" onClick={() => void repo.analyze()} disabled={!repo.available || totals.counted >= totals.books}>
-                        <Icon name="oz_link_check" size={18} />
-                        {totals.counted ? "המשך הניתוח" : "ניתוח הקישורים של הספרים"}
-                      </button>
+                      {totals.counted < totals.books && (
+                        <button class="btn tonal" onClick={() => void repo.analyze()} disabled={!repo.available}>
+                          <Icon name="oz_link_check" size={18} />
+                          {totals.counted ? "המשך הניתוח" : "ניתוח הקישורים של הספרים"}
+                        </button>
+                      )}
                       {totals.counted > 0 && (
                         <button class="btn text" onClick={() => void repo.analyze(true)}>
                           ניתוח מחדש מההתחלה
@@ -137,9 +148,10 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 {progress && (
-                  <div role="status" aria-live="polite" class="repo-progress">
-                    <progress max={progress.total || 1} value={progress.done} aria-label="התקדמות הניתוח" />
-                    <span>
+                  <div class="repo-progress">
+                    <span class="sr-only" role="status">{progress.stage === "links" ? "הניתוח רץ." : "חישוב הכיסוי רץ."}</span>
+                    <progress max={progress.total || 1} value={progress.done} aria-label="התקדמות הניתוח" aria-valuetext={`${n(progress.done)} מתוך ${n(progress.total)} ספרים`} />
+                    <span aria-hidden="true">
                       {progress.stage === "links" ? "נקראו הקישורים של" : "חושב כיסוי של"} {n(progress.done)} מתוך {n(progress.total)} ספרים. אפשר לעצור, והספרים שנקראו נשמרים.
                     </span>
                   </div>
@@ -147,14 +159,14 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 {!progress && repo.analyzedAt.value !== null && (
                   <p class="muted small" role="status" style="margin:0">
                     {totals.counted >= totals.books
-                      ? `נקראו הקישורים של כל ${n(totals.books)} הספרים.`
+                      ? `${totals.books === 1 ? "נקראו הקישורים של הספר היחיד" : `נקראו הקישורים של כל ${n(totals.books)} הספרים`}.`
                       : `נקראו הקישורים של ${n(totals.counted)} מתוך ${n(totals.books)} ספרים; "המשך הניתוח" קורא את השאר.`}{" "}
                     הניתוח האחרון: <time class="repo-time">{new Date(repo.analyzedAt.value).toLocaleString("he", { dateStyle: "medium", timeStyle: "short" })}</time>. המספרים לא מתעדכנים לבד אם המסד או הפרויקט משתנים.
                   </p>
                 )}
                 {!progress && totals.counted === 0 && askedMany && (
                   <p class="muted small" style="margin:0">
-                    יש כאן {n(totals.books)} ספרים, ולכן הניתוח המלא עשוי לקחת כמה דקות. הרשימה למטה פועלת כבר עכשיו, ואפשר לנתח רק ספרים מסוימים: חפשו, ובחרו "חישוב כיסוי" לספרים שברשימה.
+                    יש כאן {n(totals.books)} ספרים, ולכן הניתוח המלא עשוי לקחת כמה דקות. אפשר לעצור אותו בכל רגע: הספרים שנקראו נשארים, והרשימה והחיפוש פועלים כבר עכשיו.
                   </p>
                 )}
               </div>
@@ -212,7 +224,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   <input type="search" value={query} onInput={(e) => setQuery(e.currentTarget.value)} placeholder="חלק מהשם…" />
                 </label>
                 <label class="field">
-                  הצגה
+                  אילו ספרים להציג
                   <select aria-label="אילו ספרים להציג" value={filter} onChange={(e) => setFilter(e.currentTarget.value as Filter)}>
                     {(Object.keys(FILTERS) as Filter[]).map((f) => (
                       <option key={f} value={f}>
@@ -222,7 +234,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   </select>
                 </label>
                 <label class="field">
-                  סדר
+                  סדר הרשימה
                   <select aria-label="סדר הרשימה" value={sort} onChange={(e) => setSort(e.currentTarget.value as RepoSort)}>
                     {(Object.keys(SORTS) as RepoSort[]).map((s) => (
                       <option key={s} value={s}>
@@ -233,15 +245,15 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 </label>
               </div>
               <div class="row">
-                <span class="muted" role="status" aria-live="polite">
-                  {n(list.length)} ספרים{filter !== "all" && totals.counted < totals.books ? " (מתוך מה שנקרא עד עכשיו)" : ""}
+                <span class="muted">
+                  {many(list.length, "ספר אחד", "ספרים")}{filter !== "all" && totals.counted < totals.books ? " (מתוך מה שנקרא עד עכשיו)" : ""}
                 </span>
                 <span class="grow" />
                 <button class="btn text small" onClick={() => repo.setPickedBooks([...picked, ...list.slice(0, shown).map((b) => b.key)])} disabled={!list.length}>
                   סימון המוצגים
                 </button>
                 <button class="btn text small" onClick={() => repo.setPickedBooks([])} disabled={!picked.size}>
-                  ביטול הסימון
+                  ביטול סימון הספרים
                 </button>
                 <button class="btn text small" onClick={() => void repo.countCoverage(list.slice(0, COVERAGE_AT_ONCE).map((b) => b.key))} disabled={busy || !totals.counted || !list.length} title="סופר כמה שורות בכל ספר כבר מקושרות. נעשה לספרים שברשימה, עד 200 בכל פעם">
                   חישוב כיסוי לספרים שברשימה
@@ -257,7 +269,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   {list.length > shown && (
                     <div style="text-align:center;padding:6px">
                       <button class="btn outlined" onClick={() => setShown(shown + PAGE)}>
-                        הצגת עוד ({n(list.length - shown)} ספרים)
+                        הצגת עוד ({many(list.length - shown, "ספר אחד", "ספרים")})
                       </button>
                     </div>
                   )}
@@ -307,7 +319,7 @@ function BookRow({ title, row, checked, current, onPick, onOpen }: { title: stri
         {title}
       </button>
       <span class="repo-meta muted">
-        {!row ? "לא נבדק" : row.unavailable ? "אי אפשר לקרוא" : row.total === 0 ? <b class="repo-none">בלי קישורים</b> : `${n(row.total)} קישורים`}
+        {!row ? "לא נבדק" : row.unavailable ? "אי אפשר לקרוא" : row.total === 0 ? <b class="repo-none">בלי קישורים</b> : many(row.total, "קישור אחד", "קישורים")}
         {row && !row.unavailable && row.flags.length > 0 && (
           <span class="repo-flagged" title={row.flags.map((f) => `${DB_LINK_FLAG_LABELS[f.flag].he}: ${n(f.count)}`).join("\n")}>
             {" "}
@@ -329,6 +341,13 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
   const [summary, setSummary] = useState<DbLinkSummary | DbLinksUnavailable | null | "loading">("loading");
   const [cov, setCov] = useState<CoverageSummary | null>(null);
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  const head = useRef<HTMLHeadingElement>(null);
+  // the details open beside the list or below it: bring them into view and say so (a screen reader hears the book's name)
+  useEffect(() => {
+    box.current?.scrollIntoView({ block: "nearest" });
+    head.current?.focus({ preventScroll: true });
+  }, [bookKey]);
   useEffect(() => {
     setSummary("loading");
     setCov(null);
@@ -340,8 +359,13 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
   const ok = summary !== "loading" && summary && "total" in summary ? summary : null;
   const countCoverage = async () => {
     setBusy(true);
-    setCov(await store.coverage.summary(bookKey));
-    setBusy(false);
+    try {
+      setCov(await store.coverage.summary(bookKey));
+    } catch (err) {
+      store.notify("error", `חישוב הכיסוי נכשל: ${(err as Error).message ?? err}`);
+    } finally {
+      setBusy(false);
+    }
   };
   const open = (then?: () => void) => {
     store.showBook("source", bookKey);
@@ -361,9 +385,9 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
     onLeave();
   };
   return (
-    <section class="repo-detail" aria-label={`פרטי הספר ${book.title}`}>
+    <section class="repo-detail" aria-label={`פרטי הספר ${book.title}`} ref={box}>
       <div class="row">
-        <h3 class="grow" style="margin:0">{book.title}</h3>
+        <h3 class="grow focus-target" style="margin:0" tabIndex={-1} ref={head}>{book.title}</h3>
         <button class="icon-btn" onClick={onClose} aria-label="סגירת הפרטים">
           <Icon name="fl_dismiss" size={18} />
         </button>
@@ -410,7 +434,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
                 {ok.flags.map((f) => (
                   <li key={f.flag}>
                     <b>{DB_LINK_FLAG_LABELS[f.flag].he}</b> ({n(f.count)}): {DB_LINK_FLAG_LABELS[f.flag].hint}.{" "}
-                    <button class="btn text small" onClick={() => void showFlagged(f.flag)} disabled={!!store.task.value}>
+                    <button class="btn text small" onClick={() => void showFlagged(f.flag)} disabled={!!store.task.value} aria-label={`הצגת הקישורים עם הסימון: ${DB_LINK_FLAG_LABELS[f.flag].he}`}>
                       הצגת הקישורים האלה
                     </button>
                   </li>
@@ -451,7 +475,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
               ))}
             </ol>
           )}
-          {cov.ranges.length > 10 && <p class="muted small">ועוד {n(cov.ranges.length - 10)} קטעים. הרשימה המלאה בלשונית "בדיקה", בחלק "כיסוי הספר".</p>}
+          {cov.ranges.length > 10 && <p class="muted small">ועוד {many(cov.ranges.length - 10, "קטע אחד", "קטעים")}. הרשימה המלאה בלשונית "בדיקה", בחלק "כיסוי הספר".</p>}
         </>
       )}
     </section>
@@ -543,7 +567,7 @@ function Suggestions() {
           {visible.length > shown && (
             <div style="text-align:center">
               <button class="btn outlined" onClick={() => setShown(shown + PAIRS_PAGE)}>
-                הצגת עוד ({n(visible.length - shown)} זוגות)
+                הצגת עוד ({many(visible.length - shown, "זוג אחד", "זוגות")})
               </button>
             </div>
           )}

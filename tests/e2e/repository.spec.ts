@@ -75,7 +75,7 @@ test("repository: analyze a database, find the books without links, pick a sugge
   await expect(pair.locator(".repo-reasons li").first()).toBeVisible();
   await expect(dlg.getByRole("button", { name: "השלמת קישורים לנבחרים" })).toBeDisabled();
   await pair.getByRole("checkbox").check();
-  await expect(dlg.locator(".repo-chosen")).toContainText("נבחרו 1 ספרים");
+  await expect(dlg.locator(".repo-chosen")).toContainText("נבחר ספר אחד");
 
   // complete: the guided flow opens at the books it was given, and nothing ran
   await dlg.getByRole("button", { name: "השלמת קישורים לנבחרים" }).click();

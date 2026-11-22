@@ -167,6 +167,19 @@ export class RepositoryState {
     this.abort?.abort();
   }
 
+  /** Forgets the rows of books this database does not have (another database was opened since); true when something was dropped. */
+  dropStale(): void {
+    const keys = new Set(this.books.peek().map((b) => b.key));
+    const rows = this.rows.peek();
+    if (![...rows.keys()].some((k) => !keys.has(k))) return;
+    this.cancel();
+    this.rows.value = new Map([...rows].filter(([k]) => keys.has(k)));
+    if (!this.rows.peek().size) this.analyzedAt.value = null;
+    this.suggestions.value = null;
+    this.pickedBooks.value = new Set([...this.pickedBooks.peek()].filter((k) => keys.has(k)));
+    this.pickedPairs.value = new Map([...this.pickedPairs.peek()].filter(([, p]) => (!p.dependantKey || keys.has(p.dependantKey)) && (!p.baseKey || keys.has(p.baseKey))));
+  }
+
   /** Forgets everything counted (a changed database, or the user asks to start over). */
   reset(): void {
     this.cancel();

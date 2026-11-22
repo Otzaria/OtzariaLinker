@@ -54,7 +54,7 @@ export function PersonalCsvSection({ bundle }: { bundle: PersonalCsvBundle | nul
             {bundle.skipped.slice(0, SHOWN).map((s) => (
               <li key={s.link.id} class="warning">
                 <span>
-                  <b>{s.link.source.book.title} {s.link.source.line + 1} ↔ {s.link.target.book.title} {s.link.target.line + 1}</b>: {s.text}
+                  <b>{s.link.source.book.title}, שורה {s.link.source.line + 1} ↔ {s.link.target.book.title}, שורה {s.link.target.line + 1}</b>: {s.text}
                 </span>
               </li>
             ))}

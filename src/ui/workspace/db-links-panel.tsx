@@ -210,9 +210,12 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
 function FlagFilter({ summary }: { summary: DbLinkSummary }) {
   const s = useStore().dbLinks;
   const cur = s.filter.value.flag;
+  // open once a flag is chosen, and stays as the user leaves it (cancelling the flag must not fold it under their hands)
+  const [opened, setOpened] = useState(!!cur);
+  useEffect(() => void (cur && setOpened(true)), [cur]);
   if (!summary.flags?.length) return null;
   return (
-    <details class="dbl-flags-sum" open={!!cur || undefined}>
+    <details class="dbl-flags-sum" open={opened} onToggle={(e) => setOpened(e.currentTarget.open)}>
       <summary>
         סימוני בדיקה בקישורים של הספר ({summary.flags.length.toLocaleString("he")} {summary.flags.length === 1 ? "סוג" : "סוגים"})
       </summary>

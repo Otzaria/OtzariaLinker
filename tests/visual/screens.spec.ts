@@ -433,7 +433,7 @@ for (const [width, viewport] of WIDTHS) {
       const row = pairs.locator('.pair-row[data-pair="פירוש קצר על בראשית>בראשית"]');
       await expect(row.locator(".pair-fit")).toContainText("הכותרות", { timeout: 30_000 });
       await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^סוג הקישור/).selectOption("targum");
-      await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^רמת הביטחון/).selectOption("high");
+      await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^הצעות מרמת ביטחון/).selectOption("high");
       await row.getByRole("checkbox", { name: /לכלול את הזוג/ }).uncheck();
       await pairs.scrollIntoViewIfNeeded();
       await snap(page, "guided-pair-controls");

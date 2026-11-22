@@ -86,6 +86,22 @@ describe("repository analysis", () => {
   });
 });
 
+describe("a database that was replaced", () => {
+  it("rows and picks of books this database does not have are dropped, the others are kept", async () => {
+    const { repo, key } = await opened();
+    await repo.analyze();
+    const real = key("ארצות החיים");
+    const row = repo.rows.value.get(real)!;
+    repo.rows.value = new Map([...repo.rows.value, ["gone:1", { ...row, key: "gone:1", title: "ספר שנסגר" }]]);
+    repo.setPickedBooks([real, "gone:1"]);
+    repo.dropStale();
+    expect(repo.rows.value.has("gone:1")).toBe(false);
+    expect(repo.rows.value.has(real)).toBe(true);
+    expect([...repo.pickedBooks.value]).toEqual([real]);
+    expect(repo.analyzedAt.value).not.toBeNull();
+  });
+});
+
 describe("suspicious books", () => {
   const row = (total: number, flags: number): RepoRow => ({ key: "k", title: "t", total, out: total, in: 0, typesOut: {}, ends: { same: 0, library: 0, other: 0, unresolved: 0 }, flags: flags ? [{ flag: "target-out-of-range", count: flags }] : [], top: [] });
   it("at least 5% of the links flagged and at least 3 of them", () => {

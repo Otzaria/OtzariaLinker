@@ -435,7 +435,7 @@ test("guided flow: the controls of one pair — include, link type, threshold, r
   // simple mode: only "include this pair"; the type, the threshold and the cost are for advanced mode
   await expect(A.getByRole("checkbox", { name: /לכלול את הזוג/ })).toBeChecked();
   await expect(A.getByLabel(/^סוג הקישור/)).toHaveCount(0);
-  await expect(A.getByLabel(/^רמת הביטחון/)).toHaveCount(0);
+  await expect(A.getByLabel(/^הצעות מרמת ביטחון/)).toHaveCount(0);
 
   // switch a pair off: it stays on the list, says so, and its steps leave the plan
   const runs = async () => Number(((await main.locator(".stats").innerText()).match(/(\d+)\s*הרצות/) ?? [])[1]);
@@ -452,7 +452,7 @@ test("guided flow: the controls of one pair — include, link type, threshold, r
   // advanced mode: the type (grouped picker), the threshold, the cost, and the methods that will not run, with the reason
   await page.getByRole("checkbox", { name: "מצב מתקדם" }).check();
   const type = A.getByLabel(/^סוג הקישור/);
-  const threshold = A.getByLabel(/^רמת הביטחון/);
+  const threshold = A.getByLabel(/^הצעות מרמת ביטחון/);
   await expect(type).toHaveValue("");
   await expect(threshold).toHaveValue("");
   await expect(A.locator(".pair-cost")).toContainText(/זמן משוער/);

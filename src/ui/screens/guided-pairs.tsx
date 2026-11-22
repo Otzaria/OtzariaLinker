@@ -214,7 +214,7 @@ export function PairChoices() {
                       </label>
                       <label class="field">
                         <span>הצעות מרמת ביטחון</span>
-                        <select aria-label={`רמת הביטחון הנמוכה ביותר לזוג: ${p.dependant.title} ← ${p.base.title}`} value={ctl.minConfidence ?? ""} onChange={(e) => control(k, p, { minConfidence: e.currentTarget.value || undefined })}>
+                        <select aria-label={`הצעות מרמת ביטחון, לזוג: ${p.dependant.title} ← ${p.base.title}`} value={ctl.minConfidence ?? ""} onChange={(e) => control(k, p, { minConfidence: e.currentTarget.value || undefined })}>
                           {THRESHOLDS.map((t) => (
                             <option key={t.value} value={t.value}>{t.label}</option>
                           ))}
