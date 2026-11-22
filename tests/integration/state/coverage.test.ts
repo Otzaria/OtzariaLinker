@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
@@ -17,6 +17,62 @@ async function opened() {
   const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
   return { store, key };
 }
+
+describe("coverage table of many books (the repository screen)", () => {
+  async function dbStore() {
+    const service = registryService(new SourceRegistry());
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    await store.openFiles([DB]);
+    const keys = [...store.books.value.values()].map((b) => b.key);
+    return { store, service, keys, key: (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key };
+  }
+  const collect = async (it: AsyncIterable<{ title: string }>) => {
+    const rows = [];
+    for await (const r of it) rows.push(r);
+    return rows;
+  };
+
+  it("one row per book with its buckets, read from the database's link indexes — Onkelos is linked to Bereshit there", async () => {
+    const { store, keys, key } = await dbStore();
+    const rows = (await collect(store.coverage.rows(keys))) as Awaited<ReturnType<typeof store.coverage.table>>;
+    expect(rows.map((r) => r.title).sort()).toEqual([...store.books.value.values()].map((b) => b.title).sort());
+    const onk = rows.find((r) => r.key === key("תרגום אונקלוס על בראשית"))!;
+    expect(onk.counts.byBucket.linked).toBeGreaterThan(100);
+    // no headings and no text were read: the row says it is approximate
+    expect(onk.exact).toBe(false);
+    expect(rows.every((r) => r.counts.total === r.lineCount)).toBe(true);
+  });
+
+  it("with headings: they are not suitable, and the row is exact about them", async () => {
+    const { store, key } = await dbStore();
+    const [row] = await store.coverage.table([key("בראשית")], { headings: true });
+    const [plain] = await store.coverage.table([key("בראשית")]);
+    expect(row!.exact).toBe(true);
+    expect(row!.counts.byBucket["not-suitable"]).toBeGreaterThan(plain!.counts.byBucket["not-suitable"]);
+  });
+
+  it("is lazy and cancellable: the next book is read only when asked for, and a cancel stops at the next one", async () => {
+    const { store, service, keys } = await dbStore();
+    const spy = vi.spyOn(service, "existingLinks");
+    const it = store.coverage.rows(keys)[Symbol.asyncIterator]();
+    await it.next();
+    expect(spy).toHaveBeenCalledTimes(1);
+    await it.next();
+    expect(spy).toHaveBeenCalledTimes(2);
+    const ctl = new AbortController();
+    const seen: string[] = [];
+    for await (const r of store.coverage.rows(keys, { signal: ctl.signal })) {
+      seen.push(r.key);
+      ctl.abort();
+    }
+    expect(seen).toHaveLength(1);
+  });
+
+  it("books the table cannot count (not open) are left out, not zero rows", async () => {
+    const { store } = await dbStore();
+    expect(await store.coverage.table(["ghost:1"])).toEqual([]);
+  });
+});
 
 describe("AppStore — coverage", () => {
   it("before any link: every suitable line is unlinked, the headings are not suitable", async () => {

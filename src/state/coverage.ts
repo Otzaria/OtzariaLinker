@@ -2,7 +2,7 @@ import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
-import { candidateLines, coverageSummary, doubtfulLines, type CoverageBook, type CoverageSummary } from "../linking/coverage";
+import { candidateLines, coverageCounts, coverageSummary, doubtfulLines, type CoverageBook, type CoverageSummary } from "../linking/coverage";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { QualityState } from "./quality";
@@ -46,6 +46,27 @@ export interface CoverageOptions {
   unsuitable?: ReadonlySet<number>;
 }
 
+/** One book of the table: its buckets (no ranges), and whether the headings and the text were read for it. */
+export interface CoverageRow {
+  key: string;
+  title: string;
+  lineCount: number;
+  counts: Omit<CoverageSummary, "ranges">;
+  /**
+   * false: the book's headings were not read (`headings: false`) and no text was, so its headings count as unlinked lines and
+   * blank lines are not set aside — an upper bound of what is missing. true: headings are not suitable (blank lines still are not read).
+   */
+  exact: boolean;
+}
+
+export interface CoverageTableOptions {
+  signal?: AbortSignal;
+  /** read each book's headings (a worker call per book); default false: the table of a whole database stays a read of its link indexes */
+  headings?: boolean;
+  /** count the database's own links (default true) */
+  includeDb?: boolean;
+}
+
 export class CoverageState {
   private readonly headingCache = new Map<string, ReadonlySet<number>>();
   private readonly unsuitableCache = new Map<string, ReadonlySet<number>>();
@@ -68,6 +89,39 @@ export class CoverageState {
     }
     const lineCount = b.lineCount ?? this.host.lines.count(bookKey) ?? (await this.host.lines.learnCount(bookKey)) ?? 0;
     return { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount, headings, ...(unsuitable && { unsuitable }) };
+  }
+
+  /**
+   * The coverage of MANY books — a whole database for the repository screen — one row at a time, as the caller asks for it, so the
+   * first rows are there at once and a stop (the signal, or leaving the loop) costs nothing more. Index-based: a book's links are
+   * read through its database's link indexes (BooksService.existingLinks), not its text; the project's links are counted too.
+   * A book that is not open, or whose length is not known, has no row. The rows are not cached: a table is a moment.
+   */
+  async *rows(bookKeys: readonly string[], options: CoverageTableOptions = {}): AsyncGenerator<CoverageRow> {
+    const project = [...this.host.linkState.value.links.values()];
+    for (const key of bookKeys) {
+      if (options.signal?.aborted) return;
+      const b = this.host.books.value.get(key);
+      if (!b) continue;
+      const lineCount = b.lineCount ?? this.host.lines.count(key) ?? (await this.host.lines.learnCount(key)) ?? 0;
+      if (lineCount <= 0) continue;
+      let headings: ReadonlySet<number> = new Set();
+      if (options.headings) {
+        const hs = await this.service.headings(key, options.signal ? { signal: options.signal } : {});
+        headings = new Set(hs.map((h) => h.line));
+      }
+      const db = options.includeDb === false ? [] : await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}).catch(() => [] as Link[]);
+      if (options.signal?.aborted) return;
+      const book: CoverageBook = { owns: (ref) => this.host.sameBook(ref, key), lineCount, headings };
+      yield { key, title: b.title, lineCount, counts: coverageCounts([...project, ...db], book), exact: options.headings === true };
+    }
+  }
+
+  /** The rows of rows(), all of them (or those before the signal stopped it). */
+  async table(bookKeys: readonly string[], options: CoverageTableOptions = {}): Promise<CoverageRow[]> {
+    const out: CoverageRow[] = [];
+    for await (const r of this.rows(bookKeys, options)) out.push(r);
+    return out;
   }
 
   /** The lines that can carry a link: at least two Hebrew letters (as the headings engine skips the rest). Read once per book. */
