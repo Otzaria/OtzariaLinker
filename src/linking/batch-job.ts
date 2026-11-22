@@ -171,7 +171,7 @@ export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "
  * the book again even when no text changed.
  */
 export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRecord["engineOptions"]): string {
-  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}`).sort();
+  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}${s.kind === "pair" && s.ambiguousBase ? "|amb" : ""}`).sort();
   const engines = [...new Set(steps.map((s) => s.engine))].sort();
   return JSON.stringify([parts, engines.map((e) => engineOptions?.[e] ?? null)]);
 }

@@ -179,6 +179,15 @@ function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reas
 }
 
 /**
+ * A step whose base was chosen between books of the same title by a rule (PlanStep.ambiguousBase): nothing it finds is above "possible",
+ * each suggestion says why, and the step says so once. The user lifts it by naming the book.
+ */
+function ambiguousBaseCap(r: EngineResult, title: string): EngineResult {
+  const why: Reason = { code: "maxlink/ambiguous-base", text: `יש כמה ספרים בשם "${title}", והבסיס נבחר לפי כלל ולא לפי ראיה, ולכן ההצעה הזו לא יכולה להיות מעל "אפשרית". בחרו במפורש את הספר (מקור לספרי הבסיס, או זוג עם הספר עצמו) כדי להסיר את ההגבלה.` };
+  return { ...capConfidence(r, ["certain", "high"], why), notes: [{ code: "maxlink/ambiguous-base", text: why.text }, ...r.notes] };
+}
+
+/**
  * The title gate (issue #21): a headings step whose books' titles do not fit (linking/title-fit.ts) is not run — its
  * guards only lower confidence AFTER a run, and a wrong method yields many wrong links. The skipped step says why,
  * so the report shows it; the user can run the method on that pair by naming it (PlanChoices.methods). A check that
@@ -281,6 +290,7 @@ export async function maxlinkJob(
         const byLinks = step.relation.scope && step.relation.scope.baseSection === undefined && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
         const unfit = step.titleGate && !step.relation.scope && !step.relation.through ? titleGateSkip(loaded.source, loaded.target) : null;
         result = unfit ?? (await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks));
+        if (step.ambiguousBase) result = ambiguousBaseCap(result, step.target.title);
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);

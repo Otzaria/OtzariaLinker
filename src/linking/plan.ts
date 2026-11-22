@@ -272,6 +272,12 @@ export type PlanStep =
        * user chose for the pair by name has no gate (issue #21: the title engine only where titles match).
        */
       titleGate?: true;
+      /**
+       * The base was chosen between open books that share its exact title (the dependant's own source first, or the official one) and
+       * the user chose neither the source nor the book: nothing says it is the right one. The job lowers what the step finds to "possible"
+       * (workers/maxlink-job.ts), so nothing of it is approved in bulk until the user names the book.
+       */
+      ambiguousBase?: true;
       /** a rough cost (estimateMs); absent when a book's length is not known */
       estimate?: StepEstimate;
     }
@@ -1022,6 +1028,10 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (touching.length) relations.set(b.key, touching);
   }
 
+  // a base whose exact title another open book has too, chosen by a rule and not by the user (a pair with its key, or the source for the bases)
+  const titleCopies = new Map<string, number>();
+  for (const b of input.library) titleCopies.set(b.title.trim(), (titleCopies.get(b.title.trim()) ?? 0) + 1);
+  const sharesTitle = (rel: Relation): boolean => rel.via !== "user" && !input.preferSource && (titleCopies.get(rel.base.title.trim()) ?? 0) > 1;
   const steps: PlanStep[] = [];
   const unsuitable: PlanUnsuitable[] = [];
   const unsuitableSeen = new Set<string>();
@@ -1075,7 +1085,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      steps.push({ id, kind: "pair", ...s, relation: rel });
+      steps.push({ id, kind: "pair", ...s, relation: rel, ...(sharesTitle(rel) && { ambiguousBase: true as const }) });
       bump(s.source.key);
       bump(s.target.key);
       }
@@ -1117,6 +1127,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (comm.length) decisions.push(comm.length === 1 ? `פירוש פתוח אחד כתוב עליו: ${quote(comm[0]!.dependant.title)}.` : `${comm.length} פירושים פתוחים כתובים עליו.`);
     if (notes.length) decisions.push(notes.length === 1 ? `יש לו ספר הערות פתוח: ${quote(notes[0]!.dependant.title)}.` : `יש לו ${notes.length} ספרי הערות פתוחים.`);
     for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
+    const shared = [...new Set(steps.filter((st) => st.kind === "pair" && st.ambiguousBase && st.source.key === k).map((st) => (st.kind === "pair" ? st.target.title : "")))];
+    for (const t of shared) decisions.push(`יש עוד ספר בשם ${quote(t)}, והבסיס נבחר לפי כלל (המקור של הספר, או המאגר הרשמי) ולא לפי ראיה. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו במפורש את הספר (בחירת מקור לספרי הבסיס, או זוג עם הספר עצמו).`);
     if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
     // a pair the user asked for that could not be made, said even when the book's other pairs were made
     const missed = unmade.get(k);
