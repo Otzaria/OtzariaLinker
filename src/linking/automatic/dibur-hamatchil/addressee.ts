@@ -17,6 +17,11 @@
  * halachaCommentators.ts, an organization repo, so portable under AGENTS.md §2.7): a commentator's id, its
  * written forms ("ש"ך", "שפתי כהן") and its book "X על שולחן ערוך <חלק>". Only the names are taken, as search
  * keys; the routing stays this engine's own (a name counts only before ד"ה, see extract.ts).
+ *
+ * RISK, not measured: several of these abbreviations are ambiguous across books (מ"ב is also a number, ב"ש is also בית
+ * שמאי, ח"מ and מ"א are short). The guard is the required ד"ה after the name and the gershayim; a wrong routing only
+ * sets a line aside from the base (it is then left for review, never linked to the wrong book). No benchmark exists
+ * for the Shulchan Aruch pairs: measure on the library before relying on it.
  */
 import { searchKey, type HebToken } from "../../../matching/hebrew-tokens";
 

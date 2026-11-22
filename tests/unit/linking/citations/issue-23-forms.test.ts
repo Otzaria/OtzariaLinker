@@ -95,6 +95,8 @@ describe("issue #23 — the target books are not open: zero results come with th
     expect(r.suggestions).toHaveLength(0);
     const note = r.notes.find((n) => n.code === "citations/no-target-books");
     expect(note).toBeDefined();
+    // the cause is stated as a possibility: the book may simply cite nothing
+    expect(note!.text).toContain("ייתכן");
     expect(note!.text).toContain("תנ\"ך");
     expect(note!.text).toContain("ש\"ס");
     expect(note!.text).toContain("משנה תורה");
