@@ -317,3 +317,115 @@ test.describe("desktop", () => {
     await snap(page, "side-panel-narrow");
   });
 });
+
+/*
+ * The screens of the stacked work (PR 3), at the three widths: the coverage section, the unlinked marks in a reader, the
+ * checklist of "books I choose", the pair mode with more targets, the guided plan with its pairs and counts, the alt_toc
+ * dialog, and the page of all the link types.
+ */
+const MINE = txt("ספר שלי.txt", ["<h1>ספר שלי</h1>", "שורה שנייה", "שורה שלישית", "שורה רביעית", "<h2>פרק ב</h2>", "שורה שישית", "שורה שביעית"]);
+const MINE_LINKS = {
+  name: "ספר שלי_links.json",
+  mimeType: "application/json",
+  buffer: Buffer.from(JSON.stringify([2, 6].map((l) => ({ line_index_1: l, heRef_2: "בראשית", path_2: "בראשית.txt", line_index_2: 3, "Conection Type": "reference" })))),
+};
+const BIUR_B = txt("ביאור ב על בראשית.txt", ["<h1>ביאור ב על בראשית</h1>", "<h2>פרק א</h2>", ...HEB.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `ביאור ב לפסוק ${i + 1}`])]);
+
+for (const [width, viewport] of WIDTHS) {
+  test.describe(`${width} (stacked screens)`, () => {
+    test.use({ viewport });
+
+    test("coverage: the unlinked ranges of a book and the counts by what links each line", async ({ page }) => {
+      await openFiles(page, [MINE, MINE_LINKS]);
+      await pickBooks(page, "ספר שלי", /^בראשית/);
+      await page.getByRole("tab", { name: /בדיקה/ }).click();
+      const cov = page.locator("details.coverage");
+      await cov.locator("summary").click();
+      await cov.getByRole("button", { name: "חישוב כיסוי" }).click();
+      await expect(cov.locator(".cov-range").first()).toBeVisible();
+      await snap(page, "coverage");
+    });
+
+    test("reader: the lines no link touches are marked, by a sign and not by colour alone", async ({ page }) => {
+      await openFiles(page, [MINE, MINE_LINKS]);
+      await pickBooks(page, "ספר שלי", /^בראשית/);
+      await page.locator(".reader.source").getByRole("checkbox", { name: "סימון שורות בלי קישור" }).check();
+      await expect(page.locator(".reader.source .ln.unlinked").first()).toBeVisible();
+      await snap(page, "unlinked-marks");
+    });
+
+    test("max-link: the books I choose, ticked from a searchable list", async ({ page }) => {
+      await openFiles(page, [BIUR, BIUR_B]);
+      await page.getByRole("tab", { name: /הצעות/ }).click();
+      await page.getByRole("radio", { name: "קישור מרבי" }).click();
+      await page.getByRole("radio", { name: "ספרים שאבחר" }).click();
+      const g = page.getByRole("group", { name: "הספרים לקישור" });
+      await g.getByRole("checkbox", { name: /^ביאור על בראשית/ }).check();
+      await g.getByRole("checkbox", { name: /^ביאור ב על בראשית/ }).check();
+      await expect(page.locator(".ml-plan-line")).toBeVisible();
+      await snap(page, "maxlink-books");
+    });
+
+    test("pair mode: more targets for one book, every method that fits merged", async ({ page }) => {
+      await openFiles(page, [BIUR]);
+      await pickBooks(page, "ביאור על בראשית", /^בראשית/);
+      await page.getByRole("tab", { name: /הצעות/ }).click();
+      const more = page.locator("details.more-targets");
+      await more.locator("summary").click();
+      await more.getByRole("group", { name: "עוד ספרי יעד" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
+      await page.getByRole("checkbox", { name: /כל השיטות שמתאימות/ }).check();
+      await snap(page, "pair-targets");
+    });
+
+    test("alt_toc: the structure editor with its explanation, on a small screen too", async ({ page }) => {
+      const heads = txt("חומש שלי.txt", ["<h1>חומש שלי</h1>", ...Array.from({ length: 12 }, (_, i) => [`<h2>פרשה ${i + 1}</h2>`, `שורה ${i + 1}`]).flat()]);
+      await openFiles(page, [heads]);
+      await page.getByRole("tab", { name: /קישורים/ }).first().click();
+      await page.getByRole("button", { name: /^מבני כותרות/ }).click();
+      const dlg = page.getByRole("dialog");
+      await dlg.getByLabel("הספר").selectOption("חומש שלי");
+      await dlg.getByLabel("מפתח המבנה החדש (באנגלית)").fill("Parasha");
+      await dlg.getByRole("button", { name: "מבנה חדש" }).click();
+      await dlg.getByRole("button", { name: "מילוי מכותרות הספר" }).click();
+      await expect(dlg.getByLabel("כותרת צומת 12", { exact: true })).toBeVisible();
+      await dlg.locator("details.alt-why > summary").click();
+      await snap(page, "alt-toc");
+    });
+
+    test("link types: the page of all of them, grouped, with where each shows in Otzaria", async ({ page }) => {
+      await openFiles(page, [MINE]);
+      await pickBooks(page, "ספר שלי", /^בראשית/);
+      await page.getByRole("button", { name: "מה כל סוג אומר?" }).click();
+      await expect(page.getByRole("dialog", { name: "סוגי הקישור" })).toBeVisible();
+      await snap(page, "types-help");
+    });
+
+    test("guided flow: the plan with the pairs, the counts of the links that exist, and what the file will hold", async ({ page }) => {
+      const dir = join(test.info().outputPath(), "הספרים שלי");
+      mkdirSync(dir, { recursive: true });
+      const commentary = (t: string) => [`<h1>${t}</h1>`, "<h2>פרק א</h2>", ...HEB.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `${t}: ביאור לפסוק ${i + 1}`])];
+      writeFileSync(join(dir, "ביאור על בראשית.txt"), commentary("ביאור על בראשית").join(nl), "utf8");
+      writeFileSync(join(dir, "פירוש קצר על בראשית.txt"), ["<h1>פירוש קצר על בראשית</h1>", "בראשית ברא - בשביל התורה.", "והארץ היתה תהו ובהו - תמהה ומשוממה."].join(nl), "utf8");
+      await chooseTask(page, "auto", "folder-otzaria");
+      const main = page.locator("main.guided");
+      const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+      const chooser = page.waitForEvent("filechooser");
+      await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+      await (await chooser).setFiles(dir);
+      await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+      await next.click();
+      await next.click();
+      const dbChooser = page.waitForEvent("filechooser");
+      await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+      await (await dbChooser).setFiles([DB]);
+      await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+      await next.click();
+      await expect(page).toHaveURL(/#\/guided\/plan$/);
+      await main.locator("details.guided-pairs > summary").click();
+      await expect(main.locator(".guided-pairs .pair-fit").first()).toContainText("הכותרות", { timeout: 30_000 });
+      await expect(main.locator(".guided-existing")).toContainText(/במסד [\d,]+/, { timeout: 30_000 });
+      await main.locator(".guided-final").scrollIntoViewIfNeeded();
+      await snap(page, "guided-plan");
+    });
+  });
+}

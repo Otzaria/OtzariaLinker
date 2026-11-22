@@ -28,7 +28,7 @@ test("the real seforim.db opens through the file chooser and a book shows its te
   await expect(page.locator(".source-row")).toContainText("seforim.db");
 
   // the book list's search, then the book as the source: a large book with notes
-  const list = page.getByRole("region", { name: "קבצים, מסדים וספרים" });
+  const list = page.getByRole("region", { name: "קבצים ומסדים" });
   const reader = page.locator(".reader.source");
   const open = async (title: string) => {
     await list.getByRole("searchbox", { name: "חיפוש ספר" }).fill(title);

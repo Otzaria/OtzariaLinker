@@ -1249,7 +1249,7 @@ export class AppStore {
     });
     const missing = this.missingSources.value.length;
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
-    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים, מסדים וספרים".` : ""}`);
+    this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים ומסדים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     this.noticeChangedBooks();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];

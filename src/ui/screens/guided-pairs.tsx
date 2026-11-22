@@ -125,6 +125,7 @@ export function PairChoices() {
                             <ul class="pair-reasons">
                               {fit.reasons.map((r) => (
                                 <li key={r.code} class={r.ok ? "ok" : "no"}>
+                                  <span class="sign" aria-hidden="true">{r.ok ? "✓" : "✕"}</span>
                                   <span class="sr-only">{r.ok ? "מתקיים: " : "לא מתקיים: "}</span>
                                   {r.text}
                                 </li>

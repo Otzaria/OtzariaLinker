@@ -299,7 +299,7 @@ test("every control has a name, and text has AA contrast, on each main screen", 
   await page.goto(distUrl);
 
   await workspace(page);
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.locator('.reader.source .ln[data-i="3"] .tx').click();
@@ -365,7 +365,7 @@ test("a task's progress is said through a live region that was on the page befor
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.goto(distUrl);
   await workspace(page);
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();

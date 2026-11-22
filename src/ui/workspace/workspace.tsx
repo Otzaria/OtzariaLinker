@@ -64,7 +64,7 @@ export function Workspace() {
 function PanelContent({ id }: { id: PanelId }) {
   if (id === "source") return <Reader side="source" />;
   if (id === "target") return <Reader side="target" />;
-  if (id === "sources") return <Panel id="sources" title="קבצים, מסדים וספרים" icon="oz_bookshelf" class="sources-panel"><SourcesBody /></Panel>;
+  if (id === "sources") return <Panel id="sources" title="קבצים ומסדים" icon="oz_bookshelf" class="sources-panel"><SourcesBody /></Panel>;
   return <SidePanel />;
 }
 

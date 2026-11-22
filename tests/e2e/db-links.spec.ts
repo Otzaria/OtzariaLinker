@@ -18,7 +18,7 @@ test("browse a book's database links, filter, copy one, export it with the repla
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
 
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
   await expect(page.locator(".reader.source h2")).toHaveText("ארצות החיים");
 
@@ -86,7 +86,7 @@ test("a personal database's links: an unopened target book is named as such, and
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "personal.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/pdc-personal-mini.db")) }]);
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: "PLACEHOLDER commentary on official" }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
   await page.getByRole("tab", { name: /קישורים/ }).first().click();
   await page.getByRole("tab", { name: /קישורים מהמסד/ }).click();

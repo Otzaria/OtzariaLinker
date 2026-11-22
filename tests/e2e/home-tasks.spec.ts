@@ -87,7 +87,7 @@ test("an open database is offered by the next task sheet, and picking it again d
   await expect(page.getByText(/כבר פתוח, ולכן לא נטען שוב/)).toBeVisible();
   await expect(sheet.locator(".steps .opened")).toHaveCount(1);
   await start.click();
-  await expect(page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".src-badge")).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "קבצים ומסדים" }).locator(".src-badge")).toHaveCount(1);
   expect(seen.errors).toEqual([]);
 });
 

@@ -30,6 +30,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: var(--radius); background: transparent; cursor: pointer; color: var(--on-surface-variant); }
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .icon-btn[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+code { font-family: var(--font-mono); font-size: 0.92em; }
 kbd { font: 11px var(--font-mono); border: 1px solid var(--outline-variant); border-radius: var(--radius-xs); padding: 0 4px; color: var(--on-surface-variant); }
 /* a shortcut inside a button takes the button's colour (on a filled button the muted grey was 1.5:1) */
 .btn kbd { color: inherit; border-color: currentColor; }
@@ -130,9 +131,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .pairs-body { padding: 0 10px 10px; display: grid; gap: 8px; }
 .pair-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .pair-row { display: grid; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; overflow-wrap: anywhere; }
-.pair-reasons { margin: 4px 0 0; padding-inline-start: 18px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
-.pair-reasons .no::marker { content: "✕ "; }
-.pair-reasons .ok::marker { content: "✓ "; }
+.pair-reasons { list-style: none; margin: 4px 0 0; padding: 0; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.pair-reasons .sign { display: inline-block; inline-size: 1.2em; }
 .fit-badge { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; border: 1px solid var(--outline-variant); }
 .fit-fit { background: var(--secondary-container); color: var(--on-secondary-container); }
 .fit-partial { background: var(--warning-container); color: var(--on-warning-container); }
@@ -167,6 +167,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .heading-jump .heading-list { position: absolute; inset-inline-start: 0; z-index: 8; margin-top: 4px; width: min(320px, 80vw); max-height: 50vh; overflow: auto; padding: 6px; background: var(--surface-container-high); border: 1px solid var(--outline-variant); border-radius: var(--radius); box-shadow: var(--elev-2); display: grid; gap: 4px; }
 .heading-jump ul { list-style: none; margin: 0; padding: 0; }
 .heading-jump li .btn { white-space: normal; text-align: start; min-height: 28px; }
+.reader-tools .grow { white-space: nowrap; }
 .unl-switch { font-size: var(--fs-sm); display: inline-flex; gap: 4px; align-items: center; }
 .ln.unlinked { border-inline-start-style: dotted; border-inline-start-color: var(--outline); }
 .ln .unl { color: var(--on-surface-variant); font-size: 11px; }

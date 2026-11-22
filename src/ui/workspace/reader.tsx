@@ -473,8 +473,8 @@ function ReaderTools({ side, bookKey, count, unlinkedOn, onUnlinked }: { side: S
       </form>
       <HeadingJump side={side} bookKey={bookKey} />
       <label class="check unl-switch" title="מסמן ליד כל שורת תוכן שאף קישור לא נוגע בה (כותרות לא מסומנות)">
-        <input type="checkbox" checked={unlinkedOn} onChange={(e) => onUnlinked(e.currentTarget.checked)} />
-        <span>סימון שורות בלי קישור</span>
+        <input type="checkbox" aria-label="סימון שורות בלי קישור" checked={unlinkedOn} onChange={(e) => onUnlinked(e.currentTarget.checked)} />
+        <span>בלי קישור</span>
       </label>
       <span class="muted grow">{count !== undefined ? `${count.toLocaleString("he")} שורות` : ""}</span>
     </div>

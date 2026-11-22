@@ -27,7 +27,7 @@ test("citations: a text book's references are linked into the open database, the
   ]);
   await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
 
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: "חיבור לדוגמה" }).first().locator('button.side-btn[data-side="source"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: "מראי מקומות" });

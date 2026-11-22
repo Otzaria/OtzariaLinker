@@ -18,7 +18,7 @@ test("history list: newest first, jump back and forward, keyboard", async ({ pag
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(DB) }, COMMENTARY]);
-  const books = page.getByRole("region", { name: "קבצים, מסדים וספרים" }).locator(".book-list li");
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
   await books.filter({ hasText: "פירוש על בראשית" }).locator('button.side-btn[data-side="source"]').click();
   await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   const source = page.locator(".reader.source");
