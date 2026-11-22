@@ -10,6 +10,8 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
 import { clearMatches, FindBar, paintMatches } from "./book-find";
+import { coverageOfLines } from "../../linking/coverage";
+import type { BookHeading } from "../../core/books";
 import { clearMatched, paintMatched } from "./matched-paint";
 import { splitMatched } from "./matched-words";
 import { BookInfo } from "./book-info";
@@ -197,6 +199,20 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   }, [matchHere?.line, matchHere?.words, tick, active, reviewed?.id]);
   useEffect(() => () => clearMatched(side), []);
 
+  // the content lines no link touches yet, marked when asked for (state/coverage.ts + linking/coverage.ts); null = off
+  const [unlinked, setUnlinked] = useState<ReadonlySet<number> | null>(null);
+  const [unlinkedOn, setUnlinkedOn] = useState(false);
+  const revision = store.linkState.value.revision;
+  useEffect(() => {
+    if (!unlinkedOn) return setUnlinked(null);
+    let current = true;
+    void store.coverage.book(bookKey).then((book) => {
+      if (!current || !book) return;
+      const cov = coverageOfLines([...store.linkState.peek().links.values()], book);
+      setUnlinked(new Set(cov.flatMap((c, i) => (c === "unlinked" ? [i] : []))));
+    });
+    return () => void (current = false);
+  }, [unlinkedOn, bookKey, revision]);
   const marks = useLineMarks(side, bookKey);
   const pick = store.pick[side].value;
   const pickHere = pick && pick.bookKey === bookKey ? pick : null;
@@ -296,13 +312,13 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
 
   return (
     <>
-      <ReaderTools side={side} bookKey={bookKey} count={count} />
+      <ReaderTools side={side} bookKey={bookKey} count={count} unlinkedOn={unlinkedOn} onUnlinked={setUnlinkedOn} />
       {findOpen && <FindBar side={side} bookKey={bookKey} focusSeq={findSeq} onClose={() => scroller.current?.focus()} />}
       {/* the arrows pick lines here (keyboard use); what was picked is said aloud, the eye sees the highlight */}
       <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ${role.name} (החצים בוחרים שורה)`}>
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
-            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} />
+            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} unlinked={unlinked} />
           ))}
         </div>
       </div>
@@ -366,7 +382,7 @@ function useLineMarks(side: Side, bookKey: string): Marks {
   return { project: project.value, suggested: suggested.value };
 }
 
-function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null; linksOpen: number | null; onLinks: (line: number, anchor: HTMLElement) => void }) {
+function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null; linksOpen: number | null; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: ReadonlySet<number> | null }) {
   const { c, bookKey, active, io, count } = props;
   const store = useStore();
   const ref = useRef<HTMLDivElement>(null);
@@ -394,7 +410,7 @@ function Chunk(props: { c: number; bookKey: string; active: boolean; io: Interse
       {lines.map((l, k) => {
         const i = from + k;
         if (!l) return <div key={i} class="ln" data-i={i}><span class="no">{i + 1}</span><span class="tx muted">…</span></div>;
-        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} linksOpen={props.linksOpen === i} onLinks={props.onLinks} />;
+        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} linksOpen={props.linksOpen === i} onLinks={props.onLinks} unlinked={!!props.unlinked?.has(i)} />;
       })}
     </div>
   );
@@ -408,10 +424,10 @@ function countDb(links: Link[] | undefined, bookKey: string, from: number, n: nu
   return m;
 }
 
-function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpen, onLinks }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null; linksOpen: boolean; onLinks: (line: number, anchor: HTMLElement) => void }) {
+function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpen, onLinks, unlinked }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null; linksOpen: boolean; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: boolean }) {
   const html = useMemo(() => sanitizeBookHtml(l.anchorText), [l.anchorText]);
   const total = (mark?.new ?? 0) + (mark?.file ?? 0) + (mark?.deleted ?? 0) + db;
-  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}`;
+  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}${unlinked ? " unlinked" : ""}`;
   return (
     <div class={cls} data-i={l.index} title={l.heading !== null ? "שורת כותרת — אוצריא לא יוצרת קישור אל כותרת או ממנה" : undefined}>
       <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר היעד" : undefined}>{l.index + 1}</span>
@@ -434,13 +450,14 @@ function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpe
             {db ? <span class="mark db" title={`${db} קישורים קיימים במסד`}>{db}</span> : null}
           </button>
         )}
+        {unlinked ? <span class="unl" role="img" aria-label="בלי קישור" title="שורה בלי קישור">○</span> : null}
         {sug ? <span class={`mark sug conf-${sug}`} title={`הצעה ממתינה, ודאות ${CONFIDENCE_LABELS[sug]}`}>•</span> : null}
       </span>
     </div>
   );
 }
 
-function ReaderTools({ side, bookKey, count }: { side: Side; bookKey: string; count: number | undefined }) {
+function ReaderTools({ side, bookKey, count, unlinkedOn, onUnlinked }: { side: Side; bookKey: string; count: number | undefined; unlinkedOn: boolean; onUnlinked: (on: boolean) => void }) {
   const store = useStore();
   const [go, setGo] = useState("");
   return (
@@ -454,8 +471,47 @@ function ReaderTools({ side, bookKey, count }: { side: Side; bookKey: string; co
       >
         <input class="goto" type="number" min={1} max={count} placeholder="לשורה…" value={go} onInput={(e) => setGo(e.currentTarget.value)} aria-label="מעבר לשורה" />
       </form>
+      <HeadingJump side={side} bookKey={bookKey} />
+      <label class="check unl-switch" title="מסמן ליד כל שורת תוכן שאף קישור לא נוגע בה (כותרות לא מסומנות)">
+        <input type="checkbox" checked={unlinkedOn} onChange={(e) => onUnlinked(e.currentTarget.checked)} />
+        <span>סימון שורות בלי קישור</span>
+      </label>
       <span class="muted grow">{count !== undefined ? `${count.toLocaleString("he")} שורות` : ""}</span>
     </div>
+  );
+}
+
+const HEADINGS_SHOWN = 200;
+
+/** "Jump to a heading": the book's heading lines, read when the list is opened (a tap or Enter, no hover), filtered by typing. */
+function HeadingJump({ side, bookKey }: { side: Side; bookKey: string }) {
+  const store = useStore();
+  const [heads, setHeads] = useState<BookHeading[] | null>(null);
+  const [q, setQ] = useState("");
+  const shown = (heads ?? []).filter((h) => !q.trim() || h.text.includes(q.trim()));
+  return (
+    <details
+      class="heading-jump"
+      onToggle={(e) => {
+        if ((e.currentTarget as HTMLDetailsElement).open && heads === null) void store.altToc.headings(bookKey).then((h) => setHeads(h ?? []));
+      }}
+    >
+      <summary>מעבר לכותרת</summary>
+      <div class="heading-list">
+        <input type="search" aria-label="חיפוש כותרת" placeholder="חיפוש כותרת…" value={q} onInput={(e) => setQ(e.currentTarget.value)} />
+        {heads === null ? <p class="muted">קורא את הכותרות…</p> : !heads.length ? <p class="muted">אין כותרות בספר הזה.</p> : null}
+        <ul>
+          {shown.slice(0, HEADINGS_SHOWN).map((h) => (
+            <li key={h.line} style={`padding-inline-start:${(Math.min(h.level, 6) - 1) * 12}px`}>
+              <button class="btn text small" onClick={() => store.reveal(side, bookKey, h.line)}>
+                {h.text || `כותרת בשורה ${h.line + 1}`} <span class="muted">· שורה {h.line + 1}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {shown.length > HEADINGS_SHOWN && <p class="muted">מוצגות {HEADINGS_SHOWN} מתוך {shown.length.toLocaleString("he")} — הקלידו כדי לצמצם.</p>}
+      </div>
+    </details>
   );
 }
 
