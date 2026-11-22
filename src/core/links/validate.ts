@@ -1,4 +1,4 @@
-import { APP_DEPENDENT_TYPES, canonicalTypeString, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
+import { APP_DEPENDENT_TYPES, canonicalTypeString, inlineLinkerVersionNote, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
 import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
@@ -167,6 +167,7 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const inlinePrivate = inline && ctx.purpose === "private" && isDocumentedInlineLinker(link.declaredType);
   if (inline && ctx.purpose !== "private")
     add("error", "export/inline-linker-private-only", `הסוג "ציטוט בטקסט" (INLINE_LINKER) מוכר רק לייבוא האישי של אוצריא. ספריית אוצריא והסנכרון השבועי שלה לא מכירים אותו ויישמרו את הקישור כ"אחר", בלי הציטוט בגוף הטקסט. בחרו בחלון הייצוא "לשימוש פרטי", או בחרו סוג אחר.`, "Conection Type INLINE_LINKER");
+  if (inlinePrivate) add("warning", "export/inline-linker-version", inlineLinkerVersionNote());
   if (inlinePrivate) {
     // the app's own rules (user_import_parser.dart): start and an end after it, from one source line
     if (!link.anchor || link.anchor.rawEnd === undefined || link.anchor.rawEnd <= link.anchor.rawStart)

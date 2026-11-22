@@ -293,9 +293,8 @@
 ### 1.12 `INLINE_LINKER` — "ציטוט בטקסט": סוג של הייבוא האישי בלבד
 
 מקור: תיעוד האפליקציה, `docs/personal_databases.md` ב־`Otzaria/otzaria` (ענף `dev`), הסעיף "ציטוט בגוף הטקסט בקובץ
-`<ספר>_links.json`", commit `6f71470e` (issue #4308, 2026-11-21); הקוד שם: `lib/user_content_import/services/user_import_parser.dart`
-(בדיקות: ‏"ציטוט בטקסט דורש start ו-end גדול ממנו", "מקור הציטוט בטקסט חייב להיות בשורה אחת"). **לא נבדק בגרסת שחרור** של האפליקציה,
-רק בענף `dev`.
+`<ספר>_links.json`", commit `6f71470e` (issue #4308, 2026-11-20 UTC; בגרסה הראשונה של המסמך נכתב 21.11); הקוד שם: `lib/user_content_import/services/user_import_parser.dart`
+(בדיקות: ‏"ציטוט בטקסט דורש start ו-end גדול ממנו", "מקור הציטוט בטקסט חייב להיות בשורה אחת"). **התמיכה תלויה בגרסת אוצריא, ואין עדיין גרסה שפורסמה שכוללת אותה.** נמדד ב־2026-11-22 עם `gh api repos/Otzaria/otzaria`: ה־commit הוא אב קדמון של `dev` (ענף `dev` מקדים אותו ב־169 commits) ושל אף שחרור שפורסם; השחרור היציב האחרון, `0.9.98.3+809` (2026-11-02, tag על `5a8e0b34`), נמצא 2,582 commits מאחוריו, והקובץ `user_import_parser.dart` שבו אינו מכיר `INLINE_LINKER` (בגרסה כזו הסוג נדחה כ"סוג קישור לא מוכר"). `dev` מכיר אותו (`kInlineLinkerImportType`). לכן הכלי לא מבטיח תמיכה בכל הגרסאות: ייצוא פרטי עם הסוג הזה נכתב עם אזהרה (`export/inline-linker-version`), והטקסט בממשק (אפשרות המנוע, הערת המנוע) אומר "תלוי בגרסת אוצריא". כשייצא שחרור שכולל אותו, מעדכנים `INLINE_LINKER_SUPPORT.supportedFrom` ב־`core/links/connection-type.ts`.
 
 | | |
 |---|---|

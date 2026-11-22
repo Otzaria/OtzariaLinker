@@ -1,3 +1,4 @@
+import { inlineLinkerVersionNote } from "../../core/links/connection-type";
 import { checkCustomPattern } from "../../core/text/safe-regex";
 import type { MarkerStyle } from "./footnotes/markers";
 import { compilePattern, CUSTOM_PRESET, DEFAULT_PRESET, describeLevels, PATTERN_PRESETS, presetById } from "./pattern";
@@ -105,7 +106,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
       label: "סוג הקישור",
       default: "reference",
       choices: [["reference", "הפניה (מתאים גם לספרייה)"], ["inline-linker", "ציטוט בטקסט (לשימוש פרטי בלבד)"]],
-      hint: 'ציטוט בטקסט נפתח בלחיצה על מילות ההפניה, גם בספר של ספריא. הסוג מוכר רק לייבוא האישי של אוצריא, ולכן בייצוא לספרייה הוא יוחזק: ייצאו אותו בבחירה "לשימוש פרטי".',
+      hint: 'ציטוט בטקסט נפתח בלחיצה על מילות ההפניה, גם בספר של ספריא. הסוג מוכר רק לייבוא האישי של אוצריא, ולכן בייצוא לספרייה הוא יוחזק: ייצאו אותו בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote(),
     },
     { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
