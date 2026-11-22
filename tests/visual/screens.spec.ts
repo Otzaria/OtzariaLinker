@@ -67,7 +67,7 @@ async function pickBooks(page: Page, source: string | RegExp, target: string | R
 }
 
 /** Anything that shows a time or a duration. */
-const timeMasks = (page: Page): Locator[] => [page.locator("summary", { hasText: "שניות" }), page.locator(".ml-steps")];
+const timeMasks = (page: Page): Locator[] => [page.locator("summary", { hasText: "שניות" }), page.locator(".ml-steps"), page.locator(".cov-time"), page.locator(".repo-time")];
 
 async function snap(page: Page, name: string, { keepErrors = false } = {}) {
   // success/info notices fade by themselves after 5 s, so whether one is still there depends on how
@@ -95,6 +95,12 @@ async function snap(page: Page, name: string, { keepErrors = false } = {}) {
     await expect(page).toHaveScreenshot([width, `${name}-${colorScheme}.png`], { mask: timeMasks(page) });
   }
   await page.emulateMedia({ colorScheme: "light" });
+}
+
+/** Advanced mode, as the top bar's switch does it (on a phone the switch is in a menu). */
+async function setAdvanced(page: Page) {
+  await page.evaluate(() => ((globalThis as unknown as { __linker: { prefs: { advanced: { value: boolean } } } }).__linker.prefs.advanced.value = true));
+  await expect(page.locator("html")).toHaveAttribute("data-theme", /light|dark/);
 }
 
 async function dropDatabase(page: Page, name: string, fixture: string) {
@@ -398,6 +404,117 @@ for (const [width, viewport] of WIDTHS) {
       await page.getByRole("button", { name: "מה כל סוג אומר?" }).click();
       await expect(page.getByRole("dialog", { name: "סוגי הקישור" })).toBeVisible();
       await snap(page, "types-help");
+    });
+
+    test("guided plan, advanced: the controls of each pair — include, link type, confidence, cost, what will not run", async ({ page }) => {
+      const dir = join(test.info().outputPath(), "הספרים שלי");
+      mkdirSync(dir, { recursive: true });
+      const commentary = (t: string) => [`<h1>${t}</h1>`, "<h2>פרק א</h2>", ...HEB.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `${t}: ביאור לפסוק ${i + 1}`])];
+      writeFileSync(join(dir, "ביאור על בראשית.txt"), commentary("ביאור על בראשית").join(nl), "utf8");
+      writeFileSync(join(dir, "פירוש קצר על בראשית.txt"), ["<h1>פירוש קצר על בראשית</h1>", "בראשית ברא - בשביל התורה.", "והארץ היתה תהו ובהו - עוד שורה."].join(nl), "utf8");
+      await chooseTask(page, "auto", "folder-otzaria");
+      const main = page.locator("main.guided");
+      const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+      const chooser = page.waitForEvent("filechooser");
+      await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+      await (await chooser).setFiles(dir);
+      await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+      await next.click();
+      await next.click();
+      const dbChooser = page.waitForEvent("filechooser");
+      await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+      await (await dbChooser).setFiles([DB]);
+      await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+      await next.click();
+      await expect(page).toHaveURL(/#\/guided\/plan$/);
+      await setAdvanced(page);
+      const pairs = main.locator("details.guided-pairs");
+      if (!(await pairs.evaluate((el) => (el as HTMLDetailsElement).open))) await pairs.locator("summary").click();
+      const row = pairs.locator('.pair-row[data-pair="פירוש קצר על בראשית>בראשית"]');
+      await expect(row.locator(".pair-fit")).toContainText("הכותרות", { timeout: 30_000 });
+      await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^סוג הקישור/).selectOption("targum");
+      await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^רמת הביטחון/).selectOption("high");
+      await row.getByRole("checkbox", { name: /לכלול את הזוג/ }).uncheck();
+      await pairs.scrollIntoViewIfNeeded();
+      await snap(page, "guided-pair-controls");
+    });
+
+    test("db links of a personal database: the flags — counted, a filter, and said on each link in words", async ({ page }) => {
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "קבצים", exact: true }).click();
+      await (await chooser).setFiles([{ name: "personal.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/pdc-personal-mini.db")) }]);
+      const booksTab = page.getByRole("tab", { name: "ספרים" });
+      await expect(page.locator(".side-panel")).toBeVisible({ timeout: 30_000 });
+      if (await booksTab.isVisible()) await booksTab.click();
+      await page.locator(".book-list li").filter({ hasText: "PLACEHOLDER commentary on official" }).first().locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
+      await page.getByRole("tab", { name: /קישורים/ }).first().click();
+      await page.getByRole("tab", { name: /קישורים מהמסד/ }).click();
+      const panel = page.locator(".dbl");
+      await expect(panel.locator(".dbl-item").first()).toBeVisible({ timeout: 30_000 });
+      await panel.locator(".dbl-flags-sum summary").click();
+      await panel.locator(".dbl-flags-sum").getByRole("button", { name: /כפילות הפוכה/ }).click();
+      await panel.locator(".dbl-flags-sum summary").click(); // folded again, so that the flagged links are in view
+      await expect(panel.locator(".dbl-flags").first()).toBeVisible();
+      await snap(page, "db-links-flags");
+    });
+
+    test("coverage: the count kept with the project, shown as out of date until the book is counted again", async ({ page }) => {
+      await openFiles(page, [MINE, MINE_LINKS]);
+      await pickBooks(page, "ספר שלי", /^בראשית/);
+      await page.getByRole("tab", { name: /בדיקה/ }).click();
+      const cov = page.locator("details.coverage");
+      await cov.locator("summary").click();
+      await cov.getByRole("button", { name: "חישוב כיסוי" }).click();
+      await expect(cov.locator(".cov-range").first()).toBeVisible();
+      await cov.getByLabel("הספר").selectOption("target");
+      await cov.getByLabel("הספר").selectOption("source");
+      await expect(cov.locator(".cov-stamp[data-stale]")).toBeVisible();
+      await snap(page, "coverage-kept");
+    });
+
+    test("export: links.csv for a personal library — when to use it, the files, what is left out and why", async ({ page }) => {
+      const mineCsv = {
+        name: "ספר שלי_links.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(["line_index_1,heRef_2,path_2,line_index_2,Conection Type", "2,בראשית,בראשית.txt,3,source", "3,בראשית,בראשית.txt,4,reference"].join(nl)),
+      };
+      await openFiles(page, [MINE, mineCsv]);
+      await setAdvanced(page);
+      await page.getByRole("button", { name: /^ייצוא/ }).click();
+      const dialog = page.getByRole("dialog", { name: "ייצוא קובצי קישורים" });
+      await dialog.getByLabel("פורמט קובצי הקישורים").selectOption("personal-csv", { timeout: 30_000 });
+      await expect(dialog.locator(".files")).toContainText("links.csv", { timeout: 30_000 });
+      await snap(page, "export-personal-csv");
+    });
+
+    test("repository analysis: the counts, the books with no links, a book's details, and the pairs the tool suggests", async ({ page }) => {
+      await chooseTask(page, "repo", "analyze");
+      const sheet = page.getByRole("dialog", { name: "ניתוח מאגר והשלמת קישורים" });
+      const chooser = page.waitForEvent("filechooser");
+      await sheet.getByRole("button", { name: "המסד: מסד נתונים" }).click();
+      await (await chooser).setFiles([DB]);
+      await expect(sheet.locator(".steps > li").first()).toHaveClass(/done/, { timeout: 30_000 });
+      await sheet.getByRole("button", { name: "התחלה" }).click();
+      const dlg = page.locator("dialog.repository");
+      await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+      await expect(dlg.getByText(/נקראו הקישורים של כל/)).toBeVisible({ timeout: 60_000 });
+      await dlg.locator("details.repo-more summary").click();
+      await dlg.locator(".body").evaluate((el) => (el.scrollTop = 0));
+      await snap(page, "repository-counts");
+      await dlg.locator("details.repo-more summary").click();
+      await dlg.getByLabel("חיפוש ספר").fill("ארצות החיים");
+      await dlg.locator(".repo-book", { hasText: "6 קישורים" }).first().getByRole("button", { name: /^פרטי הספר/ }).click();
+      await expect(dlg.getByRole("list", { name: "הספרים המקושרים" })).toBeVisible({ timeout: 30_000 });
+      await dlg.locator(".repo-h").first().evaluate((el) => el.scrollIntoView({ block: "start" }));
+      await snap(page, "repository");
+      await dlg.getByLabel("חיפוש ספר").fill("");
+      await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
+      await dlg.getByLabel("גם ספרים שכבר מקושרים").check();
+      await expect(dlg.locator(".repo-pair").first()).toBeVisible({ timeout: 30_000 });
+      await dlg.locator(".repo-pair").first().getByRole("checkbox").check();
+      await dlg.locator(".repo-pair").first().scrollIntoViewIfNeeded();
+      await dlg.locator(".repo-pairs").evaluate((el) => el.scrollIntoView({ block: "start" }));
+      await snap(page, "repository-pairs");
     });
 
     test("guided flow: the plan with the pairs, the counts of the links that exist, and what the file will hold", async ({ page }) => {

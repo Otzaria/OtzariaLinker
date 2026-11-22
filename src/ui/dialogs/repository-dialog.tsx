@@ -149,7 +149,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                     {totals.counted >= totals.books
                       ? `נקראו הקישורים של כל ${n(totals.books)} הספרים.`
                       : `נקראו הקישורים של ${n(totals.counted)} מתוך ${n(totals.books)} ספרים; "המשך הניתוח" קורא את השאר.`}{" "}
-                    הניתוח האחרון: {new Date(repo.analyzedAt.value).toLocaleString("he", { dateStyle: "medium", timeStyle: "short" })}. המספרים לא מתעדכנים לבד אם המסד או הפרויקט משתנים.
+                    הניתוח האחרון: <time class="repo-time">{new Date(repo.analyzedAt.value).toLocaleString("he", { dateStyle: "medium", timeStyle: "short" })}</time>. המספרים לא מתעדכנים לבד אם המסד או הפרויקט משתנים.
                   </p>
                 )}
                 {!progress && totals.counted === 0 && askedMany && (
@@ -273,7 +273,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
         </div>
         <footer>
           <span class="repo-chosen muted" role="status" aria-live="polite">
-            {chosen.length ? `נבחרו ${n(chosen.length)} ספרים${pairs.size ? `, ${n(pairs.size)} מהם עם זוג שנבחר` : ""}.` : "עוד לא נבחרו ספרים או זוגות."}
+            {chosen.length ? `${chosen.length === 1 ? "נבחר ספר אחד" : `נבחרו ${n(chosen.length)} ספרים`}${pairs.size ? (pairs.size === 1 ? ", עם זוג אחד שנבחר" : `, ${n(pairs.size)} מהם עם זוג שנבחר`) : ""}.` : "עוד לא נבחרו ספרים או זוגות."}
           </span>
           <span class="grow" />
           <button class="btn text" onClick={() => ref.current?.close()}>
@@ -534,6 +534,12 @@ function Suggestions() {
               );
             })}
           </ul>
+          {!visible.length && s.proposals.length > 0 && (
+            <p class="muted" role="status">
+              כל {n(s.proposals.length)} הזוגות שהוצעו הם של ספרים שכבר מקושרים. סמנו "גם ספרים שכבר מקושרים" כדי לראות אותם ולהשלים קישורים חסרים.
+            </p>
+          )}
+          {!s.proposals.length && <p class="muted" role="status">לא נמצאו זוגות לפי השמות: אין ספרים ששמם מציין ספר אחר שפתוח.</p>}
           {visible.length > shown && (
             <div style="text-align:center">
               <button class="btn outlined" onClick={() => setShown(shown + PAIRS_PAGE)}>

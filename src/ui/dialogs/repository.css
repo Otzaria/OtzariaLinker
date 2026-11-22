@@ -37,3 +37,4 @@ dialog.repository footer { align-items: center; gap: 8px; flex-wrap: wrap; }
 .repo-conf-high { background: var(--secondary-container); color: var(--on-secondary-container); }
 .repo-conf-medium { background: var(--surface-container-highest); }
 .repo-conf-low { background: var(--warning-container); color: var(--on-warning-container); }
+dialog.repository .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -112,9 +112,9 @@ export function CoveragePanel() {
           <>
             {countedAt !== undefined && (
               <p class={`cov-stamp small ${stale ? "warn-text" : "muted"}`} role="note" data-stale={stale || undefined}>
-                {stale
-                  ? `זה החישוב האחרון ששמור בפרויקט, מ־${stamp(countedAt)}. הוא לא מתעדכן לבד: ייתכן שהקישורים השתנו מאז. לחצו "חישוב מחדש" כדי לראות את המצב עכשיו.`
-                  : `חושב לאחרונה: ${stamp(countedAt)}.`}
+                {stale ? "זה החישוב האחרון ששמור בפרויקט, מ־" : "חושב לאחרונה: "}
+                <time class="cov-time" dateTime={new Date(countedAt).toISOString()}>{stamp(countedAt)}</time>
+                {stale ? ". הוא לא מתעדכן לבד: ייתכן שהקישורים השתנו מאז. לחצו \"חישוב מחדש\" כדי לראות את המצב עכשיו." : "."}
                 {stale && current.ranges.length >= COVERAGE_RANGES_MAX && ` רשימת הקטעים שנשמרה קוצרה ל־${n(COVERAGE_RANGES_MAX)} קטעים; המספרים מדויקים.`}
               </p>
             )}

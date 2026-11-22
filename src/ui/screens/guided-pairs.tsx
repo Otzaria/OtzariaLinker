@@ -221,7 +221,7 @@ export function PairChoices() {
                         </select>
                       </label>
                       <p class="pair-cost muted small">
-                        {cost === null ? "זמן משוער: עדיין לא ידוע, כי אורך אחד הספרים של הזוג עוד לא נקרא." : `זמן משוער לזוג: ${durationText(cost)}.`}
+                        {cost === null ? <span title="אורך אחד הספרים של הזוג עוד לא נקרא, ולכן אי אפשר להעריך כמה זמן ייקח.">זמן משוער: עדיין לא ידוע.</span> : `זמן משוער לזוג: ${durationText(cost)}.`}
                       </p>
                       {skipped.length > 0 && (
                         <div class="pair-skipped small">
