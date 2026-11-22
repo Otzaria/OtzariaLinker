@@ -140,8 +140,9 @@ const NATURAL = new Intl.Collator("he", { numeric: true });
  */
 export function runOrder(titles: readonly string[], steps: ReadonlyMap<string, readonly PlanStep[]>): string[] {
   const groups = new Map<string, string[]>();
-  // Array.sort is stable: equal titles (a clash across folders) keep the plan's order
-  for (const t of [...titles].sort(NATURAL.compare)) {
+  // The collator calls "ביאור 02" and "ביאור 2" equal: a plain code-unit comparison breaks that tie, so the order never
+  // depends on the input order. Array.sort is stable: identical titles (a clash across folders) keep the plan's order.
+  for (const t of [...titles].sort((a, b) => NATURAL.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0))) {
     const k = [...new Set((steps.get(t) ?? []).flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])))].sort().join("|");
     const g = groups.get(k);
     if (g) g.push(t);
