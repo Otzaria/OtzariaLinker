@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
-import { EVIDENCE_MIN, evidenceFromCounts, evidenceToFollow, LINKED_MIN, linkedFields, linkedProps, notesBaseKey, pairMethodKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
+import { estimateMs, EVIDENCE_MIN, evidenceFromCounts, evidenceToFollow, LINKED_MIN, linkedFields, linkedProps, notesBaseKey, pairMethodKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
 
 const book = (key: string, title: string, more: Partial<PlanBook> = {}): PlanBook => ({ key, title, origin: "otzaria", ...more });
 /** the pair relations alone: the citations engine (single-book) would add a step for every selected book */
@@ -737,3 +737,59 @@ describe("planMaxLink — the commentators of the Shulchan Aruch as intermediate
     expect(p.steps.filter((s) => s.kind === "pair" && s.engine === "headings").map((s) => s.kind === "pair" && s.target.key)).toEqual(["sa"]);
   });
 });
+
+/* 2.1 — what the plan says it will cost, and which methods it does NOT use for a pair, with the reason */
+describe("planMaxLink — estimated cost and unsuitable methods", () => {
+  const lib = [
+    book("b:1", "ספר א", { lineCount: 10_000 }),
+    book("c:1", 'רש"י על ספר א', { lineCount: 20_000 }),
+    book("t:1", "תרגום אונקלוס על ספר א", { lineCount: 5_000 }),
+    book("n:1", "הערות לספר א", { lineCount: 3_000 }),
+    book("x:1", "ספר בלי אורך"),
+  ];
+  const stepOf = (p: ReturnType<typeof planMaxLink>, id: string) => p.steps.find((s) => s.id === id)!;
+
+  it("every step has an estimate from the line counts of its books (the pair's lines for pair engines, the book's for citations)", () => {
+    const p = planMaxLink({ selected: ["c:1"], library: lib });
+    const h = stepOf(p, "headings|c:1>b:1");
+    expect(h.estimate).toEqual({ lines: 30_000, ms: estimateMs("headings", 30_000) });
+    const dh = stepOf(p, "dibur-hamatchil|c:1>b:1");
+    expect(dh.estimate!.ms).toBeGreaterThan(h.estimate!.ms);
+    const cit = stepOf(p, "citations|c:1");
+    expect(cit.estimate).toEqual({ lines: 20_000, ms: estimateMs("citations", 20_000) });
+    expect(p.estimatedMs).toBe(p.steps.reduce((n, s) => n + (s.estimate?.ms ?? 0), 0));
+    expect(p.unestimated).toBe(0);
+  });
+
+  it("a book whose length is not known has no estimate, and the plan counts it instead of guessing", () => {
+    const p = planMaxLink({ selected: ["x:1"], library: lib });
+    expect(p.steps.every((s) => s.estimate === undefined)).toBe(true);
+    expect(p.unestimated).toBe(p.steps.length);
+    expect(p.estimatedMs).toBe(0);
+  });
+
+  it("a commentary: footnotes is named unsuitable for the pair, with why; a targum: dibur-hamatchil; a notes book: headings and dibur-hamatchil", () => {
+    const p = planPairs({ selected: ["c:1", "t:1", "n:1"], library: lib });
+    const why = (dep: string, engine: string) => p.unsuitable.find((u) => u.dependant.key === dep && u.engine === engine)?.why ?? "";
+    expect(why("c:1", "footnotes")).toContain("ספר פירוש");
+    expect(why("t:1", "dibur-hamatchil")).toContain("תרגום");
+    expect(why("n:1", "headings")).toContain("ספר הערות");
+    expect(why("n:1", "dibur-hamatchil")).toContain("ספר הערות");
+    // a method that IS planned is never listed
+    expect(p.unsuitable.some((u) => u.dependant.key === "c:1" && (u.engine === "headings" || u.engine === "dibur-hamatchil"))).toBe(false);
+  });
+
+  it("a method the user unticked is listed as 'not ticked', not as unsuitable", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, engines: new Set(["dibur-hamatchil"]) });
+    const u = p.unsuitable.find((x) => x.dependant.key === "c:1" && x.engine === "headings")!;
+    expect(u.reason).toBe("unticked");
+    expect(u.why).toContain("לא סומנה");
+    expect(p.unsuitable.find((x) => x.engine === "footnotes")!.reason).toBe("unsuitable");
+  });
+
+  it("methods the user named for a pair are not second-guessed", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { methods: { [pairMethodKey('רש"י על ספר א', "ספר א")]: ["footnotes"] } } });
+    expect(p.unsuitable.some((u) => u.dependant.key === "c:1" && u.engine === "footnotes")).toBe(false);
+  });
+});
+

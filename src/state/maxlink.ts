@@ -476,6 +476,7 @@ export class MaxLinkState {
         ...this.host.refOf(b.key),
         ...(b.bases && { bases: b.bases }),
         ...(b.dependence && { dependence: b.dependence }),
+        ...(b.lineCount !== undefined && { lineCount: b.lineCount }),
         ...linkedProps(fields),
       };
     });

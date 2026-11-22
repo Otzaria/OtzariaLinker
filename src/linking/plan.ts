@@ -71,6 +71,8 @@ export interface PlanBook extends BookRef {
    * base absent from linkedCounts has no such link to it at all.
    */
   readonly linkedComplete?: boolean;
+  /** the number of lines, when the source knows it (a database does; a text file only after it is read): the plan's cost estimate */
+  readonly lineCount?: number;
 }
 
 /** What the existing links say a dependant is, besides a commentary (evidenceFromCounts). */
@@ -269,8 +271,36 @@ export type PlanStep =
        * user chose for the pair by name has no gate (issue #21: the title engine only where titles match).
        */
       titleGate?: true;
+      /** a rough cost (estimateMs); absent when a book's length is not known */
+      estimate?: StepEstimate;
     }
-  | { id: string; kind: "single"; engine: SingleEngineId; source: BookRef; why: string };
+  | { id: string; kind: "single"; engine: SingleEngineId; source: BookRef; why: string; estimate?: StepEstimate };
+
+/** What a step is expected to cost: the lines it reads, and the milliseconds that is worth (estimateMs). */
+export interface StepEstimate {
+  readonly lines: number;
+  readonly ms: number;
+}
+
+/**
+ * Milliseconds per line, measured on this code (2026-11-22, one machine, the official database: רש"י על ברכות, ביאור הלכה, רש"י על
+ * בראשית and שער הציון against their bases; citations on ביאור הלכה, רש"י על ברכות and משנה ברורה). A pair engine reads both books, so
+ * its lines are the two books' together: headings 0.04-0.05, dibur-hamatchil 0.13-0.37 (it grows with the size of the pair).
+ * Citations reads one book, and varies most with how many references the book has: 0.5-3.1 per line, and with the number of books
+ * open (the name index). The constants are the middle of those ranges: an order of magnitude to plan by, never a promise.
+ */
+export const COST_MS_PER_LINE: Readonly<Record<EngineId, number>> = { headings: 0.05, "dibur-hamatchil": 0.25, footnotes: 0.05, citations: 1.5, pattern: 0.1 };
+export const estimateMs = (engine: EngineId, lines: number): number => Math.round(lines * (COST_MS_PER_LINE[engine] ?? 0.1));
+
+/** A method the plan does not run for a pair, and why — shown to the user, not dropped silently. */
+export interface PlanUnsuitable {
+  readonly dependant: BookRef;
+  readonly base: BookRef;
+  readonly engine: PairEngineId;
+  /** "unsuitable": the relation does not fit the method; "unticked": it would run, but the user left it out */
+  readonly reason: "unsuitable" | "unticked";
+  readonly why: string;
+}
 
 export interface PlanBookRow {
   book: BookRef;
@@ -304,6 +334,12 @@ export interface MaxLinkPlan {
   baseSources: { title: string; sources: string[] }[];
   /** the user's choices the plan was made with (PlanInput.choices): the job keeps them, to plan the same after a reload */
   choices?: PlanChoices;
+  /** the methods left out of each pair and why (the pairs the user named methods for are not second-guessed) */
+  unsuitable: PlanUnsuitable[];
+  /** the steps' estimates together (ms), counting only the steps whose books' lengths are known */
+  estimatedMs: number;
+  /** steps with no estimate, because a book's length is not known yet */
+  unestimated: number;
 }
 
 /**
@@ -815,6 +851,18 @@ function chosenStep(engine: PairEngineId, rel: Relation): StepSpec | null {
   return null;
 }
 
+/** Why a method does not fit this relation (stepsFor gives none of it), in Hebrew; "" when nothing is known. */
+function whyNot(engine: PairEngineId, rel: Relation, depBook: PlanBook): string {
+  const d = quote(rel.dependant.title);
+  const b = quote(rel.base.title);
+  if (rel.kind === "notes") return engine === "footnotes" ? "" : `${d} הוא ספר הערות על ${b}: ההערות מקושרות לפי סימני ההערה בטקסט, לא לפי כותרות או דיבור המתחיל.`;
+  if (rel.kind === "mishnah-in-talmud") return engine === "dibur-hamatchil" ? "" : `${d} מובאת ב${b} כלשונה: הגמרא אינה מחולקת לפי כותרות המשנה, ואין בה סימני הערה; רק דיבור המתחיל מחפש את מילות הפתיחה.`;
+  if (engine === "footnotes") return `${d} הוא ספר פירוש, לא ספר הערות: שיטת הערות השוליים מתאימה סימני הערה בטקסט לשורות בספר ההערות.`;
+  if (rel.dhOnly) return `${b} ${rel.dhOnly === "intermediate" ? "הוא מפרש ביניים" : "מחולק לפי פרקים משלו"} שהכותרות שלו אינן של ${d}; רק דיבור המתחיל נבחר.`;
+  if (engine === "dibur-hamatchil" && (isTargum(depBook) || rel.dependence === "targum")) return `${d} הוא תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק הכותרות.`;
+  return "";
+}
+
 function stepsFor(rel: Relation, depBook: PlanBook): StepSpec[] {
   const d = quote(rel.dependant.title);
   const b = quote(rel.base.title);
@@ -944,6 +992,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   }
 
   const steps: PlanStep[] = [];
+  const unsuitable: PlanUnsuitable[] = [];
+  const unsuitableSeen = new Set<string>();
   const seen = new Set<string>();
   const touches = new Map<string, number>();
   const bump = (k: string) => touches.set(k, (touches.get(k) ?? 0) + 1);
@@ -961,6 +1011,17 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
             return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
           })
         : own;
+      if (!wanted)
+        for (const engine of ["headings", "dibur-hamatchil", "footnotes"] as const) {
+          const planned = own.some((x) => x.engine === engine);
+          const key = `${engine}|${rel.dependant.key}>${rel.base.key}`;
+          if (unsuitableSeen.has(key)) continue;
+          if (planned && enabled(engine)) continue;
+          const why = planned ? "" : whyNot(engine, rel, byKey.get(depKey)!);
+          if (!planned && !why) continue;
+          unsuitableSeen.add(key);
+          unsuitable.push(planned || !why ? { dependant: rel.dependant, base: rel.base, engine, reason: "unticked", why: "השיטה לא סומנה, ולכן לא תרוץ על הזוג הזה." } : { dependant: rel.dependant, base: rel.base, engine, reason: "unsuitable", why });
+        }
       for (const s of list) {
       if (!wanted && !enabled(s.engine)) continue;
       // one step per part when a part of the dependant is linked to the same part of the base
@@ -1035,7 +1096,20 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   for (const s of steps) perEngine[s.engine] = (perEngine[s.engine] ?? 0) + 1;
   const identified = books.filter((r) => relations.has(r.book.key) || onBase.has(r.book.key)).length;
   const choices = input.choices && (input.choices.pairs?.length || Object.keys(input.choices.methods ?? {}).length) ? input.choices : undefined;
-  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }) };
+  // a rough cost per step, where the books' lengths are known (COST_MS_PER_LINE)
+  const lines = (k: string) => byKey.get(k)?.lineCount;
+  let estimatedMs = 0;
+  let unestimated = 0;
+  for (const st of steps) {
+    const n = st.kind === "pair" ? (lines(st.source.key) !== undefined && lines(st.target.key) !== undefined ? lines(st.source.key)! + lines(st.target.key)! : undefined) : lines(st.source.key);
+    if (n === undefined) unestimated++;
+    else {
+      const estimate = { lines: n, ms: estimateMs(st.engine, n) };
+      (st as { estimate?: StepEstimate }).estimate = estimate;
+      estimatedMs += estimate.ms;
+    }
+  }
+  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }), unsuitable, estimatedMs, unestimated };
 }
 
 /** The book names a base it is written on: by its title ("X על Y", "הערות על Y") or by the database. */
