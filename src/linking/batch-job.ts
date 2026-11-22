@@ -1,6 +1,7 @@
 import type { BookRef } from "../core/links/model";
 import { combineFingerprints } from "../core/text/fingerprint";
 import { ENGINES, type EngineId, type Suggestion } from "./automatic";
+import { sanitizeStoredOptions } from "./automatic/option-specs";
 import type { StepResult } from "./maxlink-report";
 import type { MaxLinkPlan, PlanStep } from "./plan";
 
@@ -257,6 +258,16 @@ export function jobCsv(job: JobRecord): string {
   return `﻿${rows.join("\r\n")}\r\n`;
 }
 
+/** The stored per-engine options, each validated like the form's (option-specs.ts): a hostile or damaged value is dropped. */
+function storedEngineOptions(stored: object): NonNullable<JobRecord["engineOptions"]> {
+  const out: NonNullable<JobRecord["engineOptions"]> = {};
+  for (const e of ENGINES) {
+    const o = sanitizeStoredOptions(e.id, (stored as Record<string, unknown>)[e.id]);
+    if (Object.keys(o).length) out[e.id] = o;
+  }
+  return out;
+}
+
 /** Parses a stored record; null when it is not one (an older or damaged entry is dropped, never trusted). */
 export function parseJobRecord(text: string | null | undefined): JobRecord | null {
   if (!text) return null;
@@ -272,7 +283,7 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
       scope: typeof r.scope === "string" ? r.scope : "",
       sources: r.sources.filter((s): s is string => typeof s === "string"),
       ...(Array.isArray(r.engines) && { engines: r.engines.filter((e): e is EngineId => ENGINES.some((x) => x.id === e)) }),
-      ...(r.engineOptions && typeof r.engineOptions === "object" && { engineOptions: r.engineOptions }),
+      ...(r.engineOptions && typeof r.engineOptions === "object" && !Array.isArray(r.engineOptions) && { engineOptions: storedEngineOptions(r.engineOptions) }),
       ...(typeof r.preferBase === "string" && { preferBase: r.preferBase }),
       // a job that was running when the tab closed is paused: nothing runs until the user says so
       state: r.state === "running" || !states.includes(r.state as JobState) ? "paused" : r.state!,

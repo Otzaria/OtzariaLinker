@@ -9,6 +9,8 @@
 export const MAX_CUSTOM_REGEX_INPUT = 20_000;
 export const MAX_PATTERN_LENGTH = 300;
 const MAX_UNBOUNDED_QUANTIFIERS = 2;
+/** a bounded `{n,m}` wider than this (m - n) costs like an unbounded one and is counted with them (QA round 2) */
+const WIDE_RANGE = 8;
 /** every unbounded quantifier is rewritten to at most this many repetitions (security review #7) */
 export const QUANTIFIER_CAP = 64;
 
@@ -22,7 +24,9 @@ export type PatternCheck = { readonly ok: true; readonly regex: RegExp } | { rea
  * worker. Refused: invalid syntax, more than 300 characters, back-references, a quantified group
  * that itself contains a quantifier or an alternation ("nested quantifiers" — the classic
  * catastrophic shape), more than 2 unbounded quantifiers, and patterns that match the empty string.
- * Then every unbounded quantifier is BOUNDED (`*` → `{0,64}`, `+` → `{1,64}`, `{n,}` → `{n,n+64}`),
+ * A bounded range wider than WIDE_RANGE (`{1,500}`) counts as unbounded and its width is capped like
+ * theirs, so `a{1,500}a{1,500}a{1,500}b` is refused instead of running for minutes.
+ * Then every unbounded quantifier is BOUNDED (`*` → `{0,64}`, `+` → `{1,64}`, `{n,}` → `{n,n+64}`, `{n,m}` → `{n,min(m,n+64)}`),
  * so even a polynomial pattern like `a*a*b` costs at most ~line × 64² steps; markers are short, so
  * no real marker pattern is affected. Lines longer than MAX_CUSTOM_REGEX_INPUT are not searched.
  */
@@ -34,7 +38,7 @@ export function checkCustomPattern(pattern: string, flags = "", limits: { readon
   if (/\\[1-9]|\\k</.test(p)) return { ok: false, reason: "הפניות חוזרות (כמו \\1) אינן מותרות: הן עלולות להקפיא את הכלי." };
   const shape = quantifierShape(p);
   if (shape.nested) return { ok: false, reason: "קבוצה עם כמת שבתוכה עוד כמת או חלופות (למשל (a+)+) עלולה להקפיא את הכלי. כתבו את הביטוי בלי קינון." };
-  if (shape.unbounded > MAX_UNBOUNDED_QUANTIFIERS) return { ok: false, reason: `יותר מ־${MAX_UNBOUNDED_QUANTIFIERS} כמתים בלתי מוגבלים (* או +). צמצמו אותם, למשל ל־{1,4}.` };
+  if (shape.unbounded > MAX_UNBOUNDED_QUANTIFIERS) return { ok: false, reason: `יותר מ־${MAX_UNBOUNDED_QUANTIFIERS} כמתים בלתי מוגבלים או רחבים (*, + או טווח כמו {1,500}). צמצמו אותם, למשל ל־{1,4}.` };
   const safeFlags = [...new Set(String(flags).replace(/[^imsu]/g, ""))].join("") + "g";
   let regex: RegExp;
   try {
@@ -72,12 +76,13 @@ export function boundQuantifiers(p: string): string {
       out += c;
       continue;
     }
-    const brace = c === "{" ? /^\{(\d+),\}/.exec(p.slice(i)) : null;
+    const brace = c === "{" ? /^\{(\d+),(\d*)\}/.exec(p.slice(i)) : null;
     if ((c === "*" || c === "+") && !afterQuantifier) {
       out += `{${c === "*" ? 0 : 1},${QUANTIFIER_CAP}}`;
       afterQuantifier = true;
     } else if (brace) {
-      out += `{${brace[1]},${Number(brace[1]) + QUANTIFIER_CAP}}`;
+      const n = Number(brace[1]);
+      out += `{${brace[1]},${brace[2] ? Math.min(Number(brace[2]), n + QUANTIFIER_CAP) : n + QUANTIFIER_CAP}}`;
       i += brace[0].length - 1;
       afterQuantifier = true;
     } else {
@@ -137,7 +142,8 @@ function quantifierShape(p: string): { nested: boolean; unbounded: number } {
       const m = /^\{(\d*)(,?)(\d*)\}/.exec(p.slice(i));
       if (m) {
         len = m[0].length;
-        q = m[2] && !m[3] ? "unbounded" : Number(m[3] || m[1]) > 1 ? "bounded" : null;
+        const wide = m[2] && m[3] ? Number(m[3]) - Number(m[1] || 0) > WIDE_RANGE : false;
+        q = (m[2] && !m[3]) || wide ? "unbounded" : Number(m[3] || m[1]) > 1 ? "bounded" : null;
       }
     }
     if (q) {

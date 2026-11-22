@@ -299,3 +299,48 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
   for (const k of Object.keys(options)) if (options[k] === undefined) delete options[k];
   return { options, errors, changed };
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Options of one engine as they were STORED (a job record read back from IndexedDB, which anyone can edit) →
+ * only what the form could have produced: a known key with a value of the right type, numbers clamped to
+ * their range, select values from the choices, regular expressions through the same guard as
+ * `toEngineOptions`. Anything else is dropped, never passed on to the worker.
+ */
+export function sanitizeStoredOptions(engine: EngineId, stored: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const specs = ENGINE_OPTION_SPECS[engine];
+  if (!specs || !isRecord(stored)) return out;
+  for (const spec of specs) {
+    const raw = stored[spec.key];
+    if (raw === undefined) continue;
+    switch (spec.kind) {
+      case "boolean":
+        if (typeof raw === "boolean") out[spec.key] = raw;
+        break;
+      case "number":
+        if (spec.key.startsWith("t.")) break; // thresholds are stored together, below
+        if (typeof raw === "number" && Number.isFinite(raw)) out[spec.key] = Math.round(Math.min(spec.max, Math.max(spec.min, raw)));
+        break;
+      case "select":
+        if (spec.key === "targetStartsWithDh" ? typeof raw === "boolean" : typeof raw === "string" && spec.choices.some(([c]) => c === raw)) out[spec.key] = raw;
+        break;
+      case "regex":
+        if (typeof raw === "string" && (spec.template ? compilePattern(raw) : checkCustomPattern(raw)).ok) out[spec.key] = raw;
+        break;
+      case "marker":
+        if (raw === "sup" || raw === "sub" || raw === "parentheses") out[spec.key] = raw;
+        else if (isRecord(raw) && typeof raw["tag"] === "string" && /^[a-zA-Z][\w-]*$/.test(raw["tag"])) out[spec.key] = { tag: raw["tag"] };
+        else if (isRecord(raw) && typeof raw["regex"] === "string" && checkCustomPattern(raw["regex"]).ok) out[spec.key] = { regex: raw["regex"] };
+        break;
+    }
+  }
+  const t = stored["thresholds"];
+  if (isRecord(t)) {
+    const { certain, high, possible, ambiguityMargin } = t;
+    const ok = [certain, high, possible, ambiguityMargin].every((x) => typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= 1);
+    if (ok && (possible as number) <= (high as number) && (high as number) <= (certain as number)) out["thresholds"] = { certain, high, possible, ambiguityMargin };
+  }
+  return out;
+}
