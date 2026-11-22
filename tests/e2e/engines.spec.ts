@@ -97,3 +97,37 @@ test("batch: a folder of commentaries, each against the base its title names", a
   await expect(page.getByRole("table", { name: "סיכום לפי ספר" })).toContainText("חידושים");
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 14 (screen): how the notes are marked in the book — a tag, brackets or BARE DIGITS — is a choice in basic mode,
+ * in the notes method's own form and in max-link's plan (not only behind the advanced switch).
+ */
+test("notes: the marker style, bare digits included, is offered in basic mode — in the method's form and in max-link", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const main = ["<h1>ספר דוגמה</h1>", "<h2>פרק א</h2>", "שורה ראשונה עם הערה 1 ועוד אחת 2.", "<h2>פרק ב</h2>", "כאן המספור מתחיל שוב 1."].join("\n");
+  const notes = ["<h1>הערות לספר דוגמה</h1>", "<h2>פרק א</h2>", "(1) הערה ראשונה בפרק א.", "(2) הערה שנייה בפרק א.", "<h2>פרק ב</h2>", "(1) הערה ראשונה בפרק ב."].join("\n");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "ספר דוגמה.txt", mimeType: "text/plain", buffer: Buffer.from(main) },
+    { name: "הערות לספר דוגמה.txt", mimeType: "text/plain", buffer: Buffer.from(notes) },
+  ]);
+  await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "הערות שוליים" });
+  const marker = page.getByLabel("סימני ההערות בספר");
+  await expect(marker).toBeVisible();
+  await expect(marker.locator("option", { hasText: "מספרים בלי תגית" })).toHaveCount(1);
+  await marker.selectOption("digits");
+  await expect(marker).toHaveValue("digits");
+
+  await page.getByRole("radio", { name: "קישור מרבי" }).click();
+  const section = page.getByRole("region", { name: "הגדרות: הערות שוליים" });
+  await expect(section.getByLabel("סימני ההערות בספר")).toBeVisible({ timeout: 15_000 });
+  // basic mode: the rest of the notes method's settings stay folded away
+  await expect(section.locator("details.engine-options")).toHaveCount(0);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

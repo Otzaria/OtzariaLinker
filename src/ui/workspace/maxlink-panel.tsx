@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { rovingKeys, rovingTabIndex } from "../keyboard";
 import { ENGINES, type EngineId } from "../../linking/automatic";
-import { defaultFormValues, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
+import { defaultFormValues, ENGINE_OPTION_SPECS, isEssential, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { sourceNameText } from "../shell/file-name";
 import { BookChecklist } from "./book-checklist";
-import { EngineOptions } from "./engine-options";
+import { EngineOptions, EssentialOptions } from "./engine-options";
 import "./maxlink.css";
 
 /*
@@ -63,7 +63,8 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const [formValues, setFormValues] = useState<Partial<Record<EngineId, FormValues>>>({});
   const checks = useMemo(() => {
     const out = new Map<EngineId, OptionsCheck>();
-    if (advanced) for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id)));
+    // basic mode: only the essential options count (the marker style of footnotes); advanced: all of them
+    for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id), advanced ? "all" : "essential"));
     return out;
   }, [advanced, engines.map((e) => e.id).join(), off, formValues]);
   const invalid = [...checks.values()].some((c) => Object.keys(c.errors).length > 0);
@@ -142,19 +143,24 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
               ))}
             </fieldset>
           )}
-          {advanced &&
-            engines
-              .filter((e) => !off.has(e.id))
-              .map((e) => (
+          {engines
+            .filter((e) => !off.has(e.id) && (advanced || ENGINE_OPTION_SPECS[e.id].some((s) => isEssential(s, formValues[e.id] ?? defaultFormValues(e.id)))))
+            .map((e) => (
                 <section key={e.id} aria-label={`הגדרות: ${e.title}`}>
                   <b style="font-size:var(--fs-sm)">{e.title}</b>
-                  <EngineOptions
+                  <EssentialOptions
+                    engine={e.id}
+                    values={formValues[e.id] ?? defaultFormValues(e.id)}
+                    check={checks.get(e.id)!}
+                    onChange={(key, v) => setFormValues((all) => ({ ...all, [e.id]: { ...(all[e.id] ?? defaultFormValues(e.id)), [key]: v } }))}
+                  />
+                  {advanced && <EngineOptions
                     engine={e.id}
                     values={formValues[e.id] ?? defaultFormValues(e.id)}
                     check={checks.get(e.id)!}
                     onChange={(key, v) => setFormValues((all) => ({ ...all, [e.id]: { ...(all[e.id] ?? defaultFormValues(e.id)), [key]: v } }))}
                     onReset={() => setFormValues((all) => ({ ...all, [e.id]: defaultFormValues(e.id) }))}
-                  />
+                  />}
                 </section>
               ))}
           <details class="held" open={(advanced || unpaired > 0) && plan.books.length <= 12}>
