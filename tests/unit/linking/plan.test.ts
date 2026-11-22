@@ -699,3 +699,25 @@ describe("planMaxLink — title gate, explicit pairs and per-pair methods", () =
     expect(p.books[0]!.skipped).toContain("ספר שלא נפתח");
   });
 });
+
+describe("planMaxLink — the commentators of the Shulchan Aruch as intermediates (#10)", () => {
+  const lib = [
+    book("sa", "שולחן ערוך, חושן משפט", { origin: "sefaria", isBaseBook: true }),
+    book("ketzot", "קצות החושן על שולחן ערוך חושן משפט"),
+    book("shach", "שפתי כהן על שולחן ערוך חושן משפט"),
+    book("sma", "מאירת עיניים על שולחן ערוך חושן משפט"),
+    book("taz", "טורי זהב על שולחן ערוך חושן משפט"),
+  ];
+  it("a commentary on the SA also gets a pair against each open commentator on it, for the lines that name that commentator only", () => {
+    const p = planPairs({ selected: ["ketzot"], library: lib });
+    const to = (t: string) => p.steps.find((s) => s.kind === "pair" && s.engine === "dibur-hamatchil" && s.target.title === t);
+    for (const t of ["שפתי כהן על שולחן ערוך חושן משפט", "מאירת עיניים על שולחן ערוך חושן משפט", "טורי זהב על שולחן ערוך חושן משפט"]) {
+      const s = to(t);
+      expect(s, t).toBeDefined();
+      expect(s!.kind === "pair" && s!.options).toEqual({ addressedOnly: true });
+    }
+    // never against itself, and not by headings (the commentator's numbering is its own)
+    expect(p.steps.some((s) => s.kind === "pair" && s.target.key === "ketzot")).toBe(false);
+    expect(p.steps.filter((s) => s.kind === "pair" && s.engine === "headings").map((s) => s.kind === "pair" && s.target.key)).toEqual(["sa"]);
+  });
+});

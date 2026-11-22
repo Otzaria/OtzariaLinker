@@ -11,6 +11,12 @@
  * The names are ideas of `linker/dibur_matcher.py` (otzaria-library @48748247, organization code)
  * — its `_NAME_DH_PATTERNS`, extended with the commentators the database actually has as "X על Y"
  * books — matched here on search keys (hebrew-tokens.ts), with the prefixes ב/ו/וב peeled.
+ *
+ * The commentators of the Shulchan Aruch (ש"ך, ט"ז, מג"א, סמ"ע, ב"ש, ח"מ, באה"ט, פת"ש, מ"ב, בה"ל, קצה"ח) are
+ * the idea of Otzaria/otzaria-link-generator @c51c4c9fa817dbe58ce401f395da04465d5c2609 (src/data/
+ * halachaCommentators.ts, an organization repo, so portable under AGENTS.md §2.7): a commentator's id, its
+ * written forms ("ש"ך", "שפתי כהן") and its book "X על שולחן ערוך <חלק>". Only the names are taken, as search
+ * keys; the routing stays this engine's own (a name counts only before ד"ה, see extract.ts).
  */
 import { searchKey, type HebToken } from "../../../matching/hebrew-tokens";
 
@@ -28,7 +34,16 @@ interface Entry extends Commentator {
   readonly glued: readonly string[];
   /** search keys of the book title before " על " ("רש\"י על שבת" → "רשי") */
   readonly titles: readonly string[];
+  /**
+   * Titles of the commentator's book written WITHOUT " על " ("מגן אברהם", "משנה ברורה"): the whole title. With
+   * `part`, the title is also followed by the SA part it is on ("באר היטב אורח חיים").
+   */
+  readonly whole?: readonly string[];
+  readonly part?: true;
 }
+
+/** the search keys of written forms ("ש\"ך", "שפתי כהן"): the keys are derived, never hand-typed */
+const keysOf = (...forms: string[]): string[] => forms.map((f) => searchKey(f));
 
 const ENTRIES: readonly Entry[] = [
   { key: "rashi", name: 'רש"י', names: ["רשי", "פרשי", "פירשי", "פירוש רשי"], glued: ["רדה", "רשדה"], titles: ["רשי"] },
@@ -42,7 +57,22 @@ const ENTRIES: readonly Entry[] = [
   { key: "rashba", name: 'רשב"א', names: ["רשבא", "הרשבא"], glued: [], titles: ["רשבא"] },
   { key: "ramban", name: 'רמב"ן', names: ["רמבנ", "הרמבנ"], glued: [], titles: ["רמבנ"] },
   { key: "bartenura", name: "ברטנורא", names: ["רעב", "הרעב", "ברטנורא"], glued: [], titles: ["ברטנורא", "רעב"] },
+  // the commentators of the Shulchan Aruch (see the header)
+  { key: "shach", name: 'ש"ך', names: keysOf('ש"ך', "שפתי כהן"), glued: [], titles: keysOf("שפתי כהן", 'ש"ך') },
+  { key: "taz", name: 'ט"ז', names: keysOf('ט"ז', "טורי זהב"), glued: [], titles: keysOf("טורי זהב", 'ט"ז') },
+  { key: "sma", name: 'סמ"ע', names: keysOf('סמ"ע', "מאירת עינים", "מאירת עיניים"), glued: [], titles: keysOf("מאירת עיניים", "מאירת עינים", 'סמ"ע') },
+  { key: "magen_avraham", name: 'מג"א', names: keysOf('מג"א', 'מ"א'), glued: [], titles: keysOf("מגן אברהם"), whole: keysOf("מגן אברהם") },
+  { key: "beit_shmuel", name: 'ב"ש', names: keysOf('ב"ש', "בית שמואל"), glued: [], titles: keysOf("בית שמואל"), whole: keysOf("בית שמואל") },
+  { key: "chelkat_mechokek", name: 'ח"מ', names: keysOf('ח"מ', "חלקת מחוקק"), glued: [], titles: keysOf("חלקת מחוקק"), whole: keysOf("חלקת מחוקק") },
+  { key: "baer_heitev", name: 'באה"ט', names: keysOf('באה"ט', "באר היטב"), glued: [], titles: keysOf("באר היטב"), whole: keysOf("באר היטב"), part: true },
+  { key: "pitchei_teshuva", name: 'פת"ש', names: keysOf('פ"ת', 'פתח"ת', 'פת"ש', "פתחי תשובה"), glued: [], titles: keysOf("פתחי תשובה") },
+  { key: "mishna_berura", name: 'מ"ב', names: keysOf('מ"ב', 'משנ"ב', "משנה ברורה"), glued: [], titles: keysOf("משנה ברורה"), whole: keysOf("משנה ברורה") },
+  { key: "biur_halacha", name: 'בה"ל', names: keysOf('בה"ל', "ביאור הלכה"), glued: [], titles: keysOf("ביאור הלכה"), whole: keysOf("ביאור הלכה") },
+  { key: "ketzot", name: 'קצה"ח', names: keysOf('קצה"ח', "קצות החושן"), glued: [], titles: keysOf("קצות החושן") },
 ];
+
+/** the parts of the Shulchan Aruch, as the library's titles write them (it spells "חשן משפט" without a vav) */
+const SA_PARTS = new Set(keysOf("אורח חיים", "יורה דעה", "אבן העזר", "חושן משפט", "חשן משפט"));
 
 const PREFIXES = ["", "ב", "ו", "וב"];
 const byName = new Map<string, Entry>();
@@ -77,8 +107,21 @@ export function commentatorOfGlued(t: HebToken | undefined): Commentator | null 
  */
 export function commentatorOfTitle(title: string): Commentator | null {
   const at = title.indexOf(" על ");
-  if (at <= 0) return null;
-  const head = searchKey(title.slice(0, at));
-  const e = ENTRIES.find((x) => x.titles.includes(head));
-  return e ? { key: e.key, name: e.name } : null;
+  if (at > 0) {
+    const head = searchKey(title.slice(0, at));
+    const e = ENTRIES.find((x) => x.titles.includes(head));
+    return e ? { key: e.key, name: e.name } : null;
+  }
+  // a commentator of the Shulchan Aruch whose book is its name alone: "מגן אברהם", "באר היטב אורח חיים"
+  const key = searchKey(title);
+  for (const e of ENTRIES) {
+    if (!e.whole) continue;
+    if (e.whole.includes(key)) {
+      // "באר היטב" alone names no part of the Shulchan Aruch: not a book of the library
+      if (e.part) continue;
+      return { key: e.key, name: e.name };
+    }
+    if (e.part && e.whole.some((w) => key.startsWith(`${w} `) && SA_PARTS.has(key.slice(w.length + 1)))) return { key: e.key, name: e.name };
+  }
+  return null;
 }
