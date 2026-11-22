@@ -143,6 +143,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .pick-list { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; display: grid; gap: 2px; }
 .pick-list .check { display: flex; gap: 8px; align-items: start; padding: 2px 4px; overflow-wrap: anywhere; }
 .pick-count { margin: 0; font-size: var(--fs-sm); }
+.dbl-unresolved { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); border: 1px dashed var(--warning); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }

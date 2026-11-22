@@ -74,3 +74,33 @@ test("browse a book's database links, filter, copy one, export it with the repla
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 13 (screen): a personal database whose links are in external_link. A link that points at a book that is not open
+ * says so (and has no line to jump to), and a "source" link says which way it runs — "מקור" alone reads as a role.
+ */
+test("a personal database's links: an unopened target book is named as such, and 'source' says which way it runs", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "personal.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/pdc-personal-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: "PLACEHOLDER commentary on official" }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).first().click();
+  await page.getByRole("tab", { name: /קישורים מהמסד/ }).click();
+  const panel = page.locator(".dbl");
+  await expect(panel.locator(".dbl-sum")).toContainText("קישורים במסד", { timeout: 30_000 });
+  const items = panel.getByRole("list", { name: "קישורים מהמסד" }).locator(".dbl-item");
+  await expect(items.first()).toBeVisible();
+
+  // the library is not open: the target is named, marked as not open, and shows no line number
+  const toLibrary = items.filter({ hasText: "בראשית" }).first();
+  await expect(toLibrary.locator(".dbl-unresolved")).toContainText("הספר לא פתוח");
+  await expect(toLibrary).not.toContainText(/בראשית \d/);
+  // the direction type says which way it runs
+  await expect(items.filter({ hasText: "מקור — מפירוש אל ספר הבסיס" }).first()).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

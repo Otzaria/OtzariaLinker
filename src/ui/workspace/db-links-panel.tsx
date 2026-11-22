@@ -260,6 +260,12 @@ function LineView({ side }: { side: Side }) {
   );
 }
 
+/** A link end whose book no open source holds (a personal database's external_link row, ExternalLinksReader): key "unresolved:<title>". */
+const isUnresolved = (b: Link["source"]["book"]): boolean => b.key.startsWith("unresolved:");
+
+/** The type as this view shows it: "מקור" alone reads as a role of the book, so the direction is said. */
+const typeText = (type: ConnectionType): string => (type === "SOURCE" ? "מקור — מפירוש אל ספר הבסיס" : TYPE_LABELS[type].he);
+
 function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
   const store = useStore();
   const s = store.dbLinks;
@@ -273,7 +279,8 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
     const mine = s.side.value;
     const [own, other] = l.source.book.key === s.bookKey.value ? [l.source, l.target] : [l.target, l.source];
     store.reveal(mine, own.book.key, own.line);
-    store.reveal(mine === "source" ? "target" : "source", other.book.key, other.line);
+    // a book that is not open has no reader to show it in
+    if (!isUnresolved(other.book)) store.reveal(mine === "source" ? "target" : "source", other.book.key, other.line);
   };
   const anchors = l.dbAnchors?.length ?? 0;
   return (
@@ -285,13 +292,9 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         <span class="status dbl-status" title={DB_LINK_ORIGIN_LABELS[origin].hint}>
           {DB_LINK_ORIGIN_LABELS[origin].he}
         </span>
-        <span>
-          {l.source.book.title} {where(l.source.line, l.source.end)}
-        </span>
+        <End end={l.source} where={where} />
         <Icon name="oz_link" size={14} />
-        <span>
-          {l.target.book.title} {where(l.target.line, l.target.end)}
-        </span>
+        <End end={l.target} where={where} />
       </div>
       <div class="acts" onClick={(e) => e.stopPropagation()}>
         <button class="icon-btn" onClick={() => void s.adopt([l])} disabled={!!why || !!store.task.value} title={why ?? "העתקה לפרויקט"} aria-label="העתקה לפרויקט">
@@ -299,7 +302,7 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         </button>
       </div>
       <div class="muted">
-        {TYPE_LABELS[type].he}
+        {typeText(type)}
         {anchors > 0 && ` · ${anchors === 1 ? "עוגן" : `${anchors} עוגנים`}`}
         {(isRange(l.source) || isRange(l.target)) && " · טווח"}
         {l.dbSuppressed?.length ? " · מוסתר בצד אחד" : ""}
@@ -308,5 +311,23 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         {l.heRef2 && <span> · {l.heRef2}</span>}
       </div>
     </li>
+  );
+}
+
+/** One end of a link: the book and its line — or, for a book that is not open, its name and why there is no line. */
+function End({ end, where }: { end: Link["source"]; where: (line: number, end?: number) => string }) {
+  if (isUnresolved(end.book))
+    return (
+      <span>
+        {end.book.title}{" "}
+        <span class="dbl-unresolved" title="הספר שהקישור מצביע אליו לא פתוח (למשל ספריית אוצריא), ולכן אין שורה להציג. פתחו אותו ושורת הקישור תימצא.">
+          הספר לא פתוח
+        </span>
+      </span>
+    );
+  return (
+    <span>
+      {end.book.title} {where(end.line, end.end)}
+    </span>
   );
 }
