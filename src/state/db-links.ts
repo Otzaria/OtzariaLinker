@@ -1,7 +1,7 @@
 import { computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { ConnectionType } from "../core/links/connection-type";
-import { dbLinkOrigin, type DbLinkDirection, type DbLinkQuery, type DbLinkSummary, type DbLinksUnavailable } from "../core/links/db-links";
+import { dbLinkOrigin, type DbLinkDirection, type DbLinkFlag, type DbLinkQuery, type DbLinkSummary, type DbLinksUnavailable } from "../core/links/db-links";
 import { linkMatchIndex, matchLink, storedLinkIdentity, type LinkMatch, type LinkMatchIndex } from "../core/links/equality";
 import { adoptDbLink } from "../core/links/from-db";
 import type { BookRef, Link } from "../core/links/model";
@@ -48,6 +48,8 @@ export interface DbLinkFilter {
   dir?: DbLinkDirection;
   types?: readonly ConnectionType[];
   otherBookKey?: string;
+  /** only the links that carry this flag (a personal database's external_link rows: DbLinkFlag) */
+  flag?: DbLinkFlag;
   /** only the line (or range) picked in the chosen reader */
   pickedLine?: boolean;
 }
@@ -128,6 +130,7 @@ export class DbLinksState {
       ...(f.dir && { dir: f.dir }),
       ...(f.types?.length && { types: f.types }),
       ...(f.otherBookKey && { otherBookKey: f.otherBookKey }),
+      ...(f.flag && { flag: f.flag }),
       ...(f.pickedLine && pick && { lines: { from: pick.line, to: pick.end ?? pick.line } }),
     };
   }
