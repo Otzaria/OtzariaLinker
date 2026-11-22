@@ -339,3 +339,57 @@ test("guided flow: approving a group approves exactly the count it showed, and i
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * Issues 21 and 26 (screens): before the run the plan says, per pair, whether the commentary's titles fit its base (the
+ * headings method is only right then) and why, lets the user name the method of one pair, and "force dibur-hamatchil for
+ * all pairs". Forcing a method where it does not fit warns. Basic mode keeps this folded; advanced opens it.
+ */
+test("guided flow: the plan's pairs — title fit with reasons, a method per pair, force dibur-hamatchil, warnings", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]!, "פירוש קצר על בראשית": BOOKS["פירוש קצר על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  // folded in simple mode; one line per pair inside, the verdict only when asked for
+  const pairs = main.locator("details.guided-pairs");
+  await expect(pairs).not.toHaveAttribute("open", "");
+  await pairs.locator("summary").click();
+  // each pair is a row named by its key (dependant>base); a commentary is also paired with the commentaries on the same base
+  const row = (dep: string) => pairs.locator(`.pair-row[data-pair="${dep}>בראשית"]`);
+  await expect(row("ביאור על בראשית").locator(".pair-fit")).toContainText("הכותרות מתאימות", { timeout: 30_000 });
+  await expect(row("פירוש קצר על בראשית").locator(".pair-fit")).toContainText("הכותרות לא מתאימות", { timeout: 30_000 });
+  await expect(row("פירוש קצר על בראשית").locator(".pair-fit")).toContainText("אין כותרות"); // the reason, with the number behind it
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toHaveCount(0);
+
+  // naming headings for the pair whose titles do not fit: allowed, with a warning that says why
+  await row("פירוש קצר על בראשית").getByLabel(/^שיטה לזוג/).selectOption("both");
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toContainText("אינן של ספר הבסיס");
+  await row("פירוש קצר על בראשית").getByLabel(/^שיטה לזוג/).selectOption("");
+  await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toHaveCount(0);
+
+  // force dibur-hamatchil for all pairs: the plan then runs no other method
+  await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).check();
+  const methods = main.locator(".guided-books li b");
+  await expect(methods).toHaveText(["לפי דיבור המתחיל"]);
+  await expect(main.locator(".pair-force-note")).toContainText("גם היכן שהכותרות מתאימות");
+  await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).uncheck();
+  expect(await methods.count()).toBeGreaterThan(1);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

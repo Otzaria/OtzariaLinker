@@ -123,6 +123,26 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .cov-ranges { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .cov-range { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 6px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); }
 .cov-where { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
+/* the guided plan's pairs: title fit and a method per pair (issues 21, 26) */
+.guided-pairs { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.guided-pairs > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
+.pairs-body { padding: 0 10px 10px; display: grid; gap: 8px; }
+.pair-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pair-row { display: grid; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; overflow-wrap: anywhere; }
+.pair-reasons { margin: 4px 0 0; padding-inline-start: 18px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.pair-reasons .no::marker { content: "✕ "; }
+.pair-reasons .ok::marker { content: "✓ "; }
+.fit-badge { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: 600; border: 1px solid var(--outline-variant); }
+.fit-fit { background: var(--secondary-container); color: var(--on-secondary-container); }
+.fit-partial { background: var(--warning-container); color: var(--on-warning-container); }
+.fit-unfit { background: var(--error-container); color: var(--on-error-container); }
+.warn-text { margin: 0; padding: 6px 8px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
+/* ticking books (issue 26) */
+.book-checklist { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 8px; margin: 0; display: grid; gap: 6px; min-width: 0; }
+.book-checklist legend { font-weight: 600; padding-inline: 4px; }
+.pick-list { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; display: grid; gap: 2px; }
+.pick-list .check { display: flex; gap: 8px; align-items: start; padding: 2px 4px; overflow-wrap: anywhere; }
+.pick-count { margin: 0; font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }
