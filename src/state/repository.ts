@@ -4,6 +4,7 @@ import type { ConnectionType } from "../core/links/connection-type";
 import type { DbLinkFlag, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { UserPair } from "../linking/plan";
 import { discoverPairs, type DiscoveryBook, type PairProposal } from "../linking/discovery";
+import type { CoverageSummary } from "../linking/coverage";
 import type { CoverageRow, CoverageState } from "./coverage";
 import type { BooksService, OpenedSource } from "./services";
 
@@ -37,8 +38,14 @@ export interface RepoRow {
   top: { key: string; title: string; links: number }[];
   /** why its links cannot be read (no link table…): it is not counted as having none */
   unavailable?: string;
-  /** the lines by what links them, once counted (CoverageRow); an upper bound unless `exact` */
-  coverage?: { suitable: number; unlinked: number; linked: number; partial: number; multiple: number; notSuitable: number; at: number };
+  /** the lines by what links them, once counted (CoverageRow); `unlinked` is an upper bound unless `exact` (the book's headings were read) */
+  coverage?: { suitable: number; unlinked: number; linked: number; partial: number; multiple: number; notSuitable: number; exact: boolean; at: number };
+  /**
+   * why the coverage of this book is NOT shown although it was asked for: the database says it has links, but the count found no
+   * line they touch, which is what a failed read of the links looks like (linking/coverage.ts counts a failed read as "no links"),
+   * and "100% unlinked" would be a lie. Unknown is not zero.
+   */
+  coverageUnknown?: string;
 }
 
 /** A book is "suspicious" when at least this share of its links carry a flag (and at least SUSPICIOUS_MIN of them). */
@@ -100,7 +107,16 @@ export class RepositoryState {
   readonly pickedPairs = signal<ReadonlyMap<string, UserPair>>(new Map());
   readonly suggestions = signal<{ proposals: PairProposal[]; titled: number; unresolved: number } | null>(null);
   readonly suggesting = signal(false);
+  /** the last error of a count the user asked for (a coverage count that failed); null when the last one did not fail */
+  readonly error = signal<string | null>(null);
+  /** the coverage of ONE book, counted for its details: it names the book, so another book's details never show it */
+  readonly bookCoverage = signal<{ bookKey: string; summary: CoverageSummary } | null>(null);
+  /** the book whose details coverage is being counted */
+  readonly bookCoverageBusy = signal<string | null>(null);
   private abort: AbortController | null = null;
+  /** bumped when what a running count would write is no longer wanted (another source, rows dropped, reset): a plain stop keeps what was counted */
+  private epoch = 0;
+  private bookRun = 0;
 
   /** the open databases (a repository is a database, not text files) */
   readonly repositories = computed(() => this.host.sources.value.filter((s) => s.info.kind !== "text-files"));
@@ -154,7 +170,7 @@ export class RepositoryState {
 
   chooseSource(id: string): void {
     if (this.sourceId.value === id) return;
-    this.cancel();
+    this.discard();
     this.sourceId.value = id;
     this.rows.value = new Map();
     this.analyzedAt.value = null;
@@ -163,26 +179,38 @@ export class RepositoryState {
     this.suggestions.value = null;
   }
 
+  /** Stops the count; what it counted so far is kept. */
   cancel(): void {
     this.abort?.abort();
   }
 
+  /** Stops the count AND what it would still write: its late end must not put old rows back (the source changed, the rows were dropped). */
+  private discard(): void {
+    this.epoch++;
+    this.bookRun++;
+    this.bookCoverage.value = null;
+    this.bookCoverageBusy.value = null;
+    this.error.value = null;
+    this.abort?.abort();
+  }
+
   /** Forgets the rows of books this database does not have (another database was opened since); true when something was dropped. */
-  dropStale(): void {
+  dropStale(): boolean {
     const keys = new Set(this.books.peek().map((b) => b.key));
     const rows = this.rows.peek();
-    if (![...rows.keys()].some((k) => !keys.has(k))) return;
-    this.cancel();
+    if (![...rows.keys()].some((k) => !keys.has(k))) return false;
+    this.discard();
     this.rows.value = new Map([...rows].filter(([k]) => keys.has(k)));
     if (!this.rows.peek().size) this.analyzedAt.value = null;
     this.suggestions.value = null;
     this.pickedBooks.value = new Set([...this.pickedBooks.peek()].filter((k) => keys.has(k)));
     this.pickedPairs.value = new Map([...this.pickedPairs.peek()].filter(([, p]) => (!p.dependantKey || keys.has(p.dependantKey)) && (!p.baseKey || keys.has(p.baseKey))));
+    return true;
   }
 
   /** Forgets everything counted (a changed database, or the user asks to start over). */
   reset(): void {
-    this.cancel();
+    this.discard();
     this.rows.value = new Map();
     this.analyzedAt.value = null;
     this.suggestions.value = null;
@@ -222,7 +250,9 @@ export class RepositoryState {
     const read = this.service.dbLinkSummary;
     if (!source || !read || this.abort) return;
     if (again) this.rows.value = new Map();
+    this.error.value = null;
     const ctl = (this.abort = new AbortController());
+    const epoch = this.epoch;
     const todo = this.books.value.filter((b) => !this.rows.peek().has(b.key));
     const next = new Map(this.rows.peek());
     let last = performance.now();
@@ -243,9 +273,12 @@ export class RepositoryState {
         }
       }
     } finally {
-      this.rows.value = new Map(next);
+      // a count that was only stopped keeps its rows; one that was discarded (another source, dropped rows) writes nothing
+      if (epoch === this.epoch) {
+        this.rows.value = new Map(next);
+        this.analyzedAt.value = Date.now();
+      }
       this.progress.value = null;
-      this.analyzedAt.value = Date.now();
       this.abort = null;
     }
   }
@@ -253,7 +286,9 @@ export class RepositoryState {
   /** Counts the lines each of these books has linked (project and database links), one book at a time; stoppable. */
   async countCoverage(keys: readonly string[]): Promise<void> {
     if (this.abort) return;
+    this.error.value = null;
     const ctl = (this.abort = new AbortController());
+    const epoch = this.epoch;
     const next = new Map(this.rows.peek());
     const todo = keys.filter((k) => next.has(k) && !next.get(k)!.unavailable);
     let done = 0;
@@ -263,7 +298,7 @@ export class RepositoryState {
       for await (const row of this.host.coverage.rows(todo, { signal: ctl.signal })) {
         done = todo.indexOf(row.key) + 1;
         const cur = next.get(row.key);
-        if (cur) next.set(row.key, { ...cur, coverage: coverageOf(row) });
+        if (cur) next.set(row.key, withCoverage(cur, row));
         if (performance.now() - last >= FLUSH_MS) {
           this.rows.value = new Map(next);
           this.progress.value = { stage: "coverage", done, total: todo.length };
@@ -271,12 +306,40 @@ export class RepositoryState {
         }
       }
     } catch (err) {
-      if (!ctl.signal.aborted) throw err;
+      // not thrown: the dialog starts this without waiting for it; the error is shown, and what was counted so far is kept
+      if (!ctl.signal.aborted) this.error.value = `חישוב הכיסוי נכשל: ${(err as Error).message ?? err}`;
     } finally {
-      this.rows.value = new Map(next);
+      if (epoch === this.epoch) this.rows.value = new Map(next);
       this.progress.value = null;
       this.abort = null;
     }
+  }
+
+  /**
+   * The coverage of one book for its details (lines, ranges). The answer names its book and only the LAST asked book's answer is kept:
+   * a slow count of book A that ends after the user moved to book B is dropped, not shown under B's heading. A failure sets `error`.
+   */
+  async countBookCoverage(bookKey: string): Promise<void> {
+    const run = ++this.bookRun;
+    this.error.value = null;
+    this.bookCoverageBusy.value = bookKey;
+    try {
+      const summary = await this.host.coverage.summary(bookKey);
+      if (run !== this.bookRun) return;
+      if (summary) this.bookCoverage.value = { bookKey, summary };
+      else this.error.value = "אי אפשר לחשב כיסוי: הספר לא פתוח, או שאורכו עדיין לא ידוע.";
+    } catch (err) {
+      if (run === this.bookRun) this.error.value = `חישוב הכיסוי נכשל: ${(err as Error).message ?? err}`;
+    } finally {
+      if (run === this.bookRun) this.bookCoverageBusy.value = null;
+    }
+  }
+
+  /** The details of another book were opened (or closed): its coverage is not the one counted for the previous book. */
+  leaveBook(): void {
+    this.bookRun++;
+    this.bookCoverage.value = null;
+    this.bookCoverageBusy.value = null;
   }
 
   /** One book's links in full (by book and by type), for its detail; null when they cannot be read. */
@@ -341,7 +404,16 @@ export class RepositoryState {
   }
 }
 
-function coverageOf(row: CoverageRow): NonNullable<RepoRow["coverage"]> {
+/**
+ * The row with its counted coverage. The database says the book has links (`total`) but no line was found linked: the read of the
+ * links failed (coverage.ts reports that as "no links"), so the coverage stays unknown instead of showing every line as unlinked.
+ */
+function withCoverage(cur: RepoRow, row: CoverageRow): RepoRow {
   const c = row.counts.byBucket;
-  return { suitable: row.counts.suitable, unlinked: row.counts.unlinked, linked: c.linked, partial: c.partial, multiple: c.multiple, notSuitable: c["not-suitable"], at: Date.now() };
+  if (cur.total > 0 && c.linked + c.partial + c.multiple === 0) {
+    const { coverage: _old, ...rest } = cur;
+    return { ...rest, coverageUnknown: "לספר יש קישורים במסד, אבל לא נמצאה אף שורה שהם נוגעים בה: כנראה שקריאת הקישורים נכשלה, ולכן הכיסוי לא ידוע." };
+  }
+  const { coverageUnknown: _gone, ...rest } = cur;
+  return { ...rest, coverage: { suitable: row.counts.suitable, unlinked: row.counts.unlinked, linked: c.linked, partial: c.partial, multiple: c.multiple, notSuitable: c["not-suitable"], exact: row.exact, at: Date.now() } };
 }

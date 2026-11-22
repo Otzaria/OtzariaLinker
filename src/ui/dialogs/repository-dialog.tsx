@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { TYPE_LABELS } from "../../core/links/connection-type";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
-import type { CoverageSummary } from "../../linking/coverage";
 import type { PairConfidence, PairProposal } from "../../linking/discovery";
 import { isSuspicious, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoRow, type RepoSort } from "../../state/repository";
 import { useStore } from "../context";
@@ -61,7 +60,9 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
     repo.dropStale();
     return () => repo.cancel();
   }, []);
-  useEffect(() => repo.dropStale(), [repo.books.value]);
+  useEffect(() => {
+    repo.dropStale();
+  }, [repo.books.value]);
 
   // the list: filtered and sorted from the small rows; only a page of it is in the page
   const list = useMemo(() => {
@@ -155,6 +156,11 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                       {progress.stage === "links" ? "נקראו הקישורים של" : "חושב כיסוי של"} {n(progress.done)} מתוך {n(progress.total)} ספרים. אפשר לעצור, והספרים שנקראו נשמרים.
                     </span>
                   </div>
+                )}
+                {repo.error.value && (
+                  <p class="warn-text small" role="alert" style="margin:0">
+                    {repo.error.value}
+                  </p>
                 )}
                 {!progress && repo.analyzedAt.value !== null && (
                   <p class="muted small" role="status" style="margin:0">
@@ -320,6 +326,7 @@ function BookRow({ title, row, checked, current, onPick, onOpen }: { title: stri
       </button>
       <span class="repo-meta muted">
         {!row ? "לא נבדק" : row.unavailable ? "אי אפשר לקרוא" : row.total === 0 ? <b class="repo-none">בלי קישורים</b> : many(row.total, "קישור אחד", "קישורים")}
+        {row?.coverageUnknown && " · הכיסוי לא ידוע"}
         {row && !row.unavailable && row.flags.length > 0 && (
           <span class="repo-flagged" title={row.flags.map((f) => `${DB_LINK_FLAG_LABELS[f.flag].he}: ${n(f.count)}`).join("\n")}>
             {" "}
@@ -339,8 +346,10 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
   const book = store.books.value.get(bookKey);
   const row = repo.rows.value.get(bookKey);
   const [summary, setSummary] = useState<DbLinkSummary | DbLinksUnavailable | null | "loading">("loading");
-  const [cov, setCov] = useState<CoverageSummary | null>(null);
-  const [busy, setBusy] = useState(false);
+  // the coverage counted for this book's details: the state names its book, so a slow count of the previous book is never shown here
+  const counted = repo.bookCoverage.value;
+  const cov = counted && counted.bookKey === bookKey ? counted.summary : null;
+  const busy = repo.bookCoverageBusy.value === bookKey;
   const box = useRef<HTMLElement>(null);
   const head = useRef<HTMLHeadingElement>(null);
   // the details open beside the list or below it: bring them into view and say so (a screen reader hears the book's name)
@@ -350,23 +359,16 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
   }, [bookKey]);
   useEffect(() => {
     setSummary("loading");
-    setCov(null);
+    repo.leaveBook();
     let live = true;
     void repo.detailOf(bookKey).then((s) => live && setSummary(s));
-    return () => void (live = false);
+    return () => {
+      live = false;
+      repo.leaveBook();
+    };
   }, [bookKey]);
   if (!book) return null;
   const ok = summary !== "loading" && summary && "total" in summary ? summary : null;
-  const countCoverage = async () => {
-    setBusy(true);
-    try {
-      setCov(await store.coverage.summary(bookKey));
-    } catch (err) {
-      store.notify("error", `חישוב הכיסוי נכשל: ${(err as Error).message ?? err}`);
-    } finally {
-      setBusy(false);
-    }
-  };
   const open = (then?: () => void) => {
     store.showBook("source", bookKey);
     then?.();
@@ -445,13 +447,18 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
         </>
       )}
       <h4>כיסוי</h4>
+      {row?.coverageUnknown && !cov && (
+        <p class="warn-text small" role="note">
+          {row.coverageUnknown}
+        </p>
+      )}
       {row?.coverage && !cov && (
         <p class="small">
           {n(row.coverage.unlinked)} מתוך {n(row.coverage.suitable)} שורות תוכן בלי קישור ({row.coverage.suitable ? Math.round((row.coverage.unlinked / row.coverage.suitable) * 100) : 0}%). כותרות לא נספרות כשורות תוכן, ואם לא נקראו כותרות הספר המספר הוא גבול עליון.
         </p>
       )}
       <div class="row">
-        <button class="btn tonal small" onClick={() => void countCoverage()} disabled={busy || !!store.task.value}>
+        <button class="btn tonal small" onClick={() => void repo.countBookCoverage(bookKey)} disabled={busy || !!store.task.value}>
           {cov ? "חישוב מחדש" : "חישוב כיסוי מלא וקטעים בלי קישור"}
         </button>
         <button class="btn text small" onClick={() => open()}>
