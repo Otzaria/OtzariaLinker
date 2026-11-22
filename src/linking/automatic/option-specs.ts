@@ -2,6 +2,7 @@ import { inlineLinkerVersionNote } from "../../core/links/connection-type";
 import { checkCustomPattern } from "../../core/text/safe-regex";
 import type { MarkerStyle } from "./footnotes/markers";
 import { compilePattern, CUSTOM_PRESET, DEFAULT_PRESET, describeLevels, PATTERN_PRESETS, presetById } from "./pattern";
+import { compileSourceFilter, parseSourceFilter, SOURCE_FILTER_PRESETS, type SourceFilter, type SourceFilterPreset } from "./source-filter";
 import { DEFAULT_THRESHOLDS, type EngineId } from "./types";
 
 /*
@@ -28,6 +29,8 @@ interface SpecBase {
   hintOf?: (values: FormValues) => string | null;
   /** options cleared when this one changes (a new preset drops the pattern edited from the previous one) */
   resets?: readonly string[];
+  /** shown only while this holds (the regular expression of the line filter while the filter is a pattern of your own) */
+  showWhen?: (values: FormValues) => boolean;
 }
 
 export type OptionSpec =
@@ -63,6 +66,47 @@ const TYPE_CHOICES = [
   ["other", "אחר"],
 ] as const;
 
+/**
+ * The source filter (issue #27, source-filter.ts) as form fields: which lines of the source enter the engine, and whether the marker in front
+ * of them is ignored when matching. The lineFilter keys are not engine options by themselves: toEngineOptions turns them into ONE option,
+ * sourceFilter, and sanitizeStoredOptions reads that back. stripDefault is what the engine does when nobody says (dibur-hamatchil reads the
+ * words after the marker; the others read the line as it is).
+ */
+const LINE_FILTER_CHOICES: readonly (readonly [string, string])[] = [
+  ["", "כל השורות"],
+  ["square", "רק שורות שמתחילות ב־[א]"],
+  ["round", "רק שורות שמתחילות ב־(א)"],
+  ["close-paren", "רק שורות שמתחילות ב־א)"],
+  ["bold-dh", 'רק שורות שמתחילות ב־<b>ד"ה</b>'],
+  ["regex", "רק שורות שמתחילות בסימן משלכם (ביטוי רגולרי)"],
+];
+function lineFilterSpecs(stripDefault: boolean, essential: boolean): OptionSpec[] {
+  const on = (v: FormValues) => String(v["lineFilter"] ?? "") !== "";
+  return [
+    {
+      kind: "select",
+      key: "lineFilter",
+      label: "אילו שורות של הספר המקשר נכנסות",
+      default: "",
+      choices: LINE_FILTER_CHOICES,
+      ...(essential && { essential: true }),
+      hint: "למשל קישור רק לשורות שמתחילות ב־[א]. ההתאמה נעשית לפי המילים שאחרי הסימן, והקישור והעוגן נשארים על השורה המקורית. בלי סימן כל השורות נכנסות.",
+    },
+    {
+      kind: "regex",
+      key: "lineFilterRegex",
+      label: "הסימן בתחילת השורה (ביטוי רגולרי)",
+      default: "",
+      essentialWhen: { key: "lineFilter", value: "regex" },
+      showWhen: (v) => String(v["lineFilter"] ?? "") === "regex",
+      hint: "הביטוי מתאים לתחילת השורה בלבד (אחרי רווחים ותגיות). למשל {\\d+} ל־{12}. ביטוי שעלול להקפיא את הכלי נדחה.",
+    },
+    { kind: "boolean", key: "lineFilterExclude", label: "הפוך: לדלג על השורות שמתחילות בסימן", default: false, showWhen: on },
+    { kind: "boolean", key: "lineFilterStrip", label: "להתאים לפי המילים שאחרי הסימן (הסימן עצמו לא נחשב)", default: stripDefault, showWhen: on },
+  ];
+}
+const isLineFilterKey = (key: string) => key.startsWith("lineFilter");
+
 export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[]>> = {
   headings: [
     { kind: "select", key: "numbering", label: "קריאת מספרים בכותרות", default: "lenient", choices: [["lenient", "סלחנית (יה, ער, רחצ נקראים)"], ["strict", "מדויקת בלבד"]] },
@@ -70,9 +114,11 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "untaggedHeadings", label: "שורות קצרות כמו \"פרק ג\" נחשבות כותרת גם בלי תגית", default: true },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...lineFilterSpecs(false, false),
     ...THRESHOLDS,
   ],
   "dibur-hamatchil": [
+    ...lineFilterSpecs(true, true),
     { kind: "number", key: "maxDhWords", label: "מספר מילים מרבי בדיבור המתחיל", min: 2, max: 30, default: 12 },
     { kind: "select", key: "anchors", label: "עוגן על מילות הד\"ה בבסיס", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
     { kind: "select", key: "targetStartsWithDh", label: "שורות ספר הבסיס פותחות בד\"ה משלהן", default: "", choices: [["", "זיהוי אוטומטי"], ["yes", "כן (פירוש על פירוש)"], ["no", "לא"]] },
@@ -85,7 +131,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     ...THRESHOLDS,
   ],
   footnotes: [
-    { kind: "marker", key: "mainMarkers", label: "סימני ההערות בספר", default: "auto", hint: "אוטומטי בודק <sup>, <sub> וסוגריים ובוחר את מה שמתאים לספר ההערות." },
+    { kind: "marker", key: "mainMarkers", label: "סימני ההערות בספר", default: "auto", hint: "אוטומטי בודק <sup>, <sub> וסוגריים, ורק אם אף אחד מהם לא מתאים — גם מספרים צמודים למילה (שלום1). אם ההערות הן מספרים בלי תגית, בחרו \"מספרים בלי תגית\"." },
     { kind: "marker", key: "notesMarkers", label: "סימון תחילת הערה בספר ההערות", default: "auto" },
     { kind: "select", key: "notesMarkerPosition", label: "איפה הסימן בשורת ההערה", default: "start", choices: [["start", "רק בתחילת השורה"], ["anywhere", "בכל מקום בשורה"]] },
     { kind: "select", key: "numbering", label: "מספור ההערות", default: "auto", choices: [["auto", "לפי ספר ההערות"], ["digits", "ספרות"], ["letters", "אותיות"], ["any", "שניהם"]] },
@@ -94,6 +140,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "select", key: "chapterAlignment", label: "שיוך הסימנים לפרקים", default: "global", choices: [["global", "גלובלי (מומלץ)"], ["greedy", "סימן אחר סימן (כמו Link-Notes)"]] },
     { kind: "boolean", key: "includeInlineNoteMarkers", label: "לקרוא גם סימנים של הערות שכבר מוטמעות בשורה", default: false },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...lineFilterSpecs(false, false),
   ],
   citations: [
     { kind: "select", key: "minConfidence", label: "ודאות מינימלית להצעה", default: "possible", choices: [["possible", "אפשרית ומעלה"], ["high", "גבוהה ומעלה"], ["certain", "ודאית בלבד"]], hint: "הצעות בוודאות נמוכה יותר לא יוצגו כלל." },
@@ -110,6 +157,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     },
     { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
+    { kind: "boolean", key: "noGate", label: "להריץ גם על ספר בלי סימני הפניה", default: false, hint: "השיטה מדלגת על ספר שאין בו שורה עם דף, פרק, סימן, סעיף או פסוק ומספר (ולא עשר שורות שמזכירות מקום). ספר שמצטט רק בשם הספר ובמספרים (\"בראשית א, ב\") ייתכן שיידלג בטעות." },
     ...THRESHOLDS,
   ],
   pattern: [
@@ -147,6 +195,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "sectionRanges", label: "לקשר לכל הסעיף שתחתיה ההפניה מצביעה (טווח)", default: false },
     { kind: "select", key: "anchors", label: "עוגן על המילים שנמצאו", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...lineFilterSpecs(false, false),
     ...THRESHOLDS,
   ],
 };
@@ -167,6 +216,9 @@ export function isEssential(spec: OptionSpec, values: FormValues): boolean {
   return spec.essential === true || (spec.essentialWhen !== undefined && String(values[spec.essentialWhen.key] ?? "") === spec.essentialWhen.value);
 }
 
+/** shown in the form now (an option with showWhen is hidden while its condition does not hold) */
+export const isShown = (spec: OptionSpec, values: FormValues): boolean => spec.showWhen === undefined || spec.showWhen(values);
+
 /** the text field next to a marker select: `<key>.custom` */
 export const customKey = (key: string): string => `${key}.custom`;
 
@@ -175,6 +227,7 @@ export const MARKER_CHOICES = [
   ["sup", "<sup>"],
   ["sub", "<sub>"],
   ["parentheses", "סוגריים ( )"],
+  ["digits", "מספרים בלי תגית (שלום1)"],
   ["tag", "תגית אחרת"],
   ["regex", "ביטוי רגולרי"],
 ] as const;
@@ -210,6 +263,7 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
 
   for (const spec of ENGINE_OPTION_SPECS[engine]) {
     if (scope === "essential" && !isEssential(spec, values)) continue;
+    if (isLineFilterKey(spec.key)) continue; // composed into one option below
     const raw = values[spec.key];
     if (raw === undefined) continue;
     switch (spec.kind) {
@@ -267,7 +321,7 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
         if (v === "auto") break;
         const custom = String(values[customKey(spec.key)] ?? "").trim();
         let style: MarkerStyle;
-        if (v === "sup" || v === "sub" || v === "parentheses") style = v;
+        if (v === "sup" || v === "sub" || v === "parentheses" || v === "digits") style = v;
         else if (v === "tag") {
           const tag = custom.replace(/[<>/\s]/g, "");
           if (!/^[a-zA-Z][\w-]*$/.test(tag)) {
@@ -292,6 +346,8 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
       }
     }
   }
+  const filter = lineFilterOption(engine, values, scope, errors);
+  if (filter) (options["sourceFilter"] = filter), changed++;
   if (thresholdsChanged) {
     if (!(thresholds.possible <= thresholds.high && thresholds.high <= thresholds.certain))
       errors["t.certain"] = "הספים צריכים להיות בסדר עולה: מינימלי ≤ גבוה ≤ ודאי.";
@@ -299,6 +355,38 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
   }
   for (const k of Object.keys(options)) if (options[k] === undefined) delete options[k];
   return { options, errors, changed };
+}
+
+/** The lineFilter fields as the engine option sourceFilter (null: no filter), with the problems of the fields in errors. */
+function lineFilterOption(engine: EngineId, values: FormValues, scope: "all" | "essential", errors: Record<string, string>): SourceFilter | null {
+  const specs = ENGINE_OPTION_SPECS[engine];
+  const get = (key: string) => specs.find((x) => x.key === key);
+  const filterSpec = get("lineFilter");
+  if (!filterSpec || (scope === "essential" && !isEssential(filterSpec, values))) return null;
+  const choice = String(values["lineFilter"] ?? "");
+  if (!choice) return null;
+  const used = (key: string) => {
+    const sp = get(key);
+    return !!sp && (scope === "all" || isEssential(sp, values));
+  };
+  let prefix: SourceFilter["prefix"];
+  if (choice === "regex") {
+    const rx = String(values["lineFilterRegex"] ?? "").trim();
+    const check = compileSourceFilter({ prefix: { regex: rx } });
+    if (!check.ok) {
+      errors["lineFilterRegex"] = check.reason;
+      return null;
+    }
+    prefix = { regex: rx };
+  } else if (SOURCE_FILTER_PRESETS.includes(choice as SourceFilterPreset)) prefix = { preset: choice as SourceFilterPreset };
+  else {
+    errors["lineFilter"] = "ערך לא מוכר.";
+    return null;
+  }
+  const exclude = used("lineFilterExclude") && (values["lineFilterExclude"] === true || values["lineFilterExclude"] === "true");
+  const stripSpec = get("lineFilterStrip");
+  const strip = used("lineFilterStrip") ? values["lineFilterStrip"] === true || values["lineFilterStrip"] === "true" : undefined;
+  return { prefix, ...(exclude && { mode: "exclude" as const }), ...(strip !== undefined && stripSpec?.kind === "boolean" && strip !== stripSpec.default && { strip }) };
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -336,6 +424,10 @@ export function sanitizeStoredOptions(engine: EngineId, stored: unknown): Record
         else if (isRecord(raw) && typeof raw["regex"] === "string" && checkCustomPattern(raw["regex"]).ok) out[spec.key] = { regex: raw["regex"] };
         break;
     }
+  }
+  if (specs.some((x) => x.key === "lineFilter")) {
+    const f = parseSourceFilter(stored["sourceFilter"]);
+    if (f && compileSourceFilter(f).ok) out["sourceFilter"] = f;
   }
   const t = stored["thresholds"];
   if (isRecord(t)) {

@@ -5,8 +5,9 @@ import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
 import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseBookResult, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
-import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
-import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook, type PlanStep } from "../linking/plan";
+import { applyPairMinimums, linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
+import type { TitleFitReport } from "../linking/title-fit";
+import { competingTargets, evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, PAIR_ENGINES, pairMethodKey, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PairEngineId, type PlanBook, type PlanChoices, type PlanStep, type RelationKind } from "../linking/plan";
 import type { LinkState } from "./history";
 import type { BooksService, CallOptions, KeyValueStore, OpenedSource, Saver } from "./services";
 import type { NoticeKind, SideTab } from "./store";
@@ -19,7 +20,13 @@ import { countOf } from "./task-progress";
  * the report. The run is an ordinary SuggestionRun, so the table, inline and card views, approve,
  * reject and undo work on it unchanged. Kept out of store.ts on purpose, like AltTocState.
  */
-export type MaxLinkScope = { kind: "book"; key: string } | { kind: "source"; id: string } | { kind: "sources"; ids: readonly string[] } | { kind: "all" };
+export type MaxLinkScope =
+  | { kind: "book"; key: string }
+  | { kind: "source"; id: string }
+  | { kind: "sources"; ids: readonly string[] }
+  /** exactly these books (issue #26: 2-3 or any subset), in this order; keys of books that are not open are ignored */
+  | { kind: "books"; keys: readonly string[] }
+  | { kind: "all" };
 
 export interface MaxLinkHost {
   readonly books: ReadonlySignal<Map<string, SourceBook>>;
@@ -41,6 +48,7 @@ export interface MaxLinkRunOptions {
   /** the source the plan took the bases from when a base is open in several: a resumed job plans the same */
   preferSource?: string;
 }
+
 
 /** Where the batch job is kept in the browser: the record, and each book's result under its index. */
 export const JOB_KEY = "maxlink-job:v1";
@@ -113,6 +121,7 @@ export class MaxLinkState {
   selection(scope: MaxLinkScope): string[] {
     if (scope.kind === "book") return this.host.books.value.has(scope.key) ? [scope.key] : [];
     if (scope.kind === "source") return this.host.sources.value.find((s) => s.info.id === scope.id)?.books.map((b) => b.key) ?? [];
+    if (scope.kind === "books") return scope.keys.filter((k, i) => this.host.books.value.has(k) && scope.keys.indexOf(k) === i);
     // several sources (the guided flow's folder, opened in more than one pick), in the order they were opened
     if (scope.kind === "sources") return this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).flatMap((s) => s.books.map((b) => b.key));
     return [...this.host.books.value.keys()];
@@ -121,6 +130,10 @@ export class MaxLinkState {
   scopeLabel(scope: MaxLinkScope): string {
     if (scope.kind === "book") return `הספר "${this.host.refOf(scope.key).title}"`;
     if (scope.kind === "source") return `המקור "${this.host.sources.value.find((s) => s.info.id === scope.id)?.info.label ?? scope.id}"`;
+    if (scope.kind === "books") {
+      const titles = this.selection(scope).map((k) => `"${this.host.refOf(k).title}"`);
+      return titles.length === 1 ? `הספר ${titles[0]}` : `הספרים ${titles.join(", ")}`;
+    }
     if (scope.kind === "sources") {
       const labels = this.host.sources.value.filter((s) => scope.ids.includes(s.info.id)).map((s) => `"${s.info.label}"`);
       return labels.length === 1 ? `המקור ${labels[0]}` : `המקורות ${labels.join(", ")}`;
@@ -181,8 +194,29 @@ export class MaxLinkState {
    * The plan for a scope, with only the ticked engines (all when `engines` is absent). `preferSource`:
    * the source whose books are the bases when a base is open in several (MaxLinkPlan.baseSources).
    */
-  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>, preferSource?: string): MaxLinkPlan {
-    return planMaxLink({ selected: this.selection(scope), library: this.planLibrary(), ...(engines && { engines }), ...(preferSource && { preferSource }) });
+  plan(scope: MaxLinkScope, engines?: ReadonlySet<EngineId>, preferSource?: string, choices?: PlanChoices): MaxLinkPlan {
+    return planMaxLink({ selected: this.selection(scope), library: this.planLibrary(), ...(engines && { engines }), ...(preferSource && { preferSource }), ...(choices && { choices }) });
+  }
+
+  /** Whether the commentary's titles fit its base (linking/title-fit.ts), for the screens that offer the headings method; null when the service cannot tell. */
+  titleFit(commentaryKey: string, baseKey: string): Promise<TitleFitReport | null> {
+    return this.service.titleFit ? this.service.titleFit(this.host.refOf(commentaryKey), this.host.refOf(baseKey)) : Promise.resolve(null);
+  }
+
+  /**
+   * Pair mode with several targets (issue #26): ONE book against each of the chosen books, with the chosen
+   * methods per pair (default: the relation's own — headings and dibur-hamatchil for a commentary — merged into one
+   * run, as a max-link run is). The relation is the user's, not read from the names or the database. The plan
+   * carries these choices, so run() keeps them in the job. Books that are not open are left out.
+   */
+  pairPlan(dependantKey: string, baseKeys: readonly string[], methods?: readonly PairEngineId[], kind?: RelationKind): MaxLinkPlan {
+    const title = (k: string) => this.host.refOf(k).title;
+    const bases = [...new Set(baseKeys)].filter((k) => k !== dependantKey && this.host.books.value.has(k));
+    const dependant = title(dependantKey);
+    const pairs = bases.map((k) => ({ dependant, base: title(k), dependantKey, baseKey: k, ...(kind && { kind }) }));
+    const chosen: Record<string, readonly PairEngineId[]> = {};
+    if (methods?.length) for (const k of bases) chosen[pairMethodKey(dependant, title(k))] = methods;
+    return this.plan({ kind: "books", keys: [dependantKey] }, new Set(PAIR_ENGINES), undefined, { pairs, ...(Object.keys(chosen).length && { methods: chosen }) });
   }
 
   /* ---------------- the batch job (V5 P1-8) ---------------- */
@@ -224,6 +258,8 @@ export class MaxLinkState {
       engines: Object.keys(plan.perEngine) as EngineId[],
       ...(options.engineOptions && Object.keys(options.engineOptions).length && { engineOptions: options.engineOptions }),
       ...(preferBase && { preferBase }),
+      // the books by title only: session keys are not kept in a job (a resumed job plans from the titles)
+      ...(plan.choices && { choices: { ...plan.choices, ...(plan.choices.pairs && { pairs: plan.choices.pairs.map(({ dependantKey: _d, baseKey: _b, ...rest }) => rest) }) } }),
     });
     this.dropStored(this.job.peek());
     this.results.clear();
@@ -362,7 +398,7 @@ export class MaxLinkState {
       return false;
     }
     const prefer = job.preferBase ? this.host.sources.value.find((s) => s.info.label === job.preferBase)?.info.id : undefined;
-    const plan = planMaxLink({ selected: keys, library: this.planLibrary(), ...(job.engines && { engines: new Set(job.engines) }), ...(prefer && { preferSource: prefer }) });
+    const plan = planMaxLink({ selected: keys, library: this.planLibrary(), ...(job.engines && { engines: new Set(job.engines) }), ...(prefer && { preferSource: prefer }), ...(job.choices && { choices: job.choices }) });
     this.useSteps(plan);
     // the results kept, bound to this session's books by title
     const keyOf = (t: string) => byTitle.get(t);
@@ -440,6 +476,7 @@ export class MaxLinkState {
         ...this.host.refOf(b.key),
         ...(b.bases && { bases: b.bases }),
         ...(b.dependence && { dependence: b.dependence }),
+        ...(b.lineCount !== undefined && { lineCount: b.lineCount }),
         ...linkedProps(fields),
       };
     });
@@ -621,12 +658,18 @@ export class MaxLinkState {
     // "already exists": the database's links, and the project's — except the link a suggestion's own approval made
     const project = new Map<string, string[]>();
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
+    // the books a book is aimed at in more than one way (the user's own pairs, PlanChoices.pairs, and any commentary the plan relates to two
+    // whole books): a line is never linked to several of them blindly (merge.ts step 4d)
+    const userTargets = [...new Set([...plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" ? [s.target.key] : [])), ...competingTargets(plan.steps)])];
     const raw = mergeSuggestions(items, {
       reference: db,
+      ...(userTargets.length > 1 && { candidateBooks: userTargets }),
       existing: (s) => (db.has(linePairKey(s)) ? "db" : project.get(linePairKey(s))?.some((id) => id !== `auto:${stableId(s)}`) ? "project" : null),
     });
     // the merged ids are made of book keys too: without them an approval is recognised in every session (stableId)
-    const merged = { ...raw, suggestions: raw.suggestions.map((s) => ({ ...s, id: stableId(s) })) };
+    // a pair's own threshold (UserPair.minConfidence): the suggestions below it are not shown, and the count is said
+    const limited = applyPairMinimums(raw.suggestions, plan.minConfidence ?? {});
+    const merged = { ...raw, suggestions: limited.kept.map((s) => ({ ...s, id: stableId(s) })) };
 
     const info: MaxLinkRunInfo = { scope: scopeLabel, books: plan.books, identified: plan.identified, steps: outcomes, stats: merged.stats, ms: job.ms };
     const failed = outcomes.filter((o) => o.error).length;
@@ -642,6 +685,7 @@ export class MaxLinkState {
       ...(st.suspectPairs
         ? [{ code: "maxlink/pair-disagree", text: `ב־${st.suspectPairs} זוגות ספרים השיטות סותרות זו את זו ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה של שיטה אחת אינה "ודאית"; הן מסומנות לבדיקה.` }]
         : []),
+      ...(limited.hidden ? [{ code: "maxlink/below-pair-minimum", text: `${limited.hidden.toLocaleString("he")} הצעות לא מוצגות: הן מתחת לסף הביטחון שבחרתם לזוג הספרים שלהן.` }] : []),
       ...(failed ? [{ code: "maxlink/errors", text: `${failed} שלבים נכשלו; שאר השלבים רצו. הפרטים ב"דוח הקישור המרבי".` }] : []),
       ...(partialText(job) ? [{ code: "maxlink/partial", text: partialText(job).trim() }] : []),
     ];

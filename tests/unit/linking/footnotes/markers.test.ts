@@ -213,3 +213,46 @@ describe("data-label markers (Sefaria)", () => {
     expect(labelCommentators(line)).toEqual(["A", "B"]);
   });
 });
+
+/*
+ * Issue #14 — bare numbers with no tag ("שלום1 עולם2"). NO REAL FIXTURE: no real book in the repo has bare
+ * number markers (the reporter's data is a personal DB; ADR 0004). These are minimal hand-written lines that
+ * use only the shape the issue describes, not an invented schema.
+ */
+describe('style "digits" (bare numbers glued to a word)', () => {
+  it("finds a number right after a Hebrew word or punctuation, with exact raw spans", () => {
+    const line = "שלום1 עולם2. עוד,3 ו<b>שלום</b>4";
+    const ms = detectMarkers(line, "digits");
+    expect(ms.map((m) => m.num)).toEqual([1, 2, 3, 4]);
+    for (const m of ms) expect(shownByGenerator(line, m)).toBe(String(m.num));
+    expect(ms.every((m) => m.numbering === "digits" && m.style === "regex")).toBe(true);
+  });
+  it("does not read numbers that are text: a year, 'פרק 12', numbers inside tags and attributes, longer than 3 digits", () => {
+    expect(detectMarkers("בשנת 1990 וגם פרק 12 ושלום 3", "digits")).toEqual([]);
+    expect(detectMarkers('<i data-label="5">שלום</i> <sup>7</sup> <a href="x1">ק</a>', "digits")).toEqual([]);
+    expect(detectMarkers("שלום1990", "digits")).toEqual([]);
+  });
+  it("a number glued to an abbreviation or a one- or two-letter word is a reference, not a marker (ח\"א.12, ג'3, פרק ג,3, א.2, הלכה ו.1)", () => {
+    for (const t of ['ראה ח"א.12 ועוד', "בדף ג'3 ועוד", "פרק ג,3 ועוד", "פסוק א.2 ועוד", "הלכה ו.1 ועוד", "ב\"ק.5 ועוד"]) expect(detectMarkers(t, "digits"), t).toEqual([]);
+  });
+
+  it("a note line opening with chapter:verse is no note number", () => {
+    expect(leadingMarker("12:5 הערה", "digits")).toBeNull();
+    expect(leadingMarker("12. הערה", "digits")?.num).toBe(12);
+  });
+
+  it("does not read parts of ordinary numbers: a citation 'כג:5', '1,200', '3.5', and a number inside nested <sup><b>", () => {
+    expect(detectMarkers("תהלים כג:5 ושלום", "digits")).toEqual([]);
+    expect(detectMarkers("שלום 1,200 ועוד", "digits")).toEqual([]);
+    expect(detectMarkers("שלום3.5 ועוד", "digits")).toEqual([]);
+    expect(detectMarkers("שלום<sup><b>1</b></sup> ועוד", "digits")).toEqual([]);
+    // but a marker after a comma or a period still reads
+    expect(detectMarkers("שלום,3 עולם.4", "digits").map((m) => m.num)).toEqual([3, 4]);
+  });
+
+  it("on a note line the number opens the line, with or without a dot", () => {
+    expect(leadingMarker("12. הערה", "digits")?.num).toBe(12);
+    expect(leadingMarker("12 הערה", "digits")?.num).toBe(12);
+    expect(leadingMarker("הערה 12", "digits")).toBeNull();
+  });
+});

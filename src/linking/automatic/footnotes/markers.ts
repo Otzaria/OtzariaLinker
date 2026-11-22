@@ -27,6 +27,12 @@ export type MarkerStyle =
   | "sub"
   /** `(12)` / `(יב)` in the text outside tags (tags inside the parentheses are allowed) */
   | "parentheses"
+  /**
+   * Bare digits with no tag: "שלום1 עולם2." — a number of one to three digits glued to a word or its punctuation
+   * (issue #14; also at the very start of a note line: "12. הערה"). A number after a space ("פרק 12"), a year,
+   * a decimal and a digit inside a <sup>/<sub> are not read.
+   */
+  | "digits"
   /** any element name, e.g. `{ tag: "small" }` */
   | { readonly tag: string }
   /**
@@ -248,6 +254,47 @@ function detectParentheses(map: VisibleMap, opts: DetectOptions): Marker[] {
 }
 
 
+/** what may stand right before a bare number: a Hebrew letter or the punctuation that closes a phrase */
+const BEFORE_DIGITS = /[א-ת.,;"'׳״)\]!?]/;
+/**
+ * The word a bare number is glued to must be a real word: three Hebrew letters or more, with no gershayim or geresh
+ * inside. A number after an abbreviation or a lone letter is a reference, not a note marker: ח"א.12, ב"ק.5, ג'3,
+ * פרק ג,3, פסוק א.2, הלכה ו.1 (QA: a main book with no markers read these as a series). Nikud is not counted.
+ */
+const NIKUD = "֑-ׇ";
+const TRAILING = new RegExp(`[.,;)\\]!?"'׳״]+$`);
+const WORD_TAIL = new RegExp(`[א-ת${NIKUD}"'׳״]+$`);
+function realWordBefore(text: string, at: number): boolean {
+  const word = WORD_TAIL.exec(text.slice(Math.max(0, at - 24), at).replace(TRAILING, ""))?.[0] ?? "";
+  if (/["'׳״]/.test(word)) return false;
+  return word.replace(new RegExp(`[${NIKUD}]`, "g"), "").length >= 3;
+}
+
+const IN_SUP_OPEN = /<\s*(?:sup|sub)\b[^>]*>\s*(?:<[^>]*>\s*)*$/i;
+
+function detectDigits(html: string, map: VisibleMap, opts: DetectOptions): Marker[] {
+  const out: Marker[] = [];
+  const firstText = map.text.search(/\S/);
+  for (const m of map.text.matchAll(/\d+/g)) {
+    if (m[0].length > 3) continue;
+    const at = m.index;
+    const prev = at > 0 ? map.text[at - 1]! : "";
+    const lineStart = at === firstText;
+    if (!lineStart && (!BEFORE_DIGITS.test(prev) || !realWordBefore(map.text, at))) continue;
+    // part of a larger number: "3.5" and "1,200" (before and after the separator)
+    if ((prev === "." || prev === ",") && /\d/.test(map.text[at - 2] ?? "")) continue;
+    if (/^[.,:]\d/.test(map.text.slice(at + m[0].length, at + m[0].length + 2))) continue;
+    const rawStart = map.starts[at]!;
+    // a <sup>/<sub> number belongs to those styles (also inside nested tags: <sup><b>1</b></sup>); looked at in a window, not the whole line
+    if (IN_SUP_OPEN.test(html.slice(Math.max(0, rawStart - 200), rawStart))) continue;
+    const p = parseMarkerToken(m[0]);
+    if (!p || !accept(p, opts)) continue;
+    const rawEnd = map.ends[at + m[0].length - 1]!;
+    out.push({ rawStart, rawEnd, visible: m[0], ...p, style: "regex" });
+  }
+  return out;
+}
+
 function detectRegex(html: string, map: VisibleMap, regex: RegExp, opts: DetectOptions): Marker[] {
   if (html.length > MAX_CUSTOM_REGEX_INPUT) return [];
   const out: Marker[] = [];
@@ -312,12 +359,14 @@ export type CompiledStyle =
   | { readonly kind: "tag"; readonly tag: string; readonly style: Marker["style"] }
   | { readonly kind: "label"; readonly commentator?: string }
   | { readonly kind: "parentheses" }
+  | { readonly kind: "digits" }
   | { readonly kind: "regex"; readonly regex: RegExp };
 
 /** Validates a style once (a custom pattern is checked here). */
 export function compileStyle(style: MarkerStyle): { ok: true; compiled: CompiledStyle } | { ok: false; reason: string } {
   if (style === "sup" || style === "sub") return { ok: true, compiled: { kind: "tag", tag: style, style } };
   if (style === "parentheses") return { ok: true, compiled: { kind: "parentheses" } };
+  if (style === "digits") return { ok: true, compiled: { kind: "digits" } };
   if (style === "label") return { ok: true, compiled: { kind: "label" } };
   if (typeof style === "object" && style && "label" in style) return { ok: true, compiled: { kind: "label", commentator: String(style.label) } };
   if (typeof style === "object" && style && "tag" in style) {
@@ -348,6 +397,7 @@ export function detectMarkers(text: string, style: MarkerStyle | CompiledStyle, 
   let found: Marker[];
   if (compiled.kind === "tag") found = detectTag(html, map, compiled.tag, compiled.style, opts);
   else if (compiled.kind === "parentheses") found = detectParentheses(map, opts);
+  else if (compiled.kind === "digits") found = detectDigits(html, map, opts);
   else if (compiled.kind === "label") found = detectLabels(html, compiled.commentator, opts);
   else found = detectRegex(html, map, compiled.regex, opts);
   return found.sort((a, b) => a.rawStart - b.rawStart);

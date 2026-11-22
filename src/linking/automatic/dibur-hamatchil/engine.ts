@@ -34,6 +34,7 @@ import {
   type EngineContext,
   type EngineLine,
   type EngineResult,
+  type MatchedSpan,
   type Reason,
   type Suggestion,
 } from "../types";
@@ -1418,6 +1419,11 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       score: a.score,
       reasons: [r("dh/alternative", `מקום נוסף שבו נמצא הדיבור המתחיל: שורה ${a.line + 1} בספר הבסיס`), ...(a.why ? [a.why] : [])],
     }));
+    // where the words are, for a screen to show: the ד"ה on the commentary line (the lines that only inherit a place have none)
+    // and the quoted words on the base line (a line's own words, not an inherited place)
+    const ex = cExtract.get(p.cLine);
+    const dhSpan: MatchedSpan | undefined = ex?.kind === "dh" && ex.dh.length ? { rawStart: ex.dh[0]!.rawStart, rawEnd: ex.dh[ex.dh.length - 1]!.rawEnd } : undefined;
+    const baseSpan: MatchedSpan | undefined = p.words && meta.get(p.cLine)?.direct ? { rawStart: p.words.rawStart, rawEnd: p.words.rawEnd } : undefined;
     const common = {
       id: `dibur-hamatchil:${commentary.book.key}#${p.cLine}>${base.book.key}#${p.base}`,
       engine: "dibur-hamatchil" as const,
@@ -1429,9 +1435,10 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       warnings,
     };
     return policy.anchors
-      ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), target: cSide, declaredType: types.anchored, heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
+      ? { ...common, source: baseSide, ...(anchor ? { anchor } : {}), ...((baseSpan || dhSpan) && { matched: { ...(baseSpan && { source: baseSpan }), ...(dhSpan && { target: dhSpan }) } }), target: cSide, declaredType: types.anchored, heRef2: heRefOf(commentary, cPath, cByIndex.get(p.cLine), p.cLine) }
       : {
           ...common,
+          ...((baseSpan || dhSpan) && { matched: { ...(dhSpan && { source: dhSpan }), ...(baseSpan && { target: baseSpan }) } }),
           source: cSide,
           target: baseSide,
           ...(citedSpan && { citedSpan }),

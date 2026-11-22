@@ -11,6 +11,7 @@ import type { SearchOptions } from "./search-job";
 import type { MaxLinkJobResult } from "../linking/maxlink-report";
 import type { PlanStep } from "../linking/plan";
 import type { MaxLinkJobOptions } from "./maxlink-job";
+import type { TitleFitReport } from "../linking/title-fit";
 
 /** The worker's operations, as the UI calls them through RpcClient. */
 export interface SourcesApi {
@@ -29,6 +30,8 @@ export interface SourcesApi {
   close(sourceId: string): void;
   /** runs an automatic engine on two whole books (both read here, in the worker) */
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;
+  /** does the commentary's titles fit its base (the headings method)? verdict and reasons, before any run */
+  titleFit(source: BookRef, target: BookRef): TitleFitReport;
   diffBooks(oldKey: string, newKey: string): BookDiff;
   runBatch(engine: EngineId, pairs: { source: BookRef; target: BookRef }[], options: Record<string, unknown>): BatchItem[];
   /** lines of one book that contain a query (capped), with snippets; progress counts lines */

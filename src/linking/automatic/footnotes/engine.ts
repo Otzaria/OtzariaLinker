@@ -200,6 +200,11 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   const numbering = decideNumbering(options.numbering ?? "auto", rawNoteOccs);
   const noteOccs = numbering ? rawNoteOccs.filter((o) => o.marker.numbering === numbering || isStar(o)) : rawNoteOccs;
   if (!noteOccs.length) {
+    // the books in the wrong order (issue #14: "it works but you must swap source and target"): say so, not "check the setting"
+    if (looksSwapped(main, notes, includeInline)) {
+      runNotes.push(r("footnotes/swapped", "נראה שהספרים בסדר הפוך: הספר שנבחר כמקור נראה כמו ספר הערות (שורותיו נפתחות במספר), והספר שנבחר כיעד הוא זה שמכיל את סימני ההערות. החליפו ביניהם: המקור הוא הספר עם סימני ההערות, והיעד הוא ספר ההערות."));
+      return { suggestions: [], notes: runNotes, unmatched: [] };
+    }
     runNotes.push(r("footnotes/no-notes", "לא נמצאו בספר ההערות שורות שנפתחות בסימן הערה (מספר או אות). בדקו את הגדרת הסימון של ההערות."));
     return { suggestions: [], notes: runNotes, unmatched: [] };
   }
@@ -208,6 +213,8 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   const detectOpts = { ...(numbering ? { numbering } : {}), includeInlineNoteMarkers: includeInline };
   const noteNums = new Set(noteOccs.map((o) => o.marker.num));
   const mainStyle = mainStyleFixed === "auto" ? chooseMainStyle(main, detectOpts, noteNums, runNotes, ctx.signal) : mainStyleFixed;
+  /** bare digits the engine chose on its own (not the user): a bare number is ambiguous, so none is above "possible" */
+  const digitsByAuto = mainStyleFixed === "auto" && mainStyle.kind === "digits";
   const mainOccs: Occ[] = [];
   const headingMarkers: Occ[] = [];
   let skippedLong = 0;
@@ -275,7 +282,7 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
     const s = buildSuggestion(h, main, notes, declaredType, heRefOf, noteLead, plan.chapters, { merged, typeShowsPopup, singleChapter: plan.chapters.length === 1, anchors: !sefaria });
     if (s.warnings.some((w) => w.code === "footnotes/no-popup")) noPopup++;
     h.lines.forEach((x) => linkedNoteLines.add(x));
-    suggestions.push(s);
+    suggestions.push(digitsByAuto ? capDigitsByAuto(s) : s);
   }
 
   /* ---- run notes ---- */
@@ -789,6 +796,33 @@ function decideNumbering(opt: Numbering | "auto" | "any", occs: readonly Occ[]):
   return null;
 }
 
+/**
+ * The "main" book looks like a notes book (most content lines open with a note number) while the "notes" book
+ * carries note markers in its text: the two were given the other way round.
+ */
+function looksSwapped(main: EngineBook, notes: EngineBook, includeInline: boolean): boolean {
+  let content = 0;
+  let opening = 0;
+  for (const l of main.lines) {
+    if (l.heading !== null) continue;
+    const text = withoutBom(l.text);
+    if (!stripTags(text)) continue;
+    content++;
+    if (leadingMarker(text, "auto", { includeInlineNoteMarkers: includeInline })) opening++;
+  }
+  if (!content || opening < content * 0.5) return false;
+  // tag and parentheses markers settle it; bare digits are weak (a page or verse number in prose): at least three, mid-line
+  const styles: MarkerStyle[] = ["sup", "sub", "parentheses"];
+  let bare = 0;
+  for (const l of notes.lines) {
+    if (l.heading !== null) continue;
+    const text = withoutBom(l.text);
+    for (const s of styles) if (detectMarkers(text, s, { includeInlineNoteMarkers: includeInline }).length) return true;
+    for (const m of detectMarkers(text, "digits")) if (stripTags(text.slice(0, m.rawStart)).trim() && ++bare >= 3) return true;
+  }
+  return false;
+}
+
 const MAIN_CANDIDATES: readonly MarkerStyle[] = ["sup", "sub", "parentheses"];
 
 function chooseMainStyle(
@@ -814,13 +848,56 @@ function chooseMainStyle(
     }
     if (!best || matched > best.matched || (matched === best.matched && found > best.found)) best = { style: c.compiled, matched, found };
   }
+  if (best && best.matched === 0) {
+    // no tag or parentheses style fits the notes' numbers: bare digits glued to words ("שלום1"), tried last because a bare
+    // number is ambiguous with numbers in the text (issue #14)
+    const c = compileStyle("digits");
+    if (c.ok) {
+      let matched = 0;
+      const distinct = new Set<number>();
+      const seq: number[] = [];
+      for (const l of main.lines) {
+        if ((l.index & 255) === 0 && signal?.aborted) throw new Aborted();
+        if (l.heading !== null) continue;
+        for (const m of detectMarkers(withoutBom(l.text), c.compiled, opts))
+          if (noteNums.has(m.num)) {
+            matched++;
+            distinct.add(m.num);
+            seq.push(m.num);
+          }
+      }
+      // ordinary numbers in prose are not a marker style (QA): the notes' numbers must be found DISTINCTLY (at least half
+      // of them: one number repeated is no series) and run on the way notes do (1, 2, 3 … again from 1 in the next
+      // chapter), not shuffled
+      if (distinct.size >= Math.min(noteNums.size, Math.max(2, Math.ceil(noteNums.size * 0.5))) && risesLikeNotes(seq)) best = { style: c.compiled, matched, found: matched };
+    }
+  }
   runNotes.push(r("footnotes/style-auto", `סגנון הסימון בספר נבחר אוטומטית: ${describeStyle(best!.style)}.`));
   return best!.style;
+}
+
+/** Marker numbers in book order run like notes: most steps go up by one to three, or start again from 1 or 2. */
+function risesLikeNotes(seq: readonly number[]): boolean {
+  if (seq.length < 2) return false;
+  let steps = 0;
+  for (let i = 1; i < seq.length; i++) {
+    const d = seq[i]! - seq[i - 1]!;
+    if ((d >= 1 && d <= 3) || seq[i]! <= 2) steps++;
+  }
+  return steps >= (seq.length - 1) * 0.7;
+}
+
+const CAPPED_BY_DIGITS: ReadonlySet<string> = new Set(["certain", "high"]);
+
+function capDigitsByAuto(s: Suggestion): Suggestion {
+  const warn: Reason = r("footnotes/digits-auto", "הסימן נקרא כמספר צמוד למילה, שהכלי בחר מעצמו; מספר חשוף עמום מול מספרים רגילים בטקסט, ולכן הקישור לבדיקה. כדי לאשר בקבוצה בחרו במפורש \"מספרים בלי תגית\".");
+  return { ...s, confidence: CAPPED_BY_DIGITS.has(s.confidence) ? "possible" : s.confidence, rules: [...s.rules, "footnotes/digits-auto"], warnings: [...s.warnings, warn] };
 }
 
 function describeStyle(s: CompiledStyle): string {
   if (s.kind === "label") return s.commentator ? `סימני ההערות של "${s.commentator}" (data-label)` : "סימני הערות מסוג data-label";
   if (s.kind === "parentheses") return "מספרים בסוגריים, כמו (12)";
+  if (s.kind === "digits") return "מספרים צמודים למילה, בלי תגית, כמו שלום1";
   if (s.kind === "regex") return `ביטוי מותאם /${s.regex.source}/`;
   return `תגית <${s.tag}>`;
 }

@@ -42,6 +42,11 @@ describe("the batch job's pure parts", () => {
     expect(stepsSignature([pair("headings", { declaredType: "targum" })])).not.toBe(stepsSignature([pair("headings")]));
   });
 
+  it("a headings step that ran behind the title gate and the same step named by the user are different work (review: a skipped result must not be reused)", () => {
+    const gated = { ...pair("headings"), titleGate: true } as PlanStep;
+    expect(stepsSignature([gated])).not.toBe(stepsSignature([pair("headings")]));
+  });
+
   it("a book's status: done, 'no match', failed with the reasons; per engine done and failed", () => {
     expect(finishBook(book(), [{ engine: "headings", suggestions: 5 }, { engine: "citations", suggestions: 0 }], 10, "fp")).toMatchObject({ status: "done", suggestions: 5, engines: { headings: [1, 1, 0], citations: [1, 1, 0] }, fingerprint: "fp" });
     expect(finishBook(book(), [{ engine: "headings", suggestions: 0 }, { engine: "citations", suggestions: 0 }], 10, "fp").status).toBe("no-match");
@@ -64,6 +69,24 @@ describe("the batch job's pure parts", () => {
     expect(parseJobRecord("{")).toBeNull();
     expect(parseJobRecord(JSON.stringify({ ...rec, v: 2 }))).toBeNull();
     expect(parseJobRecord(JSON.stringify({ ...rec, books: [{ title: "a", status: "weird", engines: {} }] }))!.books).toEqual([]);
+  });
+
+  it("the user's choices (explicit pairs, per-pair methods) survive storage; malformed entries are dropped", () => {
+    const rec: JobRecord = { v: 1, id: "x", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings", "footnotes"] } } };
+    expect(parseJobRecord(JSON.stringify(rec))!.choices).toEqual(rec.choices);
+    const damaged = { ...rec, choices: { pairs: [{ dependant: "א" }, 7, { dependant: "ג", base: "ד", kind: "bogus" }], methods: { "א>ב": ["pattern?", "citations"], "ג>ד": ["dibur-hamatchil"] } } };
+    expect(parseJobRecord(JSON.stringify(damaged))!.choices).toEqual({ pairs: [{ dependant: "ג", base: "ד" }], methods: { "ג>ד": ["dibur-hamatchil"] } });
+    expect(parseJobRecord(JSON.stringify({ ...rec, choices: "x" }))!.choices).toBeUndefined();
+  });
+
+  it("the per-pair controls (enabled, connectionType, minConfidence) survive storage; bad values are dropped; an old record without them loads as before", () => {
+    const rec: JobRecord = { v: 1, id: "x", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", enabled: false, connectionType: "reference", minConfidence: "high" }] } };
+    expect(parseJobRecord(JSON.stringify(rec))!.choices).toEqual(rec.choices);
+    const bad = { ...rec, choices: { pairs: [{ dependant: "א", base: "ב", enabled: "no", connectionType: 7, minConfidence: "sure" }, { dependant: "ג", base: "ד", enabled: true }] } };
+    expect(parseJobRecord(JSON.stringify(bad))!.choices).toEqual({ pairs: [{ dependant: "א", base: "ב" }, { dependant: "ג", base: "ד" }] });
+    // a record saved before these fields existed
+    const old = { v: 1, id: "o", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings"] } } };
+    expect(parseJobRecord(JSON.stringify(old))!.choices).toEqual({ pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings"] } });
   });
 
   it("books that read the same bases run next to each other, groups in order of appearance", () => {

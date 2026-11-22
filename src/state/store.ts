@@ -26,11 +26,13 @@ import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTas
 import { DbLinksState } from "./db-links";
 import { LinkCompareState } from "./link-compare";
 import { LinkFixes } from "./link-fixes";
+import { CoverageState } from "./coverage";
 import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
 import { SuggestionsState } from "./suggestions";
 import { ExchangeState } from "./exchange";
+import { PersonalCsvState } from "./personal-csv";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
 
@@ -98,12 +100,16 @@ export class AppStore {
   readonly maxLink: MaxLinkState;
   /** range suggestions, cutting and completion (state/ranges.ts) */
   readonly ranges: RangesState;
+  /** which lines of a book are linked, partly covered or still unlinked (state/coverage.ts) */
+  readonly coverage: CoverageState;
   /** automatic suggestions: engine, citations and batch runs, and the user's decisions (state/suggestions.ts) */
   readonly suggestions: SuggestionsState;
   /** importing links files, sheets and records; the export (state/exchange.ts) */
   readonly exchange: ExchangeState;
   /** the quality check and its report (state/quality.ts) */
   readonly quality: QualityState;
+  /** export of a personal book's links to the official library as the personal-database build's links.csv (state/personal-csv.ts) */
+  readonly personalCsv: PersonalCsvState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
 
@@ -224,9 +230,11 @@ export class AppStore {
     this.fixes = new LinkFixes(this);
     this.maxLink = new MaxLinkState(this, service, saver);
     this.ranges = new RangesState(this, service);
+    this.coverage = new CoverageState(this, service);
     this.suggestions = new SuggestionsState(this, service);
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
+    this.personalCsv = new PersonalCsvState(this, service, saver);
     this.guided = new GuidedFlowState(this);
   }
 
@@ -1171,6 +1179,7 @@ export class AppStore {
         // a confirmation is for this session only (C4): "no file in the library" is not a copy of a file at all
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
         bookLines: this.bookLinesNow(),
+        coverage: this.coverage.snapshot(),
       },
       APP_VERSION,
       undefined,
@@ -1219,6 +1228,7 @@ export class AppStore {
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
       this.projectBookLines.value = new Map(p.bookLines.map((b) => [b.title, b.lines] as const));
+      this.coverage.restore(p.coverage);
       this.changedNoticed.clear();
       // the switch "ספרי ספריית אוצריא" as the user left it, for each source when it is open again
       this.projectLibraryChoices.value = p.sources.filter((s) => s.library !== undefined);

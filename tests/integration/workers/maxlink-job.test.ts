@@ -3,7 +3,7 @@ import { strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
 import type { EngineResult } from "../../../src/linking/automatic";
-import { planMaxLink, type PlanStep, type SingleEngineId } from "../../../src/linking/plan";
+import { pairMethodKey, planMaxLink, type PlanStep, type SingleEngineId } from "../../../src/linking/plan";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { fingerprintsJob, maxlinkJob, type SingleRunner } from "../../../src/workers/maxlink-job";
 
@@ -316,5 +316,47 @@ describe("maxlinkJob — a part of the dependant against the same part of the ba
     for (const it of res.items) expect(it.result!.suggestions).toEqual([]);
     expect(res.items[0]!.result!.notes[0]!.text).toContain('"על הביאור"');
     expect(res.items[1]!.result!.notes[0]!.text).toContain('"ביאור"');
+  });
+
+  /* #21: the title engine runs only where the titles fit */
+  describe("title gate", () => {
+    const PLAIN = text("פירוש פשוט על בראשית.txt", ["פירוש פשוט על בראשית", "ביאור ראשון בלי שום כותרת", "ביאור שני בלי שום כותרת", "ביאור שלישי בלי שום כותרת"]);
+    async function plain() {
+      const reg = new SourceRegistry();
+      const res = await reg.open([DB, PLAIN]);
+      const all = res.sources.flatMap((s) => s.books);
+      return { reg, all, book: all.find((b) => b.title === "פירוש פשוט על בראשית")! };
+    }
+    const noteCodes = (r: { result?: EngineResult }) => r.result?.notes.map((n) => n.code) ?? [];
+
+    it("a commentary with no titles: the headings step is skipped with the reasons, dibur-hamatchil still runs", async () => {
+      const { reg, all, book } = await plain();
+      const plan = planMaxLink({ selected: [book.key], library: all, singleEngines: [] });
+      const res = await maxlinkJob(reg, plan.steps, {}, {});
+      const h = res.items.find((i) => i.stepId.startsWith("headings|"))!;
+      expect(h.error).toBeUndefined();
+      expect(h.result!.suggestions).toHaveLength(0);
+      expect(noteCodes(h)).toContain("title-fit/skipped");
+      expect(h.result!.notes.find((n) => n.code === "title-fit/skipped")!.text).toContain("אין כותרות");
+      const dh = res.items.find((i) => i.stepId.startsWith("dibur-hamatchil|") && i.stepId.includes(">"))!;
+      expect(noteCodes(dh)).not.toContain("title-fit/skipped");
+    });
+
+    it("naming headings for the pair forces it: no skip note", async () => {
+      const { reg, all, book } = await plain();
+      const base = all.find((b) => b.title === "בראשית")!;
+      const plan = planMaxLink({ selected: [book.key], library: all, singleEngines: [], choices: { methods: { [pairMethodKey(book.title, base.title)]: ["headings"] } } });
+      const res = await maxlinkJob(reg, plan.steps, {}, {});
+      expect(noteCodes(res.items[0]!)).not.toContain("title-fit/skipped");
+    });
+
+    it("titles that fit: the headings step runs as before", async () => {
+      const { reg, all, byTitle } = await setup();
+      const plan = planMaxLink({ selected: [byTitle("ביאור על בראשית").key], library: all, singleEngines: [] });
+      const res = await maxlinkJob(reg, plan.steps, {}, {});
+      const h = res.items.find((i) => i.stepId.startsWith("headings|"))!;
+      expect(noteCodes(h)).not.toContain("title-fit/skipped");
+      expect(h.result!.suggestions.filter((x) => x.confidence === "certain")).toHaveLength(10);
+    });
   });
 });

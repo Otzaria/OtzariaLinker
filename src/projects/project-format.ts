@@ -87,6 +87,28 @@ export interface ProjectFile {
    * library update, a fixed text file) may have moved them: reopening compares, and says so (V5 P1-10).
    */
   bookLines?: ProjectBookLines[];
+  /**
+   * Optional (2.15, without a version bump: older readers ignore it): the last coverage of each book the project computed
+   * (state/coverage.ts) — the buckets and the unlinked ranges — so a reopened project shows where it stood.
+   */
+  coverage?: ProjectCoverage[];
+}
+
+/** The buckets of linking/coverage.ts, by name (kept here as plain strings: this layer does not import linking). */
+const COVERAGE_BUCKETS = ["linked", "unlinked", "partial", "multiple", "not-suitable", "candidate", "doubtful"] as const;
+/** the unlinked ranges one entry keeps: a book with more is truncated (the buckets stay exact) */
+export const COVERAGE_RANGES_MAX = 2000;
+
+export interface ProjectCoverage {
+  title: string;
+  /** the book's lines when it was counted */
+  lines: number;
+  /** lines per bucket (only the buckets that are not zero need be present) */
+  buckets: Record<string, number>;
+  /** the unlinked ranges [first, last], at most COVERAGE_RANGES_MAX */
+  ranges: [number, number][];
+  /** when it was counted (ms) */
+  at: number;
 }
 
 export interface ProjectBookLines {
@@ -105,6 +127,7 @@ export interface ProjectData {
   dbMappings?: SavedDbMapping[];
   libraryFiles?: ProjectLibraryFile[];
   bookLines?: ProjectBookLines[];
+  coverage?: ProjectCoverage[];
 }
 
 const storeSide = (s: LinkSide): StoredSide => ({
@@ -135,6 +158,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date(), 
     ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
     ...(p.libraryFiles?.length && { libraryFiles: p.libraryFiles.map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })) }),
     ...(p.bookLines?.length && { bookLines: p.bookLines.map((b) => ({ title: b.title, lines: b.lines })) }),
+    ...(p.coverage?.length && { coverage: p.coverage }),
   };
   const text = JSON.stringify(file);
   if (!cache) return text;
@@ -156,7 +180,7 @@ export class ProjectError extends Error {
 }
 
 /** Parses and validates a project file; `bind` turns a stored book back into a BookRef of this session. */
-export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; libraryFiles: ProjectLibraryFile[]; bookLines: ProjectBookLines[]; savedAt: string; skipped: number } {
+export function parseProject(text: string, bind: (b: StoredBook) => BookRef): ProjectData & { altToc: AltTocBook[]; libraryFiles: ProjectLibraryFile[]; bookLines: ProjectBookLines[]; coverage: ProjectCoverage[]; savedAt: string; skipped: number } {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -187,6 +211,7 @@ export function parseProject(text: string, bind: (b: StoredBook) => BookRef): Pr
     dbMappings: parseSavedDbMappings(f.dbMappings),
     libraryFiles: rebuildLibraryFiles(f.libraryFiles),
     bookLines: rebuildBookLines(f.bookLines),
+    coverage: rebuildCoverage(f.coverage),
     skipped: skipped + altToc.skipped,
   };
 }
@@ -212,6 +237,27 @@ function rebuildBookLines(raw: unknown): ProjectBookLines[] {
   const out = new Map<string, ProjectBookLines>();
   for (const x of raw as Record<string, unknown>[])
     if (x && typeof x === "object" && str(x.title) && x.title && !out.has(x.title) && isInt(x.lines)) out.set(x.title, { title: x.title, lines: x.lines });
+  return [...out.values()];
+}
+
+/* ---- coverage of the books: rebuilt from checked fields (untrusted input) ---- */
+function rebuildCoverage(raw: unknown): ProjectCoverage[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Map<string, ProjectCoverage>();
+  for (const x of raw as Record<string, unknown>[]) {
+    if (!x || typeof x !== "object" || !str(x.title) || !x.title || out.has(x.title) || !isInt(x.lines) || !isInt(x.at)) continue;
+    const buckets: Record<string, number> = {};
+    if (x.buckets && typeof x.buckets === "object")
+      for (const k of COVERAGE_BUCKETS) {
+        const n = (x.buckets as Record<string, unknown>)[k];
+        if (isInt(n)) buckets[k] = n;
+      }
+    const lines = x.lines;
+    const ranges: [number, number][] = [];
+    if (Array.isArray(x.ranges))
+      for (const r of x.ranges.slice(0, COVERAGE_RANGES_MAX)) if (Array.isArray(r) && r.length === 2 && isInt(r[0]) && isInt(r[1]) && r[0] <= r[1] && r[1] < lines) ranges.push([r[0], r[1]]);
+    out.set(x.title, { title: x.title, lines, buckets, ranges, at: x.at });
+  }
   return [...out.values()];
 }
 

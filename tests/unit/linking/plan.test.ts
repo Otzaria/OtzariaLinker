@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
-import { EVIDENCE_MIN, evidenceFromCounts, evidenceToFollow, LINKED_MIN, linkedFields, linkedProps, notesBaseKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
+import { estimateMs, EVIDENCE_MIN, evidenceFromCounts, evidenceToFollow, LINKED_MIN, linkedFields, linkedProps, notesBaseKey, pairMethodKey, planMaxLink, singleBookEngines, type PlanBook, type SingleEngineId } from "../../../src/linking/plan";
 
 const book = (key: string, title: string, more: Partial<PlanBook> = {}): PlanBook => ({ key, title, origin: "otzaria", ...more });
 /** the pair relations alone: the citations engine (single-book) would add a step for every selected book */
@@ -625,5 +625,214 @@ describe("planMaxLink — a base open in several sources (product audit F4)", ()
     const chosen = planMaxLink({ selected: ["s3:ביאור על בראשית.txt"], library: other, preferSource: "s1" });
     expect(chosen.books[0]!.unpaired).toBeUndefined();
     expect(targetsOf(chosen)).toEqual(new Set(["s1:בראשית.txt"]));
+  });
+});
+
+/* #21 (titles only when they fit) and #26 (several targets, explicit relations, per-pair methods) */
+describe("planMaxLink — title gate, explicit pairs and per-pair methods", () => {
+  const lib = [
+    book("b:1", "ספר א"),
+    book("b:2", "ספר ב"),
+    book("b:3", "ספר ג"),
+    book("c:1", 'רש"י על ספר א'),
+    book("n:1", "הערות לספר א"),
+    book("u:1", "חיבור כלשהו"),
+  ];
+  const pair = (p: ReturnType<typeof planMaxLink>, id: string) => p.steps.find((s) => s.id === id) as Extract<(typeof p.steps)[number], { kind: "pair" }> | undefined;
+
+  it("a headings step of a commentary carries the title gate (the job checks the titles before running it)", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib });
+    expect(pair(p, "headings|c:1>b:1")!.titleGate).toBe(true);
+    expect(pair(p, "dibur-hamatchil|c:1>b:1")!.titleGate).toBeUndefined();
+  });
+
+  it("per-pair methods: dibur-hamatchil alone for a pair, the others keep the defaults", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { methods: { [pairMethodKey('רש"י על ספר א', "ספר א")]: ["dibur-hamatchil"] } } });
+    expect(steps(p)).toEqual(['dibur-hamatchil:רש"י על ספר א>ספר א']);
+  });
+
+  it("naming headings for a pair forces it: no title gate, and the plan says it was the user's choice", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { methods: { [pairMethodKey('רש"י על ספר א', "ספר א")]: ["headings", "dibur-hamatchil"] } } });
+    expect(steps(p)).toEqual(['headings:רש"י על ספר א>ספר א', 'dibur-hamatchil:רש"י על ספר א>ספר א']);
+    expect(pair(p, "headings|c:1>b:1")!.titleGate).toBeUndefined();
+    expect(pair(p, "headings|c:1>b:1")!.why).toContain("לפי בחירתכם");
+  });
+
+  it("a method the relation does not give by itself can be chosen: footnotes on a commentary pair reads the BASE as the source", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { methods: { [pairMethodKey('רש"י על ספר א', "ספר א")]: ["footnotes"] } } });
+    expect(steps(p)).toEqual(['footnotes:ספר א>רש"י על ספר א']);
+  });
+
+  it("explicit pairs: one book against several bases whose titles do not name each other", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב" }, { dependant: "חיבור כלשהו", base: "ספר ג" }] } });
+    expect(steps(p)).toEqual(["headings:חיבור כלשהו>ספר ב", "dibur-hamatchil:חיבור כלשהו>ספר ב", "headings:חיבור כלשהו>ספר ג", "dibur-hamatchil:חיבור כלשהו>ספר ג"]);
+    expect(p.steps.every((s) => s.kind === "pair" && s.relation.via === "user")).toBe(true);
+    expect(p.books[0]!.skipped).toBeUndefined();
+    expect(p.books[0]!.decisions.join(" ")).toContain("לפי בחירתכם");
+  });
+
+  it("without the explicit pairs the same book is not linked (nothing is guessed)", () => {
+    expect(planPairs({ selected: ["u:1"], library: lib }).steps).toHaveLength(0);
+  });
+
+  it("an explicit pair replaces what the name would have given for that dependant, never adds to it", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { pairs: [{ dependant: 'רש"י על ספר א', base: "ספר ב" }] } });
+    expect(steps(p)).toEqual(['headings:רש"י על ספר א>ספר ב', 'dibur-hamatchil:רש"י על ספר א>ספר ב']);
+  });
+
+  it('an explicit pair adds no intermediate-commentator pair (רש"י on the same base): only the books the user chose', () => {
+    const sel = { selected: ["u:1"], library: lib };
+    const explicit = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }] } });
+    expect(steps(explicit)).toEqual(["headings:חיבור כלשהו>ספר א", "dibur-hamatchil:חיבור כלשהו>ספר א"]);
+    // the same book by a name that says its base still gets the intermediates (the pair is the planner's)
+    expect(steps(planPairs({ selected: ["c:1"], library: [...lib, book("c:2", 'תוספות על ספר א')] }))).toContain('dibur-hamatchil:רש"י על ספר א>תוספות על ספר א');
+  });
+
+  it("a pair that cannot be made is named in the book's decisions even when another pair of it is made", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב" }, { dependant: "חיבור כלשהו", base: "ספר שלא נפתח" }] } });
+    expect(steps(p)).toEqual(["headings:חיבור כלשהו>ספר ב", "dibur-hamatchil:חיבור כלשהו>ספר ב"]);
+    expect(p.books[0]!.skipped).toBeUndefined();
+    expect(p.books[0]!.decisions.join(" ")).toContain("ספר שלא נפתח");
+  });
+
+  it("the same title open in two sources: a pair by key binds that copy, one by title only says which it took (QA)", () => {
+    const twin = [...lib, { ...book("b2:2", "ספר ב"), origin: "personal" as const }];
+    const byKey = planPairs({ selected: ["u:1"], library: twin, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", baseKey: "b2:2" }] } });
+    expect(byKey.steps.every((s) => s.kind === "pair" && s.target.key === "b2:2")).toBe(true);
+    const byTitle = planPairs({ selected: ["u:1"], library: twin, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב" }] } });
+    expect(byTitle.steps.every((s) => s.kind === "pair" && s.target.key === "b:2")).toBe(true);
+    expect(byTitle.books[0]!.decisions.join(" ")).toContain("פתוח ביותר ממקור אחד");
+  });
+
+  it("an explicit notes relation runs footnotes with the main book as the source", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", kind: "notes" }] } });
+    expect(steps(p)).toEqual(["footnotes:ספר ב>חיבור כלשהו"]);
+  });
+
+  it("an explicit pair naming a book that is not open says so, and links nothing", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר שלא נפתח" }] } });
+    expect(p.steps).toHaveLength(0);
+    expect(p.books[0]!.skipped).toContain("ספר שלא נפתח");
+  });
+});
+
+describe("planMaxLink — the commentators of the Shulchan Aruch as intermediates (#10)", () => {
+  const lib = [
+    book("sa", "שולחן ערוך, חושן משפט", { origin: "sefaria", isBaseBook: true }),
+    book("ketzot", "קצות החושן על שולחן ערוך חושן משפט"),
+    book("shach", "שפתי כהן על שולחן ערוך חושן משפט"),
+    book("sma", "מאירת עיניים על שולחן ערוך חושן משפט"),
+    book("taz", "טורי זהב על שולחן ערוך חושן משפט"),
+  ];
+  it("a commentary on the SA also gets a pair against each open commentator on it, for the lines that name that commentator only", () => {
+    const p = planPairs({ selected: ["ketzot"], library: lib });
+    const to = (t: string) => p.steps.find((s) => s.kind === "pair" && s.engine === "dibur-hamatchil" && s.target.title === t);
+    for (const t of ["שפתי כהן על שולחן ערוך חושן משפט", "מאירת עיניים על שולחן ערוך חושן משפט", "טורי זהב על שולחן ערוך חושן משפט"]) {
+      const s = to(t);
+      expect(s, t).toBeDefined();
+      expect(s!.kind === "pair" && s!.options).toEqual({ addressedOnly: true });
+    }
+    // never against itself, and not by headings (the commentator's numbering is its own)
+    expect(p.steps.some((s) => s.kind === "pair" && s.target.key === "ketzot")).toBe(false);
+    expect(p.steps.filter((s) => s.kind === "pair" && s.engine === "headings").map((s) => s.kind === "pair" && s.target.key)).toEqual(["sa"]);
+  });
+});
+
+/* 2.1 — what the plan says it will cost, and which methods it does NOT use for a pair, with the reason */
+describe("planMaxLink — estimated cost and unsuitable methods", () => {
+  const lib = [
+    book("b:1", "ספר א", { lineCount: 10_000 }),
+    book("c:1", 'רש"י על ספר א', { lineCount: 20_000 }),
+    book("t:1", "תרגום אונקלוס על ספר א", { lineCount: 5_000 }),
+    book("n:1", "הערות לספר א", { lineCount: 3_000 }),
+    book("x:1", "ספר בלי אורך"),
+  ];
+  const stepOf = (p: ReturnType<typeof planMaxLink>, id: string) => p.steps.find((s) => s.id === id)!;
+
+  it("every step has an estimate from the line counts of its books (the pair's lines for pair engines, the book's for citations)", () => {
+    const p = planMaxLink({ selected: ["c:1"], library: lib });
+    const h = stepOf(p, "headings|c:1>b:1");
+    expect(h.estimate).toEqual({ lines: 30_000, ms: estimateMs("headings", 30_000) });
+    const dh = stepOf(p, "dibur-hamatchil|c:1>b:1");
+    expect(dh.estimate!.ms).toBeGreaterThan(h.estimate!.ms);
+    const cit = stepOf(p, "citations|c:1");
+    expect(cit.estimate).toEqual({ lines: 20_000, ms: estimateMs("citations", 20_000) });
+    expect(p.estimatedMs).toBe(p.steps.reduce((n, s) => n + (s.estimate?.ms ?? 0), 0));
+    expect(p.unestimated).toBe(0);
+  });
+
+  it("a book whose length is not known has no estimate, and the plan counts it instead of guessing", () => {
+    const p = planMaxLink({ selected: ["x:1"], library: lib });
+    expect(p.steps.every((s) => s.estimate === undefined)).toBe(true);
+    expect(p.unestimated).toBe(p.steps.length);
+    expect(p.estimatedMs).toBe(0);
+  });
+
+  it("a commentary: footnotes is named unsuitable for the pair, with why; a targum: dibur-hamatchil; a notes book: headings and dibur-hamatchil", () => {
+    const p = planPairs({ selected: ["c:1", "t:1", "n:1"], library: lib });
+    const why = (dep: string, engine: string) => p.unsuitable.find((u) => u.dependant.key === dep && u.engine === engine)?.why ?? "";
+    expect(why("c:1", "footnotes")).toContain("ספר פירוש");
+    expect(why("t:1", "dibur-hamatchil")).toContain("תרגום");
+    expect(why("n:1", "headings")).toContain("ספר הערות");
+    expect(why("n:1", "dibur-hamatchil")).toContain("ספר הערות");
+    // a method that IS planned is never listed
+    expect(p.unsuitable.some((u) => u.dependant.key === "c:1" && (u.engine === "headings" || u.engine === "dibur-hamatchil"))).toBe(false);
+  });
+
+  it("a method the user unticked is listed as 'not ticked', not as unsuitable", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, engines: new Set(["dibur-hamatchil"]) });
+    const u = p.unsuitable.find((x) => x.dependant.key === "c:1" && x.engine === "headings")!;
+    expect(u.reason).toBe("unticked");
+    expect(u.why).toContain("לא סומנה");
+    expect(p.unsuitable.find((x) => x.engine === "footnotes")!.reason).toBe("unsuitable");
+  });
+
+  it("methods the user named for a pair are not second-guessed", () => {
+    const p = planPairs({ selected: ["c:1"], library: lib, choices: { methods: { [pairMethodKey('רש"י על ספר א', "ספר א")]: ["footnotes"] } } });
+    expect(p.unsuitable.some((u) => u.dependant.key === "c:1" && u.engine === "footnotes")).toBe(false);
+  });
+});
+
+
+/* B — per-pair control: disable a pair, override its connection type, set its own confidence threshold */
+describe("planMaxLink — per-pair enabled, connectionType and minConfidence (UserPair)", () => {
+  const lib = [book("u:1", "חיבור כלשהו"), book("b:2", "ספר ב"), book("b:3", "ספר ג"), book("t:1", "תרגום אונקלוס על ספר ב"), book("b:4", "ספר ד")];
+  const pairs = (extra: object, extra2: object = {}) => ({ pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", ...extra }, { dependant: "חיבור כלשהו", base: "ספר ג", ...extra2 }] });
+
+  it("enabled:false leaves the pair out (and says so), the other pairs of the book still run", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ enabled: false }) });
+    expect(steps(p).every((s) => s.endsWith(">ספר ג"))).toBe(true);
+    const off = p.unsuitable.find((u) => u.base.title === "ספר ב")!;
+    expect(off.reason).toBe("disabled");
+    expect(off.why).toContain("הושבת");
+    expect(p.books[0]!.decisions.join(" ")).toContain("הושבת");
+  });
+
+  it("all pairs of a book disabled: the book is skipped with that reason", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ enabled: false }, { enabled: false }) });
+    expect(p.steps).toHaveLength(0);
+    expect(p.books[0]!.skipped).toContain("הושבתו");
+  });
+
+  it("connectionType becomes the declared type of every step of the pair, over the plan's own (a targum's too)", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ connectionType: "reference" }) });
+    for (const s of p.steps) {
+      if (s.kind !== "pair") continue;
+      if (s.target.title === "ספר ב") expect(s.options).toMatchObject({ declaredType: "reference" });
+      else expect(s.options?.declaredType).toBeUndefined();
+    }
+    const t = planPairs({ selected: ["t:1"], library: lib, choices: { pairs: [{ dependant: "תרגום אונקלוס על ספר ב", base: "ספר ב", connectionType: "commentary" }] } });
+    expect(t.steps.every((s) => s.kind === "pair" && s.options?.declaredType === "commentary")).toBe(true);
+  });
+
+  it("an unknown connection type is ignored, with a note in the book's decisions (never written as a made-up type)", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ connectionType: "no-such-type" }) });
+    expect(p.steps.every((s) => s.kind !== "pair" || s.options?.declaredType === undefined)).toBe(true);
+    expect(p.books[0]!.decisions.join(" ")).toContain("no-such-type");
+  });
+
+  it("minConfidence is carried on the plan, by pair, for the merge to apply", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ minConfidence: "high" }) });
+    expect(p.minConfidence).toEqual({ [pairMethodKey("חיבור כלשהו", "ספר ב")]: "high" });
   });
 });

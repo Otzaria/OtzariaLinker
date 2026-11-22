@@ -322,3 +322,90 @@ describe("Sefaria's notes: data-label markers in the book, unnumbered note lines
     expect(flat.suggestions).toEqual([]);
   });
 });
+
+/*
+ * Issue #14 — notes numbered with bare digits. NO REAL FIXTURE exists for this shape (the only real footnotes
+ * pair in the repo, midrash-vayisau, uses <sup>); these are minimal hand-written lines, said so on purpose.
+ */
+describe("bare-number markers (#14)", () => {
+  const main = ["<h1>ספר</h1>", "שלום1 עולם2. עוד3 בשנת 1990 ובפרק 12"];
+  const notes = ["<h1>הערות לספר</h1>", "1. הערה א", "2. הערה ב", "3. הערה ג"];
+
+  it('the "digits" style links bare numbers to the note lines', () => {
+    expect(pairs(run(main, notes, { mainMarkers: "digits" }))).toEqual(["1>1", "1>2", "1>3"]);
+  });
+
+  it("auto: when no tag style fits, bare numbers after a word are tried and chosen (says so)", () => {
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>2", "1>3"]);
+    expect(codes(res.notes)).toContain("footnotes/style-auto");
+  });
+
+  it("auto keeps preferring a tag style over bare numbers", () => {
+    const res = run(["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup> ו3"], ["<h1>הערות לספר</h1>", "1. א", "2. ב"]);
+    expect(pairs(res)).toEqual(["1>1", "1>2"]);
+  });
+
+  it("the books given in the wrong order: a precise note instead of 'check the marker setting'", () => {
+    const res = runFootnotesEngine(book(NOTES, "n", notes), book(MAIN, "m", main));
+    expect(res.suggestions).toHaveLength(0);
+    expect(codes(res.notes)).toContain("footnotes/swapped");
+    expect(codes(res.notes)).not.toContain("footnotes/no-notes");
+    expect(res.notes.find((n) => n.code === "footnotes/swapped")!.text).toContain("בסדר הפוך");
+  });
+
+  it("auto does not choose bare numbers on a single coincidence (one number of the text equals a note number)", () => {
+    const res = run(["<h1>ספר</h1>", "שלום עולם1 ועוד דברים"], ["<h1>הערות לספר</h1>", "1. א", "2. ב", "3. ג", "4. ד", "5. ה", "6. ו"]);
+    expect(codes(res.notes).filter((c) => c === "footnotes/style-auto")).toHaveLength(1);
+    expect(res.notes.find((n) => n.code === "footnotes/style-auto")!.text).not.toContain("צמודים");
+  });
+
+  // QA findings: a main book with no markers at all, only ordinary numbers that LOOK like a series, must give nothing (PR1: 0)
+  describe("auto never chooses bare digits for ordinary numbers in prose", () => {
+    const notes = ["<h1>הערות לספר</h1>", ...Array.from({ length: 30 }, (_, i) => `${i + 1}. הערה ${i + 1}`)];
+    const mainOf = (line: (n: number) => string) => ["<h1>ספר</h1>", ...Array.from({ length: 40 }, (_, i) => line(i))];
+    it.each([
+      ["a citation after a chapter letter: פרק ג,N / א.N", (i: number) => `כך כתב הרמב"ם בהלכות שבת פרק ג,${(i % 8) + 1} וגם בפסוק א.${(i % 5) + 1} כדלעיל.`],
+      ['a volume-and-page abbreviation: ח"א.N', (i: number) => `ראה שם ח"א.${(i % 30) + 1} ועוד דברים`],
+      ["a daf with a geresh: ג'N", (i: number) => `ראה בדף ג'${(i % 30) + 1} ועוד דברים`],
+      ["a halacha letter: הלכה ו.N", (i: number) => `ועיין הלכה ו.${(i % 30) + 1} ועוד דברים`],
+    ])("%s", (_name, line) => {
+      const res = run(mainOf(line), notes);
+      expect(res.suggestions).toHaveLength(0);
+      expect(codes(res.notes)).not.toContain("footnotes/style-auto-digits");
+    });
+
+    it("one number repeated again and again is no series: distinct numbers must be half of the notes", () => {
+      const res = run(mainOf(() => "שלום עולם5 ועוד דברים"), notes);
+      expect(res.suggestions).toHaveLength(0);
+    });
+
+    it("numbers that do not rise (descending, shuffled) are no series", () => {
+      const nums = Array.from({ length: 30 }, (_, i) => 30 - i);
+      const res = run(["<h1>ספר</h1>", ...nums.map((n) => `שלום עולם${n} ועוד דברים`)], notes);
+      expect(res.suggestions).toHaveLength(0);
+    });
+
+    it("a real series after real words is accepted, but never above 'possible', and says so; an explicit choice keeps its confidence", () => {
+      const main = ["<h1>ספר</h1>", ...Array.from({ length: 30 }, (_, i) => `שלום עולם${i + 1} ועוד דברים`)];
+      const auto = run(main, notes);
+      expect(auto.suggestions).toHaveLength(30);
+      expect(auto.suggestions.every((s) => s.confidence === "possible")).toBe(true);
+      expect(auto.suggestions[0]!.warnings.map((w) => w.code)).toContain("footnotes/digits-auto");
+      const explicit = run(main, notes, { mainMarkers: "digits" });
+      expect(explicit.suggestions.some((s) => s.confidence === "certain" || s.confidence === "high")).toBe(true);
+    });
+  });
+
+  it("no 'swapped' claim for one stray number glued to a word in the other book (a page or verse number in prose)", () => {
+    const res = run(["1. הערה", "2. הערה", "3. הערה"], ["דברים רגילים בעמוד5 של הספר", "ועוד שורה בלי שום סימן"]);
+    expect(codes(res.notes)).not.toContain("footnotes/swapped");
+    expect(codes(res.notes)).toContain("footnotes/no-notes");
+  });
+
+  it("no 'swapped' claim when the other book has no markers either", () => {
+    const res = run(["שלום עולם"], ["הערה בלי מספר"]);
+    expect(codes(res.notes)).toContain("footnotes/no-notes");
+    expect(codes(res.notes)).not.toContain("footnotes/swapped");
+  });
+});

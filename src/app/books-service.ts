@@ -17,6 +17,7 @@ export function booksService(call: SourcesCall): BooksService {
     close: async (id) => void (await call("close", [id])),
     runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
     runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),
+    titleFit: (source, target, opts) => call("titleFit", [source, target], opts),
     diffBooks: (oldKey, newKey, opts) => call("diffBooks", [oldKey, newKey], opts),
     searchBook: (key, query, options, opts) => call("searchBook", [key, query, options], opts),
     altToc: (key, opts) => call("altToc", [key], opts),

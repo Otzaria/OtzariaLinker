@@ -1,7 +1,7 @@
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
-import { CONFIDENCE_ORDER, recordsOf, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { CONFIDENCE_ORDER, compileSourceFilter, previewSourceFilter, recordsOf, type Confidence, type EngineId, type EngineResult, type Reason, type SourceFilter, type SourceFilterPreview, type Suggestion } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -171,8 +171,21 @@ export class SuggestionsState {
 
   constructor(
     private readonly host: SuggestionsHost,
-    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks">,
+    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines">,
   ) {}
+
+  /**
+   * Which lines of a source book a line filter (issue #27, linking/automatic/source-filter.ts) lets into the engine, with a few of each side,
+   * read from the book the way the engine reads it (the line as the generator counts anchors). `error`: the filter is not valid; null: the
+   * read was cancelled or failed. Nothing is run and nothing changes.
+   */
+  async previewSourceFilter(sourceKey: string, filter: SourceFilter, engine: EngineId, limit = 6): Promise<SourceFilterPreview | { error: string } | null> {
+    const compiled = compileSourceFilter(filter, { strip: engine === "dibur-hamatchil" });
+    if (!compiled.ok) return { error: compiled.reason };
+    const lines = await this.host.runTask("קורא את שורות הספר…", (opts) => this.service.lines(sourceKey, 0, Number.MAX_SAFE_INTEGER, opts));
+    if (!lines) return null;
+    return previewSourceFilter(lines.map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading })), compiled.filter, limit);
+  }
 
   async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);

@@ -1,5 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import { runEngineSliced, type EngineBook, type EngineContext, type EngineId, type EngineResult } from "../linking/automatic";
+import { titleFit, type TitleFitReport } from "../linking/title-fit";
 import { diffLines, findMoves, type LineFate, type LineMapping } from "../matching/line-diff";
 import type { SourceRegistry } from "../sources/registry";
 
@@ -17,6 +18,16 @@ export async function engineJob(registry: SourceRegistry, engine: EngineId, sour
   const t = await load(target);
   ctx.signal?.throwIfAborted();
   return runEngineSliced(engine, s, t, options, ctx);
+}
+
+/** Whether the titles of a commentary fit its base (linking/title-fit.ts), both read here, in the worker. */
+export async function titleFitJob(registry: SourceRegistry, source: BookRef, target: BookRef, ctx: EngineContext = {}): Promise<TitleFitReport> {
+  const load = async (book: BookRef): Promise<EngineBook> => ({ book, lines: (await registry.lines(book.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef })) });
+  const s = await load(source);
+  ctx.signal?.throwIfAborted();
+  const t = await load(target);
+  ctx.signal?.throwIfAborted();
+  return titleFit(s, t);
 }
 
 export interface BatchItem {

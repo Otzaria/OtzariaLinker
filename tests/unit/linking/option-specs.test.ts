@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENGINES } from "../../../src/linking/automatic";
-import { customKey, defaultFormValues, ENGINE_OPTION_SPECS, toEngineOptions } from "../../../src/linking/automatic/option-specs";
+import { customKey, defaultFormValues, ENGINE_OPTION_SPECS, MARKER_CHOICES, toEngineOptions } from "../../../src/linking/automatic/option-specs";
 import { DEFAULT_THRESHOLDS } from "../../../src/linking/automatic/types";
 
 describe("engine option specs", () => {
@@ -49,6 +49,12 @@ describe("engine option specs", () => {
   it("footnotes headingLevel 0 means every heading (no option)", () => {
     expect(toEngineOptions("footnotes", { headingLevel: 0 }).options).toEqual({});
     expect(toEngineOptions("footnotes", { headingLevel: 2 }).options).toEqual({ headingLevel: 2 });
+  });
+
+  it("bare numbers (#14): a ready-made marker style for both sides", () => {
+    expect(toEngineOptions("footnotes", { mainMarkers: "digits" }).options).toEqual({ mainMarkers: "digits" });
+    expect(toEngineOptions("footnotes", { notesMarkers: "digits" }).options).toEqual({ notesMarkers: "digits" });
+    expect(MARKER_CHOICES.map(([v]) => v)).toContain("digits");
   });
 
   it("marker styles: built-in, custom tag, guarded regular expression", () => {

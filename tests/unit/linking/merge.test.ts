@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { BookRef, LinkSide } from "../../../src/core/links/model";
 import type { Confidence, EngineId, Suggestion } from "../../../src/linking/automatic";
-import { linePairKey, mergeItems, mergeSuggestions, type MergeItem } from "../../../src/linking/merge";
+import { applyPairMinimums, linePairKey, mergeItems, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../../src/linking/merge";
 
 const C: BookRef = { key: "t:1", title: "ביאור על בראשית", origin: "otzaria" };
 const B: BookRef = { key: "d:1", title: "בראשית", origin: "otzaria" };
@@ -365,3 +365,105 @@ describe("mergeSuggestions — regression: nothing absorbed on the way is lost",
     expect(new Set(ids).size).toBe(ids.length); // each once
   });
 });
+
+/* #10: one line, several target books the user chose — never linked to all of them blindly */
+describe("mergeSuggestions — the candidate books of one line (candidateBooks)", () => {
+  const B2: BookRef = { key: "d:2", title: "ספר שני", origin: "otzaria" };
+  const toB = (c: number, b: number, conf: Confidence): MergeItem => H(c, b, conf);
+  const toB2 = (c: number, b: number, conf: Confidence): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B2, b), conf), focus: C.key });
+  const opts = { candidateBooks: [B.key, B2.key] };
+
+  it("without the option nothing changes: two books, two certain suggestions", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")]);
+    expect(suggestions.map((s) => s.confidence)).toEqual(["certain", "certain"]);
+  });
+
+  it("the more certain candidate wins one step down, the other is folded in as its alternative, with the reason", () => {
+    const { suggestions, stats } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "possible")], opts);
+    expect(suggestions).toHaveLength(1);
+    const s = suggestions[0]!;
+    expect(s.target.book.key).toBe(B.key);
+    expect(s.confidence).toBe("high"); // a won conflict costs a step: never bulk-approved
+    expect(s.rules).toContain("maxlink/multi-target-winner");
+    expect(s.alternatives.map((a) => a.target.book.key)).toEqual([B2.key]);
+    expect(s.alternatives[0]!.reasons[0]!.text).toContain("ספר שני");
+    expect(s.warnings.map((w) => w.code)).toContain("maxlink/multi-target-winner");
+    expect(stats).toMatchObject({ settled: 1, outweighed: 1 });
+  });
+
+  it("equally sure candidates: both stay, both 'ambiguous', each names the other", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")], opts);
+    expect(suggestions).toHaveLength(2);
+    for (const s of suggestions) {
+      expect(s.confidence).toBe("ambiguous");
+      expect(s.rules).toContain("maxlink/multi-target");
+      expect(s.alternatives).toHaveLength(1);
+    }
+  });
+
+  it("a third, less sure candidate is not called 'equally sure': only the tied ones name each other", () => {
+    const B3: BookRef = { key: "d:3", title: "ספר שלישי", origin: "otzaria" };
+    const toB3: MergeItem = { suggestion: sg("headings", side(C, 5), side(B3, 1), "possible"), focus: C.key };
+    const { suggestions, stats } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain"), toB3], { candidateBooks: [B.key, B2.key, B3.key] });
+    const by = (key: string) => suggestions.find((s) => s.target.book.key === key)!;
+    expect(by(B.key).alternatives.map((a) => a.target.book.key)).toEqual([B2.key]);
+    expect(by(B2.key).alternatives.map((a) => a.target.book.key)).toEqual([B.key]);
+    expect(by("d:3").rules).not.toContain("maxlink/multi-target");
+    expect(by("d:3").confidence).toBe("possible");
+    expect(stats.conflicts).toBe(2);
+  });
+
+  it("other lines, and books that are not candidates, are untouched", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(6, 3, "certain"), toB(7, 4, "certain")], opts);
+    expect(suggestions.map((s) => s.confidence)).toEqual(["certain", "certain", "certain"]);
+    const other = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")], { candidateBooks: [B.key] });
+    expect(other.suggestions.map((s) => s.confidence)).toEqual(["certain", "certain"]);
+  });
+
+  it("deterministic: the input order does not matter", () => {
+    const a = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "high")], opts).suggestions;
+    const b = mergeSuggestions([toB2(5, 3, "high"), toB(5, 10, "certain")], opts).suggestions;
+    expect(b.map((s) => s.id)).toEqual(a.map((s) => s.id));
+    expect(b.map((s) => s.confidence)).toEqual(a.map((s) => s.confidence));
+  });
+});
+
+describe("mergeSuggestions — matched words (#11 data)", () => {
+  it("the merged link keeps the words of the member that has them, on the right sides", () => {
+    // headings: commentary → base, no words; dibur-hamatchil: base → commentary, with the words of both lines
+    const dh: MergeItem = { suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "high", { declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 9 }, matched: { source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } } }), focus: C.key };
+    const { suggestions } = mergeSuggestions([H(5, 10, "high"), dh]);
+    expect(suggestions[0]!.engine).toBe("dibur-hamatchil");
+    expect(suggestions[0]!.matched).toEqual({ source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } });
+  });
+
+  it("when the representative is the engine without words, the words are turned to its own orientation", () => {
+    // the headings record (commentary → base) is the representative when it is more certain and the other has the weaker anchor
+    const dh: MergeItem = { suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "ambiguous", { declaredType: "commentary", matched: { source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } } }), focus: C.key };
+    const { suggestions } = mergeSuggestions([H(5, 10, "certain"), dh]);
+    const s = suggestions[0]!;
+    // the representative is the headings record (commentary → base): the dibur-hamatchil spans, written base → commentary, are turned
+    expect(s.engine).toBe("headings");
+    expect(s.source.book.key).toBe(C.key);
+    expect(s.matched).toEqual({ source: { rawStart: 0, rawEnd: 6 }, target: { rawStart: 3, rawEnd: 9 } });
+  });
+});
+
+describe("applyPairMinimums — a pair's own confidence threshold (UserPair.minConfidence)", () => {
+  const mk = (conf: Confidence, other: BookRef = B): MergedSuggestion => mergeSuggestions([{ suggestion: sg("headings", side(C, 5), side(other, 10), conf), focus: C.key }]).suggestions[0]!;
+  it("hides the suggestions of that pair below its threshold, keeps the rest, counts what it hid", () => {
+    const list = [mk("certain"), mk("high"), mk("possible"), mk("ambiguous"), mk("possible", M), mk("ambiguous", M)];
+    const { kept, hidden } = applyPairMinimums(list, { [`${C.title}>${B.title}`]: "high" });
+    expect(kept.map((s) => `${s.target.book.title}:${s.confidence}`)).toEqual([`${B.title}:certain`, `${B.title}:high`, `${M.title}:possible`, `${M.title}:ambiguous`]);
+    expect(hidden).toBe(2);
+  });
+  it("no minimums: nothing changes", () => {
+    const list = [mk("possible")];
+    expect(applyPairMinimums(list, {})).toEqual({ kept: list, hidden: 0 });
+  });
+  it("works whichever way the record is written (the focus is the commentary)", () => {
+    const dh = mergeSuggestions([{ suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "possible", { declaredType: "commentary" }), focus: C.key }]).suggestions[0]!;
+    expect(applyPairMinimums([dh], { [`${C.title}>${B.title}`]: "high" }).hidden).toBe(1);
+  });
+});
+

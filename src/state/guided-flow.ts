@@ -4,7 +4,8 @@ import type { Link } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
 import type { EngineId } from "../linking/automatic";
-import { notesBaseTitle, type MaxLinkPlan, type Relation } from "../linking/plan";
+import { ENGINES } from "../linking/automatic";
+import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairEngineId, type Relation } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
 import type { LinkState } from "./history";
@@ -371,6 +372,9 @@ export interface GuidedRecord {
   purpose: "submission" | "private";
   /** the label of the source chosen for the bases, when a base is open twice */
   preferBase?: string;
+  /** the methods chosen for every pair (GuidedFlowState.methods), and for single pairs (pairMethods); absent in older records */
+  methods?: string[];
+  pairMethods?: Record<string, string[]>;
   links: number;
   /** the result was downloaded: nothing to continue */
   done: boolean;
@@ -378,6 +382,17 @@ export interface GuidedRecord {
 }
 
 export const GUIDED_KEY = "guided:v1";
+
+function cleanPairMethods(raw: object): Record<string, string[]> {
+  // keys come from JSON.parse, so "__proto__" can be one: on a plain object `out[k] =` would set the prototype. No prototype, and that key is dropped.
+  const out: Record<string, string[]> = Object.create(null);
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === "__proto__") continue;
+    const list = Array.isArray(v) ? v.filter((e): e is string => (PAIR_ENGINES as readonly unknown[]).includes(e)) : [];
+    if (list.length) out[k] = list;
+  }
+  return out;
+}
 
 export function parseGuidedRecord(text: string | null | undefined): GuidedRecord | null {
   if (!text) return null;
@@ -393,6 +408,8 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
       sources,
       purpose: r.purpose === "private" ? "private" : "submission",
       ...(typeof r.preferBase === "string" && r.preferBase && { preferBase: r.preferBase }),
+      ...(Array.isArray(r.methods) && r.methods.some((e) => typeof e === "string") && { methods: r.methods.filter((e): e is string => typeof e === "string" && ENGINES.some((x) => x.id === e)) }),
+      ...(r.pairMethods && typeof r.pairMethods === "object" && Object.keys(cleanPairMethods(r.pairMethods)).length > 0 && { pairMethods: cleanPairMethods(r.pairMethods) }),
       links: Number(r.links) || 0,
       done: r.done === true,
       savedAt: Number(r.savedAt) || 0,
@@ -435,6 +452,14 @@ export class GuidedFlowState {
   readonly bookSources = signal<readonly string[]>([]);
   /** the source whose books are the bases when a base is open in several ("" = the planner's default) */
   readonly preferSource = signal("");
+  /**
+   * The methods that may run, for every pair (null = every method that fits). "Force dibur-hamatchil for all pairs"
+   * is the set {dibur-hamatchil}. Kept in the saved flow (GuidedRecord.methods) and restored by continueSaved(); start() resets it.
+   * The job also keeps the engines it ran with (JobRecord.engines).
+   */
+  readonly methods = signal<ReadonlySet<EngineId> | null>(null);
+  /** the methods the user named for one pair (plan.ts pairMethodKey): exactly those run there, headings with no title gate */
+  readonly pairMethods = signal<Readonly<Record<string, readonly PairEngineId[]>>>({});
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
   readonly saved = signal<GuidedRecord | null>(null);
   /** where a continued flow had got to: step 1 leads back there once its books are open again */
@@ -460,7 +485,8 @@ export class GuidedFlowState {
     const scope = this.scope.value;
     if (!scope) return null;
     const prefer = this.preferSource.value || (this.preferLabel ? this.host.sources.value.find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
-    return this.host.maxLink.plan(scope, undefined, prefer || undefined);
+    const methods = this.pairMethods.value;
+    return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(methods).length ? { methods } : undefined);
   });
 
   readonly missing = computed<MissingBase[]>(() => {
@@ -517,6 +543,9 @@ export class GuidedFlowState {
       this.bookSources.value = adopt;
       this.preferSource.value = "";
       this.preferLabel = undefined;
+      // a new flow starts from the default methods: "dibur-hamatchil for all pairs" of the previous one must not leak into it
+      this.methods.value = null;
+      this.pairMethods.value = {};
       this.resumeTo.value = null;
       this.saved.value = null;
       this.bundle.value = null;
@@ -545,6 +574,8 @@ export class GuidedFlowState {
     batch(() => {
       this.host.exportPurpose.value = r.purpose;
       this.preferLabel = r.preferBase;
+      this.methods.value = r.methods?.length ? new Set(r.methods as EngineId[]) : null;
+      this.pairMethods.value = (r.pairMethods ?? {}) as Record<string, readonly PairEngineId[]>;
       this.bookSources.value = [];
       this.resumeTo.value = r.step;
       this.active.value = true;
@@ -580,6 +611,29 @@ export class GuidedFlowState {
   /** Drops a source from the books (it stays open, and may still serve as bases). */
   removeBooks(sourceId: string): void {
     this.bookSources.value = this.bookSources.peek().filter((id) => id !== sourceId);
+  }
+
+  /**
+   * The engines the plan may use: the chosen methods for the pair engines (headings, dibur-hamatchil), and ALWAYS footnotes and the
+   * single-book engines (citations) — forcing dibur-hamatchil for all pairs replaces only the headings engine (owner decision).
+   */
+  private engineSet(): ReadonlySet<EngineId> | undefined {
+    const chosen = this.methods.value;
+    return chosen ? new Set<EngineId>([...chosen, "footnotes", ...singleBookEngines()]) : undefined;
+  }
+
+  /** The methods for every pair (issue #21): null = all that fit, {dibur-hamatchil} = force it instead of headings everywhere. */
+  setMethods(engines: ReadonlySet<EngineId> | null): void {
+    this.methods.value = engines;
+  }
+
+  /** The methods for one pair of books, by their titles; null or empty goes back to the default for the pair. */
+  setPairMethods(dependantTitle: string, baseTitle: string, engines: readonly PairEngineId[] | null): void {
+    const key = pairMethodKey(dependantTitle, baseTitle);
+    const next = { ...this.pairMethods.peek() };
+    if (engines?.length) next[key] = engines;
+    else delete next[key];
+    this.pairMethods.value = next;
   }
 
   setPreferSource(id: string): void {
@@ -711,6 +765,8 @@ export class GuidedFlowState {
       sources,
       purpose: this.host.exportPurpose.value,
       ...(prefer && { preferBase: prefer }),
+      ...(this.methods.value && { methods: [...this.methods.value] }),
+      ...(Object.keys(this.pairMethods.value).length && { pairMethods: Object.fromEntries(Object.entries(this.pairMethods.value).map(([k, v]) => [k, [...v]])) }),
       links: this.facts.value.links,
       done: this.downloaded.value !== null,
       savedAt: Date.now(),
@@ -743,3 +799,4 @@ export class GuidedFlowState {
     return () => (clearTimeout(timer), stop());
   }
 }
+

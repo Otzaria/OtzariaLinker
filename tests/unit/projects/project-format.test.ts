@@ -126,6 +126,38 @@ describe("project file — the source's library switch (audit F2)", () => {
   });
 });
 
+describe("project file — the coverage of the books (2.15)", () => {
+  const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ ...b, key: `unresolved:${b.title}` });
+  const base = { sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null } };
+  const entry = { title: B.title, lines: 100, buckets: { linked: 60, unlinked: 30, "not-suitable": 10 }, ranges: [[3, 9], [40, 41]] as [number, number][], at: 1_700_000_000_000 };
+
+  it("round-trips as an optional field of version 1 (no version bump); an older project has none", () => {
+    const text = serializeProject({ ...base, coverage: [entry] }, "4.0.0");
+    expect(JSON.parse(text).version).toBe(1);
+    expect(parseProject(text, bind).coverage).toEqual([entry]);
+    expect(JSON.parse(serializeProject(base, "4.0.0"))).not.toHaveProperty("coverage");
+    expect(parseProject(serializeProject(base, "4.0.0"), bind).coverage).toEqual([]);
+  });
+
+  it("is untrusted input: unknown buckets, negative or fractional counts, ranges outside the book and repeated titles are dropped", () => {
+    const raw = JSON.parse(serializeProject(base, "4.0.0"));
+    raw.coverage = [
+      { ...entry, buckets: { linked: 5, bogus: 3, unlinked: -1, partial: 1.5 }, ranges: [[3, 9], [9, 3], [50, 500], ["a", 1], [1]] },
+      { ...entry, title: "" },
+      { ...entry, title: "ג" },
+      { ...entry },
+      null,
+      "x",
+      { ...entry, title: "ב", lines: -2 },
+    ];
+    const got = parseProject(JSON.stringify(raw), bind).coverage;
+    expect(got).toHaveLength(2);
+    expect(got[0]).toEqual({ title: B.title, lines: 100, buckets: { linked: 5 }, ranges: [[3, 9]], at: entry.at });
+    raw.coverage = { title: "א" };
+    expect(parseProject(JSON.stringify(raw), bind).coverage).toEqual([]);
+  });
+});
+
 describe("project file — the books' line counts (V5 P1-10)", () => {
   const bind = (b: { title: string; origin: BookRef["origin"] }) => ({ ...b, key: `unresolved:${b.title}` });
   const base = { sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null } };

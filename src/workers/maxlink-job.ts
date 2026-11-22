@@ -4,6 +4,7 @@ import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
 import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
 import { capSpanned, runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { titleFit, titleGateAdvice, type TitleFitReport, type TitleGateAdvice } from "../linking/title-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -177,6 +178,49 @@ function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reas
   return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
 }
 
+/**
+ * A step whose base was chosen between books of the same title by a rule (PlanStep.ambiguousBase): nothing it finds is above "possible",
+ * each suggestion says why, and the step says so once. The user lifts it by naming the book.
+ */
+function ambiguousBaseCap(r: EngineResult, title: string): EngineResult {
+  const why: Reason = { code: "maxlink/ambiguous-base", text: `יש כמה ספרים בשם "${title}", והבסיס נבחר לפי כלל ולא לפי ראיה, ולכן ההצעה הזו לא יכולה להיות מעל "אפשרית". בחרו במפורש את הספר (מקור לספרי הבסיס, או זוג עם הספר עצמו) כדי להסיר את ההגבלה.` };
+  return { ...capConfidence(r, ["certain", "high"], why), notes: [{ code: "maxlink/ambiguous-base", text: why.text }, ...r.notes] };
+}
+
+/**
+ * The title gate (issue #21), as an advisor (fix round before the merge of PR 2). The check (linking/title-fit.ts) cannot rule on every pair:
+ * it is read through titleGateAdvice. Only a ruling the measurement supports (no titles, or none of them the base's) skips the step — its
+ * guards only lower confidence AFTER a run, and a wrong method yields many wrong links — with the reasons, and the user can run the
+ * method on that pair by naming it (PlanChoices.methods). A doubt (partial, undecided) runs the step with a note that says why; a step the
+ * user forced against the check's advice runs with a warning and nothing of it "certain". A check that cannot be made never blocks the step.
+ */
+function titleFitOrNull(source: EngineBook, target: EngineBook): TitleFitReport | null {
+  try {
+    return titleFit(source, target);
+  } catch {
+    return null;
+  }
+}
+
+function titleGateSkip(source: EngineBook, target: EngineBook, advice: TitleGateAdvice): EngineResult {
+  return {
+    suggestions: [],
+    notes: [{ code: "title-fit/skipped", text: `שיטת הכותרות לא הורצה על "${source.book.title}" מול "${target.book.title}": ${advice.why} שיטת דיבור המתחיל לא תלויה בכותרות. אפשר להריץ את שיטת הכותרות על הזוג הזה בבחירה מפורשת.` }],
+    unmatched: [],
+  };
+}
+
+/** A step that runs although the title check doubts it: the note says why; forced by the user, the suggestions also carry a warning and none is "certain". */
+function titleAdvice(r: EngineResult, fit: TitleFitReport, advice: TitleGateAdvice, forced: boolean, source: string, target: string): EngineResult {
+  if (forced) {
+    const why: Reason = { code: "title-fit/forced", text: `בחרתם להריץ את שיטת הכותרות על "${source}" מול "${target}", ובדיקת ההתאמה לא אישרה אותה (${fit.verdict}): ${advice.why} ההצעות נשארות, אבל אינן "ודאיות" לאישור בקבוצה: בדקו אותן.` };
+    const capped = { ...r, suggestions: r.suggestions.map((x) => ({ ...x, ...(x.confidence === "certain" && { confidence: "high" as const }), warnings: [...x.warnings, why] })) };
+    return { ...capped, notes: [{ code: "title-fit/forced", text: why.text }, ...r.notes] };
+  }
+  const code = fit.verdict === "undecided" ? "title-fit/undecided" : fit.verdict === "partial" ? "title-fit/partial" : "title-fit/doubtful";
+  return { ...r, notes: [{ code, text: `שיטת הכותרות רצה על "${source}" מול "${target}", אבל בדיקת ההתאמה מהססת (${fit.verdict}): ${advice.why} בדקו את ההצעות לפני אישור.` }, ...r.notes] };
+}
+
 export async function maxlinkJob(
   registry: SourceRegistry,
   steps: readonly PlanStep[],
@@ -256,7 +300,12 @@ export async function maxlinkJob(
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
         const byLinks = step.relation.scope && step.relation.scope.baseSection === undefined && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
-        result = await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks);
+        const fit = (step.titleGate || step.titleForced) && !step.relation.scope && !step.relation.through ? titleFitOrNull(loaded.source, loaded.target) : null;
+        const advice = fit ? titleGateAdvice(fit) : null;
+        const skipped = fit && advice && step.titleGate && !step.titleForced && advice.action === "skip" ? titleGateSkip(loaded.source, loaded.target, advice) : null;
+        result = skipped ?? (await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks));
+        if (!skipped && fit && advice && advice.action !== "run") result = titleAdvice(result, fit, advice, step.titleForced === true, loaded.source.book.title, loaded.target.book.title);
+        if (step.ambiguousBase) result = ambiguousBaseCap(result, step.target.title);
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);

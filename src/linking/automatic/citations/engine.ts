@@ -65,6 +65,11 @@ export interface CitationsOptions extends SefariaOwnedOption {
   readonly thresholds?: ConfidenceThresholds;
   /** alternatives kept on each suggestion. Default 3. */
   readonly maxAlternatives?: number;
+  /**
+   * Run on a book although the suitability gate sees no sign of a place in it (suitability.ts CITATION_GATE): a book that cites by the name of a
+   * book and numbers alone, with no place word, may be skipped by it. Default false.
+   */
+  readonly noGate?: boolean;
 }
 
 const ENGINE = "citations" as const;
@@ -209,6 +214,7 @@ export class CitationRun {
       scope: options.scope ?? "all",
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
+      noGate: options.noGate ?? false,
     };
     this.sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
     this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid, self: source }, source.title, units);
@@ -488,6 +494,14 @@ export class CitationRun {
       code: "citations/summary",
       text: `נסרקו ${this.lines.toLocaleString("he")} שורות. נמצאו ${counts.detected.toLocaleString("he")} מראי מקומות לספרים שפתוחים בכלי; ${counts.resolved.toLocaleString("he")} אותרו עד השורה${counts.ibid ? ` (מהם ${counts.ibid.toLocaleString("he")} "שם")` : ""}.`,
     });
+    if (!counts.detected) {
+      const missing = this.missingCorpora();
+      if (missing.length)
+        notes.push({
+          code: "citations/no-target-books",
+          text: `לא נמצאו מראי מקומות. ייתכן שהספר פשוט אינו מצטט; וייתכן שספרי היעד לא נפתחו: המנוע מזהה הפניות רק לספרים שפתוחים בכלי, ובספרים שנפתחו אין ${missing.join(", ")}. אם הספר מצטט אותם, פתחו את מסד אוצריא (או את הספרים שאליהם הוא מפנה) והריצו שוב.`,
+        });
+    }
     if (counts.noLocation) notes.push({ code: "citations/not-found", text: `${counts.noLocation.toLocaleString("he")} מראי מקומות לא אותרו: המקום (פרק, דף, סימן) אינו קיים בספר שזוהה. הם ברשימת "בלי התאמה".` });
     if (counts.noBook) notes.push({ code: "citations/no-structure", text: `${counts.noBook.toLocaleString("he")} מראי מקומות מפנים לספרים בלי מבנה שאפשר לאתר בו מקום (בלי ציוני מקום במסד ובלי כותרות של פרקים או סימנים).` });
     if (counts.belowMin) notes.push({ code: "citations/below-minimum", text: `${counts.belowMin.toLocaleString("he")} הצעות היו מתחת לוודאות המינימלית שנבחרה ולא הוצגו.` });
@@ -497,6 +511,22 @@ export class CitationRun {
     const anchorNote = this.anchorNote(anchorsAllowed);
     if (anchorNote) notes.push(anchorNote);
     return { suggestions, notes, unmatched: [...unmatched.entries()].sort((a, b) => a[0] - b[0]).map(([line, reasons]) => ({ line, reasons })) };
+  }
+
+  /**
+   * The well-known corpora (as collectionOf() reads a title) with no book among the open ones. A run that found
+   * nothing is most often one whose targets are not open; the scanner cannot tell what a citation to a closed
+   * book looks like (no name table: it is built from the open catalog), so this is the explanation instead.
+   */
+  private missingCorpora(): string[] {
+    const have = new Set(this.aliases.collections.values());
+    const groups: [readonly string[], string][] = [
+      [["tanakh"], 'תנ"ך'],
+      [["bavli", "mishna", "yerushalmi"], 'ש"ס או משנה'],
+      [["rambam"], "משנה תורה"],
+      [["sa", "tur"], "שולחן ערוך"],
+    ];
+    return groups.filter(([colls]) => !colls.some((c) => have.has(c as never))).map(([, label]) => label);
   }
 
   private anchorPolicy(target: BookRef, cache: Map<string, boolean>): boolean {

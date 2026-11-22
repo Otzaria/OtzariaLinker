@@ -1,6 +1,6 @@
 import type { SourceRegistry } from "../sources/registry";
 import { citationsJob } from "./citations-job";
-import { batchJob, diffJob, engineJob } from "./engine-job";
+import { batchJob, diffJob, engineJob, titleFitJob } from "./engine-job";
 import { fingerprintsJob, maxlinkJob } from "./maxlink-job";
 import { RpcFailure, type CallContext, type CallOptions, type Handlers } from "./rpc";
 import { searchJob } from "./search-job";
@@ -24,6 +24,7 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     close: (_ctx, sourceId) => registry.close(sourceId),
+    titleFit: (ctx, source, target) => titleFitJob(registry, source, target, jobCtx(ctx)),
     diffBooks: (ctx, oldKey, newKey) => diffJob(registry, oldKey, newKey, jobCtx(ctx)),
     runBatch: (ctx, engine, pairs, options) => batchJob(registry, engine, pairs, options, jobCtx(ctx)),
     searchBook: (ctx, bookKey, query, options) => searchJob(registry, bookKey, query, options, jobCtx(ctx)),
