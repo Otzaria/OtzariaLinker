@@ -69,6 +69,6 @@
 node scripts/audit/personal-db-audit.mjs <personal.db> --official <seforim.db> --phase graph --out graph.json
 ```
 
-הכללים והסיווג בקוד הסקריפט (הפונקציה \`graph\`). שינוי כלל משנה את המספרים; המספרים כאן הם של הכללים שלמעלה.
+הכללים והסיווג בקוד הסקריפט (הפונקציה `graph`). שינוי כלל משנה את המספרים; המספרים כאן הם של הכללים שלמעלה.
 
 </div>
