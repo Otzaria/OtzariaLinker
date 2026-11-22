@@ -75,3 +75,61 @@ test("alt_toc: build a structure from the headings, number it, save, export it w
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * #26 (OtzariaLinker issue 25): on a small screen the node table collapsed to a sliver and the open
+ * errors list took the rest. The table keeps room for at least three rows and scrolls inside itself,
+ * the errors list is bounded and scrolls, and the column headers stay in view.
+ */
+for (const size of [{ width: 360, height: 560 }, { width: 1024, height: 600 }]) {
+  test(`alt_toc: the node table keeps its room and scrolls inside, errors bounded, headers sticky (${size.width}x${size.height})`, async ({ page }) => {
+    const seen = watchPage(page);
+    // open at the wide default layout (where the sources list is visible), then shrink the window
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(distUrl);
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "קבצים", exact: true }).click();
+    await (await chooser).setFiles([{ name: "חומש שלי.txt", mimeType: "text/plain", buffer: Buffer.from(BOOK) }]);
+    await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+    await page.setViewportSize(size);
+    await page.getByRole("tab", { name: /קישורים/ }).click();
+    await page.getByRole("button", { name: /^מבני כותרות/ }).click();
+    const dlg = page.getByRole("dialog");
+    await dlg.getByLabel("מפתח המבנה החדש (באנגלית)").fill("Parasha");
+    await dlg.getByRole("button", { name: "מבנה חדש" }).click();
+    for (let i = 0; i < 14; i++) await dlg.getByRole("button", { name: "הוספת צומת" }).click();
+    await expect(dlg.getByLabel("כותרת צומת 14")).toBeVisible();
+
+    const rows = dlg.locator(".alt-rows");
+    const rowH = (await dlg.locator(".alt-row").first().boundingBox())!.height;
+    const box = (await rows.boundingBox())!;
+    expect(box.height, "the node table keeps room for three rows").toBeGreaterThanOrEqual(rowH * 3);
+    expect(await rows.evaluate((el) => el.scrollHeight > el.clientHeight), "the table scrolls inside itself").toBe(true);
+
+    // 14 empty titles = 14 errors, open by default: bounded, scrolls inside
+    const list = dlg.locator("details.held ul.problems");
+    await expect(list).toBeVisible();
+    expect((await list.boundingBox())!.height, "the errors list is bounded").toBeLessThanOrEqual(size.height * 0.34);
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+    // the dialog body (not the page) scrolls, and nothing scrolls sideways
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(await dlg.locator(".body").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+    // sticky column headers: after scrolling the table to the bottom the header is still at its top edge
+    const head = dlg.locator(".alt-head");
+    await expect(head).toBeVisible();
+    await rows.evaluate((el) => (el.scrollTop = el.scrollHeight));
+    const h = (await head.boundingBox())!;
+    const r = (await rows.boundingBox())!;
+    expect(h.y - r.y, "header stays at the top of the scrolled table").toBeLessThan(12);
+
+    // editing still works
+    await dlg.getByLabel("כותרת צומת 14").fill("סוף");
+    await expect(dlg.getByLabel("כותרת צומת 14")).toHaveValue("סוף");
+    await dlg.getByRole("button", { name: "שמירה" }).scrollIntoViewIfNeeded();
+    await expect(dlg.getByRole("button", { name: "שמירה" })).toBeVisible();
+    expect(seen.external).toEqual([]);
+    expect(seen.errors).toEqual([]);
+  });
+}

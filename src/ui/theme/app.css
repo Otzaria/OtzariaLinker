@@ -446,9 +446,24 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 /* alt_toc editor */
 .alt-toc label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .alt-toc .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
-.alt-rows { display: grid; gap: 4px; max-height: 40vh; overflow: auto; padding: 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
-.alt-row { display: grid; grid-template-columns: 64px 1fr 90px auto auto; gap: 6px; align-items: center; }
+/* issue #25: the table keeps room for ~3 rows (a scroll container's min-content is 0, so in a squeezed dialog body
+   it collapsed to its padding), scrolls inside itself, and its column headers stay put */
+.alt-rows { display: grid; gap: 4px; align-content: start; min-height: min(12rem, 40vh); max-height: 40vh; overflow: auto; padding: 0 8px 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.alt-row, .alt-head { display: grid; grid-template-columns: 64px minmax(0, 1fr) 90px auto auto; gap: 6px; align-items: center; }
+.alt-head { position: sticky; top: 0; z-index: 1; padding-block: 8px 4px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.alt-head .gap { inline-size: 26px; }
 .alt-row.bad input { border-color: var(--error); }
+.alt-toc .problems { max-height: min(9rem, 24vh); overflow: auto; }
+@media (max-width: 600px) {
+  /* narrow: the title gets a full line; level and line sit under it */
+  .alt-row, .alt-head { grid-template-columns: 72px 88px minmax(0, 1fr) auto auto; row-gap: 4px; }
+  .alt-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 1; }
+  .alt-row > :nth-child(4) { grid-column: 4; }
+  .alt-head > :nth-child(2) { display: none; }
+  .alt-head > .gap { display: none; }
+  .alt-rows { min-height: min(17rem, 48vh); max-height: 48vh; }
+  .alt-row + .alt-row { padding-block-start: 4px; border-top: 1px dashed var(--outline-variant); }
+}
 
 /* export: "what now?" (audit F13) */
 .saved-note { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--on-surface); }

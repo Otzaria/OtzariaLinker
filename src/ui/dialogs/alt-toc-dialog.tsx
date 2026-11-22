@@ -222,6 +222,13 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
               </div>
               <p class="muted" style="margin:0">רמה 0 היא הרמה העליונה (פרשה), רמה 1 מה שתחתיה (עליה), וכן הלאה. מספר השורה הוא כמו בקורא: השורה הראשונה היא 1.</p>
               <div class="alt-rows" role="table" aria-label="צמתי המבנה">
+                <div class="alt-head" role="row">
+                  <span role="columnheader">רמה</span>
+                  <span role="columnheader">כותרת</span>
+                  <span role="columnheader">שורה</span>
+                  <span class="gap" aria-hidden="true" />
+                  <span class="gap" aria-hidden="true" />
+                </div>
                 {s.entries.slice(0, shown).map((e, i) => {
                   const bad = problems.some((p) => p.structure === cur && p.entry === i && p.severity === "error");
                   const name = e.heTitle || `צומת ${i + 1}`;
