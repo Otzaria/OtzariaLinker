@@ -65,7 +65,9 @@ const MAX_ZIP = 512 * 1024 ** 2;
 export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
   /** databases waiting for (or opened with) a mapping, by token — a few File handles, no data */
-  private readonly pending = new Map<string, { blob: Blob; label: string }>();
+  private readonly pending = new Map<string, { blob: Blob; label: string; identity?: string }>();
+  /** the mapping each open mapped database was opened with (JSON), to tell "the same again" from "another mapping" */
+  private readonly mappingOf = new Map<string, string>();
   /**
    * The identity of each open database file → its source id, and back (to release it on close). Picking the
    * same file twice must not load it twice: two sources would list every book twice and hold the file twice
@@ -117,7 +119,29 @@ export class SourceRegistry {
   async openMapped(token: string, mapping: DbMapping, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<OpenedSource> {
     const p = this.pending.get(token);
     if (!p) throw new LinkerError("db/mapping-unknown-token", "המסד הזה כבר אינו פתוח לבחירת מיפוי. גררו אותו שוב.");
-    return this.add(await MappedDbSource.open(this.nextId(), p.label, blobSource(p.blob), mapping, ctx));
+    // A mapped database is one source like any other (#22): the same file mapped twice is the same reader (the same
+    // mapping) or REPLACES it (another mapping), never two readers of one file. The identity is reserved in the same
+    // synchronous step that checks it, so two overlapping calls see each other.
+    const identity = p.identity;
+    const mappingKey = JSON.stringify(mapping);
+    const known = identity === undefined ? undefined : this.byIdentity.get(identity);
+    const held = known === undefined ? undefined : this.sources.get(known);
+    if (held && this.mappingOf.get(held.info.id) === mappingKey) return { info: held.info, books: await held.books() };
+    if (held) this.close(held.info.id);
+    const id = this.nextId();
+    if (identity !== undefined) {
+      this.byIdentity.set(identity, id);
+      this.identityOf.set(id, identity);
+    }
+    try {
+      const opened = await this.add(await MappedDbSource.open(id, p.label, blobSource(p.blob), mapping, ctx));
+      this.mappingOf.set(id, mappingKey);
+      return opened;
+    } catch (err) {
+      if (identity !== undefined && this.byIdentity.get(identity) === id) this.byIdentity.delete(identity);
+      this.identityOf.delete(id);
+      throw err;
+    }
   }
 
   /** The first lines of the first books through a mapping that is not confirmed yet (the wizard's test). */
@@ -292,6 +316,7 @@ export class SourceRegistry {
     const identity = this.identityOf.get(sourceId);
     if (identity !== undefined) this.byIdentity.delete(identity);
     this.identityOf.delete(sourceId);
+    this.mappingOf.delete(sourceId);
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
@@ -375,7 +400,11 @@ export class SourceRegistry {
 
   private async offerMapping(f: InputFile, result: OpenResult): Promise<void> {
     try {
-      (result.needsMapping ??= []).push(await pendingMapping(f.path, nameOf(f.path), f.blob, this.pending));
+      const offered = await pendingMapping(f.path, nameOf(f.path), f.blob, this.pending);
+      (result.needsMapping ??= []).push(offered);
+      // the identity of the file, kept with its token: when it is mapped, picking it again is "already open" (like an Otzaria database)
+      const entry = this.pending.get(offered.token);
+      if (entry) entry.identity = await fileIdentity(f);
     } catch (err) {
       result.skipped.push({ path: f.path, reason: reasonOf(err, "לא הצלחתי לקרוא את המסד.") });
     }
