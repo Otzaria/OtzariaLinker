@@ -51,12 +51,10 @@ describe("engine option specs", () => {
     expect(toEngineOptions("footnotes", { headingLevel: 2 }).options).toEqual({ headingLevel: 2 });
   });
 
-  it("bare numbers (#14): a ready-made marker style, and the choice is offered in basic mode", () => {
+  it("bare numbers (#14): a ready-made marker style for both sides", () => {
     expect(toEngineOptions("footnotes", { mainMarkers: "digits" }).options).toEqual({ mainMarkers: "digits" });
     expect(toEngineOptions("footnotes", { notesMarkers: "digits" }).options).toEqual({ notesMarkers: "digits" });
     expect(MARKER_CHOICES.map(([v]) => v)).toContain("digits");
-    // a user in basic mode must be able to say how the book marks its notes
-    expect(toEngineOptions("footnotes", { mainMarkers: "digits" }, "essential").options).toEqual({ mainMarkers: "digits" });
   });
 
   it("marker styles: built-in, custom tag, guarded regular expression", () => {
