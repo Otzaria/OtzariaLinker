@@ -273,6 +273,11 @@ export type PlanStep =
        */
       titleGate?: true;
       /**
+       * The user named the headings method for this pair (PlanChoices.methods): it runs whatever the title check says, and when the check does
+       * not approve it the result carries a warning and nothing of it is "certain" (workers/maxlink-job.ts).
+       */
+      titleForced?: true;
+      /**
        * The base was chosen between open books that share its exact title (the dependant's own source first, or the official one) and
        * the user chose neither the source nor the book: nothing says it is the right one. The job lowers what the step finds to "possible"
        * (workers/maxlink-job.ts), so nothing of it is approved in bulk until the user names the book.
@@ -872,7 +877,7 @@ const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", 
  */
 const targumTypeOk = (dep: BookRef, base: BookRef): boolean => base.isBaseBook === true && titleDeclaresDependencyOn(dep.title, base.title);
 
-type StepSpec = { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>>; titleGate?: true };
+type StepSpec = { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>>; titleGate?: true; titleForced?: true };
 
 /** A method the user named for a pair that the relation does not give by itself (PlanChoices.methods). */
 function chosenStep(engine: PairEngineId, rel: Relation): StepSpec | null {
@@ -1062,7 +1067,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
               const step = found ?? chosenStep(e, rel);
               if (!step) return [];
               const { titleGate: _gate, ...free } = step;
-              return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
+              return [{ ...free, ...(e === "headings" && { titleForced: true as const }), why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
             }),
             ...(wanted.includes("footnotes") || !enabled("footnotes") ? [] : own.filter((x) => x.engine === "footnotes")),
           ]

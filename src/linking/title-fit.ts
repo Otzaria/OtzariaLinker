@@ -11,9 +11,15 @@ import { analyzeBook, buildUnits, pathKey, type Unit } from "./automatic/heading
  * This is the same structural reading (analyzeBook / buildUnits) without any matching: pure, linear in the
  * lines, and it explains itself — a verdict plus the reasons, each with the number behind it.
  *
- * It says "fit" / "partial" / "unfit"; it never says "link" or "do not link". The caller offers the method
- * (fit), offers it with a warning (partial) or leaves it to an advanced user who forces it (unfit).
+ * It says "fit" / "partial" / "undecided" / "unfit"; it never says "link" or "do not link". The caller offers the method
+ * (fit), offers it with a warning (partial, undecided) or leaves it to an advanced user who forces it (unfit).
  * A method is not chosen by the number of links it produces (a wrong method produces many wrong links).
+ *
+ * It ADVISES, it does not rule (fix round before the merge of PR 2). Measured on 110 pairs of the official library (48 of the first
+ * calibration, 62 held out; docs/AUTOMATION_ENGINE.md §2.1) a structural reading cannot tell every method that fails from one that works:
+ * 3 of 104 "fit" pairs failed against the database's links, and one "unfit" pair (placed share 0.10) was right on every line it spoke on. So
+ * the verdict that rules a method out (unfit by "no titles" or "other titles") is kept for what the measurement supports, the band in between
+ * is "undecided", and titleGateAdvice says what a job does with a verdict: skip for the two rulings, run with a warning otherwise.
  *
  * The metrics are structural only, so they cannot see a commentary that numbers its OWN notes in the base's
  * words ("הגהות מנחם ציון": "סעיף א, ב, ג" that are not the base's סעיפים) — that stays the job of the
@@ -21,7 +27,7 @@ import { analyzeBook, buildUnits, pathKey, type Unit } from "./automatic/heading
  * measured on the real library (docs/AUTOMATION_ENGINE.md §2, "התאמת כותרות").
  */
 
-export type TitleFitVerdict = "fit" | "partial" | "unfit";
+export type TitleFitVerdict = "fit" | "partial" | "undecided" | "unfit";
 
 export interface TitleFitReason {
   /** stable code, `title-fit/<what>` */
@@ -90,8 +96,13 @@ export const TITLE_FIT = {
   minDensity: 0.5,
   /** at or above this share of titled lines that sit under a heading path the base also has: "fit" */
   fitPlaced: 0.8,
-  /** below this: "unfit"; between: "partial" */
-  unfitPlaced: 0.3,
+  /**
+   * below this share of titled lines under a heading path the base also has: "unfit" (none of its titles is the base's: measured 0.00 to 0.03
+   * on the 7 pairs of both samples that the engine could not link at all). From here up to partialPlaced: "undecided".
+   */
+  unfitPlaced: 0.05,
+  /** below this (and from unfitPlaced up): "undecided" — a pair the first calibration called "unfit" at 0.10 was right on every line it spoke on; from here up to fitPlaced: "partial" */
+  partialPlaced: 0.3,
   /** a commentary whose headings repeat a path this often has no title per unit */
   maxDuplicates: 0.2,
   /** fewer headings than this prove nothing about titles (a one-heading file is a title page) */
@@ -212,13 +223,35 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
 
   if (!noTitles) {
     if (metrics.placedShare >= T.fitPlaced) add("same-titles", true, `לכותרות של ${pct(metrics.placedShare)} משורות הפירוש יש כותרת תואמת בספר הבסיס (אותו שם או אותו מספר).`);
-    else if (metrics.placedShare >= T.unfitPlaced) add("some-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס. שאר השורות לא יקושרו לפי כותרות.`);
-    else add("other-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: הכותרות בשני הספרים אינן אותן כותרות.`);
+    else if (metrics.placedShare < T.unfitPlaced) add("other-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: הכותרות בשני הספרים אינן אותן כותרות.`);
+    else if (metrics.placedShare < T.partialPlaced) add("unclear-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: מעט מדי כדי לומר שהכותרות הן של הבסיס, ויותר מדי כדי לומר שאינן. הבדיקה לא מכריעה; אם הפירוש כתוב על הבסיס, אפשר להריץ את שיטת הכותרות ולבדוק את התוצאה.`);
+    else add("some-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס. שאר השורות לא יקושרו לפי כותרות.`);
     if (metrics.duplicateShare > T.maxDuplicates) add("duplicates", false, `${pct(metrics.duplicateShare)} מכותרות הפירוש חוזרות על מקום שכבר נכתב (אין כותרת אחת לכל יחידה), ולכן המקום בבסיס עלול להיות לא חד־משמעי.`);
   }
 
-  const verdict: TitleFitVerdict = noTitles || metrics.placedShare < T.unfitPlaced ? "unfit" : metrics.placedShare >= T.fitPlaced && metrics.duplicateShare <= T.maxDuplicates ? "fit" : "partial";
+  const verdict: TitleFitVerdict = noTitles || metrics.placedShare < T.unfitPlaced ? "unfit" : metrics.placedShare < T.partialPlaced ? "undecided" : metrics.placedShare >= T.fitPlaced && metrics.duplicateShare <= T.maxDuplicates ? "fit" : "partial";
   return { verdict, reasons, metrics };
+}
+
+export interface TitleGateAdvice {
+  /** run: the titles fit; warn: run it, but the check doubts it (say why); skip: the check rules it out */
+  readonly action: "run" | "warn" | "skip";
+  /** the reasons against the method, in one text (empty for "run") */
+  readonly why: string;
+}
+
+/**
+ * What a job does with a title-fit report. Only the two rulings the measurement supports skip a step: no titles at all (nothing to link by),
+ * or titles none of which is the base's with the search for a place complete (an incomplete search, `scanCapped`, may have missed a place).
+ * Everything else — partial, undecided, and "unfit" by sparse titles (a threshold the measurement never exercised: every measured pair had
+ * 95% or more of its lines titled) or by a cut-short search — runs, and the caller attaches `why`. A user who names the method for the pair
+ * forces it: the job then runs it whatever this says, with a warning when this says anything but "run".
+ */
+export function titleGateAdvice(r: TitleFitReport): TitleGateAdvice {
+  const why = r.reasons.filter((x) => !x.ok).map((x) => x.text).join(" ");
+  if (r.verdict === "fit") return { action: "run", why: "" };
+  const ruledOut = r.verdict === "unfit" && r.metrics.scanCapped === 0 && r.reasons.some((x) => x.code === "title-fit/no-titles" || x.code === "title-fit/other-titles");
+  return { action: ruledOut ? "skip" : "warn", why };
 }
 
 
