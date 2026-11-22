@@ -1,0 +1,334 @@
+import { computed, signal, type ReadonlySignal } from "@preact/signals";
+import { sourceIdOfBookKey, type SourceBook } from "../core/books";
+import type { ConnectionType } from "../core/links/connection-type";
+import type { DbLinkFlag, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
+import type { UserPair } from "../linking/plan";
+import { discoverPairs, type DiscoveryBook, type PairProposal } from "../linking/discovery";
+import type { CoverageRow, CoverageState } from "./coverage";
+import type { BooksService, OpenedSource } from "./services";
+
+/*
+ * The analysis of a repository (V6 3.9) — an open database taken as a whole: how many books, how many links, which books have none,
+ * which kinds of links, which are flagged — and the books and pairs the user may then send to the guided flow to complete.
+ *
+ * Nothing is read until the user asks, and nothing is read all at once: the links of the books are counted ONE BOOK AT A TIME through
+ * the database's link indexes (BooksService.dbLinkSummary), the rows of the table are small counts (never the links themselves, never
+ * the text), the work can be stopped at any book and picked up again where it stopped, and the table fills while it runs. The
+ * coverage of a book (how many lines carry a link) is a second, separate read, for the books asked for. No graph, no run: choosing a
+ * book or a pair only fills the lists the guided flow is started from (GuidedFlowState.startForBooks).
+ */
+
+/** What the table keeps of one book: counts only. */
+export interface RepoRow {
+  key: string;
+  title: string;
+  lineCount?: number;
+  /** links of the book at either end, and how many of those start or end here (DbLinkSummary) */
+  total: number;
+  out: number;
+  in: number;
+  /** links that start in this book, by stored type (each link of the repository is counted once, at its source) */
+  typesOut: Partial<Record<ConnectionType, number>>;
+  /** the same links by where the other end is: this source, another open source of the library, another open source, a book that is not open */
+  ends: { same: number; library: number; other: number; unresolved: number };
+  /** per flag, the links of this book that carry it (a link between two books is counted at each of them) */
+  flags: { flag: DbLinkFlag; count: number }[];
+  /** the books it is most linked to, for the pair suggestions (a commentary is linked to its base) */
+  top: { key: string; title: string; links: number }[];
+  /** why its links cannot be read (no link table…): it is not counted as having none */
+  unavailable?: string;
+  /** the lines by what links them, once counted (CoverageRow); an upper bound unless `exact` */
+  coverage?: { suitable: number; unlinked: number; linked: number; partial: number; multiple: number; notSuitable: number; at: number };
+}
+
+/** A book is "suspicious" when at least this share of its links carry a flag (and at least SUSPICIOUS_MIN of them). */
+export const SUSPICIOUS_SHARE = 0.05;
+export const SUSPICIOUS_MIN = 3;
+const TOP = 8;
+/** the table is told of new rows at most this often while it fills (ms) */
+const FLUSH_MS = 150;
+
+export interface RepoTotals {
+  books: number;
+  /** books whose links were counted so far */
+  counted: number;
+  /** links in the repository, each once (counted at its source book) */
+  links: number;
+  noLinks: number;
+  unavailable: number;
+  byType: [ConnectionType, number][];
+  ends: { same: number; library: number; other: number; unresolved: number };
+  /** per flag: how many books carry it and the sum of their counts */
+  flags: { flag: DbLinkFlag; books: number; links: number }[];
+  flaggedBooks: number;
+  suspicious: number;
+}
+
+export interface RepositoryHost {
+  readonly sources: ReadonlySignal<readonly OpenedSource[]>;
+  readonly coverage: Pick<CoverageState, "rows" | "summary">;
+  isLibrarySource(sourceId: string): boolean;
+}
+
+export type RepoSort = "title" | "links-asc" | "links-desc" | "unlinked-share";
+
+export interface RepoProgress {
+  stage: "links" | "coverage";
+  done: number;
+  total: number;
+}
+
+export const isSuspicious = (r: RepoRow): boolean => {
+  const flagged = r.flags.reduce((n, f) => n + f.count, 0);
+  return flagged >= SUSPICIOUS_MIN && r.total > 0 && flagged / r.total >= SUSPICIOUS_SHARE;
+};
+
+/** The share of a book's content lines that no link touches, when its coverage was counted. */
+export const unlinkedShare = (r: RepoRow): number | null => (r.coverage && r.coverage.suitable > 0 ? r.coverage.unlinked / r.coverage.suitable : null);
+
+export class RepositoryState {
+  /** the source being analyzed (an open database); null = the first one */
+  readonly sourceId = signal<string | null>(null);
+  /** the counts of the books read so far, by book key */
+  readonly rows = signal<ReadonlyMap<string, RepoRow>>(new Map());
+  readonly progress = signal<RepoProgress | null>(null);
+  /** when the last counting finished or was stopped (ms) */
+  readonly analyzedAt = signal<number | null>(null);
+  /** the books the user ticked, in the order ticked */
+  readonly pickedBooks = signal<ReadonlySet<string>>(new Set());
+  /** the pairs the user ticked, by "dependantKey>baseKey" */
+  readonly pickedPairs = signal<ReadonlyMap<string, UserPair>>(new Map());
+  readonly suggestions = signal<{ proposals: PairProposal[]; titled: number; unresolved: number } | null>(null);
+  readonly suggesting = signal(false);
+  private abort: AbortController | null = null;
+
+  /** the open databases (a repository is a database, not text files) */
+  readonly repositories = computed(() => this.host.sources.value.filter((s) => s.info.kind !== "text-files"));
+  readonly source = computed<OpenedSource | null>(() => {
+    const list = this.repositories.value;
+    return list.find((s) => s.info.id === this.sourceId.value) ?? list[0] ?? null;
+  });
+  readonly books = computed<readonly SourceBook[]>(() => this.source.value?.books ?? []);
+
+  readonly totals = computed<RepoTotals>(() => {
+    const rows = this.rows.value;
+    const byType = new Map<ConnectionType, number>();
+    const flags = new Map<DbLinkFlag, { books: number; links: number }>();
+    const t: RepoTotals = { books: this.books.value.length, counted: 0, links: 0, noLinks: 0, unavailable: 0, byType: [], ends: { same: 0, library: 0, other: 0, unresolved: 0 }, flags: [], flaggedBooks: 0, suspicious: 0 };
+    for (const b of this.books.value) {
+      const r = rows.get(b.key);
+      if (!r) continue;
+      t.counted++;
+      if (r.unavailable) {
+        t.unavailable++;
+        continue;
+      }
+      t.links += r.out;
+      if (r.total === 0) t.noLinks++;
+      for (const [k, n] of Object.entries(r.typesOut)) byType.set(k as ConnectionType, (byType.get(k as ConnectionType) ?? 0) + n);
+      for (const k of ["same", "library", "other", "unresolved"] as const) t.ends[k] += r.ends[k];
+      if (r.flags.length) t.flaggedBooks++;
+      for (const f of r.flags) {
+        const cur = flags.get(f.flag) ?? { books: 0, links: 0 };
+        flags.set(f.flag, { books: cur.books + 1, links: cur.links + f.count });
+      }
+      if (isSuspicious(r)) t.suspicious++;
+    }
+    t.byType = [...byType].sort((a, b) => b[1] - a[1]);
+    t.flags = [...flags].map(([flag, v]) => ({ flag, ...v })).sort((a, b) => b.links - a.links);
+    return t;
+  });
+
+  constructor(
+    private readonly host: RepositoryHost,
+    private readonly service: Pick<BooksService, "dbLinkSummary">,
+  ) {}
+
+  get available(): boolean {
+    return !!this.service.dbLinkSummary;
+  }
+
+  get running(): boolean {
+    return this.abort !== null;
+  }
+
+  chooseSource(id: string): void {
+    if (this.sourceId.value === id) return;
+    this.cancel();
+    this.sourceId.value = id;
+    this.rows.value = new Map();
+    this.analyzedAt.value = null;
+    this.pickedBooks.value = new Set();
+    this.pickedPairs.value = new Map();
+    this.suggestions.value = null;
+  }
+
+  cancel(): void {
+    this.abort?.abort();
+  }
+
+  /** Forgets everything counted (a changed database, or the user asks to start over). */
+  reset(): void {
+    this.cancel();
+    this.rows.value = new Map();
+    this.analyzedAt.value = null;
+    this.suggestions.value = null;
+  }
+
+  private rowOf(source: OpenedSource, book: SourceBook, s: DbLinkSummary | DbLinksUnavailable): RepoRow {
+    const base = { key: book.key, title: book.title, ...(book.lineCount !== undefined && { lineCount: book.lineCount }) };
+    if (!("total" in s)) return { ...base, total: 0, out: 0, in: 0, typesOut: {}, ends: { same: 0, library: 0, other: 0, unresolved: 0 }, flags: [], top: [], unavailable: s.reason };
+    const typesOut: Partial<Record<ConnectionType, number>> = {};
+    for (const t of s.byType) if (t.out) typesOut[t.type] = t.out;
+    const ends = { same: 0, library: 0, other: 0, unresolved: 0 };
+    for (const b of s.byBook) {
+      if (!b.out) continue;
+      if (b.bookKey.startsWith("unresolved:")) ends.unresolved += b.out;
+      else if (sourceIdOfBookKey(b.bookKey) === source.info.id) ends.same += b.out;
+      else if (this.host.isLibrarySource(sourceIdOfBookKey(b.bookKey))) ends.library += b.out;
+      else ends.other += b.out;
+    }
+    return {
+      ...base,
+      total: s.total,
+      out: s.out,
+      in: s.in,
+      typesOut,
+      ends,
+      flags: s.flags ? s.flags.map((f) => ({ flag: f.flag, count: f.count })) : [],
+      top: s.byBook.slice(0, TOP).map((b) => ({ key: b.bookKey, title: b.title, links: b.out + b.in })),
+    };
+  }
+
+  /**
+   * Counts the links of the books, one at a time; the books already counted are kept (a second call continues), `again` starts over.
+   * Resolves when every book was read or the work was stopped. The table is told of new rows every FLUSH_MS, not at every book.
+   */
+  async analyze(again = false): Promise<void> {
+    const source = this.source.value;
+    const read = this.service.dbLinkSummary;
+    if (!source || !read || this.abort) return;
+    if (again) this.rows.value = new Map();
+    const ctl = (this.abort = new AbortController());
+    const todo = this.books.value.filter((b) => !this.rows.peek().has(b.key));
+    const next = new Map(this.rows.peek());
+    let last = performance.now();
+    this.progress.value = { stage: "links", done: 0, total: todo.length };
+    try {
+      for (const [i, book] of todo.entries()) {
+        if (ctl.signal.aborted) break;
+        try {
+          next.set(book.key, this.rowOf(source, book, await read.call(this.service, book.key, { signal: ctl.signal })));
+        } catch (err) {
+          if (ctl.signal.aborted) break;
+          next.set(book.key, this.rowOf(source, book, { bookKey: book.key, reason: `קריאת הקישורים נכשלה: ${(err as Error).message ?? err}`, retry: true }));
+        }
+        if (performance.now() - last >= FLUSH_MS) {
+          this.rows.value = new Map(next);
+          this.progress.value = { stage: "links", done: i + 1, total: todo.length };
+          last = performance.now();
+        }
+      }
+    } finally {
+      this.rows.value = new Map(next);
+      this.progress.value = null;
+      this.analyzedAt.value = Date.now();
+      this.abort = null;
+    }
+  }
+
+  /** Counts the lines each of these books has linked (project and database links), one book at a time; stoppable. */
+  async countCoverage(keys: readonly string[]): Promise<void> {
+    if (this.abort) return;
+    const ctl = (this.abort = new AbortController());
+    const next = new Map(this.rows.peek());
+    const todo = keys.filter((k) => next.has(k) && !next.get(k)!.unavailable);
+    let done = 0;
+    let last = performance.now();
+    this.progress.value = { stage: "coverage", done: 0, total: todo.length };
+    try {
+      for await (const row of this.host.coverage.rows(todo, { signal: ctl.signal })) {
+        done = todo.indexOf(row.key) + 1;
+        const cur = next.get(row.key);
+        if (cur) next.set(row.key, { ...cur, coverage: coverageOf(row) });
+        if (performance.now() - last >= FLUSH_MS) {
+          this.rows.value = new Map(next);
+          this.progress.value = { stage: "coverage", done, total: todo.length };
+          last = performance.now();
+        }
+      }
+    } catch (err) {
+      if (!ctl.signal.aborted) throw err;
+    } finally {
+      this.rows.value = new Map(next);
+      this.progress.value = null;
+      this.abort = null;
+    }
+  }
+
+  /** One book's links in full (by book and by type), for its detail; null when they cannot be read. */
+  async detailOf(bookKey: string): Promise<DbLinkSummary | DbLinksUnavailable | null> {
+    return this.service.dbLinkSummary ? this.service.dbLinkSummary(bookKey).catch(() => null) : null;
+  }
+
+  /* ---------------- picks ---------------- */
+
+  togglePickedBook(key: string): void {
+    const next = new Set(this.pickedBooks.value);
+    if (!next.delete(key)) next.add(key);
+    this.pickedBooks.value = next;
+  }
+
+  setPickedBooks(keys: Iterable<string>): void {
+    this.pickedBooks.value = new Set(keys);
+  }
+
+  togglePickedPair(p: PairProposal): void {
+    const k = `${p.dependant.key}>${p.base.key}`;
+    const next = new Map(this.pickedPairs.value);
+    if (!next.delete(k)) next.set(k, { dependant: p.dependant.title, base: p.base.title, dependantKey: p.dependant.key, baseKey: p.base.key, kind: p.kind });
+    this.pickedPairs.value = next;
+  }
+
+  /** The books the guided flow is started with: the ticked books and the dependants of the ticked pairs. */
+  chosenBooks(): string[] {
+    return [...new Set([...this.pickedBooks.value, ...[...this.pickedPairs.value.values()].flatMap((p) => (p.dependantKey ? [p.dependantKey] : []))])];
+  }
+
+  /* ---------------- suggested pairs ---------------- */
+
+  /**
+   * Which book is written on which, by the evidence the books carry (linking/discovery.ts): the title, the links a book already has
+   * to the base its title names, the length. It proposes with a confidence and the reasons; nothing runs and nothing is chosen.
+   */
+  async suggest(): Promise<void> {
+    const source = this.source.value;
+    if (!source || this.suggesting.value) return;
+    this.suggesting.value = true;
+    try {
+      await new Promise((r) => setTimeout(r, 0)); // let "searching…" be seen before the (synchronous) title matching
+      const rows = this.rows.peek();
+      const books: DiscoveryBook[] = source.books.map((b) => {
+        const r = rows.get(b.key);
+        const lines = r?.coverage ? r.coverage.linked + r.coverage.partial + r.coverage.multiple : r && !r.unavailable && r.total === 0 ? 0 : undefined;
+        return {
+          key: b.key,
+          title: b.title,
+          origin: b.origin,
+          ...(b.lineCount !== undefined && { lineCount: b.lineCount }),
+          ...(r && r.top.length && { linkedTo: Object.fromEntries(r.top.map((t) => [t.title, t.links])), linkedKeys: Object.fromEntries(r.top.map((t) => [t.key, t.links])) }),
+          ...(lines !== undefined && { linkedLines: lines }),
+        };
+      });
+      const found = discoverPairs(books);
+      this.suggestions.value = { proposals: found.proposals, titled: found.summary.titled, unresolved: found.summary.unresolved };
+    } finally {
+      this.suggesting.value = false;
+    }
+  }
+}
+
+function coverageOf(row: CoverageRow): NonNullable<RepoRow["coverage"]> {
+  const c = row.counts.byBucket;
+  return { suitable: row.counts.suitable, unlinked: row.counts.unlinked, linked: c.linked, partial: c.partial, multiple: c.multiple, notSuitable: c["not-suitable"], at: Date.now() };
+}

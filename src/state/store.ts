@@ -34,6 +34,7 @@ import { SuggestionsState } from "./suggestions";
 import { roleLabels } from "./roles";
 import { ExchangeState } from "./exchange";
 import { PersonalCsvState } from "./personal-csv";
+import { RepositoryState } from "./repository";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
 
@@ -111,6 +112,8 @@ export class AppStore {
   readonly quality: QualityState;
   /** export of a personal book's links to the official library as the personal-database build's links.csv (state/personal-csv.ts) */
   readonly personalCsv: PersonalCsvState;
+  /** the analysis of an open database as a whole (the repository path of the home screen) */
+  readonly repository: RepositoryState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
 
@@ -248,6 +251,7 @@ export class AppStore {
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
     this.personalCsv = new PersonalCsvState(this, service, saver);
+    this.repository = new RepositoryState(this, service);
     this.guided = new GuidedFlowState(this);
   }
 
