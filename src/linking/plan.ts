@@ -1043,15 +1043,19 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const type = ctl?.connectionType === undefined ? undefined : parseConnectionType(ctl.connectionType);
       if (ctl?.connectionType !== undefined && !type!.known) pushTo(unmade, depKey, `סוג הקישור "${ctl.connectionType}" שנבחר לזוג עם ${quote(rel.base.title)} אינו סוג מוכר, ולכן לא שונה`);
       const declared = type?.known ? ctl!.connectionType!.trim().toLowerCase().replaceAll(" ", "_") : undefined;
-      // the user named the methods of this pair: exactly those (headings then runs with no title gate)
+      // the user named the methods of this pair: exactly those for the matching of the two books (headings then runs with no title gate);
+      // the notes step of a notes book is a different job and goes on, unless the user turned the notes engine off (fix round, claim 5)
       const list: StepSpec[] = wanted
-        ? wanted.flatMap((e) => {
-            const found = own.find((x) => x.engine === e);
-            const step = found ?? chosenStep(e, rel);
-            if (!step) return [];
-            const { titleGate: _gate, ...free } = step;
-            return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
-          })
+        ? [
+            ...wanted.flatMap((e) => {
+              const found = own.find((x) => x.engine === e);
+              const step = found ?? chosenStep(e, rel);
+              if (!step) return [];
+              const { titleGate: _gate, ...free } = step;
+              return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
+            }),
+            ...(wanted.includes("footnotes") || !enabled("footnotes") ? [] : own.filter((x) => x.engine === "footnotes")),
+          ]
         : own;
       if (!wanted)
         for (const engine of ["headings", "dibur-hamatchil", "footnotes"] as const) {
