@@ -46,14 +46,32 @@ export interface LinkDiff {
   readonly loose: boolean;
 }
 
-/** What a row means for a reader: the five groups the comparison screen filters by. */
-export type LinkDiffGroup = "identical" | "conflict" | "overlap" | "onlyA" | "onlyB";
+/**
+ * What a row means for a reader: the six groups the comparison screen filters by. "details" is the same
+ * stored link whose only difference is heRef_2 / ref_1 / ref_2 (#15): wording of the target's place, not a
+ * disagreement about the link — so it is not a "conflict". Only the GROUP is separate; the row's `kind`
+ * stays "details", which `mergeLinkSets` still reports as a disagreement (nothing held is overwritten).
+ */
+export type LinkDiffGroup = "identical" | "conflict" | "details" | "overlap" | "onlyA" | "onlyB";
 
 export function diffGroup(r: LinkDiffRow): LinkDiffGroup {
   if (r.kind === "same") return "identical";
   if (r.kind === "removed") return "onlyA";
   if (r.kind === "added") return "onlyB";
+  if (r.kind === "details") return "details";
   return r.kind === "range" || r.overlap ? "overlap" : "conflict";
+}
+
+export type DetailField = "heRef2" | "ref1" | "ref2";
+
+/** The detail fields on which two links differ (an absent ref and an empty one are the same: nothing was written). */
+export function detailDifferences(a: Link, b: Link): { field: DetailField; a: string; b: string }[] {
+  const out: { field: DetailField; a: string; b: string }[] = [];
+  const vals = (l: Link): Record<DetailField, string> => ({ heRef2: l.heRef2 ?? "", ref1: l.ref1 ?? "", ref2: l.ref2 ?? "" });
+  const x = vals(a);
+  const y = vals(b);
+  for (const field of ["heRef2", "ref1", "ref2"] as const) if (x[field] !== y[field]) out.push({ field, a: x[field], b: y[field] });
+  return out;
 }
 
 interface Oriented {

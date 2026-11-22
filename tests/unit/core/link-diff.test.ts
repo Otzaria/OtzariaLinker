@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
+import { detailDifferences, diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
 import type { BookRef, Link } from "../../../src/core/links/model";
 import { linkDiffCsv } from "../../../src/formats/report/link-diff-report";
 
@@ -95,6 +95,41 @@ describe("diffLinks", () => {
       ["added", "onlyB"],
     ]);
     expect(linkDiffCsv(d, "המסד", "הקובץ").split("\r\n")).toHaveLength(5);
+  });
+
+  /*
+   * #15: two files whose only difference is heRef_2 / ref_1 / ref_2 landed in "conflicts", and the screen
+   * printed neither field, so both columns read identically. They are their own group now, and the fields
+   * that differ are known (and shown).
+   */
+  it("a record that differs only in heRef_2, ref_1 or ref_2 is a 'details' row, not a conflict", () => {
+    const d = diffLinks(
+      [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40)],
+      [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 41)],
+    );
+    const group = (s: number) => diffGroup(d.rows.find((r) => r.a!.source.line === s)!);
+    expect([1, 2, 3].map(group)).toEqual(["details", "details", "details"]);
+    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(3); // the kind stays: merges still treat it as a disagreement
+    expect(group(4)).toBe("conflict"); // another target line is a real disagreement
+  });
+
+  it("names the fields that differ, and only those", () => {
+    expect(detailDifferences(link(1, 10, { ref1: "a", ref2: "b" }), link(1, 10, { ref1: "a", ref2: "c", heRef2: "z" }))).toEqual([
+      { field: "heRef2", a: link(1, 10).heRef2, b: "z" },
+      { field: "ref2", a: "b", b: "c" },
+    ]);
+    expect(detailDifferences(link(1, 10), link(1, 10))).toEqual([]);
+    // an absent ref and an empty one are the same: nothing was written
+    expect(detailDifferences(link(1, 10, { ref1: undefined }), link(1, 10, { ref1: "" }))).toEqual([]);
+  });
+
+  it("the CSV report carries ref_1 and ref_2 of each side", () => {
+    const d = diffLinks([link(1, 10, { ref1: "REF-ONE-A" })], [link(1, 10, { ref1: "REF-ONE-B", ref2: "REF-TWO-B" })]);
+    const csv = linkDiffCsv(d, "א", "ב");
+    expect(csv).toContain("REF-ONE-A");
+    expect(csv).toContain("REF-ONE-B");
+    expect(csv).toContain("REF-TWO-B");
+    expect(csv.split("\r\n")[0]).toContain("ref_1");
   });
 
   it("100K links against 100K links in well under a second", () => {
