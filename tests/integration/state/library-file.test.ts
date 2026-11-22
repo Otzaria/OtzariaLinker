@@ -269,3 +269,26 @@ describe("A3: a new link of a book the database says has links waits for the boo
     expect(plan.files.map((f) => [f.name, f.isNewFile])).toEqual([["א_links.json", true]]);
   });
 });
+
+describe("#18: a book the library lists a links file for is held even when the database does not mark it", () => {
+  it("a text book named like a library file waits for that file; a book with another name does not", async () => {
+    const store = makeStore();
+    const txt = (name: string, lines: string[]) => ({ path: name, blob: new Blob([lines.join("\n")]) });
+    await store.openFiles([txt("ארצות החיים.txt", ["<h1>ארצות החיים</h1>", "שורה א", "שורה ב"]), txt("ספר שלי.txt", ["<h1>ספר שלי</h1>", "שורה א", "שורה ב"]), txt("יעד.txt", ["<h1>יעד</h1>", "שורה א", "שורה ב"])]);
+    const book = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!;
+    const make = (from: string) => {
+      store.pickLine("source", book(from).key, 1);
+      store.pickLine("target", book("יעד").key, 1);
+      store.draftType.value = "reference";
+      store.draftTypeTouched.value = true;
+      expect(store.createFromDraft()).not.toBeNull();
+    };
+    make("ארצות החיים");
+    make("ספר שלי");
+    const plan = (await store.exchange.prepareExport())!;
+    expect(plan.files.map((f) => f.sourceTitle)).toEqual(["ספר שלי"]);
+    const held = plan.heldBack.filter((h) => h.problems.some((p) => p.code === "export/library-file-not-loaded"));
+    expect(held.map((h) => h.link.source.book.title)).toEqual(["ארצות החיים"]);
+    expect(held[0]!.problems.find((p) => p.code === "export/library-file-not-loaded")!.message).toContain("בספרייה יש קובץ בשם");
+  });
+});

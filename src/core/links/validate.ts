@@ -57,6 +57,13 @@ export interface ValidationContext {
    */
   libraryMayHaveFile?(sourceTitle: string): boolean;
   /**
+   * The library's list of links-file names (core/links/library-link-files.ts) has a file for this title.
+   * Absent = no list: the message says only that a file may exist. The hold does not depend on it.
+   */
+  libraryFileListed?(sourceTitle: string): boolean;
+  /** which list that is and from when, for the message */
+  libraryFileListLabel?: string;
+  /**
    * Whether the library's weekly sync and PR gate treat a book as Sefaria-owned (an exact title in
    * the library's list, core/links/sefaria-titles.ts). Absent: the database origin.
    */
@@ -98,6 +105,17 @@ export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "miss
  */
 export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held", "export/inline-linker-private-only"]);
 
+/** The hold on a book whose library file is not loaded: what is known about that file (#18). */
+function libraryFileText(title: string, ctx: ValidationContext): string {
+  const file = `"${title}_links.json"`;
+  const how = `טענו אותו מהספרייה, או אשרו שאין לספר קובץ.`;
+  if (ctx.libraryFileListed?.(title) === true)
+    return `בספרייה יש קובץ בשם ${file} (לפי ${ctx.libraryFileListLabel ?? "רשימת הקבצים של הספרייה"}). הייצוא כותב את הקובץ של ספר המקור, ולכן קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו: ${how}`;
+  if (ctx.libraryFileListed?.(title) === false)
+    return `במסד מסומן שיש ל"${title}" קישורים (הסימן רחב: הוא סופר גם קישורי ספריא וקישורים אוטומטיים), אבל ברשימת קובצי הקישורים של הספרייה (${ctx.libraryFileListLabel ?? "הרשימה שבכלי"}) אין קובץ בשם ${file}. אם נוסף מאז, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: ${how} פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`;
+  return `הייצוא כותב את הקובץ של ספר המקור, ${file}, ובמסד מסומן שיש ל"${title}" קישורים. הסימן רחב (הוא סופר גם קישורי ספריא וקישורים אוטומטיים), ולכן ייתכן שבספרייה אין לו קובץ. אם יש, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: טענו אותו מהספרייה, או אשרו שאין לספר קובץ. פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`;
+}
+
 export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const out: Problem[] = [];
   const add: Add = (severity, code, message, detail) => out.push({ code, severity, message, ...(detail && { detail }) });
@@ -124,7 +142,7 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // of its own: the exported file would REPLACE that file and drop its records (compatibility review).
   // The mark (`hasSourceLinks`) is a hint, not proof — LINK_FORMATS §4.5 (2); the text says so (#18).
   if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && ctx.libraryMayHaveFile?.(s.book.title))
-    add("error", "export/library-file-not-loaded", `הייצוא כותב את הקובץ של ספר המקור, "${s.book.title}_links.json", ובמסד מסומן שיש ל"${s.book.title}" קישורים. הסימן רחב (הוא סופר גם קישורי ספריא וקישורים אוטומטיים), ולכן ייתכן שבספרייה אין לו קובץ. אם יש, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: טענו אותו מהספרייה, או אשרו שאין לספר קובץ. פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`);
+    add("error", "export/library-file-not-loaded", libraryFileText(s.book.title, ctx));
   const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
   if (match === "same-link")
     add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");

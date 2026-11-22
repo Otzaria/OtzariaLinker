@@ -57,6 +57,21 @@ describe("validateLink — generator gates", () => {
     expect(p.message).toMatch(/פירוש.*קובץ משלו/); // a commentary written as the source has a file of its own
     expect(p.message).not.toMatch(TECH_WORDS);
   });
+  /* #18 with the library's file names: the message says whether the library HAS a file of that name; the hold is the same */
+  it("library-file-not-loaded tells a book the library lists a file for from one it does not, and holds both", () => {
+    const base = { ...ctx, linksFile: () => "missing" as const, libraryMayHaveFile: () => true, libraryFileListLabel: "רשימת הקבצים של הספרייה מ־2026-11-22" };
+    const listed = validateLink(link(), { ...base, libraryFileListed: () => true }).find((x) => x.code === "export/library-file-not-loaded")!;
+    expect(listed.severity).toBe("error");
+    expect(listed.message).toContain("בספרייה יש קובץ בשם");
+    expect(listed.message).toContain("2026-11-22");
+    const unlisted = validateLink(link(), { ...base, libraryFileListed: () => false }).find((x) => x.code === "export/library-file-not-loaded")!;
+    expect(unlisted.severity).toBe("error"); // the hold does not depend on the list being current
+    expect(unlisted.message).toContain("אין קובץ בשם");
+    expect(unlisted.message).toContain("2026-11-22");
+    expect(unlisted.message).toContain("אם נוסף מאז");
+    // without a list the text is the earlier one
+    expect(validateLink(link(), base).find((x) => x.code === "export/library-file-not-loaded")!.message).toContain("ייתכן שבספרייה אין לו קובץ");
+  });
   it("db links cannot be exported as file records", () => expect(codes(link({ provenance: "db", status: "existing" }))).toContain("error:export/db-link"));
   it("a companion 'הערות על X' target is silently dropped by the generator", () => {
     expect(codes(link({ target: { book: book("הערות על ספר א"), line: 2 } }))).toContain("warning:export/companion-merged");

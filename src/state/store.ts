@@ -1,3 +1,4 @@
+import { embeddedLibraryLinkFiles } from "../core/links/library-link-files";
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
 import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
@@ -1010,7 +1011,10 @@ export class AppStore {
         if (!b || this.isLibrarySource(sourceIdOfBookKey(b.key))) return false;
         return (this.booksByTitle.value.get(ref.title) ?? []).some((x) => x.key !== b.key && this.isLibrarySource(sourceIdOfBookKey(x.key)));
       },
-      libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
+      // the database mark (wide: Sefaria's and automatic links count) OR a file of that name in the library's list
+      libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks) || embeddedLibraryLinkFiles().titles.has(title),
+      libraryFileListed: (title) => embeddedLibraryLinkFiles().titles.has(title),
+      libraryFileListLabel: embeddedLibraryLinkFiles().label,
       existing: (l) => this.dbLinks.matchDb(l),
       bookChanged: (ref) => {
         const saved = this.projectBookLines.value.get(ref.title);

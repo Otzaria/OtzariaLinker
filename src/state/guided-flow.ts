@@ -250,6 +250,7 @@ export function exportPreflight(plan: MaxLinkPlan, ctx: ValidationContext): Pref
   delete books.existing;
   delete books.linksFile;
   delete books.libraryMayHaveFile;
+  delete books.libraryFileListed;
   const groups = new Map<string, PreflightIssue & { set: Set<string> }>();
   const add = (key: string, code: string, text: string, book: string, fix?: "private") => {
     const g = groups.get(key) ?? { code, text, books: [], set: new Set<string>(), ...(fix && { fix }) };
