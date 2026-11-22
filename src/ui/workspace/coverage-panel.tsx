@@ -4,6 +4,7 @@ import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage"
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
+import { countCoverage, needsRecount, type FailedCount, type PanelSummary } from "./coverage-compute";
 import { plainText } from "./plain-text";
 
 /*
@@ -38,7 +39,8 @@ const stamp = (at: number) => new Date(at).toLocaleString("he", { dateStyle: "me
 export function CoveragePanel() {
   const store = useStore();
   const [side, setSide] = useState<Side>("source");
-  const [summary, setSummary] = useState<(CoverageSummary & { bookKey: string; revision: number }) | null>(null);
+  const [summary, setSummary] = useState<PanelSummary | null>(null);
+  const [failed, setFailed] = useState<FailedCount | null>(null);
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const bookKey = store.view[side].value;
@@ -50,15 +52,20 @@ export function CoveragePanel() {
   const compute = async () => {
     if (!bookKey || busy) return;
     setBusy(true);
-    const s = await store.coverage.summary(bookKey);
+    setFailed(null);
+    const out = await countCoverage((k) => store.coverage.summary(k), bookKey, revision);
     setBusy(false);
-    if (!s) return void store.notify("warning", "אי אפשר לחשב כיסוי: הספר לא פתוח, או שאורכו עדיין לא ידוע. פתחו אותו בקורא ונסו שוב.");
-    setSummary({ ...s, bookKey, revision });
+    if (!out.ok) {
+      // remembered by book and revision, so the "links changed" rule below does not ask again by itself
+      setFailed(out.failed);
+      return void store.notify("warning", out.failed.message);
+    }
+    setSummary(out.summary);
     setShown(PAGE);
   };
   // once computed, a change of the links (a link made, undone, imported) makes the numbers again
   useEffect(() => {
-    if (summary && summary.bookKey === bookKey && summary.revision !== revision && !busy) void compute();
+    if (needsRecount({ summary, bookKey, revision, busy, failed })) void compute();
   }, [revision, bookKey, busy]);
 
   const fresh = summary && summary.bookKey === bookKey ? summary : null;
@@ -89,7 +96,7 @@ export function CoveragePanel() {
         <div class="row">
           <label class="field grow">
             הספר
-            <select value={side} onChange={(e) => (setSide(e.currentTarget.value as Side), setSummary(null))}>
+            <select value={side} onChange={(e) => (setSide(e.currentTarget.value as Side), setSummary(null), setFailed(null))}>
               {(["source", "target"] as const).map((k) => (
                 <option key={k} value={k} disabled={!store.view[k].value}>
                   {store.roles.value[k].name}: {store.view[k].value ? (store.books.value.get(store.view[k].value!)?.title ?? "") : "לא נבחר ספר"}
@@ -103,6 +110,11 @@ export function CoveragePanel() {
           </button>
         </div>
         {!book && <p class="muted">בחרו ספר באחד הקוראים כדי לראות מה עוד לא מקושר בו.</p>}
+        {book && failed && failed.bookKey === bookKey && (
+          <p class="warn-text" role="alert">
+            {failed.message}
+          </p>
+        )}
         {book && dbBook && (
           <p class="warn-text" role="note">
             הספר הזה הוא מתוך מסד. הקישורים שיש לו במסד נקראים מהמסד ונספרים יחד עם קישורי הפרויקט, ולכן שורה שהמסד כבר מקשר לא תופיע כ"בלי קישור". בספר גדול הקריאה לוקחת כמה שניות.
