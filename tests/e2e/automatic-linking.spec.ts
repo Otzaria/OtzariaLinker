@@ -227,3 +227,42 @@ test("dibur hamatchil: the matched words are marked on both texts in the card an
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 26: in pair mode one book can be linked against several targets at once, with every method that fits the pair
+ * merged into one run (instead of choosing one method and one target).
+ */
+test("pair mode: one book against several targets, all methods merged into one run", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const heb = ["א", "ב", "ג", "ד", "ה"];
+  const nl = String.fromCharCode(10);
+  const biur = ["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...heb.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `ביאור לפסוק ${i + 1}`])].join(nl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
+  ]);
+  await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+
+  // folded by default: one target, one method
+  const more = page.locator("details.more-targets");
+  await expect(more).not.toHaveAttribute("open", "");
+  await more.locator("summary").click();
+  await more.getByRole("group", { name: "עוד ספרי יעד" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
+  await page.getByRole("checkbox", { name: /כל השיטות שמתאימות, מאוחדות/ }).check();
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await expect(page.locator(".sug-table tbody tr").first()).toBeVisible({ timeout: 60_000 });
+  // one run holding both targets: the summary is a merged (max-link style) run over the two pairs
+  await expect(page.locator(".sug-head")).toContainText("קישור מרבי");
+  await expect(page.locator(".sug-head")).toContainText("בראשית");
+  await expect(page.locator(".sug-head")).toContainText('רש"י על בראשית');
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

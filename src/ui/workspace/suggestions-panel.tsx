@@ -11,7 +11,9 @@ import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { BookChecklist } from "./book-checklist";
 import { BulkApprove } from "./bulk-approve";
+import type { PairEngineId } from "../../linking/plan";
 import { jobStateText, jobWantsAttention, MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
 
@@ -141,7 +143,14 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const t = store.view.target.value;
   // a single-book engine (citations) needs only the source; its targets are all the open books
   const single = info.singleBook === true;
-  const ready = single ? !!s : mode === "pair" ? !!s && !!t && s !== t : !!batchSource;
+  /** more targets for the same book, and "every method that fits, merged" (issue 26): the run is then a pair plan (state/maxlink.ts pairPlan) */
+  const [extra, setExtra] = useState<readonly string[]>([]);
+  const [mergeAll, setMergeAll] = useState(false);
+  const commentaryEngine = engine === "headings" || engine === "dibur-hamatchil";
+  const multiEligible = mode === "pair" && !single && engine !== "pattern";
+  const targets = [...new Set([t, ...extra].filter((k): k is string => !!k && k !== s))];
+  const multi = multiEligible && (extra.length > 0 || (mergeAll && commentaryEngine));
+  const ready = single ? !!s : mode === "pair" ? (multi ? !!s && targets.length > 0 : !!s && !!t && s !== t) : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
     if (mode !== "batch" || !src) return [];
@@ -159,6 +168,13 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
 
   const start = async () => {
     const options = check.options;
+    if (multi) {
+      const methods: readonly PairEngineId[] | undefined = mergeAll && commentaryEngine ? undefined : [engine as PairEngineId];
+      const plan = store.maxLink.pairPlan(s!, targets, methods, engine === "footnotes" ? "notes" : undefined);
+      const label = `${store.refOf(s!).title} מול ${targets.map((k) => store.refOf(k).title).join(", ")}`;
+      if (await store.maxLink.run(plan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
+      return;
+    }
     const ok = single ? await store.suggestions.runCitations(s!, options) : mode === "pair" ? await store.suggestions.runEngine(engine, s!, t!, options) : await store.suggestions.runBatch(engine, batchSource, options);
     if (ok) onDone();
   };
@@ -196,6 +212,23 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
               <span class="side-badge target">{info.targetRole}</span>
               <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
             </div>
+          )}
+          {multiEligible && (
+            <>
+              <details class="held more-targets" open={extra.length > 0 || undefined}>
+                <summary>עוד ספרי יעד לאותו ספר (לא חובה){extra.length > 0 && ` · נבחרו ${extra.length.toLocaleString("he")}`}</summary>
+                <BookChecklist label="עוד ספרי יעד" selected={extra} onChange={setExtra} exclude={s} />
+              </details>
+              {commentaryEngine && (
+                <label class="check">
+                  <input type="checkbox" checked={mergeAll} onChange={(e) => setMergeAll(e.currentTarget.checked)} />
+                  <span>
+                    <b>כל השיטות שמתאימות, מאוחדות</b>
+                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת).</span>
+                  </span>
+                </label>
+              )}
+            </>
           )}
         </>
       ) : (
