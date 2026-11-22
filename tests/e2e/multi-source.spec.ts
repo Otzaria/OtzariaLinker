@@ -129,3 +129,58 @@ test("a Hebrew database file name reads in order, extension last (audit F19)", a
   const label = page.locator(".source-row").getByText("אישי-פירושים.db");
   await expect(label).toHaveAttribute("dir", "ltr", { timeout: 30_000 }); // the database loads first; under parallel load this takes > 5 s
 });
+
+/*
+ * Issue 24: a long book name was cut with "…" in the reader's head, readable only by a mouse hover (`title`). The head
+ * now wraps the name over two lines, and the name is a button (keyboard and touch) that opens a strip with the full
+ * name, where the book comes from (its source kind and the source's own name) and its size.
+ */
+test("a reader's head: the book name wraps, and a button opens the full name and its source — by keyboard and by touch", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const LONG = "חידושי הרשב״א ובית הבחירה לרבינו מנחם המאירי על מסכת בבא מציעא פרק שני אלו מציאות";
+  const dir = folder("ספרים ארוכים", { [LONG]: [`<h1>${LONG}</h1>`, "שורה ראשונה", "שורה שנייה"] });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "תיקייה", exact: true }).click();
+  await (await chooser).setFiles(dir);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await addSource(page, "מסד נתונים", [DB]);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const books = page.locator(".book-list li");
+  await books.filter({ hasText: "חידושי הרשב" }).first().getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+
+  const head = page.locator(".reader.source .panel-head");
+  const nameBtn = head.getByRole("button", { name: LONG });
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "false");
+  // the heading is still the book's name (screen readers, tests)
+  await expect(page.locator(".reader.source .panel-head h2")).toHaveText(LONG);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const info = page.locator(".reader.source .book-info");
+  await expect(info).toHaveCount(0);
+
+  // touch / mouse
+  await nameBtn.click();
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "true");
+  await expect(info).toContainText(LONG);
+  await expect(info).toContainText("תיקייה");
+  await expect(info).toContainText("ספרים ארוכים");
+  await expect(info).toContainText("3 שורות");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "no sideways scroll").toBe(true);
+  expect(await info.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "the strip wraps instead of overflowing").toBe(true);
+
+  // keyboard: Escape closes and keeps the focus on the name; Enter opens again
+  await page.keyboard.press("Escape");
+  await expect(nameBtn).toHaveAttribute("aria-expanded", "false");
+  await expect(nameBtn).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(info).toBeVisible();
+
+  // the database side says where it comes from too
+  const tHead = page.locator(".reader.target .panel-head");
+  await tHead.locator("h2 button").click();
+  await expect(page.locator(".reader.target .book-info")).toContainText("מסד אוצריא");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

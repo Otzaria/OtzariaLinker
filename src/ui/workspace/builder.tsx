@@ -179,7 +179,7 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
   return (
     <div class={`end ${side} set`}>
       <span class={`side-badge ${side}`}>{label}</span>
-      <button class="what adv-link" style="text-decoration:none;color:inherit" onClick={() => store.reveal(side, pick.bookKey, pick.line)} title="הצגה בספר">
+      <button class="what adv-link" style="text-decoration:none;color:inherit" onClick={() => store.reveal(side, pick.bookKey, pick.line)} title={`${title} — הצגה בספר`}>
         {title} · {where}
       </button>
       {/* the same title is open from two sources: say which copy this link is made from */}

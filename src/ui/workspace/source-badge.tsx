@@ -35,10 +35,10 @@ export function badgeOf(s: OpenedSource): { kind: SourceBadgeKind; label: string
   return { kind, label: BADGE_LABEL[kind] };
 }
 
-export function SourceBadge({ source, name }: { source: OpenedSource; name?: boolean }) {
+export function SourceBadge({ source, name, class: cls }: { source: OpenedSource; name?: boolean; class?: string }) {
   const b = badgeOf(source);
   return (
-    <span class={`src-badge ${b.kind}`} title={`${b.label}: ${source.info.label}`}>
+    <span class={`src-badge ${b.kind}${cls ? ` ${cls}` : ""}`} title={`${b.label}: ${source.info.label}`}>
       {b.label}
       {name && (
         <>

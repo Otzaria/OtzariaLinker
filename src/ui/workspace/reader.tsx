@@ -10,6 +10,7 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { anchorFromSelection } from "./anchor-selection";
 import { clearMatches, FindBar, paintMatches } from "./book-find";
+import { BookInfo } from "./book-info";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
@@ -34,6 +35,7 @@ export function Reader({ side }: { side: Side }) {
   const bookKey = store.view[side].value;
   const book = bookKey ? store.books.value.get(bookKey) : undefined;
   const [choosing, setChoosing] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [query, setQuery] = useState("");
   const find = store.find[side];
   /** bumps on every "open the search box" request, so a second Ctrl+F focuses it again */
@@ -45,6 +47,12 @@ export function Reader({ side }: { side: Side }) {
   };
   // Ctrl+F while this reader has focus searches its book instead of the browser's find
   const onKeyDown = (e: KeyboardEvent) => {
+    // Escape closes the book-info strip and keeps the focus on the name that opened it
+    if (e.key === "Escape" && infoOpen) {
+      setInfoOpen(false);
+      (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".panel-head h2 button")?.focus();
+      return;
+    }
     if (!reading || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "f") return;
     e.preventDefault();
     openFind();
@@ -52,7 +60,8 @@ export function Reader({ side }: { side: Side }) {
 
   return (
     <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`} onKeyDown={onKeyDown}>
-      <ReaderHead side={side} bookKey={book?.key} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} />
+      <ReaderHead side={side} bookKey={book?.key} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} infoOpen={infoOpen && !!book} onInfo={() => setInfoOpen(!infoOpen)} infoId={`book-info-${side}`} />
+      {infoOpen && book && <BookInfo id={`book-info-${side}`} bookKey={book.key} />}
       {choosing || !book ? (
         <div class="panel-body">
           <div class="book-search">
@@ -76,7 +85,7 @@ export function Reader({ side }: { side: Side }) {
   );
 }
 
-function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen }: { side: Side; bookKey: string | undefined; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean }) {
+function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen, onInfo, infoId }: { side: Side; bookKey: string | undefined; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean; infoOpen: boolean; onInfo: () => void; infoId: string }) {
   const store = useStore();
   // several sources open: which one this book comes from (with its name when another source has the same title)
   const origin = useBookOrigin()(bookKey);
@@ -87,8 +96,16 @@ function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen }: { side
         <Icon name="fl_re_order_dots_vertical" size={16} />
       </span>
       <span class={`side-badge ${side}`}>{SIDE_LABEL[side]}</span>
-      <h2 class="grow" title={title}>{title ?? "לא נבחר ספר"}</h2>
-      {showSource && <SourceBadge source={origin.source!} name={origin.ambiguous} />}
+      <h2 class="grow book-title" title={title}>
+        {title ? (
+          <button type="button" class="title-btn" aria-expanded={infoOpen} aria-controls={infoOpen ? infoId : undefined} onClick={onInfo}>
+            {title}
+          </button>
+        ) : (
+          "לא נבחר ספר"
+        )}
+      </h2>
+      {showSource && <SourceBadge source={origin.source!} name={origin.ambiguous} class={origin.ambiguous ? "twin" : undefined} />}
       {onFind && (
         <button class="icon-btn" onClick={onFind} aria-pressed={findOpen} title="חיפוש בטקסט הספר (Ctrl+F)" aria-label="חיפוש בטקסט הספר">
           <Icon name="oz_search" />

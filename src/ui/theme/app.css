@@ -93,6 +93,24 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); border: 1px solid var(--outline-variant); border-radius: var(--radius); overflow: hidden; }
 .panel-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 8px; min-height: 42px; background: var(--surface-container-high); border-bottom: 1px solid var(--outline-variant); }
 .panel-head h2 { font-size: var(--fs-md); margin: 0; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a reader's head (issue 24): the book name wraps over two lines and is a button that opens the full name and source */
+.panel-head h2.book-title { display: block; white-space: normal; text-overflow: clip; overflow: hidden; min-width: 0; }
+/* in a narrow reader the name got no width at all (grip, badges and three icon buttons fill the row): below 300px
+   the name takes a row of its own under them */
+.reader .panel-head { flex-wrap: wrap; container-type: inline-size; container-name: rhead; }
+@container rhead (max-width: 300px) {
+  .panel-head h2.book-title { order: 9; flex: 1 1 100%; }
+  /* the badge would push a button onto a row of its own; the name button's strip shows it (and a twin title keeps its badge) */
+  .panel-head .src-badge:not(.twin) { display: none; }
+}
+.title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
+.title-btn:hover { text-decoration: underline dotted; }
+.book-info { padding: 8px 12px; display: grid; gap: 6px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
+.book-info .bi-title { font-size: var(--fs-md); overflow-wrap: anywhere; user-select: text; }
+.book-info .bi-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.book-info { grid-template-columns: minmax(0, 1fr); }
+.book-info .bi-meta > * { min-width: 0; max-width: 100%; }
+.book-info .src-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: var(--radius); line-height: 18px; }
 .panel-head .grip { cursor: grab; color: var(--outline); display: grid; place-items: center; }
 .panel.drag-over { outline: 2px solid var(--primary); outline-offset: -2px; }
 .panel-body { flex: 1; min-height: 0; overflow: auto; }
