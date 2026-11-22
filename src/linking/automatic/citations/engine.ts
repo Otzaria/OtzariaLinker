@@ -65,6 +65,11 @@ export interface CitationsOptions extends SefariaOwnedOption {
   readonly thresholds?: ConfidenceThresholds;
   /** alternatives kept on each suggestion. Default 3. */
   readonly maxAlternatives?: number;
+  /**
+   * Run on a book although the suitability gate sees no sign of a place in it (suitability.ts CITATION_GATE): a book that cites by the name of a
+   * book and numbers alone, with no place word, may be skipped by it. Default false.
+   */
+  readonly noGate?: boolean;
 }
 
 const ENGINE = "citations" as const;
@@ -209,6 +214,7 @@ export class CitationRun {
       scope: options.scope ?? "all",
       thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
       maxAlternatives: options.maxAlternatives ?? 3,
+      noGate: options.noGate ?? false,
     };
     this.sefariaOwned = sefariaOwnedOf(options.sefariaOwned);
     this.scanner = new CitationScanner(aliases, source.key, { ibid: this.opts.ibid, self: source }, source.title, units);

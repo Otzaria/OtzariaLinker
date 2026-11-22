@@ -156,6 +156,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     },
     { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
+    { kind: "boolean", key: "noGate", label: "להריץ גם על ספר בלי סימני הפניה", default: false, hint: "השיטה מדלגת על ספר שאין בו שורה עם דף, פרק, סימן, סעיף או פסוק ומספר (ולא עשר שורות שמזכירות מקום). ספר שמצטט רק בשם הספר ובמספרים (\"בראשית א, ב\") ייתכן שיידלג בטעות." },
     ...THRESHOLDS,
   ],
   pattern: [
