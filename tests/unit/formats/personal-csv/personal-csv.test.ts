@@ -27,7 +27,7 @@ const ctx: PersonalExportContext = {
 
 describe("personalLinkRows — our links as rows", () => {
   it("a commentary: the personal book's line (1-based), the official title and the heading of the place, type פירוש", () => {
-    const { rows, skipped } = personalLinkRows([link(side(PERSONAL, 4), side(OFFICIAL, 3))], ctx);
+    const { rows, skipped } = personalLinkRows([link(side(PERSONAL, 4), side(OFFICIAL, 3), "source")], ctx);
     expect(skipped).toEqual([]);
     expect(rows).toEqual([{ sourceLine: 5, sourceBook: "פירוש אישי", targetBook: "ברכות", position: "ב.", type: "פירוש" }]);
   });
@@ -38,7 +38,7 @@ describe("personalLinkRows — our links as rows", () => {
   });
 
   it("a translation is תרגום; a type the format has no word for is skipped, with the reason (never written as something else)", () => {
-    expect(personalLinkRows([link(side(PERSONAL, 4), side(OFFICIAL, 3), "targum")], ctx).rows[0]!.type).toBe("תרגום");
+    expect(personalLinkRows([link(side(OFFICIAL, 3), side(PERSONAL, 4), "targum")], ctx).rows[0]!.type).toBe("תרגום");
     const { rows, skipped } = personalLinkRows([link(side(PERSONAL, 4), side(OFFICIAL, 3), "reference")], ctx);
     expect(rows).toEqual([]);
     expect(skipped[0]!.code).toBe("csv/type");
@@ -48,14 +48,31 @@ describe("personalLinkRows — our links as rows", () => {
     const why = (l: Link) => personalLinkRows([l], ctx).skipped.map((s) => s.code);
     expect(why(link(side(PERSONAL, 4), side(PERSONAL2, 2)))).toEqual(["csv/ends"]);
     expect(why(link(side(OFFICIAL, 4), side(SA, 2)))).toEqual(["csv/ends"]);
-    expect(why(link(side(PERSONAL, 0), side(OFFICIAL, 3)))).toEqual(["csv/source-line"]);
-    expect(why(link(side(PERSONAL, 4), side(book("ספר אחר", "otzaria"), 3)))).toEqual(["csv/no-position"]);
+    expect(why(link(side(PERSONAL, 0), side(OFFICIAL, 3), "source"))).toEqual(["csv/source-line"]);
+    expect(why(link(side(PERSONAL, 4), side(book("ספר אחר", "otzaria"), 3), "source"))).toEqual(["csv/no-position"]);
     expect(why({ ...link(side(PERSONAL, 4), side(OFFICIAL, 3)), status: "deleted" })).toEqual(["csv/deleted"]);
   });
 
   it("a range on the personal side is one row per line (the format has no range), a repeated row once", () => {
-    const { rows } = personalLinkRows([link(side(PERSONAL, 2, 4), side(OFFICIAL, 3)), link(side(PERSONAL, 3), side(OFFICIAL, 3))], ctx);
+    const { rows } = personalLinkRows([link(side(PERSONAL, 2, 4), side(OFFICIAL, 3), "source"), link(side(PERSONAL, 3), side(OFFICIAL, 3), "source")], ctx);
     expect(rows.map((r) => r.sourceLine)).toEqual([3, 4, 5]);
+  });
+});
+
+describe("personalLinkRows — the direction of the link (QA round 2, C)", () => {
+  const rowsOf = (l: Link) => personalLinkRows([l], ctx);
+  it("commentary and targum are stored base to dependent: the personal book must be the TARGET; source is dependent to base: the personal book must be the SOURCE", () => {
+    expect(rowsOf(link(side(OFFICIAL, 3), side(PERSONAL, 4), "commentary")).rows).toHaveLength(1);
+    expect(rowsOf(link(side(OFFICIAL, 3), side(PERSONAL, 4), "targum")).rows[0]!.type).toBe("תרגום");
+    expect(rowsOf(link(side(PERSONAL, 4), side(OFFICIAL, 3), "source")).rows).toHaveLength(1);
+  });
+  it("the opposite direction says the opposite (the personal book would be the base), so it is skipped with csv/direction and a reason", () => {
+    for (const l of [link(side(PERSONAL, 4), side(OFFICIAL, 3), "commentary"), link(side(PERSONAL, 4), side(OFFICIAL, 3), "targum"), link(side(OFFICIAL, 3), side(PERSONAL, 4), "source")]) {
+      const r = rowsOf(l);
+      expect(r.rows, l.declaredType).toEqual([]);
+      expect(r.skipped.map((s) => s.code)).toEqual(["csv/direction"]);
+      expect(r.skipped[0]!.text).toContain("הבסיס");
+    }
   });
 });
 
@@ -63,12 +80,12 @@ describe("personalLinkRows — a range end from a file is not a loop bound (QA r
   const short: PersonalExportContext = { ...ctx, contentLine: (_b, line) => line >= 1 && line < 10, lineCount: () => 10 };
   it("a personal range of 2^53-1 is clamped to the book's last line, and finishes at once", () => {
     const t0 = Date.now();
-    const { rows } = personalLinkRows([link(side(PERSONAL, 2, Number.MAX_SAFE_INTEGER), side(OFFICIAL, 3))], short);
+    const { rows } = personalLinkRows([link(side(PERSONAL, 2, Number.MAX_SAFE_INTEGER), side(OFFICIAL, 3), "source")], short);
     expect(rows.map((r) => r.sourceLine)).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
     expect(Date.now() - t0).toBeLessThan(500);
   });
   it("a range of three million lines in a ten-line book is ten lines at most, not three million rows", () => {
-    const { rows } = personalLinkRows([link(side(PERSONAL, 1, 3_000_000), side(OFFICIAL, 3))], short);
+    const { rows } = personalLinkRows([link(side(PERSONAL, 1, 3_000_000), side(OFFICIAL, 3), "source")], short);
     expect(rows).toHaveLength(9);
   });
 });
@@ -164,4 +181,5 @@ describe("validatePersonalRows — the all-or-nothing rules of the import", () =
     expect(codes([{ ...ok, position: "ג." }])).toEqual(["csv/unknown-position"]);
   });
 });
+
 

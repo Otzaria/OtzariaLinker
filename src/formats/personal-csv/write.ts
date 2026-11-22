@@ -53,7 +53,7 @@ export interface PersonalExportContext {
 /** The longest range walked when the book's length is not known (formats may import only core, so this is not linking/coverage's cap). */
 const MAX_RANGE_LINES = 5_000_000;
 
-export type PersonalSkipCode = "csv/deleted" | "csv/ends" | "csv/type" | "csv/source-line" | "csv/no-position";
+export type PersonalSkipCode = "csv/deleted" | "csv/ends" | "csv/type" | "csv/direction" | "csv/source-line" | "csv/no-position";
 
 export interface PersonalSkip {
   link: Link;
@@ -62,6 +62,13 @@ export interface PersonalSkip {
 }
 
 const TYPE_OF: Readonly<Record<string, PersonalLinkType>> = { commentary: "פירוש", source: "פירוש", targum: "תרגום" };
+/**
+ * Which end of a link the DEPENDENT book (the commentary, the translation) is, by what the generator stores (core/links/stored-form.ts,
+ * OTZARIA_COMPATIBILITY): `commentary` and `targum` are stored base → dependent (the dependent is the target); `source` is the
+ * dependent → base form (the dependent is the source). The file says only "this personal line is a פירוש/תרגום on that heading", so
+ * a link whose personal end is not the dependent one says the opposite of what the row would.
+ */
+const DEPENDENT_END: Readonly<Record<string, "source" | "target">> = { commentary: "target", source: "source", targum: "target" };
 
 /** Our links as rows. A link the format cannot say is skipped, with the reason — never written as something it is not. */
 export function personalLinkRows(links: readonly Link[], ctx: PersonalExportContext): { rows: PersonalLinkRow[]; skipped: PersonalSkip[] } {
@@ -83,6 +90,11 @@ export function personalLinkRows(links: readonly Link[], ctx: PersonalExportCont
     const type = TYPE_OF[l.declaredType.trim().toLowerCase()];
     if (!type) {
       skip(l, "csv/type", `לסוג "${l.declaredType}" אין מילה בקובץ הזה (רק פירוש ותרגום), ולכן לא נכתב.`);
+      continue;
+    }
+    const declared = l.declaredType.trim().toLowerCase();
+    if ((DEPENDENT_END[declared] === "source") !== (mine === l.source)) {
+      skip(l, "csv/direction", `בקישור מסוג "${l.declaredType}" הספר האישי הוא ${mine === l.source ? "הבסיס" : "הנשען"}, והקובץ אומר תמיד שהשורה האישית היא פירוש או תרגום על הכותרת; לכן הקישור לא נכתב. כתבו אותו בכיוון ההפוך (פירוש: מהבסיס אל הפירוש; מקור: מהפירוש אל הבסיס).`);
       continue;
     }
     const position = ctx.positionOf(other);
@@ -277,4 +289,5 @@ export function validatePersonalRows(rows: readonly PersonalLinkRow[], v: Person
   }
   return out;
 }
+
 
