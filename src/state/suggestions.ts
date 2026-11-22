@@ -204,6 +204,17 @@ export class SuggestionsState {
     private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks">,
   ) {}
 
+  /** A new run replaces the one on the screen: it starts in the engine's order (not the sort of the last run), the card on its first suggestion. */
+  private startRun(run: SuggestionRun): void {
+    batch(() => {
+      this.run.value = run;
+      this.sortOrder.value = "book";
+      this.rankSnapshot.value = null;
+      this.current.value = run.result.suggestions[0]?.id ?? null;
+      this.host.sideTab.value = "suggestions";
+    });
+  }
+
   async runEngine(engine: EngineId, sourceKey: string, targetKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
     const target = this.host.refOf(targetKey);
@@ -212,13 +223,7 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    batch(() => {
-      this.run.value = { engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.sortOrder.value = "book"; // a new run starts in the engine's order, and the card on its first suggestion
-      this.rankSnapshot.value = null;
-      this.current.value = result.suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) this.host.notify("warning", partialNotice(result.suggestions.length));
     else this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -235,13 +240,7 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    batch(() => {
-      this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.sortOrder.value = "book"; // a new run starts in the engine's order, and the card on its first suggestion
-      this.rankSnapshot.value = null;
-      this.current.value = result.suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) return this.host.notify("warning", partialNotice(result.suggestions.length)), true;
     this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -284,13 +283,7 @@ export class SuggestionsState {
       }
       for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
-    batch(() => {
-      this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
-      this.sortOrder.value = "book";
-      this.rankSnapshot.value = null;
-      this.current.value = suggestions[0]?.id ?? null;
-      this.host.sideTab.value = "suggestions";
-    });
+    this.startRun({ engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;
     const failed = rows.filter((r) => r.problem).length;
     this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
