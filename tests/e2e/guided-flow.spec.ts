@@ -388,9 +388,11 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
   // force dibur-hamatchil for all pairs: the plan then runs no other method
   await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).check();
   const methods = main.locator(".guided-books li b");
-  await expect(methods).toHaveText(["לפי דיבור המתחיל"]);
+  // it replaces the headings method only: notes and citations still run (owner decision)
+  await expect(methods).toContainText(["לפי דיבור המתחיל"]);
+  await expect(main.locator(".guided-books li b", { hasText: "לפי כותרות" })).toHaveCount(0);
   await expect(main.locator(".pair-force-note")).toContainText("גם היכן שהכותרות מתאימות");
-  await expect(main.locator(".pair-force-note")).toContainText("שיטת הערות השוליים לא תרוץ");
+  await expect(main.locator(".pair-force-note")).toContainText("במקום שיטת הכותרות");
   await expect(row("ביאור על בראשית").getByLabel(/^שיטה לזוג/)).toHaveValue("");
   await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).uncheck();
   expect(await methods.count()).toBeGreaterThan(1);
