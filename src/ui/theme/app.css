@@ -519,6 +519,8 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .alt-toc .row { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
 /* issue #25: the table keeps room for ~3 rows (a scroll container's min-content is 0, so in a squeezed dialog body
    it collapsed to its padding), scrolls inside itself, and its column headers stay put */
+.alt-why-body { display: grid; gap: 6px; font-size: var(--fs-sm); }
+.alt-why-body p { margin: 0; }
 .alt-rows { display: grid; gap: 4px; align-content: start; min-height: min(12rem, 40vh); max-height: 40vh; overflow: auto; padding: 0 8px 8px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
 .alt-row, .alt-head { display: grid; grid-template-columns: 64px minmax(0, 1fr) 90px auto auto; gap: 6px; align-items: center; }
 .alt-head { position: sticky; top: 0; z-index: 1; padding-block: 8px 4px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); color: var(--on-surface-variant); }

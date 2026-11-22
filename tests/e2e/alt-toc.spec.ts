@@ -133,3 +133,28 @@ for (const size of [{ width: 360, height: 560 }, { width: 1024, height: 600 }]) 
     expect(seen.errors).toEqual([]);
   });
 }
+
+/*
+ * 3.11: why alternative headings exist and when one is needed — in the dialog, and true to the generator: the structures
+ * Otzaria builds itself are named (a file would duplicate them), and any file stops its automatic "Chapters".
+ */
+test("alt_toc: the dialog explains what a structure is for, when it is needed and when it would be a duplicate", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "חומש שלי.txt", mimeType: "text/plain", buffer: Buffer.from(BOOK) }]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  await page.getByRole("button", { name: /^מבני כותרות/ }).click();
+  const why = page.getByRole("dialog").locator("details.alt-why");
+  await expect(why.locator("summary")).toContainText("למה יש מבנים אלטרנטיביים");
+  await why.locator("summary").click();
+  await expect(why).toContainText("מתי צריך");
+  await expect(why).toContainText("מתי לא");
+  for (const key of ["Seifim", "Topic", "SimanNames", "Chapters"]) await expect(why).toContainText(key);
+  await expect(why).toContainText("יכפיל");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
