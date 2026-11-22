@@ -152,6 +152,14 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .type-item { padding: 6px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
 .type-item code { color: var(--on-surface-variant); }
 .types-export ul { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+/* the suggestions table: method and type as columns when the table is wide, a line under the target when it is not */
+.sug-wrap { container-type: inline-size; }
+.sug-table .col-meta { display: none; }
+@container (min-width: 560px) {
+  .sug-table .col-meta { display: table-cell; font-size: var(--fs-sm); }
+  .sug-table .meta-inline { display: none; }
+}
+.meta-inline { font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }

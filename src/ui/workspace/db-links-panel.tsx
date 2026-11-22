@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { TYPE_LABELS, parseConnectionType, type ConnectionType } from "../../core/links/connection-type";
+import { TYPE_LABELS, parseConnectionType, typeShown, type ConnectionType } from "../../core/links/connection-type";
 import { DB_LINK_ORIGIN_LABELS, dbLinkOrigin, type DbLinkSummary } from "../../core/links/db-links";
 import { isRange, type Link } from "../../core/links/model";
 import type { Side } from "../../state/store";
@@ -263,8 +263,7 @@ function LineView({ side }: { side: Side }) {
 /** A link end whose book no open source holds (a personal database's external_link row, ExternalLinksReader): key "unresolved:<title>". */
 const isUnresolved = (b: Link["source"]["book"]): boolean => b.key.startsWith("unresolved:");
 
-/** The type as this view shows it: "מקור" alone reads as a role of the book, so the direction is said. */
-const typeText = (type: ConnectionType): string => (type === "SOURCE" ? "מקור — מפירוש אל ספר הבסיס" : TYPE_LABELS[type].he);
+const typeText = typeShown;
 
 function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
   const store = useStore();

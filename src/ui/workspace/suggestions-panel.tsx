@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { parseConnectionType, typeShown } from "../../core/links/connection-type";
 import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type EngineId, type MatchedSpan, type Suggestion, type SuggestionSort } from "../../linking/automatic";
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
@@ -372,6 +373,7 @@ function TableView() {
         )}
       </div>
       <BulkApprove />
+      <div class="sug-wrap">
       <table class="sug-table" aria-label="הצעות">
         <thead>
           <tr>
@@ -382,6 +384,8 @@ function TableView() {
             </th>
             <th>שורה</th>
             <th>אל</th>
+            <th class="col-meta">שיטה</th>
+            <th class="col-meta">סוג</th>
             <th>ודאות</th>
             <th><span class="sr-only">החלטה</span></th>
           </tr>
@@ -392,6 +396,7 @@ function TableView() {
           ))}
         </tbody>
       </table>
+      </div>
       {rows.length > shown && (
         <div style="padding:8px;text-align:center">
           <button class="btn outlined" onClick={() => setShown(shown + PAGE)}>הצגת עוד ({(rows.length - shown).toLocaleString("he")})</button>
@@ -412,6 +417,9 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
   // the target's line number: the place name alone repeats down a chapter of a book without verse headings (issue 12);
   // a cited span belongs to the record's own target, which is the displayed one unless the row is shown reversed
   const place = placeText(v.to, v.reversed ? undefined : s);
+  // a merged (max-link) suggestion carries every method that found it
+  const engineText = (("engines" in s && Array.isArray(s.engines) ? (s.engines as readonly string[]) : [s.engine]) as readonly string[]).map((e) => ENGINES.find((x) => x.id === e)?.title ?? e).join(" + ");
+  const typeText = typeShown(parseConnectionType(s.declaredType).type);
   return (
     <tr
       class={`st-${state}`}
@@ -430,8 +438,12 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
       <td>
         <div>{v.toLabel}</div>
         <div class="where muted">{place}</div>
+        {/* narrow: the method and the type under the target; wide (a container query): their own columns */}
+        <div class="meta-inline muted">{engineText} · {typeText}</div>
         {snippet && <div class="snippet muted">{snippet}</div>}
       </td>
+      <td class="col-meta">{engineText}</td>
+      <td class="col-meta">{typeText}</td>
       <td>
         <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {/* the numeric score, when the list is sorted by it: inside a level the order is by this number */}

@@ -266,3 +266,34 @@ test("pair mode: one book against several targets, all methods merged into one r
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * 3.7: the suggestions table says which method found each suggestion and what link type it would be — as columns where
+ * the panel is wide, and as a line under the target where it is narrow (a phone, or the narrow side panel).
+ */
+test("suggestions table: the method and the link type of each suggestion, as columns when wide and a line when narrow", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await page.getByRole("button", { name: "הכול", exact: true }).click({ timeout: 30_000 });
+  const row = page.locator("table.sug-table tbody tr").first();
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("table.sug-table th.col-meta")).toHaveCount(2);
+  await expect(row.locator(".meta-inline")).toContainText("דיבור המתחיל");
+  await expect(row.locator(".meta-inline")).toContainText("מקור — מפירוש אל ספר הבסיס"); // the direction type says which way it runs
+  await expect(row.locator("td.col-meta").first()).toHaveText("לפי דיבור המתחיל");
+  // exactly one of the two forms is on the screen, at whatever width the panel has
+  const shown = await row.evaluate((tr) => [getComputedStyle(tr.querySelector(".meta-inline")!).display !== "none", getComputedStyle(tr.querySelector("td.col-meta")!).display !== "none"]);
+  expect(shown.filter(Boolean)).toHaveLength(1);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

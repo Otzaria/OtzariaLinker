@@ -114,6 +114,9 @@ export function appPanelOf(stored: ConnectionType): AppPanel {
 /** Types a user may choose when authoring a link file. LINKER is skipped by the generator; SOURCE is a direction. */
 export const AUTHORABLE_TYPES: readonly ConnectionType[] = CONNECTION_TYPES.filter((t) => t !== "LINKER");
 
+/** The type as a screen says it: "מקור" alone reads as a role of a book, so the direction type says which way it runs. */
+export const typeShown = (t: ConnectionType): string => (t === "SOURCE" ? "מקור — מפירוש אל ספר הבסיס" : TYPE_LABELS[t].he);
+
 export const TYPE_LABELS: Readonly<Record<ConnectionType, { he: string; hint: string }>> = {
   COMMENTARY: { he: "פירוש", hint: "מפרש על הטקסט" },
   SUPER_COMMENTARY: { he: "פירוש על פירוש", hint: 'ביאור על מפרש אחר (למשל ביאור על רש"י)' },
