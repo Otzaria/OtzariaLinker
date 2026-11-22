@@ -322,3 +322,41 @@ describe("Sefaria's notes: data-label markers in the book, unnumbered note lines
     expect(flat.suggestions).toEqual([]);
   });
 });
+
+/*
+ * Issue #14 — notes numbered with bare digits. NO REAL FIXTURE exists for this shape (the only real footnotes
+ * pair in the repo, midrash-vayisau, uses <sup>); these are minimal hand-written lines, said so on purpose.
+ */
+describe("bare-number markers (#14)", () => {
+  const main = ["<h1>ספר</h1>", "שלום1 עולם2. עוד3 בשנת 1990 ובפרק 12"];
+  const notes = ["<h1>הערות לספר</h1>", "1. הערה א", "2. הערה ב", "3. הערה ג"];
+
+  it('the "digits" style links bare numbers to the note lines', () => {
+    expect(pairs(run(main, notes, { mainMarkers: "digits" }))).toEqual(["1>1", "1>2", "1>3"]);
+  });
+
+  it("auto: when no tag style fits, bare numbers after a word are tried and chosen (says so)", () => {
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>2", "1>3"]);
+    expect(codes(res.notes)).toContain("footnotes/style-auto");
+  });
+
+  it("auto keeps preferring a tag style over bare numbers", () => {
+    const res = run(["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup> ו3"], ["<h1>הערות לספר</h1>", "1. א", "2. ב"]);
+    expect(pairs(res)).toEqual(["1>1", "1>2"]);
+  });
+
+  it("the books given in the wrong order: a precise note instead of 'check the marker setting'", () => {
+    const res = runFootnotesEngine(book(NOTES, "n", notes), book(MAIN, "m", main));
+    expect(res.suggestions).toHaveLength(0);
+    expect(codes(res.notes)).toContain("footnotes/swapped");
+    expect(codes(res.notes)).not.toContain("footnotes/no-notes");
+    expect(res.notes.find((n) => n.code === "footnotes/swapped")!.text).toContain("בסדר הפוך");
+  });
+
+  it("no 'swapped' claim when the other book has no markers either", () => {
+    const res = run(["שלום עולם"], ["הערה בלי מספר"]);
+    expect(codes(res.notes)).toContain("footnotes/no-notes");
+    expect(codes(res.notes)).not.toContain("footnotes/swapped");
+  });
+});

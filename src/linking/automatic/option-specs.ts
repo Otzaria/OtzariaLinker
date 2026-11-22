@@ -84,7 +84,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     ...THRESHOLDS,
   ],
   footnotes: [
-    { kind: "marker", key: "mainMarkers", label: "סימני ההערות בספר", default: "auto", hint: "אוטומטי בודק <sup>, <sub> וסוגריים ובוחר את מה שמתאים לספר ההערות." },
+    { kind: "marker", key: "mainMarkers", label: "סימני ההערות בספר", default: "auto", essential: true, hint: "אוטומטי בודק <sup>, <sub> וסוגריים, ורק אם אף אחד מהם לא מתאים — גם מספרים צמודים למילה (שלום1). אם ההערות הן מספרים בלי תגית, בחרו \"מספרים בלי תגית\"." },
     { kind: "marker", key: "notesMarkers", label: "סימון תחילת הערה בספר ההערות", default: "auto" },
     { kind: "select", key: "notesMarkerPosition", label: "איפה הסימן בשורת ההערה", default: "start", choices: [["start", "רק בתחילת השורה"], ["anywhere", "בכל מקום בשורה"]] },
     { kind: "select", key: "numbering", label: "מספור ההערות", default: "auto", choices: [["auto", "לפי ספר ההערות"], ["digits", "ספרות"], ["letters", "אותיות"], ["any", "שניהם"]] },
@@ -174,6 +174,7 @@ export const MARKER_CHOICES = [
   ["sup", "<sup>"],
   ["sub", "<sub>"],
   ["parentheses", "סוגריים ( )"],
+  ["digits", "מספרים בלי תגית (שלום1)"],
   ["tag", "תגית אחרת"],
   ["regex", "ביטוי רגולרי"],
 ] as const;
@@ -266,7 +267,7 @@ export function toEngineOptions(engine: EngineId, values: FormValues, scope: "al
         if (v === "auto") break;
         const custom = String(values[customKey(spec.key)] ?? "").trim();
         let style: MarkerStyle;
-        if (v === "sup" || v === "sub" || v === "parentheses") style = v;
+        if (v === "sup" || v === "sub" || v === "parentheses" || v === "digits") style = v;
         else if (v === "tag") {
           const tag = custom.replace(/[<>/\s]/g, "");
           if (!/^[a-zA-Z][\w-]*$/.test(tag)) {

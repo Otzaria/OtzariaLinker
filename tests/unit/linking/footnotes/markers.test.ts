@@ -213,3 +213,28 @@ describe("data-label markers (Sefaria)", () => {
     expect(labelCommentators(line)).toEqual(["A", "B"]);
   });
 });
+
+/*
+ * Issue #14 — bare numbers with no tag ("שלום1 עולם2"). NO REAL FIXTURE: no real book in the repo has bare
+ * number markers (the reporter's data is a personal DB; ADR 0004). These are minimal hand-written lines that
+ * use only the shape the issue describes, not an invented schema.
+ */
+describe('style "digits" (bare numbers glued to a word)', () => {
+  it("finds a number right after a Hebrew word or punctuation, with exact raw spans", () => {
+    const line = "שלום1 עולם2. עוד,3 ו<b>ש</b>4";
+    const ms = detectMarkers(line, "digits");
+    expect(ms.map((m) => m.num)).toEqual([1, 2, 3, 4]);
+    for (const m of ms) expect(shownByGenerator(line, m)).toBe(String(m.num));
+    expect(ms.every((m) => m.numbering === "digits" && m.style === "regex")).toBe(true);
+  });
+  it("does not read numbers that are text: a year, 'פרק 12', numbers inside tags and attributes, longer than 3 digits", () => {
+    expect(detectMarkers("בשנת 1990 וגם פרק 12 ושלום 3", "digits")).toEqual([]);
+    expect(detectMarkers('<i data-label="5">שלום</i> <sup>7</sup> <a href="x1">ק</a>', "digits")).toEqual([]);
+    expect(detectMarkers("שלום1990", "digits")).toEqual([]);
+  });
+  it("on a note line the number opens the line, with or without a dot", () => {
+    expect(leadingMarker("12. הערה", "digits")?.num).toBe(12);
+    expect(leadingMarker("12 הערה", "digits")?.num).toBe(12);
+    expect(leadingMarker("הערה 12", "digits")).toBeNull();
+  });
+});

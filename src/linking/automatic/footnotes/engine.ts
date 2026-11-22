@@ -200,6 +200,11 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   const numbering = decideNumbering(options.numbering ?? "auto", rawNoteOccs);
   const noteOccs = numbering ? rawNoteOccs.filter((o) => o.marker.numbering === numbering || isStar(o)) : rawNoteOccs;
   if (!noteOccs.length) {
+    // the books in the wrong order (issue #14: "it works but you must swap source and target"): say so, not "check the setting"
+    if (looksSwapped(main, notes, includeInline)) {
+      runNotes.push(r("footnotes/swapped", "נראה שהספרים בסדר הפוך: הספר שנבחר כמקור נראה כמו ספר הערות (שורותיו נפתחות במספר), והספר שנבחר כיעד הוא זה שמכיל את סימני ההערות. החליפו ביניהם: המקור הוא הספר עם סימני ההערות, והיעד הוא ספר ההערות."));
+      return { suggestions: [], notes: runNotes, unmatched: [] };
+    }
     runNotes.push(r("footnotes/no-notes", "לא נמצאו בספר ההערות שורות שנפתחות בסימן הערה (מספר או אות). בדקו את הגדרת הסימון של ההערות."));
     return { suggestions: [], notes: runNotes, unmatched: [] };
   }
@@ -789,6 +794,30 @@ function decideNumbering(opt: Numbering | "auto" | "any", occs: readonly Occ[]):
   return null;
 }
 
+/**
+ * The "main" book looks like a notes book (most content lines open with a note number) while the "notes" book
+ * carries note markers in its text: the two were given the other way round.
+ */
+function looksSwapped(main: EngineBook, notes: EngineBook, includeInline: boolean): boolean {
+  let content = 0;
+  let opening = 0;
+  for (const l of main.lines) {
+    if (l.heading !== null) continue;
+    const text = withoutBom(l.text);
+    if (!stripTags(text)) continue;
+    content++;
+    if (leadingMarker(text, "auto", { includeInlineNoteMarkers: includeInline })) opening++;
+  }
+  if (!content || opening < content * 0.5) return false;
+  const styles: MarkerStyle[] = ["sup", "sub", "parentheses", "digits"];
+  for (const l of notes.lines) {
+    if (l.heading !== null) continue;
+    const text = withoutBom(l.text);
+    for (const s of styles) if (detectMarkers(text, s, { includeInlineNoteMarkers: includeInline }).length) return true;
+  }
+  return false;
+}
+
 const MAIN_CANDIDATES: readonly MarkerStyle[] = ["sup", "sub", "parentheses"];
 
 function chooseMainStyle(
@@ -814,6 +843,20 @@ function chooseMainStyle(
     }
     if (!best || matched > best.matched || (matched === best.matched && found > best.found)) best = { style: c.compiled, matched, found };
   }
+  if (best && best.matched === 0) {
+    // no tag or parentheses style fits the notes' numbers: bare digits glued to words ("שלום1"), tried last because a bare
+    // number is ambiguous with numbers in the text (issue #14)
+    const c = compileStyle("digits");
+    if (c.ok) {
+      let matched = 0;
+      for (const l of main.lines) {
+        if ((l.index & 255) === 0 && signal?.aborted) throw new Aborted();
+        if (l.heading !== null) continue;
+        for (const m of detectMarkers(withoutBom(l.text), c.compiled, opts)) if (noteNums.has(m.num)) matched++;
+      }
+      if (matched > 0) best = { style: c.compiled, matched, found: matched };
+    }
+  }
   runNotes.push(r("footnotes/style-auto", `סגנון הסימון בספר נבחר אוטומטית: ${describeStyle(best!.style)}.`));
   return best!.style;
 }
@@ -821,6 +864,7 @@ function chooseMainStyle(
 function describeStyle(s: CompiledStyle): string {
   if (s.kind === "label") return s.commentator ? `סימני ההערות של "${s.commentator}" (data-label)` : "סימני הערות מסוג data-label";
   if (s.kind === "parentheses") return "מספרים בסוגריים, כמו (12)";
+  if (s.kind === "digits") return "מספרים צמודים למילה, בלי תגית, כמו שלום1";
   if (s.kind === "regex") return `ביטוי מותאם /${s.regex.source}/`;
   return `תגית <${s.tag}>`;
 }

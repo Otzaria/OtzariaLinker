@@ -68,7 +68,7 @@ describe("issue #23 — the six forms (pin: these passed before the change)", ()
     expect(s.confidence).toBe("certain");
     expect(s.declaredType).toBe("reference");
     // the place the heRef names (an amud's start; no range into a Sefaria book)
-    expect([lib.heRefAt(book, s.target.line), lib.heRefAt(book, s.target.line + 1)]).toContain(heRef);
+    expect([lib.heRefAt!(book, s.target.line), lib.heRefAt!(book, s.target.line + 1)]).toContain(heRef);
     expect(s.target.end).toBeUndefined();
   });
 });
