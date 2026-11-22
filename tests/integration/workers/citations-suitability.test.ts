@@ -50,3 +50,12 @@ describe("hasCitationHint with the names of the open books", () => {
     expect(hasCitationHint("הלך האיש אל השוק", (k) => names.has(k))).toBe(false);
   });
 });
+
+describe("hasCitationHint — real typography (QA round 2, E)", () => {
+  // the library writes the abbreviations with a geresh (U+05F3) as often as with an ASCII apostrophe, and some books carry nikud
+  it.each(["(סי׳ ב)", "כדאיתא בגמ׳ שם", "ראה תוס׳ בדף", "עמ׳ 5", "פ׳ ב", "הל׳ שבת", "סע׳ ג", "ראה (פֶּרֶק ב)", "בְּסִימָן ב", 'ע״א', "רש״י", "שו״ע", "ס״ק ג", 'ב"ס פ"ג'])("%s: yes", (t) => expect(hasCitationHint(t)).toBe(true));
+  it("a geresh or nikud does not make plain prose pass", () => {
+    expect(hasCitationHint("הָלַךְ הָאִישׁ אֶל הַשּׁוּק")).toBe(false);
+    expect(hasCitationHint("מה׳ ומה׳")).toBe(false);
+  });
+});
