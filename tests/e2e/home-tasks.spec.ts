@@ -84,7 +84,7 @@ test("an open database is offered by the next task sheet, and picking it again d
   chooser = page.waitForEvent("filechooser");
   await sheet.getByRole("button", { name: "המסד האישי: מסד נתונים" }).click();
   await (await chooser).setFiles(DB_FILE);
-  await expect(page.getByText(/כבר פתוח: הוא לא נטען שוב/)).toBeVisible();
+  await expect(page.getByText(/כבר פתוח, ולכן לא נטען שוב/)).toBeVisible();
   await expect(sheet.locator(".steps .opened")).toHaveCount(1);
   await start.click();
   await expect(page.getByRole("region", { name: "מקורות וספרים" }).locator(".src-badge")).toHaveCount(1);
