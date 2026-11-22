@@ -132,6 +132,36 @@ describe("diffLinks", () => {
     expect(csv.split("\r\n")[0]).toContain("ref_1");
   });
 
+  /*
+   * 1.7 (task list): the references are compared the way a reader sees them — whitespace of any kind (NBSP, tabs,
+   * doubled spaces), zero-width and direction marks do not make two places different — and the type through the
+   * generator's parser, so "COMMENTARY", " commentary " and the alias "quotation_auto" are what they store. The
+   * written values stay as they were; only the comparison is normalised.
+   */
+  it("references that differ only in invisible characters or spacing are the same link", () => {
+    const messy = "ספר ב  ​5	";
+    const a = [link(1, 10, { heRef2: "ספר ב 5", ref1: "Genesis 1:1", ref2: undefined })];
+    const b = [link(1, 10, { heRef2: messy, ref1: "Genesis 1:1 ", ref2: undefined })];
+    const d = diffLinks(a, b);
+    expect(d.rows.map((r) => r.kind)).toEqual(["same"]);
+    expect(detailDifferences(a[0]!, b[0]!)).toEqual([]);
+    expect(linkDiffKey(a[0]!)).toBe(linkDiffKey(b[0]!));
+    // a real difference of words still shows
+    const c = diffLinks(a, [link(1, 10, { heRef2: "ספר ג 5", ref1: "Genesis 1:1" })]);
+    expect(c.rows.map((r) => r.kind)).toEqual(["details"]);
+  });
+
+  it("the type is compared as the generator parses it, not as a lower-cased string", () => {
+    for (const [x, y] of [["COMMENTARY", "commentary"], [" Commentary ", "commentary"], ["quotation_auto", "quotation"], ["Super Commentary", "super_commentary"], ["footnote", "footnotes"]] as const) {
+      const d = diffLinks([link(1, 10, { declaredType: x })], [link(1, 10, { declaredType: y })]);
+      expect(d.rows.map((r) => r.kind), `${x} / ${y}`).toEqual(["same"]);
+    }
+    // two unknown strings are not the same type (the file says different things), a known one and an unknown are not either
+    expect(diffLinks([link(1, 10, { declaredType: "foo" })], [link(1, 10, { declaredType: "bar" })]).rows.map((r) => r.kind)).toEqual(["type"]);
+    expect(diffLinks([link(1, 10, { declaredType: "other" })], [link(1, 10, { declaredType: "foo" })]).rows.map((r) => r.kind)).toEqual(["type"]);
+    expect(diffLinks([link(1, 10, { declaredType: "commentary" })], [link(1, 10, { declaredType: "targum" })]).rows.map((r) => r.kind)).not.toContain("same");
+  });
+
   it("100K links against 100K links in well under a second", () => {
     const N = 100_000;
     const a = Array.from({ length: N }, (_, i) => link(i, i * 2));
