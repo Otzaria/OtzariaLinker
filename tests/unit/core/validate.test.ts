@@ -17,6 +17,7 @@ const link = (over: Partial<Link> = {}): Link => ({
   source: { book: A, line: 1 }, target: { book: B, line: 2 },
   declaredType: "reference", heRef2: "ספר ב 3", ...over,
 });
+const TECH_WORDS = /ref_[12]|heRef|anchor_src_hash|Conection|path_2|הגנרטור/;
 const codes = (l: Link) => validateLink(l, ctx).map((p) => `${p.severity}:${p.code}`);
 
 describe("validateLink — generator gates", () => {
@@ -38,6 +39,23 @@ describe("validateLink — generator gates", () => {
     const unknown: BookRef = { key: "unresolved:וזה לשונו - שובבי׳׳ם", title: "וזה לשונו - שובבי׳׳ם", origin: "unknown" };
     expect(codes(link({ provenance: "file", status: "existing", source: { book: unknown, line: 1 } }))).toContain("warning:export/source-unknown");
     expect(codes(link())).not.toContain("warning:export/source-unknown");
+  });
+  /*
+   * #18: the hold stays (a links file REPLACES the library's file of its source book), but the text said
+   * "the database has links, so there is probably a file" — the mark is wide (it counts Sefaria's and
+   * automatic links), and a commentary linked to a Gemara writes ITS OWN file. The message now names the
+   * file that would be replaced, says why the mark is only a hint, and shows the way out.
+   */
+  it("library-file-not-loaded names the file, says the database mark is only a hint, and offers the commentary's own file", () => {
+    const held = validateLink(link(), { ...ctx, linksFile: () => "missing", libraryMayHaveFile: () => true });
+    const p = held.find((x) => x.code === "export/library-file-not-loaded")!;
+    expect(p.severity).toBe("error"); // the hold is not weakened
+    expect(p.message).toContain("ספר א_links.json");
+    expect(p.message).toContain("ספריא"); // the mark counts Sefaria's links too
+    expect(p.message).toMatch(/ייתכן/); // not stated as a fact
+    expect(p.message).toContain("הקובץ של ספר המקור"); // it is the SOURCE book's file that is replaced
+    expect(p.message).toMatch(/פירוש.*קובץ משלו/); // a commentary written as the source has a file of its own
+    expect(p.message).not.toMatch(TECH_WORDS);
   });
   it("db links cannot be exported as file records", () => expect(codes(link({ provenance: "db", status: "existing" }))).toContain("error:export/db-link"));
   it("a companion 'הערות על X' target is silently dropped by the generator", () => {

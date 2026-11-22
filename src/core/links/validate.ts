@@ -122,8 +122,9 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
     add("error", "export/file-unverified", `קובץ הקישורים של "${s.book.title}" נשמר בפרויקט ולא נטען מהספרייה בהפעלה הזו. ייתכן שהוא ישן, והייצוא היה מחליף בו את הקובץ העדכני שבספרייה. טענו שוב את "${s.book.title}_links.json" מהספרייה, או אשרו במפורש שהעותק שבפרויקט הוא העדכני.`);
   // A new link of a book whose library file is not loaded, when the database says the book has links
   // of its own: the exported file would REPLACE that file and drop its records (compatibility review).
+  // The mark (`hasSourceLinks`) is a hint, not proof — LINK_FORMATS §4.5 (2); the text says so (#18).
   if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && ctx.libraryMayHaveFile?.(s.book.title))
-    add("error", "export/library-file-not-loaded", `במסד יש קישורים של "${s.book.title}", ולכן כנראה יש לו קובץ קישורים בספרייה. קובץ שייוצא בלעדיו יחליף אותו וימחק את שאר הקישורים שבו. טענו את "${s.book.title}_links.json" מהספרייה, או אשרו שאין לספר קובץ.`);
+    add("error", "export/library-file-not-loaded", `הייצוא כותב את הקובץ של ספר המקור, "${s.book.title}_links.json", ובמסד מסומן שיש ל"${s.book.title}" קישורים. הסימן רחב (הוא סופר גם קישורי ספריא וקישורים אוטומטיים), ולכן ייתכן שבספרייה אין לו קובץ. אם יש, הקובץ שייוצא יחליף אותו וימחק את שאר הקישורים שבו: טענו אותו מהספרייה, או אשרו שאין לספר קובץ. פירוש שנכתב כמקור כותב קובץ משלו ולא מחליף את קובץ הבסיס: כדי לקשר פירוש חדש, בחרו בו כמקור.`);
   const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
   if (match === "same-link")
     add("warning", "export/in-db", "הקישור הזה כבר קיים במסד: אותן שורות ואותו סוג, אחרי ההמרה של אוצריא. אם רשומה שלו כבר נמצאת בקובץ אחר בספרייה, הייצוא רק יכפיל אותה.");
