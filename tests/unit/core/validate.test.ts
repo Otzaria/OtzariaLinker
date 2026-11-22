@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { validateExport, validateLink, type LineFacts, type ValidationContext } from "../../../src/core/links/validate";
+import { exportVerdicts, validateExport, validateLink, type LineFacts, type ValidationContext } from "../../../src/core/links/validate";
 
 const book = (title: string, extra: Partial<BookRef> = {}): BookRef => ({ key: `k:${title}`, title, origin: "otzaria", isBaseBook: false, ...extra });
 const A = book("ספר א");
@@ -91,12 +91,19 @@ describe("validateLink — generator gates", () => {
     expect(got.filter((c) => c.startsWith("error:"))).toEqual([]);
   });
 
-  it("a book the library LISTS a file for, that the database does not mark, is held for the library only — a private export stays clean", () => {
+  // CHANGED on the reviewer's decision, with the user's approval (fix round before merge, task 2): the list is a snapshot, so a listed
+  // book the database does not mark is no longer HELD (error export/library-file-not-loaded) but WARNED about
+  // (warning export/library-file-snapshot). The private-export, database-mark and Sefaria-title parts below are unchanged.
+  it("a book the library LISTS a file for, that the database does not mark, is warned about for the library only (no longer held) — a private export stays clean", () => {
     const listed = { ...ctx, linksFile: () => "missing" as const, libraryFileListed: () => true, libraryFileListLabel: "הרשימה" };
     const held = (purpose?: "private" | "submission") => validateLink(link(), { ...listed, ...(purpose && { purpose }) }).some((x) => x.code === "export/library-file-not-loaded");
-    expect(held()).toBe(true);
-    expect(held("submission")).toBe(true);
+    const warned = (purpose?: "private" | "submission") => validateLink(link(), { ...listed, ...(purpose && { purpose }) }).some((x) => x.code === "export/library-file-snapshot");
+    expect(held()).toBe(false);
+    expect(held("submission")).toBe(false);
+    expect(warned()).toBe(true);
+    expect(warned("submission")).toBe(true);
     expect(held("private")).toBe(false); // the app's personal import replaces nothing in the library
+    expect(warned("private")).toBe(false);
     // the database's own mark still holds in every purpose, as before the list existed
     expect(validateLink(link(), { ...ctx, linksFile: () => "missing" as const, libraryMayHaveFile: () => true, purpose: "private" }).some((x) => x.code === "export/library-file-not-loaded")).toBe(true);
     // a user's own book that only shares a Sefaria title is refused by sefaria/not-library-edition: no second code
@@ -327,5 +334,64 @@ describe("private use: a personal book named like a library book (export/private
   it("not for the library, and not when no library book has the title", () => {
     expect(codes(link({ source: { book: MINE, line: 1 } }), { ...priv, purpose: "submission" })).not.toContain("error:export/private-title-in-library");
     expect(codes(link())).not.toContain("error:export/private-title-in-library");
+  });
+});
+
+/*
+ * Fix round before merge (task 2): the list of the library's links-file names is a SNAPSHOT (a date and a commit). It is
+ * a hint, never a block: a book it lists, that the database does not mark, is written with a visible warning that
+ * says the list is a snapshot, from when, and that the user can check the file in the library. The database's own mark
+ * still holds, as before; a private export stays clean.
+ */
+describe("the library's link-file list is a hint (a warning), not a hold", () => {
+  const LABEL = "תמונת מצב של רשימת קובצי הקישורים של הספרייה מ־2026-11-22 (3207ad3f)";
+  const snap = { ...ctx, linksFile: () => "missing" as const, libraryFileListed: () => true, libraryFileListLabel: LABEL };
+  const FILE_LEVEL = ["export/library-file-not-loaded", "export/file-held", "export/file-unverified"];
+
+  it("a listed book that the database does not mark is warned about, not held", () => {
+    const got = validateLink(link(), snap);
+    expect(got.filter((p) => p.severity === "error")).toEqual([]);
+    const w = got.find((p) => p.code === "export/library-file-snapshot")!;
+    expect(w.severity).toBe("warning");
+    expect(got.some((p) => FILE_LEVEL.includes(p.code))).toBe(false);
+  });
+
+  it("the warning says it is a snapshot, from when, that the file may exist and replaced, and that the user can check it", () => {
+    const m = validateLink(link(), snap).find((p) => p.code === "export/library-file-snapshot")!.message;
+    expect(m).toContain("2026-11-22");
+    expect(m).toContain("תמונת מצב");
+    expect(m).toContain("ספר א_links.json");
+    expect(m).toMatch(/יחליף/); // writing the file replaces the library's
+    expect(m).toMatch(/בדקו/); // the user can look at the existing file
+    expect(m).not.toMatch(TECH_WORDS);
+  });
+
+  it("the export plan writes the listed book's file and carries the warning (nothing is held)", () => {
+    const v = exportVerdicts([link()], snap);
+    expect(v.heldBack).toEqual([]);
+    expect(v.written).toHaveLength(1);
+    expect(v.warned.map((w) => w.problems.map((p) => p.code))).toEqual([["export/library-file-snapshot"]]);
+  });
+
+  it("the user can still confirm or load the file, and then there is nothing to warn about", () => {
+    for (const state of ["confirmed-new", "imported"] as const)
+      expect(validateLink(link(), { ...snap, linksFile: () => state }).map((p) => p.code)).not.toContain("export/library-file-snapshot");
+  });
+
+  it("a private export stays clean, and so does a user's own book that only shares a Sefaria title", () => {
+    expect(validateLink(link(), { ...snap, purpose: "private" }).map((p) => p.code)).toEqual([]);
+    expect(validateLink(link(), { ...snap, sefariaTitle: () => true, sefariaOwned: () => false }).map((p) => p.code)).not.toContain("export/library-file-snapshot");
+  });
+
+  it("a book the list does not name gets no warning of this kind", () => {
+    expect(validateLink(link(), { ...snap, libraryFileListed: () => false }).map((p) => p.code)).toEqual([]);
+  });
+
+  it("when the database also marks the book, the hold stays and its text says the list is a snapshot, not a fact", () => {
+    const p = validateLink(link(), { ...snap, libraryMayHaveFile: () => true }).find((x) => x.code === "export/library-file-not-loaded")!;
+    expect(p.severity).toBe("error");
+    expect(p.message).toContain("2026-11-22");
+    expect(p.message).toMatch(/ייתכן/);
+    expect(validateLink(link(), { ...snap, libraryMayHaveFile: () => true }).map((x) => x.code)).not.toContain("export/library-file-snapshot");
   });
 });

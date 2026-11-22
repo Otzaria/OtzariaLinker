@@ -131,6 +131,21 @@ export function buildExportReport(r: ReportInput): string {
       for (const p of b.problems.filter((x) => x.severity === "error").slice(0, LIMIT)) L.push(`      ${p.message}`);
     }
   }
+  // a file written although the library's file-name list (a snapshot) says the library has one: recorded with the list's date, so the reader can check the existing file first
+  const snapshotFiles = new Map<string, string>();
+  for (const { link, problems } of links.warned) {
+    const p = problems.find((x) => x.code === "export/library-file-snapshot");
+    if (p && !snapshotFiles.has(link.source.book.title)) snapshotFiles.set(link.source.book.title, p.message);
+  }
+  if (snapshotFiles.size) {
+    section(`קבצים שהרשימה מציינת שכבר קיימים בספרייה (${snapshotFiles.size.toLocaleString("he")})`, "!");
+    L.push("  הרשימה היא תמונת מצב, לא בדיקה חיה. הקבצים האלה נכתבו כרגיל, וכל אחד מהם יחליף את הקובץ שבספרייה אם הוא קיים שם:");
+    for (const [title, message] of [...snapshotFiles].sort(([a], [b]) => (a < b ? -1 : 1)).slice(0, LIMIT)) {
+      const records = links.files.find((f) => f.sourceTitle === title)?.records ?? 0;
+      L.push(`  • ${title}_links.json (${records.toLocaleString("he")} קישורים): ${message}`);
+    }
+    if (snapshotFiles.size > LIMIT) L.push(`  … ועוד ${(snapshotFiles.size - LIMIT).toLocaleString("he")}`);
+  }
   const warned = links.warned;
   const altWarnings = altToc.files.flatMap((f) => f.problems.filter((p) => p.severity === "warning").map((p) => `${f.title}: ${p.message}`));
   if (warned.length || altWarnings.length) {
