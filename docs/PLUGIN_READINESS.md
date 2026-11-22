@@ -73,7 +73,7 @@
 
 
 1. **יעד בנייה לספרייה**: תצורת Vite שנייה (`vite.lib.config.ts`), פלט JS אחד בלי `viteSingleFile` ובלי לגעת בבניית השחרור
-   (תקציב 1.75MiB ב־`scripts/package-release.mjs`), עם מחסום `src/lib/index.ts` שמייצא רק את `linking/adapters`, `runEngine` ואת
+   (תקציב 1.9MiB ב־`scripts/package-release.mjs`), עם מחסום `src/lib/index.ts` שמייצא רק את `linking/adapters`, `runEngine` ואת
    `formats/links-json`; ובדיקה ש"המחסום עולה ב־Node" (מוסיפים ל־`architecture.test.ts` כלל ש־`src/lib` מייבא רק `core`, `matching`, `linking`, `formats`).
 2. **מתאם לאוצריא**: מימוש של `BooksPort` מעל `library.getBookContent`/`getBookToc` (חלונות של 5,000 תווים → שורות; לאמת את הנקודות שבסעיף 3),
    ו־`LinksPort` מעל `library.getRawLinks`.
