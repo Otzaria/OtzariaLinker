@@ -141,7 +141,13 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // A new link of a book whose library file is not loaded, when the database says the book has links
   // of its own: the exported file would REPLACE that file and drop its records (compatibility review).
   // The mark (`hasSourceLinks`) is a hint, not proof — LINK_FORMATS §4.5 (2); the text says so (#18).
-  if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && ctx.libraryMayHaveFile?.(s.book.title))
+  // The library's file LIST adds a hold of its own, for a book the database does not mark — but only where a file
+  // would REPLACE the library's: not for private use (the app's personal import replaces nothing in the library), and
+  // not for a user's own book that merely shares a Sefaria title (sefaria/not-library-edition refuses it already).
+  const sefariaOwnedBook = ctx.sefariaOwned ? ctx.sefariaOwned(s.book) : s.book.origin === "sefaria";
+  const nameClash = !!ctx.sefariaTitle?.(s.book) && !sefariaOwnedBook;
+  const listedHold = ctx.purpose !== "private" && !nameClash && ctx.libraryFileListed?.(s.book.title) === true;
+  if (fileState === "missing" && link.provenance !== "db-copy" && link.provenance !== "file" && (ctx.libraryMayHaveFile?.(s.book.title) || listedHold))
     add("error", "export/library-file-not-loaded", libraryFileText(s.book.title, ctx));
   const match = link.provenance === "user" || link.provenance === "auto" || link.provenance === "import" ? ctx.existing?.(link) : null;
   if (match === "same-link")

@@ -91,6 +91,19 @@ describe("validateLink — generator gates", () => {
     expect(got.filter((c) => c.startsWith("error:"))).toEqual([]);
   });
 
+  it("a book the library LISTS a file for, that the database does not mark, is held for the library only — a private export stays clean", () => {
+    const listed = { ...ctx, linksFile: () => "missing" as const, libraryFileListed: () => true, libraryFileListLabel: "הרשימה" };
+    const held = (purpose?: "private" | "submission") => validateLink(link(), { ...listed, ...(purpose && { purpose }) }).some((x) => x.code === "export/library-file-not-loaded");
+    expect(held()).toBe(true);
+    expect(held("submission")).toBe(true);
+    expect(held("private")).toBe(false); // the app's personal import replaces nothing in the library
+    // the database's own mark still holds in every purpose, as before the list existed
+    expect(validateLink(link(), { ...ctx, linksFile: () => "missing" as const, libraryMayHaveFile: () => true, purpose: "private" }).some((x) => x.code === "export/library-file-not-loaded")).toBe(true);
+    // a user's own book that only shares a Sefaria title is refused by sefaria/not-library-edition: no second code
+    const own = { ...listed, sefariaTitle: () => true, sefariaOwned: () => false };
+    expect(validateLink(link(), own).map((x) => x.code)).not.toContain("export/library-file-not-loaded");
+  });
+
   it("db links cannot be exported as file records", () => expect(codes(link({ provenance: "db", status: "existing" }))).toContain("error:export/db-link"));
   it("a companion 'הערות על X' target is silently dropped by the generator", () => {
     expect(codes(link({ target: { book: book("הערות על ספר א"), line: 2 } }))).toContain("warning:export/companion-merged");

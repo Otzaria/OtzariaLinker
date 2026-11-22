@@ -1011,8 +1011,9 @@ export class AppStore {
         if (!b || this.isLibrarySource(sourceIdOfBookKey(b.key))) return false;
         return (this.booksByTitle.value.get(ref.title) ?? []).some((x) => x.key !== b.key && this.isLibrarySource(sourceIdOfBookKey(x.key)));
       },
-      // the database mark (wide: Sefaria's and automatic links count) OR a file of that name in the library's list
-      libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks) || embeddedLibraryLinkFiles().titles.has(title),
+      // the database mark (wide: Sefaria's and automatic links count); a file of that name in the library's list holds
+      // separately, in validateLink, for the library purpose only
+      libraryMayHaveFile: (title) => !!this.booksByTitle.value.get(title)?.some((b) => b.hasSourceLinks),
       libraryFileListed: (title) => embeddedLibraryLinkFiles().titles.has(title),
       libraryFileListLabel: embeddedLibraryLinkFiles().label,
       existing: (l) => this.dbLinks.matchDb(l),
