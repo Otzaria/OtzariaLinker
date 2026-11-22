@@ -444,7 +444,10 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
   const heldFiles = new Map<string, Problem>();
   for (const l of links) {
     const problems = validateLink(l, ctx);
-    const key = storedLinkIdentity(l);
+    // An INLINE_LINKER (private use) is stored by the app as its own record per anchor, not as the library's OTHER
+    // link of the two lines: its identity here is the stored one plus the anchor (QA), and never that of "other".
+    const base = storedLinkIdentity(l);
+    const key = base !== null && isInlineLinkerType(l.declaredType) ? `${base}|inline|${l.anchor?.rawStart ?? ""}-${l.anchor?.rawEnd ?? ""}` : base;
     const first = key === null ? undefined : seen.get(key);
     if (first !== undefined)
       problems.push({ code: "export/duplicate", severity: "warning", message: "קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד." });

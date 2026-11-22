@@ -161,3 +161,19 @@ describe("every spelling of INLINE_LINKER is held for the library", () => {
     for (const raw of ["inline", "linker", "inline linker x", "not inline linker", "ציטוט"]) expect(isInlineLinkerType(raw), raw).toBe(false);
   });
 });
+
+describe("duplicates in a private export (QA)", () => {
+  const priv = { ...ctx, purpose: "private" as const };
+  const dupes = (links: Link[]) => links.map((l) => validateExport(links, priv).get(l.id)!.some((p) => p.code === "export/duplicate"));
+  it("two inline citations of the same two lines with different anchors are two records, not a duplicate", () => {
+    const a = link({ id: "a", anchor: { rawStart: 10, rawEnd: 20 } });
+    const b = link({ id: "b", anchor: { rawStart: 40, rawEnd: 52 } });
+    expect(dupes([a, b])).toEqual([false, false]);
+  });
+  it("the same citation twice (same anchor) is a duplicate", () => {
+    expect(dupes([link({ id: "a" }), link({ id: "b" })])).toEqual([false, true]);
+  });
+  it("an inline citation and a type 'other' on the same lines are different records", () => {
+    expect(dupes([link({ id: "a" }), link({ id: "b", declaredType: "other", anchor: undefined, ref2: undefined })])).toEqual([false, false]);
+  });
+});
