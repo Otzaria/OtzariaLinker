@@ -80,3 +80,45 @@ describe("titleFit", () => {
     expect(titleFit(c, shifted)).toEqual(titleFit(c, base));
   });
 });
+
+describe("titleFit — QA round 2 (H)", () => {
+  const LETTERS = "אבגדהוזחטיכלמנסעפצקרשת";
+  const word = (n: number): string => {
+    let s = "";
+    let x = n + 1;
+    while (x > 0) {
+      s = LETTERS[x % LETTERS.length]! + s;
+      x = Math.floor(x / LETTERS.length);
+    }
+    return s + "ם";
+  };
+
+  it("an unfit book against a big base: the placed() scan is bounded (20,000 base units under one number, 800 commentary titles that match none)", () => {
+    const baseLines = ["<h1>ספר</h1>"];
+    for (let i = 0; i < 20_000; i++) baseLines.push(`<h2>שער ${word(i)}</h2>`, "<h3>פרק א</h3>", "שורה של טקסט");
+    const comLines = ["<h1>פירוש</h1>"];
+    for (let j = 0; j < 800; j++) comLines.push(`<h2>מדור ${word(100_000 + j)}</h2>`, "<h3>פסוק א</h3>", "שורה של פירוש");
+    const t0 = Date.now();
+    const r = titleFit(book("פירוש", comLines), book("ספר", baseLines));
+    const ms = Date.now() - t0;
+    expect(r.verdict).toBe("unfit");
+    expect(ms).toBeLessThan(3_000);
+  }, 120_000);
+
+  it("a place that is there is still found among thousands of units with the same number (the likeliest candidates come first)", () => {
+    const baseLines = ["<h1>ספר</h1>"];
+    for (let i = 0; i < 3_000; i++) baseLines.push(`<h2>שער ${word(i)}</h2>`, "<h3>פרק א</h3>", "שורה של טקסט");
+    const comLines = ["<h1>פירוש</h1>"];
+    for (const i of [0, 1_500, 2_999]) comLines.push(`<h2>שער ${word(i)}</h2>`, "<h3>פרק א</h3>", "שורה של פירוש");
+    const r = titleFit(book("פירוש", comLines), book("ספר", baseLines));
+    expect(r.metrics.placedShare).toBe(1);
+    expect(r.verdict).toBe("fit");
+  }, 60_000);
+
+  it("a name written with gershayim, geresh or nikud is the same place (רש\"י, רש״י, רַשִׁ\"י)", () => {
+    const mk = (spelling: string) => book("פירוש", ["<h1>פירוש</h1>", `<h2>${spelling}</h2>`, "<h3>פרק א</h3>", "שורה של פירוש", `<h2>${spelling}</h2>`, "<h3>פרק ב</h3>", "שורה של פירוש"]);
+    const b = book("ספר", ["<h1>ספר</h1>", '<h2>רש"י</h2>', "<h3>פרק א</h3>", "שורה", "<h3>פרק ב</h3>", "שורה"]);
+    for (const s of ['רש"י', "רש״י", "רַשִׁ״י", "רש׳י"]) expect(titleFit(mk(s), b).metrics.placedShare, s).toBe(1);
+  });
+});
+

@@ -54,6 +54,8 @@ export interface TitleFitMetrics {
   readonly placedShare: number;
   /** commentary headings that repeat an earlier heading path (a title per unit means few) / headings */
   readonly duplicateShare: number;
+  /** distinct commentary paths whose search for a place stopped at MAX_ALIGNED candidates (their "unplaced" may be wrong) */
+  readonly scanCapped: number;
 }
 
 export interface TitleFitReport {
@@ -70,6 +72,14 @@ export interface TitleFitReport {
  * 100% placed by the engine's own judgement).
  */
 const PLACE_MAX_PENALTY = 0.15;
+
+/**
+ * The most base units aligned from one bucket for one commentary path. Units whose path ENDS with the commentary path are found by
+ * an index and do not depend on it; the cap bounds only the fuzzy search (similar name, other kind word), so a big unfit book cannot cost
+ * minutes. A path that was not placed after a truncated bucket may really have a place there (`metrics.scanCapped` counts them). Not
+ * measured on the library: the fixtures never reach the cap, and 256 is a guess.
+ */
+const MAX_ALIGNED = 256;
 
 /**
  * Thresholds, measured on the real library (see title-fit.local.test.ts, which prints the pairs and the
@@ -112,28 +122,48 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
     commentaryKinds: cs.kinds,
     commentaryHasNamed: cs.hasNamed,
   };
+  // every unit by each SUFFIX of its path: a commentary path equal to the end of a base path ("פרק א › פסוק ג" under "בראשית ›…") is found at once
+  const bySuffix = new Map<string, Unit[]>();
+  for (const u of units)
+    for (let i = 0; i < u.path.length; i++) {
+      const k = pathKey(u.path.slice(i));
+      const list = bySuffix.get(k);
+      if (list) list.push(u);
+      else bySuffix.set(k, [u]);
+    }
+  let scanCapped = 0;
   const placedCache = new Map<string, boolean>();
+  const fits = (path: readonly PathElement[], u: Unit): boolean => {
+    const a = align(path, u.path, actx);
+    return !!a && a.missing === 0 && a.penalty <= PLACE_MAX_PENALTY;
+  };
   const placed = (path: readonly PathElement[]): boolean => {
     const key = pathKey(path);
     const hit = placedCache.get(key);
     if (hit !== undefined) return hit;
-    let ok = false;
-    const seen = new Set<Unit>();
-    outer: for (const e of path) {
-      for (const u of byKey.get(elementKey(e)) ?? []) {
-        if (seen.has(u)) continue;
-        seen.add(u);
-        const a = align(path, u.path, actx);
-        if (a && a.missing === 0 && a.penalty <= PLACE_MAX_PENALTY) {
-          ok = true;
-          break outer;
+    let ok = (bySuffix.get(key) ?? []).slice(0, MAX_ALIGNED).some((u) => fits(path, u));
+    if (!ok) {
+      // the rest (a similar name, a kind word the other book writes differently, an amud): units sharing an element key, but a
+      // bucket of thousands ("#1" in every chapter) is read only to MAX_ALIGNED, not whole for every title that matches nothing
+      const seen = new Set<Unit>();
+      let capped = false;
+      outer: for (const e of path) {
+        const bucket = byKey.get(elementKey(e)) ?? [];
+        if (bucket.length > MAX_ALIGNED) capped = true;
+        for (const u of bucket.slice(0, MAX_ALIGNED)) {
+          if (seen.has(u)) continue;
+          seen.add(u);
+          if (fits(path, u)) {
+            ok = true;
+            break outer;
+          }
         }
       }
+      if (capped && !ok) scanCapped++;
     }
     placedCache.set(key, ok);
     return ok;
   };
-
   let contentLines = 0;
   let titledLines = 0;
   let placedLines = 0;
@@ -168,6 +198,7 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
     placedLines,
     placedShare: titledLines ? placedLines / titledLines : 0,
     duplicateShare: cs.headings.length ? duplicates / cs.headings.length : 0,
+    scanCapped,
   };
 
   const reasons: TitleFitReason[] = [];
@@ -189,3 +220,5 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
   const verdict: TitleFitVerdict = noTitles || metrics.placedShare < T.unfitPlaced ? "unfit" : metrics.placedShare >= T.fitPlaced && metrics.duplicateShare <= T.maxDuplicates ? "fit" : "partial";
   return { verdict, reasons, metrics };
 }
+
+
