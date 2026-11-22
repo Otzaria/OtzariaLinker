@@ -86,6 +86,13 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   test.setTimeout(30 * 60_000);
   const seen = watchPage(page);
   const out: Record<string, unknown> = { dbBytes: statSync(DB!).size };
+  const flush = () => {
+    console.info("V52_PARTIAL " + JSON.stringify(out));
+    if (process.env.VALIDATION_OUT) {
+      mkdirSync(process.env.VALIDATION_OUT, { recursive: true });
+      writeFileSync(join(process.env.VALIDATION_OUT, "repository-real-v52.json"), JSON.stringify(out, null, 2));
+    }
+  };
   await installProbe(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
@@ -98,6 +105,7 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   await (await chooser).setFiles(DB!);
   await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 180_000 });
   out.open = await w();
+  flush();
 
   // 2. the repository screen; nothing is read until asked
   await page.evaluate(() => (location.hash = "#/repository"));
@@ -118,15 +126,18 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   await page.waitForTimeout(2000);
   const keptLater = await repo<number>(page, "repo.rows.value.size");
   out.stop = { stopMs, countedAtStop: keptAtStop, countedTwoSecondsLater: keptLater, progressCleared: await repo<boolean>(page, "repo.progress.value === null") };
+  flush();
   expect(keptLater, "the count kept going after stop").toBe(keptAtStop);
   expect(keptAtStop).toBeGreaterThanOrEqual(300);
   out.firstPart = await w();
+  flush();
 
   // 4. resume: continues with the books not yet counted and finishes
   w = await window_(page);
   await dlg.getByRole("button", { name: /המשך הניתוח/ }).click();
   await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 20 * 60_000 });
   out.resume = await w();
+  flush();
   out.totals = await repo<unknown>(page, "(({ books, counted, links, noLinks }) => ({ books, counted, links, noLinks }))(repo.totals.value)");
   expect(await repo<number>(page, "repo.rows.value.size")).toBe(out.books as number);
 
@@ -137,6 +148,7 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   await dlg.getByLabel("חיפוש ספר").fill("א");
   await dlg.getByLabel("חיפוש ספר").fill("");
   out.listInteraction = await w();
+  flush();
 
   // 6. coverage of 200 books (the dialog's own button)
   w = await window_(page);
@@ -145,6 +157,7 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   await expect(dlg.getByText(/נקראו הקישורים של כל/)).toBeVisible({ timeout: 10 * 60_000 });
   await expect.poll(() => repo<number>(page, "[...repo.rows.value.values()].filter((r) => r.coverage).length"), { timeout: 10 * 60_000 }).toBeGreaterThan(0);
   out.coverage200 = { ...(await w()), booksWithCoverage: await repo<number>(page, "[...repo.rows.value.values()].filter((r) => r.coverage || r.coverageUnknown).length") };
+  flush();
 
   // 7. title fit of the three biggest proposed pairs, through the guided plan's pair rows
   await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
@@ -154,7 +167,7 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
     page,
     `(() => {
       const size = (k) => store.books.value.get(k)?.lineCount ?? 0;
-      const ps = repo.suggestions.value.proposals.filter((p) => p.dependant.key && p.base.key).map((p) => ({ p, s: size(p.dependant.key) + size(p.base.key) })).sort((a, b) => b.s - a.s).slice(0, 3);
+      const ps = repo.suggestions.value.proposals.filter((p) => p.kind === "commentary" && p.dependant.key && p.base.key).map((p) => ({ p, s: size(p.dependant.key) + size(p.base.key) })).sort((a, b) => b.s - a.s).slice(0, 3);
       for (const { p } of ps) repo.togglePickedPair(p);
       return { n: repo.suggestions.value.proposals.length, lines: ps.map((x) => x.s) };
     })()`,
@@ -169,9 +182,33 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
   const pairs = main.locator("details.guided-pairs");
   await pairs.locator("summary").click();
   await expect(pairs.locator(".pair-row").first()).toBeVisible({ timeout: 120_000 });
-  // every pair row has its verdict (the fit is computed in a worker, whole books read)
-  await expect.poll(async () => (await pairs.locator(".pair-fit .fit-badge").count()) >= 3, { timeout: 15 * 60_000, intervals: [1000] }).toBe(true);
-  out.titleFit3 = { ...(await w()), pairRows: await pairs.locator(".pair-row").count() };
+  // every pair row is answered (the fit is computed in a worker that reads both whole books): bounded wait, the outcome is the measurement
+  const loading = pairs.locator(".pair-fit", { hasText: "בודק את הכותרות" });
+  let fitFinished = true;
+  try {
+    await expect.poll(async () => (await loading.count()) === 0, { timeout: 6 * 60_000, intervals: [1000] }).toBe(true);
+  } catch {
+    fitFinished = false;
+  }
+  const kinds = async () => ({
+    notesBooks: await pairs.locator(".pair-row", { hasText: "ספר הערות" }).count(),
+    withVerdict: await pairs.locator(".pair-fit .fit-badge").count(),
+    askButton: await pairs.getByRole("button", { name: "בדיקת התאמת הכותרות" }).count(),
+  });
+  out.titleFit3 = { ...(await w()), finished: fitFinished, stillLoading: await loading.count(), pairRows: await pairs.locator(".pair-row").count(), afterAutoCheck: await kinds() };
+  // a pair whose automatic check ended without a verdict offers the button: press it, as the user would, and time the answer
+  const ask = pairs.getByRole("button", { name: "בדיקת התאמת הכותרות" });
+  const asked: number[] = [];
+  for (let i = 0; i < 3 && (await ask.count()) > 0; i++) {
+    const t0 = Date.now();
+    const wk = await window_(page);
+    await ask.first().click();
+    await expect.poll(async () => (await loading.count()) === 0, { timeout: 6 * 60_000, intervals: [500] }).toBe(true);
+    asked.push(Date.now() - t0);
+    (out.titleFit3 as Record<string, unknown>)["ask" + (i + 1)] = await wk();
+  }
+  Object.assign(out.titleFit3 as object, { askedMs: asked, afterAsking: await kinds() });
+  flush();
 
   // 8. switching the database in the middle of a scan: the old scan is cancelled, nothing of it appears under the new one
   // a second, small database is opened next to it (read-only too), from the workspace's "add" menu
@@ -218,6 +255,7 @@ test("v52 in the built tool: analysis, stop, resume, switching the database, cov
     writeFileSync(join(process.env.VALIDATION_OUT, "repository-real-v52.json"), JSON.stringify(out, null, 2));
   }
   console.info("V52_RESULT " + JSON.stringify(out));
+  expect((out.titleFit3 as { finished: boolean }).finished, "the title fit of three big pairs finished").toBe(true);
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });

@@ -68,6 +68,8 @@
 
 השחרור מופעל **כשמפרסמים GitHub Release**. אין צורך להעלות קבצים ידנית.
 
+**מצב (22.11.2026): אף Release של 4.x לא פורסם, ולא נוצר tag.** פרסום גרסה 4 (גם alpha) מחכה לאישור מפורש של הבעלים; סבב התיקונים לפני מיזוג PR 3 לא יצר tag, Release או הרצת workflow. שלבים 1–5 למטה נבדקו מול `release.yml` ו־`ci.yml` בקריאה (הטריגר `release: published`, בדיקת ה־tag מול `package.json`, סדר הצעדים, בדיקת הבנייה החוזרת, `gh release upload --clobber`) ולא בהרצה.
+
 1. מעדכנים את `version` ב־`package.json` (וב־`package-lock.json`, למשל `npm version 4.0.0 --no-git-tag-version`),
    ומתעדים את השינויים.
 2. commit, ומיזוג ל־`main`.
