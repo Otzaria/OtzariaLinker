@@ -203,19 +203,19 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
     const scope = { kind: "books", keys: [key("חידושים")] } as const;
     expect(store.maxLink.plan(scope, PAIRS).steps).toHaveLength(0);
     const plan = store.maxLink.plan(scope, PAIRS, undefined, { pairs: [{ dependant: "חידושים", base: "בראשית" }] });
-    // the same book against its base by the user's word (+ the intermediate commentator on it, plan.ts intermediateSteps)
-    expect(plan.steps.map((s) => s.id).slice(0, 2)).toEqual([`headings|${key("חידושים")}>${key("בראשית")}`, `dibur-hamatchil|${key("חידושים")}>${key("בראשית")}`]);
-    expect(plan.steps.slice(0, 2).every((s) => s.kind === "pair" && s.relation.via === "user")).toBe(true);
+    // the same book against its base by the user's word; no intermediate commentator is added to a pair the user named
+    expect(plan.steps.map((s) => s.id)).toEqual([`headings|${key("חידושים")}>${key("בראשית")}`, `dibur-hamatchil|${key("חידושים")}>${key("בראשית")}`]);
+    expect(plan.steps.every((s) => s.kind === "pair" && s.relation.via === "user")).toBe(true);
   });
 
   it("pairPlan: one book, several targets, all methods merged into ONE run (pair mode)", async () => {
     const { store, key } = await opened();
     const plan = store.maxLink.pairPlan(key("ביאור על בראשית"), [key("בראשית"), key("ספר דוגמה")], ["headings", "dibur-hamatchil"]);
-    // no citations step in pair mode; the fifth step is the intermediate commentator on the first target
-    expect(plan.steps.map((s) => `${s.engine}>${s.kind === "pair" ? s.target.title : ""}`)).toEqual(["headings>בראשית", "dibur-hamatchil>בראשית", "headings>ספר דוגמה", "dibur-hamatchil>ספר דוגמה", 'dibur-hamatchil>רש"י על בראשית']);
+    // no citations step in pair mode, and no intermediate commentator: only the targets the user chose
+    expect(plan.steps.map((s) => `${s.engine}>${s.kind === "pair" ? s.target.title : ""}`)).toEqual(["headings>בראשית", "dibur-hamatchil>בראשית", "headings>ספר דוגמה", "dibur-hamatchil>ספר דוגמה"]);
     expect(await store.maxLink.run(plan, "זוג עם כמה יעדים")).toBe(true);
     const run = store.suggestions.run.value!;
-    expect(run.maxlink!.steps.length).toBe(5);
+    expect(run.maxlink!.steps.length).toBe(4);
     // the second target is not a base of it: the merge puts everything in one run
     expect(store.maxLink.job.value!.choices).toEqual(plan.choices);
   });
@@ -242,7 +242,7 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
   it("the choices travel with the job: a resumed job plans the same pairs", async () => {
     const { store, key } = await opened();
     const plan = store.maxLink.pairPlan(key("חידושים"), [key("בראשית")], ["dibur-hamatchil"]);
-    expect(plan.steps.map((s) => s.engine)).toEqual(["dibur-hamatchil", "dibur-hamatchil"]);
+    expect(plan.steps.map((s) => s.engine)).toEqual(["dibur-hamatchil"]);
     await store.maxLink.run(plan, "זוג");
     expect(store.maxLink.job.value!.choices).toEqual({ pairs: [{ dependant: "חידושים", base: "בראשית" }], methods: { "חידושים>בראשית": ["dibur-hamatchil"] } });
   });

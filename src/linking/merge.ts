@@ -407,9 +407,14 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
       const ranked = [...at].sort((a, b) => supportLevel(a) - supportLevel(b) || b.rep.s.score - a.rep.s.score || cmp(a.id, b.id));
       const [best, second] = [ranked[0]!, ranked.find((g) => g.rep.oEnd.book.key !== ranked[0]!.rep.oEnd.book.key)!];
       if (supportLevel(best) < supportLevel(second)) {
-        best.wonBy = "candidates";
+        // an earlier settle (4c) keeps its own reason; the candidates' one is only for a group that won nothing yet
+        best.wonBy ??= "candidates";
         for (const g of ranked) if (g !== best && g.rep.oEnd.book.key !== best.rep.oEnd.book.key) (best.outweighs.push(g), (g.folded = true));
-      } else for (const g of at) g.multi = at.filter((o) => o !== g && o.rep.oEnd.book.key !== g.rep.oEnd.book.key);
+      } else {
+        // the equally sure ones name each other; a less sure candidate is left as it is
+        const tied = at.filter((g) => supportLevel(g) === supportLevel(best));
+        for (const g of tied) g.multi = tied.filter((o) => o !== g && o.rep.oEnd.book.key !== g.rep.oEnd.book.key);
+      }
     }
   }
 
@@ -523,7 +528,7 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   }
   if (g.multi.length) {
     // equally sure suggestions to several of the books the user chose: none is picked for them
-    stats.conflicts++;
+    if (!g.conflictWith.length) stats.conflicts++;
     rules.push("maxlink/multi-target");
     warnings.push(r("maxlink/multi-target", `השורה הזו מתאימה באותה מידה לכמה מהספרים שבחרתם: ${g.multi.map((o) => placeOf(o, g)).join("; ")}. לא נבחר ביניהם: בדקו ובחרו.`));
     if (level < AMBIGUOUS) level = AMBIGUOUS;

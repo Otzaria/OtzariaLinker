@@ -759,6 +759,8 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
     for (const own of relations.get(k) ?? []) {
       // a midrash or a translation (by its links) does not quote רש"י or תוספות
       if (own.kind !== "commentary" || own.scope || own.through || own.dependence || own.dhOnly || own.dependant.key !== k) continue;
+      // the user named this pair (a book against the books of their choice): no pair to a book they did not choose
+      if (own.via === "user") continue;
       // the user named this pair's methods without dibur-hamatchil: nothing else runs on it
       const named = methods?.[pairMethodKey(own.dependant.title, own.base.title)];
       if (named && !named.includes("dibur-hamatchil")) continue;
@@ -878,12 +880,12 @@ function stepsFor(rel: Relation, depBook: PlanBook): StepSpec[] {
  * PlanChoices.pairs as relations, by dependant key. A title open in several sources: the first book of that title.
  * A title that names no open book gives the dependant a problem instead (the plan says which).
  */
-function userRelations(pairs: readonly UserPair[] | undefined, library: readonly PlanBook[]): Map<string, Relation[] | { problem: string }> {
+function userRelations(pairs: readonly UserPair[] | undefined, library: readonly PlanBook[]): { relations: Map<string, Relation[] | { problem: string }>; unmade: Map<string, string[]> } {
   const relations = new Map<string, Relation[] | { problem: string }>();
-  if (!pairs?.length) return relations;
+  const bad = new Map<string, string[]>();
+  if (!pairs?.length) return { relations, unmade: bad };
   const byTitle = new Map<string, PlanBook>();
   for (const b of library) if (!byTitle.has(b.title)) byTitle.set(b.title, b);
-  const bad = new Map<string, string[]>();
   for (const p of pairs) {
     const dep = byTitle.get(p.dependant);
     const base = byTitle.get(p.base);
@@ -899,7 +901,7 @@ function userRelations(pairs: readonly UserPair[] | undefined, library: readonly
     else relations.set(dep.key, [rel]);
   }
   for (const [key, why] of bad) if (!relations.has(key)) relations.set(key, { problem: `${why.join("; ")}. פתחו אותו ונסו שוב.` });
-  return relations;
+  return { relations, unmade: bad };
 }
 
 export function planMaxLink(input: PlanInput): MaxLinkPlan {
@@ -912,7 +914,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   // every relation that touches a selected book: as the dependant, or as the base of an open dependant
   const relations = new Map<string, Relation[]>(); // by dependant key
   const problems = new Map<string, string>();
-  const user = userRelations(input.choices?.pairs, input.library);
+  const { relations: user, unmade } = userRelations(input.choices?.pairs, input.library);
   /** every open commentary on a base, selected or not: the intermediate commentators come from here */
   const commentariesOn = new Map<string, Relation[]>();
   for (const b of input.library) {
@@ -993,6 +995,9 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (notes.length) decisions.push(notes.length === 1 ? `יש לו ספר הערות פתוח: ${quote(notes[0]!.dependant.title)}.` : `יש לו ${notes.length} ספרי הערות פתוחים.`);
     for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
     if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
+    // a pair the user asked for that could not be made, said even when the book's other pairs were made
+    const missed = unmade.get(k);
+    if (missed?.length && all.length) decisions.push(`לא נוצר קישור לפי בחירתכם: ${missed.join("; ")}.`);
     const n = touches.get(k) ?? 0;
     let skipped: string | undefined;
     if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;

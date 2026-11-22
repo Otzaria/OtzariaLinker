@@ -401,6 +401,18 @@ describe("mergeSuggestions — the candidate books of one line (candidateBooks)"
     }
   });
 
+  it("a third, less sure candidate is not called 'equally sure': only the tied ones name each other", () => {
+    const B3: BookRef = { key: "d:3", title: "ספר שלישי", origin: "otzaria" };
+    const toB3: MergeItem = { suggestion: sg("headings", side(C, 5), side(B3, 1), "possible"), focus: C.key };
+    const { suggestions, stats } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain"), toB3], { candidateBooks: [B.key, B2.key, B3.key] });
+    const by = (key: string) => suggestions.find((s) => s.target.book.key === key)!;
+    expect(by(B.key).alternatives.map((a) => a.target.book.key)).toEqual([B2.key]);
+    expect(by(B2.key).alternatives.map((a) => a.target.book.key)).toEqual([B.key]);
+    expect(by("d:3").rules).not.toContain("maxlink/multi-target");
+    expect(by("d:3").confidence).toBe("possible");
+    expect(stats.conflicts).toBe(2);
+  });
+
   it("other lines, and books that are not candidates, are untouched", () => {
     const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(6, 3, "certain"), toB(7, 4, "certain")], opts);
     expect(suggestions.map((s) => s.confidence)).toEqual(["certain", "certain", "certain"]);
@@ -430,7 +442,9 @@ describe("mergeSuggestions — matched words (#11 data)", () => {
     const dh: MergeItem = { suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "ambiguous", { declaredType: "commentary", matched: { source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } } }), focus: C.key };
     const { suggestions } = mergeSuggestions([H(5, 10, "certain"), dh]);
     const s = suggestions[0]!;
-    if (s.source.book.key === C.key) expect(s.matched).toEqual({ source: { rawStart: 0, rawEnd: 6 }, target: { rawStart: 3, rawEnd: 9 } });
-    else expect(s.matched).toEqual({ source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } });
+    // the representative is the headings record (commentary → base): the dibur-hamatchil spans, written base → commentary, are turned
+    expect(s.engine).toBe("headings");
+    expect(s.source.book.key).toBe(C.key);
+    expect(s.matched).toEqual({ source: { rawStart: 0, rawEnd: 6 }, target: { rawStart: 3, rawEnd: 9 } });
   });
 });

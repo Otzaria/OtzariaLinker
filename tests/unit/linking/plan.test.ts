@@ -680,12 +680,19 @@ describe("planMaxLink — title gate, explicit pairs and per-pair methods", () =
     expect(steps(p)).toEqual(['headings:רש"י על ספר א>ספר ב', 'dibur-hamatchil:רש"י על ספר א>ספר ב']);
   });
 
-  it('the intermediate-commentator pair (רש"י on the same base) is added only where dibur-hamatchil is among the pair methods', () => {
+  it('an explicit pair adds no intermediate-commentator pair (רש"י on the same base): only the books the user chose', () => {
     const sel = { selected: ["u:1"], library: lib };
-    const withDh = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }] } });
-    expect(steps(withDh)).toContain('dibur-hamatchil:חיבור כלשהו>רש"י על ספר א');
-    const headingsOnly = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }], methods: { [pairMethodKey("חיבור כלשהו", "ספר א")]: ["headings"] } } });
-    expect(steps(headingsOnly)).toEqual(["headings:חיבור כלשהו>ספר א"]);
+    const explicit = planPairs({ ...sel, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר א" }] } });
+    expect(steps(explicit)).toEqual(["headings:חיבור כלשהו>ספר א", "dibur-hamatchil:חיבור כלשהו>ספר א"]);
+    // the same book by a name that says its base still gets the intermediates (the pair is the planner's)
+    expect(steps(planPairs({ selected: ["c:1"], library: [...lib, book("c:2", 'תוספות על ספר א')] }))).toContain('dibur-hamatchil:רש"י על ספר א>תוספות על ספר א');
+  });
+
+  it("a pair that cannot be made is named in the book's decisions even when another pair of it is made", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: { pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב" }, { dependant: "חיבור כלשהו", base: "ספר שלא נפתח" }] } });
+    expect(steps(p)).toEqual(["headings:חיבור כלשהו>ספר ב", "dibur-hamatchil:חיבור כלשהו>ספר ב"]);
+    expect(p.books[0]!.skipped).toBeUndefined();
+    expect(p.books[0]!.decisions.join(" ")).toContain("ספר שלא נפתח");
   });
 
   it("an explicit notes relation runs footnotes with the main book as the source", () => {
