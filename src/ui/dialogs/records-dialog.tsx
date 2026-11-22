@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { mappingGaps, recordsToLinksFiles, type FieldOrFixed, type RecordsMapping, type RecordsTable } from "../../formats/records/records";
-import { TYPE_CHOICES } from "../../state/store";
+import { TypeOptions } from "../workspace/type-options";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import "./records-dialog.css";
@@ -98,9 +98,7 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
               </select>
               {"fixed" in m.type && (
                 <select aria-label="הסוג הקבוע" value={m.type.fixed} onChange={(e) => set({ type: { fixed: e.currentTarget.value } as FieldOrFixed })}>
-                  {TYPE_CHOICES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
+                  <TypeOptions withKey />
                 </select>
               )}
             </label>

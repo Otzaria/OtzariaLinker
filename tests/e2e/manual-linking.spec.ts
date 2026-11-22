@@ -116,3 +116,28 @@ test("dark theme and narrow screen keep the workspace usable", async ({ page }) 
   await shot(page, "7-narrow");
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 26a: the type picker groups the types the way Otzaria shows them: commentary types (the commentary panel)
+ * and link types (the links panel), as native optgroups; choosing a type from either group still works.
+ */
+test("the link type picker is grouped into commentary types and link types", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const select = page.locator(".builder").getByRole("combobox", { name: /^סוג הקשר/ });
+  const groups = await select.locator("optgroup").evaluateAll((els) => els.map((g) => ({ label: g.getAttribute("label"), options: [...g.querySelectorAll("option")].map((o) => o.value) })));
+  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  expect(groups[0]!.options).toEqual(expect.arrayContaining(["commentary", "targum", "footnotes"]));
+  expect(groups[1]!.options).toEqual(expect.arrayContaining(["reference", "quotation", "other"]));
+  expect(groups[1]!.options).not.toContain("commentary");
+  expect(groups[2]!.options).toEqual(["source"]);
+  await select.selectOption("quotation");
+  await expect(select).toHaveValue("quotation");
+  await select.selectOption("footnotes");
+  await expect(select).toHaveValue("footnotes");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

@@ -5,6 +5,7 @@ import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
 import type { Pick, Side } from "../../state/store";
 import { TYPE_CHOICES } from "../../state/store";
+import { TypeOptions } from "./type-options";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { LinkItem } from "./link-item";
@@ -68,11 +69,7 @@ export function Builder() {
       <label class="field">
         סוג הקשר
         <select value={TYPE_CHOICES.includes(store.draftType.value) ? store.draftType.value : "__custom"} onChange={(e) => e.currentTarget.value !== "__custom" && ((store.draftType.value = e.currentTarget.value), (store.draftTypeTouched.value = true))}>
-          {TYPE_CHOICES.map((t) => (
-            <option key={t} value={t}>
-              {TYPE_LABELS[t.toUpperCase() as keyof typeof TYPE_LABELS]?.he ?? t}
-            </option>
-          ))}
+          <TypeOptions />
           {!TYPE_CHOICES.includes(store.draftType.value) && <option value="__custom">{store.draftType.value} (לא מוכר)</option>}
         </select>
         <span class="muted">{TYPE_LABELS[parseConnectionType(store.draftType.value).type].hint}</span>
