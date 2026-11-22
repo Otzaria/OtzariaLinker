@@ -397,3 +397,40 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * 3.2: before the run the plan says how many links the chosen books ALREADY have (the project's and the open database's)
+ * and what will and will not go into the final file.
+ */
+test("guided flow: the plan counts the existing links of the chosen books and says what the file will hold and what is held", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("1 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  const existing = main.locator(".guided-existing");
+  await expect(existing).toContainText("בפרויקט 0", { timeout: 30_000 });
+  await expect(existing).toContainText(/במסד [\d,]+/, { timeout: 30_000 });
+  const dbCount = Number((await existing.textContent())!.match(/במסד ([\d,]+)/)![1]!.replace(/,/g, ""));
+  expect(dbCount).toBeGreaterThan(0); // the database slice links Bereshit to its commentaries
+  const final = main.locator(".guided-final");
+  await expect(final).toContainText("קישורי המסד לא נכתבים");
+  await expect(final).toContainText("מוחזק");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
