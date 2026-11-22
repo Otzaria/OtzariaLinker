@@ -1,4 +1,4 @@
-import { customKey, ENGINE_OPTION_SPECS, isEssential, MARKER_CHOICES, type FormValues, type OptionsCheck, type OptionSpec } from "../../linking/automatic/option-specs";
+import { customKey, ENGINE_OPTION_SPECS, isEssential, isShown, MARKER_CHOICES, type FormValues, type OptionsCheck, type OptionSpec } from "../../linking/automatic/option-specs";
 import type { EngineId } from "../../linking/automatic";
 
 /*
@@ -16,7 +16,7 @@ const changer = (spec: OptionSpec, onChange: OnChange): OnChange => (key, value)
 };
 
 export function EssentialOptions({ engine, values, check, onChange }: { engine: EngineId; values: FormValues; check: OptionsCheck; onChange: OnChange }) {
-  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => isEssential(s, values));
+  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => isEssential(s, values) && isShown(s, values));
   if (!specs.length) return null;
   return (
     <div class="builder" style="padding:0">
@@ -34,7 +34,7 @@ export function EngineOptions({ engine, values, check, onChange, onReset }: {
   onChange: OnChange;
   onReset: () => void;
 }) {
-  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => !isEssential(s, values));
+  const specs = ENGINE_OPTION_SPECS[engine].filter((s) => !isEssential(s, values) && isShown(s, values));
   if (!specs.length) return null;
   return (
     <details class="held engine-options" open={check.changed > 0 || Object.keys(check.errors).length > 0}>

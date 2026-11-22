@@ -10,6 +10,7 @@ import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
 import { sourceNameText } from "../shell/file-name";
 import { defaultFormValues, toEngineOptions, type FormValues } from "../../linking/automatic/option-specs";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { SourceFilterPreviewBox } from "./source-filter-preview";
 import { BulkApprove } from "./bulk-approve";
 import { jobStateText, jobWantsAttention, MaxLinkJobView } from "./maxlink-job";
 import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
@@ -213,6 +214,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         </>
       )}
       <EssentialOptions engine={engine} values={values} check={check} onChange={onOption} />
+      {mode === "pair" && !single && <SourceFilterPreviewBox engine={engine} source={s} options={check.options} />}
       {advanced ? (
         <EngineOptions
           engine={engine}
