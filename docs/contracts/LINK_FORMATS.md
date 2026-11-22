@@ -13,6 +13,8 @@
 | **[L]** | `Otzaria/otzaria-library`, `main` | `17eb3cc5a6fc1556bcfe5890c8596c40a55fdb10` (2026-11-11) |
 | **[DB]** | `seforim.db` אמיתי, `db_version=37`, `db_schema_version=7` | — |
 
+**נבדק מחדש מול הראשים ב־2026-11-22** ([`UPSTREAM_PRS_V6.md`](UPSTREAM_PRS_V6.md)): F `4bbf7dc5`, A `cee59520`, L `318e9b16`. ‏`Generator.kt`, ה־enum של הסוגים ו־`Database.sq` זהים בבית ל־pin של F, ולכן **ה־pins לא עודכנו**; מה שהשתנה ומתועד שם: אימות טביעות אצבע של `ref_*` בסנכרון (F), עוגני side 1 (F #145), הסוג `INLINE_LINKER` באפליקציה (§1.12), ו־otzaria-library #1373 (עוגן על קישור פירוש קיים: `UPSTREAM_PRS_V6.md` §3).
+
 ### קיצורי נתיבים
 
 - **`G`** = `[F] generator/otzariasqlite/src/commonMain/kotlin/io/github/kdroidfilter/seforimlibrary/otzariasqlite/Generator.kt`
