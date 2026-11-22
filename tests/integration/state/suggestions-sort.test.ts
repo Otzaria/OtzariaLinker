@@ -77,3 +77,17 @@ describe("the suggestions' sort order", () => {
     expect(sg.neighbour(1)).toBe(best[1]!.id);
   });
 });
+
+describe("the sort order while reviewing", () => {
+  it("'by state' does not reshuffle when a decision is made, and 'next pending' still finds the next one", async () => {
+    const sg = (await ran()).suggestions;
+    sg.setSort("state");
+    const before = sg.ordered.value.map((s) => s.id);
+    sg.show(before[0]!);
+    sg.approve([before[0]!]);
+    expect(sg.ordered.value.map((s) => s.id)).toEqual(before); // the snapshot holds until the order is chosen again
+    expect(sg.neighbour(1, true)).toBe(before[1]);
+    sg.setSort("state");
+    expect(sg.ordered.value.at(-1)!.id).toBe(before[0]); // chosen again: the approved one goes last
+  });
+});

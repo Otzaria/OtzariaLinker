@@ -109,6 +109,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
   .panel-head .src-badge:not(.twin) { display: none; }
 }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
+.title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }
 .book-info { padding: 8px 12px; display: grid; gap: 6px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); }
 .book-info .bi-title { font-size: var(--fs-md); overflow-wrap: anywhere; user-select: text; }

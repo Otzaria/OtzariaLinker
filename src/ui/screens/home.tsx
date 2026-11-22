@@ -314,7 +314,13 @@ export function Home() {
 export function StartTaskDialog({ onClose }: { onClose: () => void }) {
   const store = useStore();
   const id = store.startTask.value;
-  return isPathId(id) ? <PathChooser key={id} path={id} onClose={onClose} /> : <TaskSheet key={id ?? ""} onClose={onClose} />;
+  // the sheet is a new <dialog> when the path hands over to its task: focus goes back to the card that opened the first one
+  const opener = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
+  const close = () => {
+    onClose();
+    if (opener.current?.isConnected) opener.current.focus();
+  };
+  return isPathId(id) ? <PathChooser key={id} path={id} onClose={close} /> : <TaskSheet key={id ?? ""} onClose={close} />;
 }
 
 /** The first question of a path: which task. Radio group (arrows move and select), then "continue". */

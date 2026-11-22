@@ -151,6 +151,8 @@ export class SuggestionsState {
   readonly current = signal<string | null>(null);
   /** the engine picked in the run form, before any run: it decides what the two sides are called (state/roles.ts) */
   readonly formEngine = signal<EngineId | null>(null);
+  /** the decision states as they were when "by state" was chosen: deciding must not reshuffle the list under the reviewer */
+  private readonly rankSnapshot = signal<ReadonlyMap<string, SuggestionState> | null>(null);
   /** how the list is ordered for the user (issue 8); the run itself keeps the engine's order */
   readonly sortOrder = signal<SuggestionSort>("book");
   /** the run's suggestions in the chosen order: the table and the one-at-a-time views read this one list */
@@ -158,7 +160,7 @@ export class SuggestionsState {
     const list = this.run.value?.result.suggestions ?? [];
     const order = this.sortOrder.value;
     // the decision state is read only when it is the order, so a decision does not reshuffle the other orders
-    return sortSuggestions(list, order, order === "state" ? ((st) => (s: Suggestion) => STATE_RANK[st.get(s.id) ?? "pending"])(this.state.value) : undefined);
+    return sortSuggestions(list, order, order === "state" ? ((st) => (s: Suggestion) => STATE_RANK[st.get(s.id) ?? "pending"])(this.rankSnapshot.value ?? this.state.value) : undefined);
   });
 
   readonly state = computed(() => {
@@ -210,6 +212,8 @@ export class SuggestionsState {
     const partial = isPartial(result);
     batch(() => {
       this.run.value = { engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
+      this.sortOrder.value = "book"; // a new run starts in the engine's order, and the card on its first suggestion
+      this.rankSnapshot.value = null;
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -231,6 +235,8 @@ export class SuggestionsState {
     const partial = isPartial(result);
     batch(() => {
       this.run.value = { engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
+      this.sortOrder.value = "book"; // a new run starts in the engine's order, and the card on its first suggestion
+      this.rankSnapshot.value = null;
       this.current.value = result.suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -278,6 +284,8 @@ export class SuggestionsState {
     }
     batch(() => {
       this.run.value = { engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) };
+      this.sortOrder.value = "book";
+      this.rankSnapshot.value = null;
       this.current.value = suggestions[0]?.id ?? null;
       this.host.sideTab.value = "suggestions";
     });
@@ -489,6 +497,7 @@ export class SuggestionsState {
   /** Chooses the order, and puts the one-at-a-time views on the top of the new list. */
   setSort(order: SuggestionSort): void {
     batch(() => {
+      this.rankSnapshot.value = order === "state" ? new Map(this.state.peek()) : null;
       this.sortOrder.value = order;
       this.current.value = this.ordered.value[0]?.id ?? null;
     });

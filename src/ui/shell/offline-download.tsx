@@ -18,7 +18,7 @@ export const offersOfflineDownload = (protocol: string): boolean => protocol ===
 export function OfflineDownload() {
   if (!offersOfflineDownload(location.protocol)) return null;
   return (
-    <a class="btn tonal offline-download" href={OFFLINE_FILE} download={OFFLINE_FILE} rel="noopener" title="קובץ אחד בגודל של כ־1MB: שומרים במחשב ופותחים בלחיצה כפולה, גם בלי אינטרנט">
+    <a class="btn tonal offline-download" href={OFFLINE_FILE} download={OFFLINE_FILE} rel="noopener" title="קובץ אחד בגודל של כ־2MB: שומרים במחשב ופותחים בלחיצה כפולה, גם בלי אינטרנט">
       <Icon name="fl_arrow_download" size={18} />
       הורדת הכלי לעבודה בלי אינטרנט
     </a>

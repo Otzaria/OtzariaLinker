@@ -48,7 +48,7 @@ export function Reader({ side }: { side: Side }) {
   // Ctrl+F while this reader has focus searches its book instead of the browser's find
   const onKeyDown = (e: KeyboardEvent) => {
     // Escape closes the book-info strip and keeps the focus on the name that opened it
-    if (e.key === "Escape" && infoOpen) {
+    if (e.key === "Escape" && infoOpen && !e.defaultPrevented) {
       setInfoOpen(false);
       (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".panel-head h2 button")?.focus();
       return;
