@@ -1,3 +1,4 @@
+import { isInlineLinkerType } from "../../core/links/connection-type";
 import type { BookHeading } from "../../core/books";
 import type { BookRef, Link } from "../../core/links/model";
 import { unsafeFileTitle } from "../../core/links/titles";
@@ -69,6 +70,7 @@ export function planSefariaCsv(links: readonly Link[], headingsOf: (book: BookRe
   const bySource = new Map<string, SefariaCsvRow[]>();
   const ordered = [...links].sort((a, b) => cmp(a.source.book.title, b.source.book.title) || a.source.line - b.source.line || a.target.line - b.target.line);
   for (const l of ordered) {
+    if (isInlineLinkerType(l.declaredType)) continue; // Otzaria's personal-import type: no such type in a Sefaria CSV (sefariaCsvOmissions says so)
     if (unsafeFileTitle(l.source.book.title)) continue; // never a file name that leaves the folder (A4)
     const rows = bySource.get(l.source.book.title) ?? [];
     rows.push({
@@ -94,8 +96,11 @@ const DROPPED_BY_OTZARIA = new Set(["export/heading-line", "export/line-out-of-r
  * end of its book stays in its links file (dropping it there would delete it from the library), but it
  * is no link to upload to Sefaria.
  */
-export function sefariaCsvOmissions(plan: Pick<ExportPlan, "warned">): { link: Link; problems: Problem[] }[] {
+export function sefariaCsvOmissions(plan: Pick<ExportPlan, "warned"> & Partial<Pick<ExportPlan, "written">>): { link: Link; problems: Problem[] }[] {
   const out: { link: Link; problems: Problem[] }[] = [];
+  for (const l of plan.written ?? [])
+    if (isInlineLinkerType(l.declaredType))
+      out.push({ link: l, problems: [{ code: "csv/omitted", severity: "error", message: 'לא נכלל בקובץ ה־CSV לספריא: הסוג "ציטוט בטקסט" מוכר רק לייבוא האישי של אוצריא, ולקובץ CSV של ספריא אין סוג כזה. ייצאו אותו כקובץ קישורים (JSON) לשימוש פרטי.', detail: "INLINE_LINKER" }] });
   for (const w of plan.warned) {
     const why = w.problems.filter((p) => DROPPED_BY_OTZARIA.has(p.code));
     if (why.length)

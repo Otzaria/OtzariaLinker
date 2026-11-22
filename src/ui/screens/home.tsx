@@ -280,7 +280,8 @@ export function StartTaskDialog({ onClose }: { onClose: () => void }) {
     const pending = store.pendingDbs.peek().length;
     await store.openFiles(files);
     // a database that was open already is not a new source (#22), but it fills the step all the same
-    const added = [...store.sources.peek().filter((s) => !before.has(s.info.id)).map((s) => s.info.id), ...store.lastOpen.reused];
+    const held = new Set(Object.values(done).flatMap((d) => (Array.isArray(d) ? d : [])));
+    const added = [...store.sources.peek().filter((s) => !before.has(s.info.id)).map((s) => s.info.id), ...store.lastOpen.reused.filter((id) => !held.has(id))];
     if (added.length) setDone((d) => ({ ...d, [i]: [...(Array.isArray(d[i]) ? (d[i] as string[]) : []), ...added] }));
     else if (store.linkState.peek().links.size !== links || store.pendingDbs.peek().length > pending) setDone((d) => ({ ...d, [i]: d[i] ?? true }));
   };

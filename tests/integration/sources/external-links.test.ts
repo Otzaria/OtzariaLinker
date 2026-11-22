@@ -84,6 +84,16 @@ describe("external_link is read when there is no link table", () => {
     expect(page.links[4]!.target).toMatchObject({ line: 100000, book: { key: bereshit.key } });
   });
 
+  it("a row with neither a line nor a ref that resolves is not a link (nothing is guessed, AGENTS §8)", async () => {
+    const { r, key } = await open(false);
+    // the placeholder row of book 9854 line 1 has no targetLineIndex and no targetRef: not counted, not listed
+    const s = await summary(r, key(9854));
+    expect(s.total).toBe(7);
+    const page = await r.dbLinksPage(key(9854), { offset: 0, limit: 20 });
+    expect(page.links.map((l) => l.target.book.title)).not.toContain("PLACEHOLDER no line");
+    expect((await r.existingLinks(key(9854), 0, 5)).map((l) => l.target.book.title)).not.toContain("PLACEHOLDER no line");
+  });
+
   it("a book's links in a line range come back as existing links (the reader's panel and the 'already exists' check)", async () => {
     const { r, key } = await open(false);
     const links = await r.existingLinks(key(9854), 0, 1);

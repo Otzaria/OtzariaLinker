@@ -246,7 +246,7 @@ export class SourceRegistry {
         return m;
       });
       this.refIndexes.set(bookKey, p);
-      while (this.refIndexes.size > 8) this.refIndexes.delete(this.refIndexes.keys().next().value!);
+      while (this.refIndexes.size > 48) this.refIndexes.delete(this.refIndexes.keys().next().value!);
       p.catch(() => this.refIndexes.delete(bookKey));
     }
     return p;
@@ -281,9 +281,20 @@ export class SourceRegistry {
             if (!again.some((r) => r.info.id === held.info.id)) again.push({ info: held.info, books: await held.books() });
             return;
           }
-          const opened = await this.add(await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob)));
-          this.byIdentity.set(identity, opened.info.id);
-          this.identityOf.set(opened.info.id, identity);
+          const fresh = await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob));
+          // another drop of the same file finished first (drops can overlap): keep that one, release this one
+          const raced = this.byIdentity.get(identity);
+          const winner = raced ? this.sources.get(raced) : undefined;
+          if (winner) {
+            fresh.close();
+            (result.reused ??= []).push({ info: winner.info, books: await winner.books() });
+            return;
+          }
+          // the identity is taken in the same synchronous step that registers the source (add sets it before it awaits),
+          // so a drop of the same file finishing in the meantime sees it
+          this.byIdentity.set(identity, fresh.info.id);
+          this.identityOf.set(fresh.info.id, identity);
+          const opened = await this.add(fresh);
           result.sources.push(opened);
         } catch (err) {
           // not Otzaria's schema: hand its tables to the mapping wizard instead of refusing the file

@@ -48,7 +48,7 @@ export class DbBookSource implements BookSource {
     const ext = links ? null : await ExternalLinksReader.open(reader.file, reader.caps);
     const warnings = [...reader.caps.warnings];
     if (ext && !ext.indexed)
-      warnings.push({ code: "db/external-links-unindexed", message: "לטבלת הקישורים החיצוניים (external_link) במסד אין אינדקס לפי ספר, ולכן הצגת הקישורים של ספר תסרוק את כל הטבלה: איטי במסד גדול." });
+      warnings.push({ code: "db/external-links-unindexed", message: "לטבלת הקישורים החיצוניים (external_link) במסד אין אינדקס לפי ספר, ולכן הצגת הקישורים של ספר תסרוק את כל הטבלה: איטי במסד גדול. כדי להאיץ, צרו במסד אינדקס על (sourceBookId, sourceLineIndex) בכלי שיצר אותו." });
     if (links && !links.indexed)
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
     const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links, ext);
@@ -196,7 +196,7 @@ export class DbBookSource implements BookSource {
 
   private async externalLinksAt(bookId: number, from: number, to: number): Promise<Link[]> {
     const rows = await this.ext!.atLines(bookId, from, to);
-    const out = await Promise.all(rows.map((r) => this.externalToLink(r)));
+    const out = (await Promise.all(rows.map((r) => this.externalToLink(r)))).filter((l): l is Link => !!l);
     // links INTO these lines from this database's own books — only once the scan that finds them has been made
     // (the listing builds it; a click on a line must not wait for a scan of the whole table)
     if (this.internalLinks) {
@@ -205,7 +205,7 @@ export class DbBookSource implements BookSource {
       if (at) {
         const ids: number[] = [];
         for (let i = at[0]; i < at[1]; i++) if (ix.targetLine[i]! >= from && ix.targetLine[i]! <= to && ix.sourceBook[i] !== bookId) ids.push(ix.rowid[i]!);
-        out.push(...(await Promise.all((await this.ext!.byRowids(ids)).map((r) => this.externalToLink(r)))));
+        out.push(...(await Promise.all((await this.ext!.byRowids(ids)).map((r) => this.externalToLink(r)))).filter((l): l is Link => !!l));
       }
     }
     return out;
@@ -218,7 +218,8 @@ export class DbBookSource implements BookSource {
    */
   private async buildExternalListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
     const t0 = performance.now();
-    const rows = await this.ext!.outgoing(id, ctx);
+    // a row with neither targetLineIndex nor targetRef cannot be placed: not counted (one with a ref may still resolve)
+    const rows = (await this.ext!.outgoing(id, ctx)).filter((r) => r.targetLine !== null || !!r.targetRef?.trim());
     const ix = await this.internal(ctx);
     const incoming: number[] = [];
     const at = ix.range.get(id);
@@ -258,7 +259,10 @@ export class DbBookSource implements BookSource {
       keys,
       async (ids) => {
         const got = new Map<number, Link>();
-        for (const r of await this.ext!.byRowids(ids)) got.set(r.rowid, await this.externalToLink(r));
+        for (const r of await this.ext!.byRowids(ids)) {
+          const l = await this.externalToLink(r);
+          if (l) got.set(r.rowid, l);
+        }
         return ids.map((i) => got.get(i)).filter((l): l is Link => !!l);
       },
       this.ext!.indexed ? "index" : "scan",
@@ -272,10 +276,12 @@ export class DbBookSource implements BookSource {
    * versions, a ref survives), else targetLineIndex. A target that is in no open source keeps its title (it is
    * bound when that source opens) and the ref as its place name; nothing is guessed.
    */
-  private async externalToLink(r: ExternalLinkRow): Promise<Link> {
+  private async externalToLink(r: ExternalLinkRow): Promise<Link | null> {
     const book = await this.targetBook(r);
-    let line = r.targetLine ?? 0;
+    let line: number | null = r.targetLine;
     if (book && r.targetRef?.trim() && !book.key.startsWith(`${this.info.id}:`)) line = (await this.resolver?.lineOfRef(book.key, r.targetRef)) ?? line;
+    // no targetLineIndex and a ref that no open book resolves: the line is unknown, and a link to a guessed line is worse than none (AGENTS §8)
+    if (line === null) return null;
     const target: BookRef = book ?? { key: `unresolved:${r.targetTitle}`, title: r.targetTitle, origin: "unknown" };
     return {
       id: `${this.info.id}:ext:${r.rowid}`,

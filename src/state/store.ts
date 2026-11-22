@@ -266,14 +266,19 @@ export class AppStore {
     // a file that is open already is not a new source: the same sources, the same books (#22)
     const openIds = new Set(this.sources.peek().map((x) => x.info.id));
     const reused = (res.reused ?? []).filter((r) => openIds.has(r.info.id));
-    this.lastOpen = { added: res.sources.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
-    if (reused.length)
-      this.notify("info", `${reused.map((r) => `"${r.info.label}"`).join(", ")} ${reused.length === 1 ? "כבר פתוח" : "כבר פתוחים"}: הוא לא נטען שוב, ממשיכים עם הספרים הפתוחים.`);
+    // the worker holds it, the store does not (an earlier open of it was cancelled after the worker had added it): it is new here
+    const orphans = (res.reused ?? []).filter((r) => !openIds.has(r.info.id));
+    const fresh = [...res.sources, ...orphans];
+    this.lastOpen = { added: fresh.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
+    if (reused.length) {
+      const names = reused.map((r) => `"${r.info.label}"`).join(", ");
+      this.notify("info", reused.length === 1 ? `${names} כבר פתוח, ולכן לא נטען שוב. ממשיכים עם הספרים הפתוחים.` : `${names} כבר פתוחים, ולכן לא נטענו שוב. ממשיכים עם הספרים הפתוחים.`);
+    }
     batch(() => {
-      this.sources.value = [...this.sources.value, ...res.sources];
-      for (const s of res.sources) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
+      this.sources.value = [...this.sources.value, ...fresh];
+      for (const s of fresh) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
-    if (res.sources.length) this.attachLinks();
+    if (fresh.length) this.attachLinks();
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
     const each = (kind: string, run: (path: string, text: string) => void) => {
@@ -296,7 +301,7 @@ export class AppStore {
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
     if (res.skipped.length)
       this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
-    const opened = res.sources.flatMap((s) => s.books);
+    const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
       this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
       this.chooseRoles(opened);

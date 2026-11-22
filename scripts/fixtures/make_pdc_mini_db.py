@@ -48,6 +48,7 @@ EXTERNAL = [
     (12, 0, LIB, "PLACEHOLDER base", None, 2, None),                          # NULL connectionType = REFERENCE
     (11, 3, LIB, "PLACEHOLDER commentary on official", None, 5, "COMMENTARY"),  # internal, other direction pair ...
     (9854, 5, LIB, "PLACEHOLDER base", None, 3, "SOURCE"),                    # ... and its reverse (a reverse duplicate)
+    (9854, 1, "official", "PLACEHOLDER no line", None, None, "SOURCE"),       # neither a ref nor a line: cannot be placed, not a link
 ]
 
 

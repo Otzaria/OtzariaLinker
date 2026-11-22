@@ -53,6 +53,16 @@ describe("SourceRegistry: a file opens once", () => {
     expect((await r.open([{ path: "seforim.db", blob: new Blob([other]) }])).sources).toHaveLength(1);
   });
 
+  it("two overlapping drops of the same file open it once (the later one reports it as reused)", async () => {
+    const r = new SourceRegistry();
+    const [a, b] = await Promise.all([r.open([DB()]), r.open([DB()])]);
+    expect(a.sources.length + b.sources.length).toBe(1);
+    expect((a.reused?.length ?? 0) + (b.reused?.length ?? 0)).toBe(1);
+    const id = (a.sources[0] ?? b.sources[0])!.info.id;
+    r.close(id);
+    expect((await r.open([DB()])).sources).toHaveLength(1); // closing the one source released the one identity
+  });
+
   it("closing a source releases its identity: the file can be opened again", async () => {
     const r = new SourceRegistry();
     const first = await r.open([DB()]);
@@ -91,6 +101,17 @@ describe("AppStore: no duplicate sources, no duplicate books", () => {
     expect(store.lastOpen.added).toEqual([]);
     expect(store.lastOpen.reused).toEqual([store.sources.value[0]!.info.id]);
     expect(store.notices.value.some((m) => m.text.includes("כבר פתוח"))).toBe(true);
+  });
+
+  it("a source the worker holds but the store does not know (its open was cancelled late) is adopted when the file is picked again", async () => {
+    const reg = new SourceRegistry();
+    const service = { open: (f) => reg.open(f), close: async (id) => reg.close(id), lines: (k, a, b) => reg.lines(k, a, b), existingLinks: (k, a, b) => reg.existingLinks(k, a, b), altToc: (k) => reg.altToc(k), headings: (k) => reg.headings(k) } as BooksService;
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    await reg.open([DB()]); // the worker added it; the store never heard
+    await store.openFiles([DB()]);
+    expect(store.sources.value).toHaveLength(1);
+    expect(store.lastOpen.added).toHaveLength(1);
+    expect(store.books.value.size).toBeGreaterThan(0);
   });
 
   it("a source is not closed while a task runs on the sources", async () => {
