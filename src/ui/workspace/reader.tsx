@@ -13,6 +13,7 @@ import { clearMatches, FindBar, paintMatches } from "./book-find";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
 import { HideButton } from "./hide-button";
+import { parseDraggedLine } from "./line-drag";
 import { LineLinksPopover, type LineLinksAt } from "./line-links";
 import { plainText } from "./plain-text";
 import { ReopenSources } from "./reopen-sources";
@@ -245,7 +246,8 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
             setDropLine(null);
             if (!raw || !ln) return;
             e.preventDefault();
-            const from = JSON.parse(raw) as { bookKey: string; line: number };
+            const from = parseDraggedLine(raw);
+            if (!from) return;
             store.pickLine("source", from.bookKey, from.line);
             store.pickLine("target", bookKey, Number(ln.dataset.i));
             store.sideTab.value = "builder";

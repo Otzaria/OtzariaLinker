@@ -85,6 +85,29 @@ export interface BookResult {
   dbLinksUnread?: { title: string; why: string }[];
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isBookRef = (v: unknown): boolean => isObj(v) && typeof v.key === "string" && typeof v.title === "string" && typeof v.origin === "string";
+
+/**
+ * A book's stored result read back from the browser's storage: null when it is not one (damaged JSON, a wrong
+ * shape) — the caller treats that as "nothing kept" and the book runs again. Only the shape the restore relies
+ * on is checked; the values inside a step's report are display data.
+ */
+export function parseBookResult(text: string | null | undefined): BookResult | null {
+  if (!text) return null;
+  try {
+    const r: unknown = JSON.parse(text);
+    if (!isObj(r) || typeof r.title !== "string" || !isBookRef(r.source) || !Array.isArray(r.steps) || !Array.isArray(r.dbLinkKeys)) return null;
+    if (!r.dbLinkKeys.every((k) => typeof k === "string")) return null;
+    if (r.partial !== undefined && typeof r.partial !== "boolean") return null;
+    if (r.dbLinksUnread !== undefined && !(Array.isArray(r.dbLinksUnread) && r.dbLinksUnread.every((u) => isObj(u) && typeof u.title === "string" && typeof u.why === "string"))) return null;
+    const stepOk = (s: unknown) => isObj(s) && typeof s.id === "string" && typeof s.kind === "string" && typeof s.engine === "string" && ENGINES.some((e) => e.id === s.engine) && isObj(s.item) && (s.target === undefined || isBookRef(s.target));
+    return r.steps.every(stepOk) ? (r as unknown as BookResult) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The steps of each linked book (the plan's focus: the step's source), in the order of the plan's books. */
 export function stepsByBook(plan: MaxLinkPlan): Map<string, PlanStep[]> {
   const by = new Map<string, PlanStep[]>();

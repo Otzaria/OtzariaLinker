@@ -3,7 +3,7 @@ import { batch, computed, signal, type ReadonlySignal, type Signal } from "@prea
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
-import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
+import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseBookResult, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
 import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PlanBook, type PlanStep } from "../linking/plan";
@@ -370,13 +370,12 @@ export class MaxLinkState {
     if (this.jobRestored.peek()) {
       for (const [i, b] of job.books.entries()) {
         if (b.status === "pending" || b.status === "not-planned") continue;
-        const text = await this.kv?.get(resultKey(job.id, i)).catch(() => null);
-        if (!text) {
+        const r = parseBookResult(await this.kv?.get(resultKey(job.id, i)).catch(() => null));
+        if (!r) {
           // nothing kept for it (storage was full or cleared): it runs again
           if (b.status !== "failed") this.setBook(b.title, { ...withoutWhy(b), status: "pending" });
           continue;
         }
-        const r = JSON.parse(text) as BookResult;
         rebind(r, keyOf);
         this.results.set(b.title, r);
       }
