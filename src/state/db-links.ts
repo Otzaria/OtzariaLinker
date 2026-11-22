@@ -94,6 +94,26 @@ export class DbLinksState {
     this.summary.value = got ?? { bookKey, reason: "קריאת הקישורים מהמסד לא הושלמה.", retry: true };
   }
 
+  /**
+   * How many links the database already has for each of these books (the links of both ends counted once per book, as
+   * DbLinkSummary.total), without touching the links tab's own state; a book with none to read (a text file, a database with
+   * no link table) or whose read failed is absent. No progress shown: a caller that reads many books says so itself.
+   */
+  async totalsOf(bookKeys: readonly string[], signal?: AbortSignal): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!this.service.dbLinkSummary) return out;
+    for (const k of bookKeys) {
+      if (signal?.aborted) break;
+      try {
+        const s = await this.service.dbLinkSummary(k, signal ? { signal } : {});
+        if ("total" in s) out.set(k, s.total);
+      } catch {
+        /* a book that cannot be read is simply not counted */
+      }
+    }
+    return out;
+  }
+
   /** The query the panel shows now, or null when there is no book or the line filter has no line. */
   query(offset = 0): (DbLinkQuery & { bookKey: string }) | null {
     const bookKey = this.bookKey.value;
