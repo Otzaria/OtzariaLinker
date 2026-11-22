@@ -8,9 +8,14 @@ import type { DbCapabilities } from "./capabilities";
  * millions of lines; this reads one table, once.
  *
  * A (bookId, lineIndex) is recovered from a line id only by the PDC numbering `bookId × 2^20 + lineIndex + 1`
- * (DATABASE_SUPPORT_MATRIX §5.3), so the reader first checks that numbering on the first lines of the `line` table
- * and returns null for a database that does not follow it: no flag is better than a wrong one.
+ * (DATABASE_SUPPORT_MATRIX §5.3), so the reader checks that numbering and returns null for a database that does not
+ * follow it: no flag is better than a wrong one. The check is on the first lines of the `line` table AND on entries
+ * spread over the whole `tocEntry` table (the first SAMPLES, then every SAMPLE_EVERY-th, thinned evenly to at most SAMPLES): a database whose
+ * first lines follow the rule and the rest do not is caught (QA round 2, H3). Each sampled entry is looked up in the
+ * `line` table by its line id and must say the same book and line index.
  */
+const SAMPLE_EVERY = 500;
+const SAMPLES = 200;
 export class TocLines {
   private constructor(private readonly byBook: ReadonlyMap<number, Int32Array>) {}
 
@@ -46,6 +51,7 @@ export class TocLines {
     }
     if (!seen) return null;
     const lists = new Map<number, number[]>();
+    const candidates: { lineId: number; book: number; index: number }[] = [];
     let n = 0;
     for await (const r of file.scan(toc)) {
       if (++n % 50_000 === 0) ctx.signal?.throwIfAborted();
@@ -53,10 +59,19 @@ export class TocLines {
       if (lineId === null || lineId === undefined) continue;
       const book = Number(r.values[tb]);
       const index = Number(lineId) - book * 2 ** 20 - 1;
+      if (n <= SAMPLES || n % SAMPLE_EVERY === 1) candidates.push({ lineId: Number(lineId), book, index });
       if (index < 0) continue;
       const list = lists.get(book);
       if (list) list.push(index);
       else lists.set(book, [index]);
+    }
+    // entries spread over the whole table, checked against the line table: the numbering rule must hold for them too
+    const step = Math.max(1, Math.ceil(candidates.length / SAMPLES));
+    const sample = candidates.filter((_, i) => i % step === 0);
+    const found = await file.getMany(line, sample.map((c) => c.lineId));
+    for (const c of sample) {
+      const row = found.get(c.lineId);
+      if (!row || Number(row.values[lb]) !== c.book || Number(row.values[li]) !== c.index) return null;
     }
     return new TocLines(new Map([...lists].map(([b, l]) => [b, Int32Array.from(l).sort()])));
   }
