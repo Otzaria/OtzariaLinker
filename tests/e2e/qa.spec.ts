@@ -75,3 +75,44 @@ test("coverage: the unlinked ranges of a book, the buckets, jump to a range and 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * 3.6: the last coverage of a book is kept with the project (state/coverage.ts saved), and the panel says when it was counted.
+ * Until the book is counted again in this session, the kept numbers are shown as such — with the day and a plain note that they
+ * may be out of date — never as if they were current.
+ */
+test("coverage: a fresh count shows when it was counted; a kept one says it may be out of date and is replaced by a new count", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const nl = String.fromCharCode(10);
+  const book = ["<h1>ספר שלי</h1>", "שורה שנייה", "שורה שלישית", "שורה רביעית"].join(nl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "ספר שלי.txt", mimeType: "text/plain", buffer: Buffer.from(book) },
+    { name: "ספר אחר.txt", mimeType: "text/plain", buffer: Buffer.from(["<h1>ספר אחר</h1>", "שורה אחת"].join(nl)) },
+  ]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li").filter({ hasText: "ספר שלי" }).locator('button.side-btn[data-side="source"]').click();
+  await page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li").filter({ hasText: "ספר אחר" }).locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /בדיקה/ }).click();
+  const cov = page.locator("details.coverage");
+  await cov.locator("summary").click();
+  await expect(cov.locator(".cov-stamp")).toHaveCount(0); // nothing counted yet
+  await cov.getByRole("button", { name: "חישוב כיסוי" }).click();
+  await expect(cov.locator(".cov-count[data-bucket=unlinked]")).toContainText("3");
+  await expect(cov.locator(".cov-stamp")).toContainText("חושב לאחרונה:");
+  await expect(cov.locator(".cov-stamp")).not.toHaveAttribute("data-stale", /.*/);
+
+  // choosing the book again drops the session's count; the one kept with the project is shown, as out of date
+  await cov.getByLabel("הספר").selectOption("target");
+  await cov.getByLabel("הספר").selectOption("source");
+  await expect(cov.locator(".cov-stamp")).toContainText("זה החישוב האחרון ששמור בפרויקט");
+  await expect(cov.locator(".cov-stamp")).toContainText("ייתכן שהקישורים השתנו מאז");
+  await expect(cov.locator(".cov-count[data-bucket=unlinked]")).toContainText("3");
+  await cov.getByRole("button", { name: "חישוב מחדש" }).click();
+  await expect(cov.locator(".cov-stamp")).toContainText("חושב לאחרונה:");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

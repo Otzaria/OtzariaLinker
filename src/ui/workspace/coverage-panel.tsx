@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { CoverageSummary, LineCoverage, LineRange } from "../../linking/coverage";
+import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -10,8 +11,9 @@ import { plainText } from "./plain-text";
  * state/coverage.ts (linking/coverage.ts): every line is linked, covered only inside a range, linked to several places,
  * unlinked, or cannot carry a link (a heading). The list is the consecutive unlinked content lines, each with the start of
  * its text, a jump to it and "link by hand", which picks the range as the source of the builder. Nothing here changes a
- * link. It is computed from the project links as they are now, and again after each change; it is not saved with the
- * project (cheap to recompute), and the links the database already has are not counted.
+ * link. It is computed from the project links and the links the book's database already has, as they are now, and again after
+ * each change. The last result of each book is kept with the project (state/coverage.ts saved): until the book is counted again
+ * the panel shows that one, with the day it was counted and a plain note that it is not up to date.
  */
 const PAGE = 50;
 const BUCKETS: readonly { id: LineCoverage; label: string; hint: string }[] = [
@@ -23,6 +25,15 @@ const BUCKETS: readonly { id: LineCoverage; label: string; hint: string }[] = [
 ];
 const placeLabel = (r: LineRange) => (r.end > r.start ? `שורות ${r.start + 1}–${r.end + 1}` : `שורה ${r.start + 1}`);
 const n = (x: number) => x.toLocaleString("he");
+
+/** A saved coverage (ProjectCoverage) as the panel's summary: the buckets by name, the ranges as pairs. */
+function fromSaved(c: ProjectCoverage): CoverageSummary {
+  const byBucket: Record<LineCoverage, number> = { linked: 0, unlinked: 0, partial: 0, multiple: 0, "not-suitable": 0, candidate: 0, doubtful: 0 };
+  for (const [k, v] of Object.entries(c.buckets)) if (k in byBucket) byBucket[k as LineCoverage] = v;
+  const suitable = c.lines - byBucket["not-suitable"];
+  return { total: c.lines, byBucket, suitable, unlinked: byBucket.unlinked, unlinkedShare: suitable ? byBucket.unlinked / suitable : 0, ranges: c.ranges.map(([start, end]) => ({ start, end })) };
+}
+const stamp = (at: number) => new Date(at).toLocaleString("he", { dateStyle: "medium", timeStyle: "short" });
 
 export function CoveragePanel() {
   const store = useStore();
@@ -50,7 +61,12 @@ export function CoveragePanel() {
     if (summary && summary.bookKey === bookKey && summary.revision !== revision && !busy) void compute();
   }, [revision, bookKey, busy]);
 
-  const current = summary && summary.bookKey === bookKey ? summary : null;
+  const fresh = summary && summary.bookKey === bookKey ? summary : null;
+  // what the project kept of this book's last count (by title), until it is counted again in this session
+  const kept = book ? store.coverage.saved.value.get(book.title) : undefined;
+  const current = fresh ?? (kept ? fromSaved(kept) : null);
+  const stale = !fresh && !!kept;
+  const countedAt = kept?.at;
   // the start of the text of the ranges shown
   useEffect(() => {
     if (!current || !bookKey) return;
@@ -89,18 +105,26 @@ export function CoveragePanel() {
         {!book && <p class="muted">בחרו ספר באחד הקוראים כדי לראות מה עוד לא מקושר בו.</p>}
         {book && dbBook && (
           <p class="warn-text" role="note">
-            הספר הזה הוא מתוך מסד. הקישורים שיש לו במסד לא נספרים כאן, ולכן שורות שמקושרות במסד יופיעו כ"בלי קישור". רק קישורי הפרויקט נספרים.
+            הספר הזה הוא מתוך מסד. הקישורים שיש לו במסד נקראים מהמסד ונספרים יחד עם קישורי הפרויקט, ולכן שורה שהמסד כבר מקשר לא תופיע כ"בלי קישור". בספר גדול הקריאה לוקחת כמה שניות.
           </p>
         )}
         {current && (
           <>
+            {countedAt !== undefined && (
+              <p class={`cov-stamp small ${stale ? "warn-text" : "muted"}`} role="note" data-stale={stale || undefined}>
+                {stale
+                  ? `זה החישוב האחרון ששמור בפרויקט, מ־${stamp(countedAt)}. הוא לא מתעדכן לבד: ייתכן שהקישורים השתנו מאז. לחצו "חישוב מחדש" כדי לראות את המצב עכשיו.`
+                  : `חושב לאחרונה: ${stamp(countedAt)}.`}
+                {stale && current.ranges.length >= COVERAGE_RANGES_MAX && ` רשימת הקטעים שנשמרה קוצרה ל־${n(COVERAGE_RANGES_MAX)} קטעים; המספרים מדויקים.`}
+              </p>
+            )}
             <p class="cov-sum" role="status">
               {current.suitable === 0
                 ? "אין בספר שורות תוכן."
                 : current.unlinked === 0
                   ? current.suitable === 1 ? "שורת התוכן היחידה של הספר מקושרת או מכוסה בטווח." : `כל ${n(current.suitable)} שורות התוכן של הספר מקושרות או מכוסות בטווח.`
                   : `${n(current.unlinked)} מתוך ${n(current.suitable)} שורות תוכן (${Math.round(current.unlinkedShare * 100)}%) עדיין בלי קישור, ${current.ranges.length === 1 ? "בקטע אחד" : `ב־${n(current.ranges.length)} קטעים`}.`}
-              <span class="muted"> רק קישורי הפרויקט נספרים, לא קישורי המסד.</span>
+              <span class="muted"> {dbBook ? "קישורי הפרויקט וקישורי המסד נספרים." : "רק קישורי הפרויקט נספרים."}</span>
             </p>
             <ul class="cov-counts">
               {BUCKETS.map((b) => (
