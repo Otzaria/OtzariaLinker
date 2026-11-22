@@ -1175,6 +1175,7 @@ export class AppStore {
         // a confirmation is for this session only (C4): "no file in the library" is not a copy of a file at all
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
         bookLines: this.bookLinesNow(),
+        coverage: this.coverage.snapshot(),
       },
       APP_VERSION,
       undefined,
@@ -1223,6 +1224,7 @@ export class AppStore {
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
       this.projectBookLines.value = new Map(p.bookLines.map((b) => [b.title, b.lines] as const));
+      this.coverage.restore(p.coverage);
       this.changedNoticed.clear();
       // the switch "ספרי ספריית אוצריא" as the user left it, for each source when it is open again
       this.projectLibraryChoices.value = p.sources.filter((s) => s.library !== undefined);

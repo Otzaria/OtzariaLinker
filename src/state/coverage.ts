@@ -1,8 +1,9 @@
-import type { ReadonlySignal, Signal } from "@preact/signals";
+import { signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
 import { candidateLines, coverageCounts, coverageSummary, doubtfulLines, type CoverageBook, type CoverageSummary } from "../linking/coverage";
+import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../projects/project-format";
 import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { QualityState } from "./quality";
@@ -68,6 +69,11 @@ export interface CoverageTableOptions {
 }
 
 export class CoverageState {
+  /**
+   * The last coverage of each book, by title: counted in this session, or restored from the project (as of its save). Saved with the
+   * project (ProjectFile.coverage) so that a reopened project shows where it stood until the book is counted again.
+   */
+  readonly saved = signal<ReadonlyMap<string, ProjectCoverage>>(new Map());
   private readonly headingCache = new Map<string, ReadonlySet<number>>();
   private readonly unsuitableCache = new Map<string, ReadonlySet<number>>();
 
@@ -160,6 +166,28 @@ export class CoverageState {
       if (got === null) return null;
       db = got;
     }
-    return coverageSummary([...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])], book);
+    const summary = coverageSummary([...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])], book);
+    this.remember(bookKey, book.lineCount, summary);
+    return summary;
+  }
+
+  private remember(bookKey: string, lines: number, s: CoverageSummary): void {
+    const title = this.host.books.value.get(bookKey)?.title;
+    if (!title) return;
+    const buckets: Record<string, number> = {};
+    for (const [k, n] of Object.entries(s.byBucket)) if (n) buckets[k] = n;
+    const next = new Map(this.saved.peek());
+    next.set(title, { title, lines, buckets, ranges: s.ranges.slice(0, COVERAGE_RANGES_MAX).map((r) => [r.start, r.end]), at: Date.now() });
+    this.saved.value = next;
+  }
+
+  /** What goes into the project file. */
+  snapshot(): ProjectCoverage[] {
+    return [...this.saved.value.values()];
+  }
+
+  /** What a project file brought: replaces what was held (a project is a different session's moment). */
+  restore(list: readonly ProjectCoverage[]): void {
+    this.saved.value = new Map(list.map((c) => [c.title, c] as const));
   }
 }

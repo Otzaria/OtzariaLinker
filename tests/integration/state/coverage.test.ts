@@ -74,6 +74,32 @@ describe("coverage table of many books (the repository screen)", () => {
   });
 });
 
+describe("coverage in the project file (2.15)", () => {
+  const fresh = () => new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+  it("the last coverage of each book is saved with the project and comes back when it is opened", async () => {
+    const a = fresh();
+    await a.openFiles([DB, COMMENTARY]);
+    const key = [...a.books.value.values()].find((b) => b.title === "ביאור על בראשית")!.key;
+    expect(JSON.parse(a.projectText())).not.toHaveProperty("coverage");
+    const s = (await a.coverage.summary(key))!;
+    const saved = JSON.parse(a.projectText()).coverage;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ title: "ביאור על בראשית", lines: s.total, buckets: expect.objectContaining({ unlinked: s.unlinked }) });
+    expect(saved[0].ranges).toEqual(s.ranges.map((r) => [r.start, r.end]));
+    const b = fresh();
+    b.openProject("p.otzlinker.json", a.projectText());
+    expect(b.coverage.saved.value.get("ביאור על בראשית")).toMatchObject({ lines: s.total, buckets: { unlinked: s.unlinked } });
+    // and it survives being saved again before the books are open
+    expect(JSON.parse(b.projectText()).coverage[0].title).toBe("ביאור על בראשית");
+  });
+
+  it("a project saved before this existed opens with no coverage", () => {
+    const b = fresh();
+    b.openProject("old.otzlinker.json", JSON.stringify({ format: "otzaria-linker-project", version: 1, savedAt: "", app: "4.0.0", sources: [], links: [], rejectedSuggestions: [], view: { source: null, target: null } }));
+    expect(b.coverage.saved.value.size).toBe(0);
+  });
+});
+
 describe("AppStore — coverage", () => {
   it("before any link: every suitable line is unlinked, the headings are not suitable", async () => {
     const { store, key } = await opened();
