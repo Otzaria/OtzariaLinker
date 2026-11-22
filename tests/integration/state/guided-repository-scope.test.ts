@@ -44,4 +44,17 @@ describe("guided flow — started from books of an open database", () => {
     expect(g.repoScope.value).toBeNull();
     expect(g.plan.value).toBeNull();
   });
+
+  it("the controls of a pair (switched off, link type) still apply to a pair the user chose in the analysis", async () => {
+    const { g, key } = await ready();
+    g.startForBooks([key(COMM)], [{ dependant: COMM, base: "בראשית", dependantKey: key(COMM), baseKey: key("בראשית") }]);
+    const pairs = () => g.plan.value!.steps.filter((s) => s.kind === "pair").map((s) => `${s.relation.dependant.title}>${s.relation.base.title}`);
+    expect(pairs().length).toBeGreaterThan(0);
+    g.setPairControl(COMM, "בראשית", { connectionType: "targum" });
+    const typed = g.plan.value!.steps.filter((s) => s.kind === "pair");
+    expect(typed.every((s) => s.options?.declaredType === "targum")).toBe(true);
+    g.setPairControl(COMM, "בראשית", { enabled: false });
+    expect(pairs()).toEqual([]);
+    expect(g.plan.value!.unsuitable.some((u) => u.reason === "disabled")).toBe(true);
+  });
 });

@@ -999,7 +999,17 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   // the per-pair controls of the user's pairs, by title
   const controls = new Map<string, UserPair>();
   for (const [key, c] of Object.entries(input.choices?.controls ?? {})) controls.set(key, { dependant: "", base: "", ...c });
-  for (const p of input.choices?.pairs ?? []) controls.set(pairMethodKey(p.dependant, p.base), p);
+  // a pair the user chose keeps the controls it carries; what it does not say is filled in from `controls` (the guided plan's per-pair controls)
+  for (const p of input.choices?.pairs ?? []) {
+    const key = pairMethodKey(p.dependant, p.base);
+    const extra = input.choices?.controls?.[key];
+    controls.set(key, {
+      ...p,
+      ...(p.enabled === undefined && extra?.enabled !== undefined && { enabled: extra.enabled }),
+      ...(p.connectionType === undefined && extra?.connectionType !== undefined && { connectionType: extra.connectionType }),
+      ...(p.minConfidence === undefined && extra?.minConfidence !== undefined && { minConfidence: extra.minConfidence }),
+    });
+  }
   const disabledCount = new Map<string, number>();
   /** every open commentary on a base, selected or not: the intermediate commentators come from here */
   const commentariesOn = new Map<string, Relation[]>();
