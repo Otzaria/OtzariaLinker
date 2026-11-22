@@ -3,8 +3,13 @@
 # is Vite's entry (it loads /src/app/main.tsx) and shows nothing unbuilt. v3 stays at /v3.html.
 name: Pages
 
+# The site is deployed only for a commit of main whose CI run succeeded (typecheck, tests, E2E, reproducible build):
+# the push no longer deploys by itself, the finished CI run does. workflow_dispatch stays for a manual deploy of the
+# branch's head (the owner decides then; nothing checks it).
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -18,11 +23,18 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  # for a workflow_run, github.sha is the default branch's head, not the commit CI tested
+  SITE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
 jobs:
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SITE_SHA }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -34,6 +46,8 @@ jobs:
           mkdir -p _site
           cp dist/OtzariaLinker.html _site/index.html
           cp dist/OtzariaLinker.html _site/OtzariaLinker.html
+          # the hash of the file the page offers for download (the user can compare it with the one in the Release)
+          cp dist/SHA256SUMS _site/SHA256SUMS
           cp legacy/OtzariaLinker-v3.html _site/v3.html
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
@@ -56,7 +70,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for i in $(seq 1 60); do
-            states=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=${{ github.sha }}" \
+            states=$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=${{ env.SITE_SHA }}" \
               --jq '[.workflow_runs[] | select(.path == "dynamic/pages/pages-build-deployment") | .status] | join(" ")')
             if [ -n "$states" ] && ! echo "$states" | tr ' ' '\n' | grep -qvx completed; then echo "branch build done: $states"; break; fi
             # none at all after two minutes: there is no branch build (Source is GitHub Actions, or a manual run)

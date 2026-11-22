@@ -48,7 +48,17 @@
 `npm ci` → `npm run typecheck` → `npm test` (עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3) →
 `npm run build` (כולל הסריקה ותקציב הגודל, §2) → התקנת Chrome, Edge ו־Firefox (`npx playwright install
 --with-deps chrome msedge firefox`) → `npx playwright test` (שלושת הדפדפנים) → בדיקת בנייה חוזרת →
-העלאת `dist/OtzariaLinker.html` כ־artifact (`OtzariaLinker-html`).
+העלאת `dist/OtzariaLinker.html` וה־`SHA256SUMS` שלו כ־artifact (`OtzariaLinker-html`: מי שמוריד אותו משווה את ה־hash).
+בתחילת ה־job (אחרי `npm ci`) רץ `npm audit --omit=dev --audit-level=high` כצעד **שלא מכשיל** (`continue-on-error`): הוא מדווח על
+פגיעות ידועה בתלות של זמן ריצה (ארבע חבילות, מוצמדות), ומישהו מחליט. job נפרד, `visual`, מריץ את ההשוואה החזותית (§2א ב־[`TESTING.md`](TESTING.md)).
+
+**`.github/dependabot.yml`**: פעם בשבוע PR להעלאת גרסאות של חבילות npm ושל ה־actions שבשימוש. זו הצעה בלבד: ה־CI רץ עליה ואדם ממזג.
+
+**פרסום האתר (`.github/workflows/pages.yml`)**: האתר לא מתפרסם בעצם ה־push. `pages.yml` נדלק כש־run של CI על `main` **הסתיים בהצלחה**
+(`workflow_run`, `conclusion == 'success'`), בונה מחדש את אותו commit (`head_sha` של ה־run, לא ראש `main` בזמן הפרסום) ומפרסם את
+`OtzariaLinker.html` ואת `SHA256SUMS`. commit שנכשל בבדיקות לא מגיע לאתר. `workflow_dispatch` נשאר לפרסום ידני של ראש הענף, בלי בדיקה.
+**אי אפשר להוכיח את ה־workflows בלי להריץ אותם ב־GitHub:** בדקתי שהקבצים הם YAML תקין (`js-yaml`) ושהשדות והביטויים נכונים לפי התיעוד,
+`actionlint` לא היה זמין, ולכן ריצה ראשונה אחרי המיזוג היא הבדיקה: ב־Actions רואים ש־Pages נדלק אחרי CI ירוק, ולא נדלק אחרי CI אדום.
 
 ## 5. שחרור (`.github/workflows/release.yml`)
 
