@@ -119,3 +119,59 @@ describe("no import cycles", () => {
   });
   it("no module reaches itself through runtime imports", () => expect(cycles).toEqual([]));
 });
+
+/*
+ * The headless surface (issue 9, docs/PLUGIN_READINESS.md). The pure layers must run where there is no page: in a Node
+ * test, in a worker, in a plugin host. So (1) none of them touches a browser global in code, and (2) the adapter
+ * module that hosts the engines (`linking/adapters.ts`) reaches, through its runtime imports, only `core`, `matching`
+ * and `linking` — no `database`, no `sources`, no `workers`, no `state`, no `ui`.
+ */
+describe("the headless surface", () => {
+  // browser-only globals (a Node global such as Blob, TextDecoder or crypto is fine)
+  // a global, not a property or a name of ours (this.window, x.document); "window" is also a plain variable name in the
+  // engines ("a search window"), so it counts only with one of the browser's members
+  const BROWSER = /(?<![.\w$])(?:(?:document|navigator|localStorage|sessionStorage|indexedDB|DOMParser|HTMLElement|requestAnimationFrame|matchMedia)\b|window\.(?:addEventListener|removeEventListener|innerWidth|innerHeight|location|history|open|getSelection|scroll\w*|postMessage|matchMedia|requestAnimationFrame|localStorage|document|navigator)\b)/;
+  /** code with comments and string contents removed, so prose and Hebrew messages cannot trip the scan */
+  const codeOnly = (text: string) =>
+    text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:\\])\/\/.*$/gm, "$1")
+      .replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
+
+  it("core, matching, linking and formats use no browser global", () => {
+    const hits: string[] = [];
+    for (const file of files(SRC)) {
+      if (!PURE.has(layerOf(file))) continue;
+      const m = BROWSER.exec(codeOnly(readFileSync(file, "utf8")));
+      if (m) hits.push(`${relative(SRC, file).split(sep).join("/")}: ${m[1]}`);
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it("the scan catches what it is meant to (document.title in code is found, in a comment or a string it is not)", () => {
+    expect(BROWSER.test(codeOnly("const t = document.title;"))).toBe(true);
+    expect(BROWSER.test(codeOnly("// uses window.x\nconst a = 1; /* navigator */"))).toBe(false);
+    expect(BROWSER.test(codeOnly('const m = "document and window";'))).toBe(false);
+    expect(BROWSER.test(codeOnly("const n = this.window + x.document;"))).toBe(false);
+    expect(BROWSER.test(codeOnly("if (window.innerWidth) {}"))).toBe(true);
+  });
+
+  it("linking/adapters.ts reaches only core, matching and linking through its runtime imports", () => {
+    const seen = new Set<string>();
+    const walk = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const s of specifiers(readFileSync(file, "utf8"))) {
+        if (s.typeOnly || !s.spec.startsWith(".")) continue;
+        const base = resolve(file, "..", s.spec.replace(/\.js$/, ""));
+        const next = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find((c) => existsSync(c));
+        if (next) walk(next);
+      }
+    };
+    walk(resolve(SRC, "linking", "adapters.ts"));
+    const layers = new Set([...seen].map(layerOf));
+    expect([...layers].sort()).toEqual(["core", "linking", "matching"].filter((l) => layers.has(l)));
+    expect(seen.size).toBeGreaterThan(20); // it does read the engines
+    expect([...seen].some((f) => /\.tsx$/.test(f))).toBe(false);
+  });
+});
