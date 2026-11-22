@@ -65,7 +65,12 @@
   (סעיף "Rate limiting" ב־README של ה־SDK; לא נקרא לפרטים).
 - שהקובץ הארוז יעמוד במגבלות הגודל של החנות.
 
-## 4. מה נשאר (לא נעשה)
+## 4. מה נשאר (לא נעשה) — והצעד הבא, ה־harness
+
+**הצעד הבא (3.14, נדחה בכוונה):** harness שרץ ב־Node, בלי אוצריא: `vite.lib.config.ts` ו־`src/lib/index.ts` (`runPair`, `linking/adapters`, `formats/links-json`) כ־IIFE בלי `viteSingleFile`; סקריפט שטוען את החבילה ב־`vm` עם `Otzaria.call` מדומה שמחזיר `library.getBookContent` בחלונות של 5,000 תווים ו־`library.getRawLinks`; הרצת headings על זוג מה־fixture ובדיקה שהתוצאה זהה ל־`runEngine`; וכלל ב־`architecture.test.ts` ש־`src/lib` מייבא רק שכבות טהורות. הוא יוכיח שהחבילה נטענת ורצה בסביבה בלי DOM; הוא **לא** יוכיח את מספור השורות מול `line_index`, את גודל החבילה מול מגבלת החנות ואת ביצועי ה־WebView, ואת אלה אפשר לבדוק רק מול אוצריא אמיתית.
+
+מה שנשאר בכלל:
+
 
 1. **יעד בנייה לספרייה**: תצורת Vite שנייה (`vite.lib.config.ts`), פלט JS אחד בלי `viteSingleFile` ובלי לגעת בבניית השחרור
    (תקציב 1.75MiB ב־`scripts/package-release.mjs`), עם מחסום `src/lib/index.ts` שמייצא רק את `linking/adapters`, `runEngine` ואת
