@@ -5,26 +5,30 @@ import { problemText, type Problem } from "../../core/links/validate";
 import { qaAction } from "../../linking/qa";
 import type { ExportBundle } from "../../state/exchange";
 import { heldLinksText } from "../../state/history";
+import type { PersonalCsvBundle } from "../../state/personal-csv";
 import type { AppStore } from "../../state/store";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable } from "../keyboard";
 import { DbCopyFiles } from "./db-copy-files";
+import { PersonalCsvNext, PersonalCsvSection } from "./personal-csv-section";
 import { FileName, ltr } from "../shell/file-name";
 
 /*
  * The confirmation before export (plan, "three extra decisions" §3): in plain words, what will be
  * written, what is held back and why, and which library files would be replaced. Nothing is written
  * until the user confirms. More than one file downloads as a ZIP laid out like the library (links/,
- * alt_toc/) with `_report.txt`; advanced mode can write the links as CSV in Sefaria's layout instead.
+ * alt_toc/) with `_report.txt`; advanced mode can write the links as CSV in Sefaria's layout instead, or as the links.csv of a
+ * personal library (links between a book of the user's own and a book of the official database).
  */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const store = useStore();
   const ref = useRef<HTMLDialogElement>(null);
   const [plan, setPlan] = useState<ExportBundle | null>(null);
   const [failed, setFailed] = useState(false);
-  const [format, setFormat] = useState<"json" | "sefaria-csv">("json");
+  const [format, setFormat] = useState<"json" | "sefaria-csv" | "personal-csv">("json");
   const [csv, setCsv] = useState<SefariaCsvFile[] | null>(null);
+  const [personal, setPersonal] = useState<PersonalCsvBundle | null>(null);
   /** what was downloaded: the dialog stays open on "what now?" (audit F13) */
   const [saved, setSaved] = useState<string | null>(null);
   const advanced = store.prefs.advanced.value;
@@ -34,7 +38,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     if (saved) savedNote.current?.focus();
   }, [saved]);
 
-  const replan = () => void store.exchange.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null)) : setFailed(true)));
+  const replan = () => void store.exchange.prepareExport().then((p) => (p ? (setPlan(p), setCsv(null), setPersonal(null)) : setFailed(true)));
   useEffect(() => {
     ref.current?.showModal();
     replan();
@@ -45,10 +49,16 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     void store.exchange.prepareSefariaCsv(plan).then((f) => (f ? setCsv(f) : setFormat("json")));
   }, [format, plan]);
 
+  useEffect(() => {
+    if (format !== "personal-csv" || !plan || personal) return;
+    void store.personalCsv.prepare().then((b) => (b ? setPersonal(b) : setFormat("json")));
+  }, [format, plan]);
+
   const c = plan?.counts;
   const asCsv = format === "sefaria-csv";
+  const asPersonal = format === "personal-csv";
   const alt = plan?.altToc;
-  const outputs = plan ? (asCsv ? (csv?.length ?? 0) : plan.files.length) + (alt?.files.length ?? 0) : 0;
+  const outputs = plan ? (asPersonal ? (personal?.files.length ?? 0) : (asCsv ? (csv?.length ?? 0) : plan.files.length) + (alt?.files.length ?? 0)) : 0;
   /** a file holding only other books' links moved into it (private use): it adds to the base, it replaces nothing of the library */
   const onlyMoved = (f: { records: number; movedIn?: { records: number }[] }) => !!f.movedIn && f.movedIn.reduce((n, m) => n + m.records, 0) === f.records;
   return (
@@ -66,12 +76,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                 <span>{saved}</span>
               </p>
               <h3 style="margin:0">מה עכשיו?</h3>
-              <NextSteps routes={store.exchange.nextSteps(plan, asCsv ? csv ?? undefined : undefined)} open />
+              {asPersonal ? <PersonalCsvNext /> : <NextSteps routes={store.exchange.nextSteps(plan, asCsv ? csv ?? undefined : undefined)} open />}
             </div>
             <footer>
-              <button class="btn text" style="margin-inline-end:auto" onClick={() => store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)}>
-                <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
-              </button>
+              {!asPersonal && (
+                <button class="btn text" style="margin-inline-end:auto" onClick={() => store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)}>
+                  <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
+                </button>
+              )}
               <button class="btn filled" onClick={() => ref.current?.close()}>סגירה</button>
             </footer>
           </>
@@ -82,6 +94,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           {failed && <p>הבדיקה לא הושלמה, ולכן לא ייצאתי כלום.</p>}
           {plan && c && (
             <>
+              {!asPersonal && (
+              <>
               <div class="stats">
                 {/* only the numbers that say something (UX review suggestion 4) */}
                 {c.new > 0 && <Stat n={c.new} label="קישורים חדשים" />}
@@ -107,15 +121,21 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <option value="private">{advanced ? "לשימוש שלי בלבד — חסר ref_1/ref_2 או טווח בספר ספריא: רק אזהרה" : "לשימוש שלי בלבד — כללי הספרייה לא עוצרים קישורים"}</option>
                 </select>
               </label>
+              </>
+              )}
               {advanced && (
                 <label style="display:grid;gap:4px">
                   <span class="muted">פורמט קובצי הקישורים</span>
-                  <select value={format} onChange={(e) => setFormat(e.currentTarget.value as "json" | "sefaria-csv")} aria-label="פורמט קובצי הקישורים">
+                  <select value={format} onChange={(e) => setFormat(e.currentTarget.value as "json" | "sefaria-csv" | "personal-csv")} aria-label="פורמט קובצי הקישורים">
                     <option value="json">{ltr("_links.json")} לספריית אוצריא (מומלץ)</option>
                     <option value="sefaria-csv">CSV בפורמט ספריא (בלי טווחים ועוגנים)</option>
+                    <option value="personal-csv">links.csv לבניית ספרייה אישית (ספר שלכם מול ספר של המאגר הרשמי)</option>
                   </select>
                 </label>
               )}
+              {asPersonal && <PersonalCsvSection bundle={personal} />}
+              {!asPersonal && (
+              <>
               {asCsv && !csv && <p class="muted">קורא את כותרות הספרים כדי לבנות מראי מקום…</p>}
               {asCsv && csv && (
                 <>
@@ -221,27 +241,39 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                   <NextSteps routes={store.exchange.nextSteps(plan, asCsv ? csv ?? undefined : undefined)} />
                 </details>
               )}
+              </>
+              )}
             </>
           )}
         </div>
         <footer>
+          {!asPersonal && (
+          <>
           <button class="btn text" style="margin-inline-end:auto" disabled={!plan || (asCsv && !csv)} onClick={() => plan && store.exchange.saveReport(plan, asCsv ? csv ?? undefined : undefined)} title="סיכום בטקסט: כמה נכתב, לאן כל קובץ הולך, מה לא ייוצא ולמה. הוא נכלל גם בכל ZIP">
             {/* one span: a .btn is a flex row, and loose text and <bdi> would become items with gaps between them */}
             <span>הורדת הדוח (<bdi dir="ltr">_report.txt</bdi>)</span>
           </button>
           <button class="btn text" onClick={() => (store.dialog.value = "compare")} title="מה ישתנה בקובץ של כל ספר מול קובץ שבידיכם (למשל הקובץ שבספרייה)">השוואה לפני ייצוא</button>
+          </>
+          )}
           <button class="btn text" onClick={() => ref.current?.close()}>סגירה</button>
           <button
             class="btn filled"
-            disabled={!plan || outputs === 0 || (asCsv && !csv)}
+            disabled={!plan || outputs === 0 || (asCsv && !csv) || (asPersonal && !personal)}
             onClick={() => {
               if (!plan) return;
+              if (asPersonal) {
+                if (!personal) return;
+                store.personalCsv.save(personal);
+                setSaved(`ירד קובץ ZIP עם ${personal.files.length === 1 ? "קובץ links.csv אחד" : `${personal.files.length.toLocaleString("he")} קובצי links.csv`}.`);
+                return;
+              }
               store.exchange.saveExport(plan, asCsv ? csv ?? undefined : undefined);
               setSaved(outputs > 1 ? `ירד קובץ ZIP עם ${outputs.toLocaleString("he")} קבצים ודוח הייצוא.` : "הקובץ ירד.");
             }}
           >
             <Icon name="fl_arrow_download" size={18} />
-            {outputs > 1 ? "הורדת ZIP" : "הורדת הקובץ"}
+            {outputs > 1 || asPersonal ? "הורדת ZIP" : "הורדת הקובץ"}
           </button>
         </footer>
         </>
