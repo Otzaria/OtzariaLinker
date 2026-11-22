@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { BookRef, LinkSide } from "../../../src/core/links/model";
 import type { Confidence, EngineId, Suggestion } from "../../../src/linking/automatic";
-import { linePairKey, mergeItems, mergeSuggestions, type MergeItem } from "../../../src/linking/merge";
+import { applyPairMinimums, linePairKey, mergeItems, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../../../src/linking/merge";
 
 const C: BookRef = { key: "t:1", title: "ביאור על בראשית", origin: "otzaria" };
 const B: BookRef = { key: "d:1", title: "בראשית", origin: "otzaria" };
@@ -448,3 +448,22 @@ describe("mergeSuggestions — matched words (#11 data)", () => {
     expect(s.matched).toEqual({ source: { rawStart: 0, rawEnd: 6 }, target: { rawStart: 3, rawEnd: 9 } });
   });
 });
+
+describe("applyPairMinimums — a pair's own confidence threshold (UserPair.minConfidence)", () => {
+  const mk = (conf: Confidence, other: BookRef = B): MergedSuggestion => mergeSuggestions([{ suggestion: sg("headings", side(C, 5), side(other, 10), conf), focus: C.key }]).suggestions[0]!;
+  it("hides the suggestions of that pair below its threshold, keeps the rest, counts what it hid", () => {
+    const list = [mk("certain"), mk("high"), mk("possible"), mk("ambiguous"), mk("possible", M), mk("ambiguous", M)];
+    const { kept, hidden } = applyPairMinimums(list, { [`${C.title}>${B.title}`]: "high" });
+    expect(kept.map((s) => `${s.target.book.title}:${s.confidence}`)).toEqual([`${B.title}:certain`, `${B.title}:high`, `${M.title}:possible`, `${M.title}:ambiguous`]);
+    expect(hidden).toBe(2);
+  });
+  it("no minimums: nothing changes", () => {
+    const list = [mk("possible")];
+    expect(applyPairMinimums(list, {})).toEqual({ kept: list, hidden: 0 });
+  });
+  it("works whichever way the record is written (the focus is the commentary)", () => {
+    const dh = mergeSuggestions([{ suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "possible", { declaredType: "commentary" }), focus: C.key }]).suggestions[0]!;
+    expect(applyPairMinimums([dh], { [`${C.title}>${B.title}`]: "high" }).hidden).toBe(1);
+  });
+});
+

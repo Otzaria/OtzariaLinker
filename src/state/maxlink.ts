@@ -5,7 +5,7 @@ import type { BookRef } from "../core/links/model";
 import type { EngineId, Reason } from "../linking/automatic";
 import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseBookResult, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
-import { linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
+import { applyPairMinimums, linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
 import type { TitleFitReport } from "../linking/title-fit";
 import { evidenceFromCounts, evidenceToFollow, linkedFields, linkedProps, PAIR_ENGINES, pairMethodKey, planMaxLink, type LinkedEvidence, type MaxLinkPlan, type PairEngineId, type PlanBook, type PlanChoices, type PlanStep, type RelationKind } from "../linking/plan";
 import type { LinkState } from "./history";
@@ -666,7 +666,9 @@ export class MaxLinkState {
       existing: (s) => (db.has(linePairKey(s)) ? "db" : project.get(linePairKey(s))?.some((id) => id !== `auto:${stableId(s)}`) ? "project" : null),
     });
     // the merged ids are made of book keys too: without them an approval is recognised in every session (stableId)
-    const merged = { ...raw, suggestions: raw.suggestions.map((s) => ({ ...s, id: stableId(s) })) };
+    // a pair's own threshold (UserPair.minConfidence): the suggestions below it are not shown, and the count is said
+    const limited = applyPairMinimums(raw.suggestions, plan.minConfidence ?? {});
+    const merged = { ...raw, suggestions: limited.kept.map((s) => ({ ...s, id: stableId(s) })) };
 
     const info: MaxLinkRunInfo = { scope: scopeLabel, books: plan.books, identified: plan.identified, steps: outcomes, stats: merged.stats, ms: job.ms };
     const failed = outcomes.filter((o) => o.error).length;
@@ -682,6 +684,7 @@ export class MaxLinkState {
       ...(st.suspectPairs
         ? [{ code: "maxlink/pair-disagree", text: `ב־${st.suspectPairs} זוגות ספרים השיטות סותרות זו את זו ברוב השורות (למשל ספר שממוספר בדפים משלו). שם אף הצעה של שיטה אחת אינה "ודאית"; הן מסומנות לבדיקה.` }]
         : []),
+      ...(limited.hidden ? [{ code: "maxlink/below-pair-minimum", text: `${limited.hidden.toLocaleString("he")} הצעות לא מוצגות: הן מתחת לסף הביטחון שבחרתם לזוג הספרים שלהן.` }] : []),
       ...(failed ? [{ code: "maxlink/errors", text: `${failed} שלבים נכשלו; שאר השלבים רצו. הפרטים ב"דוח הקישור המרבי".` }] : []),
       ...(partialText(job) ? [{ code: "maxlink/partial", text: partialText(job).trim() }] : []),
     ];

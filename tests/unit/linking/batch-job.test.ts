@@ -79,6 +79,16 @@ describe("the batch job's pure parts", () => {
     expect(parseJobRecord(JSON.stringify({ ...rec, choices: "x" }))!.choices).toBeUndefined();
   });
 
+  it("the per-pair controls (enabled, connectionType, minConfidence) survive storage; bad values are dropped; an old record without them loads as before", () => {
+    const rec: JobRecord = { v: 1, id: "x", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", enabled: false, connectionType: "reference", minConfidence: "high" }] } };
+    expect(parseJobRecord(JSON.stringify(rec))!.choices).toEqual(rec.choices);
+    const bad = { ...rec, choices: { pairs: [{ dependant: "א", base: "ב", enabled: "no", connectionType: 7, minConfidence: "sure" }, { dependant: "ג", base: "ד", enabled: true }] } };
+    expect(parseJobRecord(JSON.stringify(bad))!.choices).toEqual({ pairs: [{ dependant: "א", base: "ב" }, { dependant: "ג", base: "ד" }] });
+    // a record saved before these fields existed
+    const old = { v: 1, id: "o", scope: "s", sources: [], state: "done", books: [], startedAt: 1, ms: 5, choices: { pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings"] } } };
+    expect(parseJobRecord(JSON.stringify(old))!.choices).toEqual({ pairs: [{ dependant: "א", base: "ב", kind: "notes" }], methods: { "א>ב": ["headings"] } });
+  });
+
   it("books that read the same bases run next to each other, groups in order of appearance", () => {
     const on = (t: string, base: BookRef): PlanStep[] => [{ id: t, kind: "pair", engine: "headings", source: ref(`k:${t}`, t), target: base, relation: {} as never, why: "" } as PlanStep, { id: `c:${t}`, kind: "single", engine: "citations", source: ref(`k:${t}`, t), why: "" }];
     const S = ref("s1:שמות.txt", "שמות");

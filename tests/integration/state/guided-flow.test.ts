@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
-import { GUIDED_KEY } from "../../../src/state/guided-flow";
+import { GUIDED_KEY, parseGuidedRecord } from "../../../src/state/guided-flow";
 import { loadPreferences } from "../../../src/state/preferences";
 import type { KeyValueStore } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
@@ -53,7 +53,42 @@ describe("guided flow — the method per book pair (#21)", () => {
     expect(g.plan.value!.perEngine.headings).toBeUndefined();
     expect(g.plan.value!.perEngine["dibur-hamatchil"]).toBeGreaterThan(0);
     expect(await g.run()).toBe(true);
-    expect(store.maxLink.job.value!.engines).toEqual(["dibur-hamatchil"]);
+    // forcing dibur-hamatchil replaces ONLY the headings engine: the single-book engine (citations) still runs on those books
+    expect(g.plan.value!.perEngine.citations).toBeGreaterThan(0);
+    expect([...store.maxLink.job.value!.engines!].sort()).toEqual(["citations", "dibur-hamatchil"]);
+  });
+
+  it("forcing dibur-hamatchil leaves the footnotes step of the notes books alone (owner decision)", async () => {
+    const { store } = makeStore();
+    const g = store.guided;
+    g.start();
+    await g.addBooks([text("ספר דוגמה.txt", ["<h1>ספר דוגמה</h1>", "<h2>פרק א</h2>", "שורה עם הערה (1) ועוד."]), text("הערות לספר דוגמה.txt", ["<h1>הערות לספר דוגמה</h1>", "<h2>פרק א</h2>", "(1) הערה."]), commentary("ביאור על בראשית")]);
+    await g.addBases([DB]);
+    expect(g.plan.value!.perEngine.footnotes).toBe(1);
+    g.setMethods(new Set(["dibur-hamatchil"]));
+    expect(g.plan.value!.perEngine.footnotes).toBe(1);
+    expect(g.plan.value!.perEngine.headings).toBeUndefined();
+  });
+
+  it("the method choice is kept in the saved flow and comes back when it is continued", async () => {
+    const { g } = await ready();
+    g.setMethods(new Set(["dibur-hamatchil"]));
+    g.setPairMethods("ביאור א על בראשית", "בראשית", ["headings"]);
+    const rec = g.record();
+    expect(rec.methods).toEqual(["dibur-hamatchil"]);
+    expect(rec.pairMethods).toEqual({ "ביאור א על בראשית>בראשית": ["headings"] });
+    const again = parseGuidedRecord(JSON.stringify(rec))!;
+    expect(again.methods).toEqual(["dibur-hamatchil"]);
+    // an older record, saved before the choice was kept, loads with none
+    const { methods: _m, pairMethods: _p, ...old } = rec;
+    expect(parseGuidedRecord(JSON.stringify(old))).toMatchObject({ step: rec.step });
+    expect(parseGuidedRecord(JSON.stringify(old))!.methods).toBeUndefined();
+    g.setMethods(null);
+    g.setPairMethods("ביאור א על בראשית", "בראשית", null);
+    g.saved.value = again;
+    g.continueSaved();
+    expect([...g.methods.value!]).toEqual(["dibur-hamatchil"]);
+    expect(g.pairMethods.value).toEqual({ "ביאור א על בראשית>בראשית": ["headings"] });
   });
 
   it("one pair on its own method, the other on the default", async () => {

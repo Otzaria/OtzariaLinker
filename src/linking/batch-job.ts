@@ -302,7 +302,19 @@ function parseChoices(raw: unknown): { choices?: PlanChoices } {
   const pairs = Array.isArray(c.pairs)
     ? c.pairs.flatMap((p): UserPair[] => {
         const x = p as Partial<UserPair> | null;
-        return x && typeof x.dependant === "string" && typeof x.base === "string" ? [{ dependant: x.dependant, base: x.base, ...(typeof x.kind === "string" && USER_KINDS.includes(x.kind as RelationKind) && { kind: x.kind as RelationKind }) }] : [];
+        return x && typeof x.dependant === "string" && typeof x.base === "string"
+          ? [
+              {
+                dependant: x.dependant,
+                base: x.base,
+                ...(typeof x.kind === "string" && USER_KINDS.includes(x.kind as RelationKind) && { kind: x.kind as RelationKind }),
+                // the per-pair controls: only well-formed values survive; a record without them is the same as before
+                ...(x.enabled === false && { enabled: false as const }),
+                ...(typeof x.connectionType === "string" && x.connectionType.trim() && { connectionType: x.connectionType }),
+                ...(typeof x.minConfidence === "string" && MIN_CONFIDENCES.includes(x.minConfidence) && { minConfidence: x.minConfidence }),
+              },
+            ]
+          : [];
       })
     : [];
   const methods: Record<string, PairEngineId[]> = {};
@@ -315,6 +327,7 @@ function parseChoices(raw: unknown): { choices?: PlanChoices } {
   return Object.keys(choices).length ? { choices } : {};
 }
 
+const MIN_CONFIDENCES: readonly string[] = ["certain", "high", "possible", "ambiguous"];
 const USER_KINDS: readonly RelationKind[] = ["commentary", "notes", "mishnah-in-talmud"];
 
 /** Parses a stored record; null when it is not one (an older or damaged entry is dropped, never trusted). */

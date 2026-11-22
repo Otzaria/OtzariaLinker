@@ -234,6 +234,27 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
     for (const [, v] of lines) expect(v.filter((x) => x.endsWith(":certain")).length).toBeLessThanOrEqual(1);
   });
 
+  it("per pair: connectionType is the type of its links, minConfidence hides the weaker suggestions (and says how many), enabled:false runs nothing (B)", async () => {
+    const { store, key } = await opened();
+    const scope = { kind: "books", keys: [key("חידושים")] } as const;
+    const pairs = (extra: object) => ({ pairs: [{ dependant: "חידושים", base: "בראשית", ...extra }] });
+    const ENGINES2 = new Set<EngineId>(["headings", "dibur-hamatchil"]);
+    // a commentary-like book with words of the base, so that dibur-hamatchil finds places of every certainty
+    const run = async (extra: object) => {
+      expect(await store.maxLink.run(store.maxLink.plan(scope, ENGINES2, undefined, pairs(extra)), "זוג")).toBe(true);
+      return store.suggestions.run.value!.result.suggestions as MergedSuggestion[];
+    };
+    const all = await run({});
+    const typed = await run({ connectionType: "reference" });
+    expect(typed.length).toBe(all.length);
+    expect(typed.every((s) => s.declaredType === "reference")).toBe(true);
+    const strict = await run({ minConfidence: "certain" });
+    expect(strict.every((s) => s.confidence === "certain")).toBe(true);
+    expect(strict.length).toBeLessThanOrEqual(all.length);
+    const hidden = all.length - strict.length;
+    if (hidden > 0) expect(store.suggestions.run.value!.result.notes.map((n) => n.code)).toContain("maxlink/below-pair-minimum");
+    expect(store.maxLink.plan(scope, ENGINES2, undefined, pairs({ enabled: false })).steps).toHaveLength(0);
+  });
   it("titleFit: the screens ask before offering the headings method", async () => {
     const { store, key } = await opened();
     expect((await store.maxLink.titleFit(key("ביאור על בראשית"), key("בראשית")))!.verdict).toBe("fit");

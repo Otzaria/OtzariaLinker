@@ -3,6 +3,7 @@ import { sourceIdOfBookKey } from "../core/books";
 import type { DbLinkBookCount } from "../core/links/db-links";
 import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
+import { parseConnectionType } from "../core/links/connection-type";
 import { ENGINES, type EngineId } from "./automatic";
 import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
@@ -298,7 +299,7 @@ export interface PlanUnsuitable {
   readonly base: BookRef;
   readonly engine: PairEngineId;
   /** "unsuitable": the relation does not fit the method; "unticked": it would run, but the user left it out */
-  readonly reason: "unsuitable" | "unticked";
+  readonly reason: "unsuitable" | "unticked" | "disabled";
   readonly why: string;
 }
 
@@ -340,6 +341,8 @@ export interface MaxLinkPlan {
   estimatedMs: number;
   /** steps with no estimate, because a book's length is not known yet */
   unestimated: number;
+  /** the confidence a pair's suggestions must reach (UserPair.minConfidence), by pairMethodKey */
+  minConfidence?: Record<string, "certain" | "high" | "possible" | "ambiguous">;
 }
 
 /**
@@ -372,6 +375,12 @@ export interface UserPair {
    */
   readonly dependantKey?: string;
   readonly baseKey?: string;
+  /** false: the pair is left out of the plan (and listed as disabled); default true */
+  readonly enabled?: boolean;
+  /** the connection type every link of this pair is written with (a known type: connection-type.ts); over the plan's own */
+  readonly connectionType?: string;
+  /** suggestions of this pair below this confidence are not shown (state/maxlink.ts, at the merge); default: all */
+  readonly minConfidence?: "certain" | "high" | "possible" | "ambiguous";
 }
 
 /** The key of a pair in PlanChoices.methods. */
@@ -978,6 +987,10 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const relations = new Map<string, Relation[]>(); // by dependant key
   const problems = new Map<string, string>();
   const { relations: user, unmade } = userRelations(input.choices?.pairs, input.library);
+  // the per-pair controls of the user's pairs, by title
+  const controls = new Map<string, UserPair>();
+  for (const p of input.choices?.pairs ?? []) controls.set(pairMethodKey(p.dependant, p.base), p);
+  const disabledCount = new Map<string, number>();
   /** every open commentary on a base, selected or not: the intermediate commentators come from here */
   const commentariesOn = new Map<string, Relation[]>();
   for (const b of input.library) {
@@ -999,8 +1012,19 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const bump = (k: string) => touches.set(k, (touches.get(k) ?? 0) + 1);
   for (const [depKey, rels] of relations)
     for (const rel of rels) {
+      const ctl = controls.get(pairMethodKey(rel.dependant.title, rel.base.title));
       const wanted = input.choices?.methods?.[pairMethodKey(rel.dependant.title, rel.base.title)];
       const own = stepsFor(rel, byKey.get(depKey)!);
+      if (ctl?.enabled === false) {
+        // switched off by the user: no step, and the plan says so (never silently dropped)
+        disabledCount.set(depKey, (disabledCount.get(depKey) ?? 0) + 1);
+        pushTo(unmade, depKey, `הזוג עם ${quote(rel.base.title)} הושבת לפי בחירתכם`);
+        for (const engine of own.map((x) => x.engine)) unsuitable.push({ dependant: rel.dependant, base: rel.base, engine, reason: "disabled", why: "הזוג הושבת לפי בחירתכם, ולכן אף שיטה לא תרוץ עליו." });
+        continue;
+      }
+      const type = ctl?.connectionType === undefined ? undefined : parseConnectionType(ctl.connectionType);
+      if (ctl?.connectionType !== undefined && !type!.known) pushTo(unmade, depKey, `סוג הקישור "${ctl.connectionType}" שנבחר לזוג עם ${quote(rel.base.title)} אינו סוג מוכר, ולכן לא שונה`);
+      const declared = type?.known ? ctl!.connectionType!.trim().toLowerCase().replaceAll(" ", "_") : undefined;
       // the user named the methods of this pair: exactly those (headings then runs with no title gate)
       const list: StepSpec[] = wanted
         ? wanted.flatMap((e) => {
@@ -1022,7 +1046,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
           unsuitableSeen.add(key);
           unsuitable.push(planned || !why ? { dependant: rel.dependant, base: rel.base, engine, reason: "unticked", why: "השיטה לא סומנה, ולכן לא תרוץ על הזוג הזה." } : { dependant: rel.dependant, base: rel.base, engine, reason: "unsuitable", why });
         }
-      for (const s of list) {
+      for (const s0 of list) {
+      const s: StepSpec = declared ? { ...s0, options: { ...s0.options, declaredType: declared } } : s0;
       if (!wanted && !enabled(s.engine)) continue;
       // one step per part when a part of the dependant is linked to the same part of the base
       const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
@@ -1076,7 +1101,8 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (missed?.length && all.length) decisions.push(`הערה לגבי הבחירה שלכם: ${missed.join("; ")}.`);
     const n = touches.get(k) ?? 0;
     let skipped: string | undefined;
-    if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;
+    if (!n && disabledCount.get(k) && disabledCount.get(k) === all.length) skipped = "כל הזוגות של הספר הושבתו לפי בחירתכם.";
+    else if (!n) skipped = all.length || onIt.length ? "השיטות המתאימות לספר הזה לא סומנו." : `${problems.get(k) ?? "לא נמצא לו קשר."} גם אין ספר פתוח שכתוב עליו.`;
     // a book that names a base but was not paired with it: why, even when other steps run on it
     const unpaired = !owns.length && n > 0 && namesBase(b) ? problems.get(k) : undefined;
     return { book: ref(b), decisions, steps: n, ...(skipped !== undefined && { skipped }), ...(unpaired !== undefined && { unpaired }) };
@@ -1109,7 +1135,9 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       estimatedMs += estimate.ms;
     }
   }
-  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }), unsuitable, estimatedMs, unestimated };
+  const minConfidence: Record<string, "certain" | "high" | "possible" | "ambiguous"> = {};
+  for (const [key, c] of controls) if (c.minConfidence) minConfidence[key] = c.minConfidence;
+  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }), unsuitable, estimatedMs, unestimated, ...(Object.keys(minConfidence).length && { minConfidence }) };
 }
 
 /** The book names a base it is written on: by its title ("X על Y", "הערות על Y") or by the database. */

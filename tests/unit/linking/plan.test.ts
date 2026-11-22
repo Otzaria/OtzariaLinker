@@ -793,3 +793,46 @@ describe("planMaxLink — estimated cost and unsuitable methods", () => {
   });
 });
 
+
+/* B — per-pair control: disable a pair, override its connection type, set its own confidence threshold */
+describe("planMaxLink — per-pair enabled, connectionType and minConfidence (UserPair)", () => {
+  const lib = [book("u:1", "חיבור כלשהו"), book("b:2", "ספר ב"), book("b:3", "ספר ג"), book("t:1", "תרגום אונקלוס על ספר ב"), book("b:4", "ספר ד")];
+  const pairs = (extra: object, extra2: object = {}) => ({ pairs: [{ dependant: "חיבור כלשהו", base: "ספר ב", ...extra }, { dependant: "חיבור כלשהו", base: "ספר ג", ...extra2 }] });
+
+  it("enabled:false leaves the pair out (and says so), the other pairs of the book still run", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ enabled: false }) });
+    expect(steps(p).every((s) => s.endsWith(">ספר ג"))).toBe(true);
+    const off = p.unsuitable.find((u) => u.base.title === "ספר ב")!;
+    expect(off.reason).toBe("disabled");
+    expect(off.why).toContain("הושבת");
+    expect(p.books[0]!.decisions.join(" ")).toContain("הושבת");
+  });
+
+  it("all pairs of a book disabled: the book is skipped with that reason", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ enabled: false }, { enabled: false }) });
+    expect(p.steps).toHaveLength(0);
+    expect(p.books[0]!.skipped).toContain("הושבתו");
+  });
+
+  it("connectionType becomes the declared type of every step of the pair, over the plan's own (a targum's too)", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ connectionType: "reference" }) });
+    for (const s of p.steps) {
+      if (s.kind !== "pair") continue;
+      if (s.target.title === "ספר ב") expect(s.options).toMatchObject({ declaredType: "reference" });
+      else expect(s.options?.declaredType).toBeUndefined();
+    }
+    const t = planPairs({ selected: ["t:1"], library: lib, choices: { pairs: [{ dependant: "תרגום אונקלוס על ספר ב", base: "ספר ב", connectionType: "commentary" }] } });
+    expect(t.steps.every((s) => s.kind === "pair" && s.options?.declaredType === "commentary")).toBe(true);
+  });
+
+  it("an unknown connection type is ignored, with a note in the book's decisions (never written as a made-up type)", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ connectionType: "no-such-type" }) });
+    expect(p.steps.every((s) => s.kind !== "pair" || s.options?.declaredType === undefined)).toBe(true);
+    expect(p.books[0]!.decisions.join(" ")).toContain("no-such-type");
+  });
+
+  it("minConfidence is carried on the plan, by pair, for the merge to apply", () => {
+    const p = planPairs({ selected: ["u:1"], library: lib, choices: pairs({ minConfidence: "high" }) });
+    expect(p.minConfidence).toEqual({ [pairMethodKey("חיבור כלשהו", "ספר ב")]: "high" });
+  });
+});

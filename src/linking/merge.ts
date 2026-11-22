@@ -573,3 +573,20 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     reasons: [...reasons, r(`maxlink/exists-${where}`, where === "db" ? "הקישור כבר קיים במסד שממנו נפתח הספר." : "הקישור כבר קיים בפרויקט.")],
   };
 }
+
+/**
+ * A pair's own confidence threshold (UserPair.minConfidence, plan.ts): the suggestions of that pair below it are not shown. The
+ * pair is the focus book (the commentary, the main book) against the other end, by title, as PlanChoices keys it
+ * (`<dependant>><base>`); a pair with no threshold is untouched. Returns what stays and how many were hidden.
+ */
+export function applyPairMinimums(list: readonly MergedSuggestion[], minimums: Readonly<Record<string, Confidence>>): { kept: MergedSuggestion[]; hidden: number } {
+  if (!Object.keys(minimums).length) return { kept: [...list], hidden: 0 };
+  const kept: MergedSuggestion[] = [];
+  for (const s of list) {
+    const mine = s.source.book.key === s.focus ? s.source : s.target;
+    const other = mine === s.source ? s.target : s.source;
+    const min = minimums[`${mine.book.title}>${other.book.title}`];
+    if (min === undefined || rank(s.confidence) <= rank(min)) kept.push(s);
+  }
+  return { kept, hidden: list.length - kept.length };
+}
