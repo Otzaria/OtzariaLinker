@@ -108,3 +108,128 @@ test("repository: the dialog fits a phone", async ({ page }) => {
   await expect(dlg.getByRole("button", { name: "השלמת קישורים לנבחרים" })).toBeVisible();
   expect(seen.errors).toEqual([]);
 });
+
+/* the repository dialog, opened from the home path "analyze and complete links" on the small real database */
+async function openRepository(page: import("@playwright/test").Page) {
+  await chooseTask(page, "repo", "analyze");
+  const sheet = page.getByRole("dialog", { name: "ניתוח מאגר והשלמת קישורים" });
+  const chooser = page.waitForEvent("filechooser");
+  await sheet.getByRole("button", { name: "המסד: מסד נתונים" }).click();
+  await (await chooser).setFiles(DB_FILE);
+  await expect(sheet.locator(".steps > li").first()).toHaveClass(/done/, { timeout: 30_000 });
+  await sheet.getByRole("button", { name: "התחלה" }).click();
+  const dlg = page.locator("dialog.repository");
+  await expect(dlg).toBeVisible();
+  return dlg;
+}
+
+test("repository: when the analysis finishes focus stays inside the dialog (on the summary), not on the page behind it", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  const where = await page.evaluate(() => {
+    const a = document.activeElement;
+    return { tag: a?.tagName, inDialog: !!a?.closest("dialog.repository"), status: a?.getAttribute("role") };
+  });
+  expect(where).toEqual({ tag: "P", inDialog: true, status: "status" });
+  expect(seen.errors).toEqual([]);
+});
+
+test("repository: interactive targets are at least 24x24 CSS px (WCAG 2.5.8)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  const boxes = await dlg.evaluate((root) => {
+    const size = (el: Element | null) => {
+      const r = el?.getBoundingClientRect();
+      return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
+    };
+    const markShown = [...root.querySelectorAll("button")].find((b) => b.textContent?.includes("סימון המוצגים")) ?? null;
+    return { checkbox: size(root.querySelector(".repo-book input[type=checkbox]")), title: size(root.querySelector(".repo-title")), markShown: size(markShown) };
+  });
+  for (const [name, b] of Object.entries(boxes)) {
+    expect(b, name).not.toBeNull();
+    expect(b!.w, `${name} width`).toBeGreaterThanOrEqual(24);
+    expect(b!.h, `${name} height`).toBeGreaterThanOrEqual(24);
+  }
+});
+
+test("repository: 'complete links' asks before it replaces a guided flow an earlier session left unfinished", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  // an unfinished flow, as the app's own autosave would have left it (IndexedDB "otzaria-linker", key "guided:v1")
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const record = { v: 1, step: "plan", sources: [{ label: "ספרים ישנים", kind: "text-files", books: 3 }], purpose: "submission", links: 0, done: false, savedAt: Date.now() };
+        const req = indexedDB.open("otzaria-linker", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("kv");
+        req.onerror = () => reject(req.error);
+        req.onsuccess = () => {
+          const tx = req.result.transaction("kv", "readwrite");
+          tx.objectStore("kv").put(JSON.stringify(record), "guided:v1");
+          tx.oncomplete = () => (req.result.close(), resolve());
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  await page.reload();
+  const banner = page.locator(".recovery", { hasText: "לא הסתיים" });
+  await expect(banner).toBeVisible();
+
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  await dlg.getByRole("checkbox", { name: /^בחירה: / }).first().check();
+  const complete = dlg.getByRole("button", { name: "השלמת קישורים לנבחרים" });
+  await complete.click();
+  // nothing was replaced yet: it asks, naming the flow it would replace, and keeps focus on the safe answer
+  const ask = dlg.getByRole("alert").filter({ hasText: "תהליך מודרך שלא הסתיים" });
+  await expect(ask).toContainText('שלב "התוכנית"');
+  await expect(page).not.toHaveURL(/#\/guided/);
+  await expect(dlg.getByRole("button", { name: /^ביטול, להשאיר/ })).toBeFocused();
+  await dlg.getByRole("button", { name: /^ביטול, להשאיר/ }).click();
+  await expect(ask).toHaveCount(0);
+  // cancelling replaced nothing: asked again, and this time replaced
+  await complete.click();
+  await expect(ask).toBeVisible();
+  await dlg.getByRole("button", { name: "להחליף ולהמשיך" }).click();
+  await expect(page).toHaveURL(/#\/guided\/books$/);
+  expect(seen.errors).toEqual([]);
+});
+
+test("repository: finger-sized targets on a coarse pointer", async ({ browser, browserName }) => {
+  test.skip(browserName !== "chromium", "isMobile is Chromium only");
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 412, height: 915 } });
+  const page = await context.newPage();
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  const small = await dlg.evaluate((root) =>
+    [...root.querySelectorAll(".repo-book input[type=checkbox], .repo-title, .repo-run button, footer button")].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { what: el.className || el.tagName, h: Math.round(r.height), w: Math.round(r.width) };
+    }).filter((b) => b.h < 44),
+  );
+  expect(small).toEqual([]);
+  await context.close();
+});
+
+test("the 'copy the folder path' button of the database hint is at least 24px high (it was 19px)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await chooseTask(page, "repo", "analyze");
+  const copy = page.getByRole("dialog").locator(".db-hint").getByRole("button", { name: /העתקה/ });
+  await expect(copy).toBeVisible();
+  const box = (await copy.boundingBox())!;
+  expect(box.height).toBeGreaterThanOrEqual(24);
+  expect(box.width).toBeGreaterThanOrEqual(24);
+});

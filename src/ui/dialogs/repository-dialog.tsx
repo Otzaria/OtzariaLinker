@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { TYPE_LABELS } from "../../core/links/connection-type";
+import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
 import type { PairConfidence, PairProposal } from "../../linking/discovery";
 import { isSuspicious, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoRow, type RepoSort } from "../../state/repository";
@@ -92,11 +93,36 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
   const pairs = repo.pickedPairs.value;
   const chosen = repo.chosenBooks();
   const busy = !!progress;
-  const complete = () => {
+  // "complete the links" starts a NEW guided flow. A flow an earlier session left unfinished (or one on the screen) is replaced by it,
+  // and the new flow is not saved: say so and ask first, instead of making the "unfinished flow" notice vanish without a word.
+  const replaced = store.guided.saved.value;
+  const replacing = !!replaced || store.guided.active.value;
+  const [confirming, setConfirming] = useState(false);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const start = () => {
     if (!chosen.length) return;
     store.guided.startForBooks(chosen, [...pairs.values()]);
     store.dialog.value = null;
   };
+  const complete = () => {
+    if (!chosen.length) return;
+    if (replacing && !confirming) return void setConfirming(true);
+    start();
+  };
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus();
+  }, [confirming]);
+  useEffect(() => {
+    if (!chosen.length) setConfirming(false);
+  }, [chosen.length]);
+  // when a count ends, the button that was focused (stop) is gone and focus would fall to the page behind the dialog: bring it to the summary
+  const wasBusy = useRef(false);
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const at = document.activeElement;
+    if (wasBusy.current && !busy && (!at || at === document.body || !ref.current?.contains(at))) summaryRef.current?.focus({ preventScroll: true });
+    wasBusy.current = busy;
+  }, [busy]);
   const askedMany = repo.books.value.length > 400;
 
   return (
@@ -163,7 +189,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   </p>
                 )}
                 {!progress && repo.analyzedAt.value !== null && (
-                  <p class="muted small" role="status" style="margin:0">
+                  <p class="muted small focus-target" role="status" style="margin:0" tabIndex={-1} ref={summaryRef}>
                     {totals.counted >= totals.books
                       ? `${totals.books === 1 ? "נקראו הקישורים של הספר היחיד" : `נקראו הקישורים של כל ${n(totals.books)} הספרים`}.`
                       : `נקראו הקישורים של ${n(totals.counted)} מתוך ${n(totals.books)} ספרים; "המשך הניתוח" קורא את השאר.`}{" "}
@@ -290,6 +316,24 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
         <footer>
+          {confirming && (
+            <div class="repo-confirm warn-text" role="alert">
+              <span>
+                {replaced
+                  ? `יש תהליך מודרך שלא הסתיים (הגעתם לשלב "${GUIDED_STEP_TITLES[replaced.step]}"). `
+                  : "תהליך מודרך כבר פתוח. "}
+                "השלמת קישורים" פותחת תהליך חדש במקומו, והתהליך החדש לא נשמר להמשך מאוחר יותר: התהליך הקודם לא יוצע יותר להמשך.
+              </span>
+              <span class="row">
+                <button class="btn text" ref={keepRef} onClick={() => setConfirming(false)}>
+                  ביטול, להשאיר את התהליך הקודם
+                </button>
+                <button class="btn filled" onClick={start}>
+                  להחליף ולהמשיך
+                </button>
+              </span>
+            </div>
+          )}
           <span class="repo-chosen muted" role="status" aria-live="polite">
             {chosen.length ? `${chosen.length === 1 ? "נבחר ספר אחד" : `נבחרו ${n(chosen.length)} ספרים`}${pairs.size ? (pairs.size === 1 ? ", עם זוג אחד שנבחר" : `, ${n(pairs.size)} מהם עם זוג שנבחר`) : ""}.` : "עוד לא נבחרו ספרים או זוגות."}
           </span>

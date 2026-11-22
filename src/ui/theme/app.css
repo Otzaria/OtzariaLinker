@@ -246,6 +246,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .db-hint .icon { margin-top: 2px; color: var(--primary); }
 .db-hint .path { display: block; margin: 2px 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--on-surface); text-align: left; }
 .db-hint .muted { margin-top: 4px; }
+.db-hint .btn.small { min-height: 24px; }
+@media (pointer: coarse) { .db-hint .btn.small, .home .btn, .home .btn.small { min-height: 44px; } }
 .btn.small { min-height: 0; padding: 0 6px; font-size: var(--fs-sm); gap: 4px; vertical-align: middle; color: var(--primary); }
 /* books grouped by source */
 .book-group + .book-group { border-top: 1px solid var(--outline-variant); }

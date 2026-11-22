@@ -23,7 +23,7 @@ dialog.repository footer { align-items: center; gap: 8px; flex-wrap: wrap; }
 .repo-book, .repo-pair { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; }
 .repo-pair { align-items: start; }
 .repo-book.current { background: var(--secondary-container); color: var(--on-secondary-container); }
-.repo-title { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; overflow-wrap: anywhere; padding: 2px 0; }
+.repo-title { flex: 1; min-width: 0; min-block-size: 28px; display: flex; align-items: center; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; overflow-wrap: anywhere; padding: 2px 0; }
 .repo-title:hover { text-decoration: underline; }
 .repo-meta { font-size: var(--fs-sm); white-space: nowrap; }
 .repo-none { color: var(--on-surface); }
@@ -31,7 +31,15 @@ dialog.repository footer { align-items: center; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 600px) { .repo-book { flex-wrap: wrap; } .repo-meta { white-space: normal; flex-basis: 100%; } }
 @media (min-width: 62rem) { .repo-detail { position: sticky; inset-block-start: 0; max-block-size: 80vh; overflow: auto; } }
 dialog.repository .btn.small { min-block-size: 28px; }
-dialog.repository input[type="checkbox"] { inline-size: 18px; block-size: 18px; flex: none; }
+/* touch targets (WCAG 2.5.8: at least 24x24 CSS px; 44px for a finger) */
+dialog.repository input[type="checkbox"] { inline-size: 24px; block-size: 24px; flex: none; }
+dialog.repository .icon-btn { min-inline-size: 28px; min-block-size: 28px; }
+.repo-confirm { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--warning, var(--outline)); border-radius: var(--radius); background: var(--warning-container, var(--surface-container)); color: var(--on-warning-container, inherit); }
+@media (pointer: coarse) {
+  dialog.repository .btn, dialog.repository .btn.small, dialog.repository .icon-btn, dialog.repository .repo-title { min-block-size: 44px; }
+  dialog.repository .icon-btn { min-inline-size: 44px; }
+  dialog.repository input[type="checkbox"] { inline-size: 44px; block-size: 44px; }
+}
 .repo-detail { border: 1px solid var(--outline-variant); border-radius: var(--radius); padding: 10px; display: grid; gap: 6px; background: var(--surface-container-low); min-width: 0; overflow-wrap: anywhere; }
 .repo-rel { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--fs-sm); }
 .repo-rel li { display: flex; gap: 8px; align-items: center; }
