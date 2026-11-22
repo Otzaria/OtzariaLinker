@@ -166,7 +166,7 @@ describe("hostile sizes: a range end or a line count from a file must not become
   it("without a line count the clamp is the shared cap, so the set can never outgrow it", () => {
     const sug = { id: "a", source: side(C, 0, Number.MAX_SAFE_INTEGER), target: side(B, 1), confidence: "high" } as Suggestion;
     expect(candidateLines([sug], () => true, (r) => r.key === "c").size).toBe(MAX_BOOK_LINES);
-  });
+  }, 30_000); // a Set of 5 million lines: about a second alone, several under a parallel run
   it("the cap is 5 million lines", () => {
     expect(MAX_BOOK_LINES).toBe(5_000_000);
   });
