@@ -66,6 +66,19 @@ export class PersonalCsvState {
       return true;
     });
     if (ok === null) return null;
+    // each target book's headings of level 2+ in line order, once; a place is memoised per (book, line)
+    const ordered = new Map<string, BookHeading[]>();
+    const sorted = (bookKey: string): BookHeading[] | null => {
+      let list = ordered.get(bookKey);
+      if (!list) {
+        const hs = targets.get(bookKey);
+        if (!hs) return null;
+        list = hs.filter((h) => h.level > 1).sort((a, b) => a.line - b.line);
+        ordered.set(bookKey, list);
+      }
+      return list;
+    };
+    const placed = new Map<string, string | null>();
     const { rows, skipped } = personalLinkRows(links, {
       isPersonal: personal,
       isOfficial: official,
@@ -73,12 +86,24 @@ export class PersonalCsvState {
       // the lines read are the book's length: a range end of a hostile file never walks past them
       lineCount: (b) => lengths.get(b.key),
       positionOf: (side) => {
-        const hs = targets.get(side.book.key);
-        if (!hs) return null;
-        let best: BookHeading | undefined;
-        for (const h of hs) if (h.line <= side.line && h.level > 1 && (!best || h.line >= best.line)) best = h;
-        const text = best ? stripTags(best.text).trim() : "";
-        return text || null;
+        const key = `${side.book.key}\u0000${side.line}`;
+        if (placed.has(key)) return placed.get(key)!;
+        const hs = sorted(side.book.key);
+        let found: string | null = null;
+        if (hs) {
+          // the last heading (of level 2+) at or before the line; of several on one line the later one, as the scan chose
+          let lo = 0;
+          let hi = hs.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (hs[mid]!.line <= side.line) lo = mid + 1;
+            else hi = mid;
+          }
+          const best = lo > 0 ? hs[lo - 1] : undefined;
+          found = (best ? stripTags(best.text).trim() : "") || null;
+        }
+        placed.set(key, found);
+        return found;
       },
     });
     const headingTexts = new Map<string, Set<string>>();
@@ -97,4 +122,5 @@ export class PersonalCsvState {
     this.saver.save(`קישורים-לספרייה-האישית-${new Date().toISOString().slice(0, 10)}.zip`, data, "application/zip");
   }
 }
+
 
