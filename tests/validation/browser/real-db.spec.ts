@@ -32,7 +32,7 @@ test("the real seforim.db opens through the file chooser and a book shows its te
   const reader = page.locator(".reader.source");
   const open = async (title: string) => {
     await list.getByRole("searchbox", { name: "חיפוש ספר" }).fill(title);
-    await list.locator(".book-list li").filter({ hasText: new RegExp(`^${title}`) }).first().getByRole("button", { name: "מקור" }).click();
+    await list.locator(".book-list li").filter({ hasText: new RegExp(`^${title}`) }).first().locator('button.side-btn[data-side="source"]').click();
     await expect(reader.locator(".ln").nth(3)).not.toBeEmpty({ timeout: 120_000 });
   };
   const t1 = Date.now();

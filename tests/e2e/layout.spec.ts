@@ -137,8 +137,8 @@ test("the side panel at its narrowest keeps every element inside it, even with a
   for (let i = 0; i < 40; i++) await page.keyboard.press("ArrowLeft");
   // both ends picked: the builder then also shows the "stored as" paragraph and the validation list
   const books = page.locator(".book-list li");
-  await books.filter({ hasText: "ביאורמפורט" }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: "חידושיהרשבא" }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאורמפורט" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: "חידושיהרשבא" }).first().locator('button.side-btn[data-side="target"]').click();
   await page.locator(".reader.source .ln").nth(1).click();
   await page.locator(".reader.target .ln").nth(1).click();
   await expect(page.locator(".builder .end.set")).toHaveCount(2);

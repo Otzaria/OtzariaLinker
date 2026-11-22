@@ -18,7 +18,7 @@ async function openBereshit(page: Page) {
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(DB) }]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   const target = page.locator(".reader.target");
   await expect(target.locator(".ln").nth(2)).toContainText("(א)", { timeout: 30_000 });
   return target;

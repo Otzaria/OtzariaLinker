@@ -33,8 +33,8 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
 
   // source = the commentary, target = Bereshit
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "פירוש על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "פירוש על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   const source = page.locator(".reader.source");
   const target = page.locator(".reader.target");
   await expect(source.locator(".ln").nth(1)).toContainText("פירוש ראשון");
@@ -108,7 +108,7 @@ test("dark theme and narrow screen keep the workspace usable", async ({ page }) 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(distUrl);
   await openFiles(page);
-  await page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li").filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "מקור" }).click();
+  await page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li").filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="source"]').click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await shot(page, "6-dark");
   await page.setViewportSize({ width: 600, height: 900 });

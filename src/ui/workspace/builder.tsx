@@ -4,6 +4,7 @@ import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-ty
 import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
 import type { Pick, Side } from "../../state/store";
+import { inRole } from "../../state/roles";
 import { TYPE_CHOICES } from "../../state/store";
 import { TypeOptions } from "./type-options";
 import { useStore } from "../context";
@@ -54,12 +55,13 @@ export function Builder() {
   }, [store]);
 
   const known = parseConnectionType(store.draftType.value).known;
+  const roles = store.roles.value;
 
   return (
     <div class="builder">
       <End side="source" pick={s} />
       <div class="row" style="justify-content:center">
-        <button class="btn text" onClick={() => swap(store)} disabled={!s && !t} title="החלפת מקור ויעד">
+        <button class="btn text" onClick={() => swap(store)} disabled={!s && !t} title={`החלפת ${roles.source.short} ו${roles.target.short}`}>
           <Icon name="fl_arrow_swap" size={16} />
           החלפה
         </button>
@@ -161,14 +163,15 @@ function StoredAs() {
 
 function End({ side, pick }: { side: Side; pick: Pick | null }) {
   const store = useStore();
-  const label = side === "source" ? "מקור" : "יעד";
+  const role = store.roles.value[side];
+  const label = role.short;
   const origin = useBookOrigin()(pick?.bookKey);
   if (!pick)
     return (
-      <div class={`end ${side}`}>
-        <span class={`side-badge ${side}`}>{label}</span>
+      <div class={`end ${side}`} data-side={side}>
+        <span class={`side-badge ${side}`} title={role.hint}>{label}</span>
         <span class="muted">
-          {side === "source" ? "לחצו על שורה בספר המקור (Shift לטווח, סימון מילים לעוגן)" : "לחצו על שורה בספר היעד, או גררו אליה מספר שורה מהמקור"}
+          {side === "source" ? `לחצו על שורה ${inRole(role.name)} (Shift לטווח, סימון מילים לעוגן)` : `לחצו על שורה ${inRole(role.name)}, או גררו אליה מספר שורה ${store.roles.value.source.from}`}
         </span>
       </div>
     );
@@ -177,8 +180,8 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
   const line = store.lines.peek(pick.bookKey, pick.line);
   const where = pick.end !== undefined ? `שורות ${pick.line + 1}–${pick.end + 1}` : `שורה ${pick.line + 1}`;
   return (
-    <div class={`end ${side} set`}>
-      <span class={`side-badge ${side}`}>{label}</span>
+    <div class={`end ${side} set`} data-side={side}>
+      <span class={`side-badge ${side}`} title={role.hint}>{label}</span>
       <button class="what adv-link" style="text-decoration:none;color:inherit" onClick={() => store.reveal(side, pick.bookKey, pick.line)} title={`${title} — הצגה בספר`}>
         {title} · {where}
       </button>

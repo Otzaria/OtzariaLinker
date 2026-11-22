@@ -69,8 +69,8 @@ test("a folder, the Otzaria database and a second folder: grouped books, a link 
 
   // a link from a folder book to a database book
   const books = page.locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await expect(page.locator(".reader.source .panel-head .src-badge")).toHaveText("תיקייה");
   await expect(page.locator(".reader.target .panel-head .src-badge")).toHaveText("מסד אוצריא");
   await page.getByRole("tab", { name: "בונה" }).click();
@@ -148,8 +148,8 @@ test("a reader's head: the book name wraps, and a button opens the full name and
   await addSource(page, "מסד נתונים", [DB]);
   await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
   const books = page.locator(".book-list li");
-  await books.filter({ hasText: "חידושי הרשב" }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "חידושי הרשב" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
 
   const head = page.locator(".reader.source .panel-head");
   const nameBtn = head.getByRole("button", { name: LONG });

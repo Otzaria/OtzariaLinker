@@ -44,7 +44,7 @@ test("100K links: table render, filter, sort, scroll, group action; 100K-vs-100K
   ]);
   await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 120_000 });
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: /^ארצות החיים/ }).getByRole("button", { name: "מקור" }).click({ timeout: 60_000 });
+  await books.filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click({ timeout: 60_000 });
 
   const items = page.locator(".vlist .link-item");
   const head = page.locator(".lt-head");

@@ -120,6 +120,8 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const store = useStore();
   const intent = store.intent.value;
   const [engine, setEngine] = useState<EngineId>(intent?.engine ?? "headings");
+  // the sides are named by the job (state/roles.ts): the form says which job this is
+  useEffect(() => void (store.suggestions.formEngine.value = engine), [engine]);
   // in the store, not here: the route names it (#/maxlink), and a guided task starts in it
   const mode = store.suggestMode.value;
   const setMode = (m: typeof mode) => (store.suggestMode.value = m);

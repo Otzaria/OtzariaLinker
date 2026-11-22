@@ -15,7 +15,6 @@ import "./db-links.css";
  * by direction and by the picked line; paged from the worker. A click shows both ends in the
  * readers. "העתקה לפרויקט" turns chosen links into project links that can be edited and exported.
  */
-const SIDE_LABEL: Record<Side, string> = { source: "ספר המקור", target: "ספר היעד" };
 const BOOK_ROWS = 40;
 
 export function DbLinksPanel() {
@@ -49,7 +48,7 @@ export function DbLinksPanel() {
         <div class="filters" role="group" aria-label="איזה ספר להציג">
           {(["source", "target"] as const).map((k) => (
             <button key={k} class="chip" aria-pressed={side === k} onClick={() => (s.side.value = k)} disabled={!store.view[k].value}>
-              {SIDE_LABEL[k]}
+              {store.roles.value[k].name}
             </button>
           ))}
         </div>
@@ -61,7 +60,7 @@ export function DbLinksPanel() {
       {!book ? (
         <div class="empty">
           <Icon name="oz_library_link" size={40} />
-          <span>פתחו ספר מתוך מסד אוצריא בקורא ה{side === "source" ? "מקור" : "יעד"}, ויוצגו כאן הקישורים שכבר יש לו במסד.</span>
+          <span>פתחו ספר מתוך מסד אוצריא בקורא של {store.roles.value[side].name}, ויוצגו כאן הקישורים שכבר יש לו במסד.</span>
         </div>
       ) : summary && summary.bookKey === bookKey && "reason" in summary ? (
         <div class="empty">

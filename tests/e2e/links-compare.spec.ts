@@ -27,7 +27,7 @@ test("compare the database with a links file, merge two versions, a group action
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: /^ארצות החיים/ }).getByRole("button", { name: "מקור" }).click({ timeout: 30_000 });
+  await books.filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click({ timeout: 30_000 });
 
   await page.getByRole("tab", { name: /קישורים/ }).first().click();
   await page.getByRole("button", { name: "השוואה ומיזוג" }).click();

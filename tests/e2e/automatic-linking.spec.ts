@@ -20,8 +20,8 @@ test("headings engine: run in the worker → table → approve all certain → c
   ]);
 
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
@@ -59,8 +59,8 @@ test("sort the suggestions: weakest first, strongest first, and back to the book
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: 'רש"י על בראשית' }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
@@ -111,8 +111,8 @@ test("a suggestion shows the target's line number in the table, the step view an
   await page.getByRole("button", { name: "קבצים", exact: true }).click();
   await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: 'רש"י על בראשית' }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
@@ -132,6 +132,52 @@ test("a suggestion shows the target's line number in the table, the step view an
   await page.getByRole("radio", { name: "כרטיס" }).click();
   await expect(page.locator(".builder .end.target.set .side-badge")).toContainText(/שור(?:ה|ות) \d+/);
   await expect(page.locator(".builder .end.source.set .side-badge")).toContainText(/שור(?:ה|ות) \d+/);
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});
+
+/*
+ * Issue 19: the two sides are named by the job — the commentary and its base, the book body and its notes, the citing and
+ * the cited book — and by the neutral "מקור"/"יעד" when no job is known (the manual builder). The ids stay `source` and
+ * `target`: the screens carry data-side, which is what tests hold on to.
+ */
+test("the sides are named by the job: commentary and base, body and notes, citing and cited — and by data-side", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  const badge = (side: "source" | "target") => page.locator(`.reader[data-side="${side}"] .panel-head .side-badge`);
+  const pickBtn = (side: "source" | "target") => page.locator(`.book-list li button.side-btn[data-side="${side}"]`).first();
+
+  // no job yet: the neutral pair
+  await expect(badge("source")).toHaveText("מקור");
+  await expect(badge("target")).toHaveText("יעד");
+  await expect(pickBtn("source")).toHaveText("מקור");
+
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי כותרות" });
+  await expect(badge("source")).toHaveText("פירוש");
+  await expect(badge("target")).toHaveText("בסיס");
+  await expect(page.locator('.reader[data-side="source"]')).toHaveAccessibleName("ספר הפירוש");
+  await expect(pickBtn("target")).toHaveText("בסיס");
+  await expect(pickBtn("target")).toHaveAttribute("title", /ספר הבסיס/);
+
+  await page.getByLabel("שיטה").selectOption({ label: "הערות שוליים" });
+  await expect(badge("source")).toHaveText("גוף הספר");
+  await expect(badge("target")).toHaveText("הערות");
+  await expect(page.locator('.reader[data-side="target"]')).toHaveAccessibleName("ספר ההערות");
+
+  await page.getByLabel("שיטה").selectOption({ label: "מראי מקומות" });
+  await expect(badge("source")).toHaveText("מפנה");
+  await expect(page.locator('.reader[data-side="source"]')).toHaveAccessibleName("הספר המפנה");
+
+  // the ids did not move: the first book list button of a side still shows the book in that reader
+  await page.getByLabel("שיטה").selectOption({ label: "לפי כותרות" });
+  await pickBtn("source").click();
+  await pickBtn("target").click();
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });

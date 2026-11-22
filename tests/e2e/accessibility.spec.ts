@@ -289,8 +289,8 @@ test("every control has a name, and text has AA contrast, on each main screen", 
 
   await workspace(page);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.locator('.reader.source .ln[data-i="3"] .tx').click();
   await page.locator('.reader.target .ln[data-i="2"] .tx').click();
   await screenOk(page, "workspace: builder");
@@ -355,8 +355,8 @@ test("a task's progress is said through a live region that was on the page befor
   await page.goto(distUrl);
   await workspace(page);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "ביאור על בראשית" }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
 
   // the region is there, empty, before the task; what it says while the task runs is recorded

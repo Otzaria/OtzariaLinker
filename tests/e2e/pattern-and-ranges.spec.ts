@@ -21,8 +21,8 @@ test("pattern method → approve → range completion → undo", async ({ page }
     { name: "שולחן.txt", mimeType: "text/plain", buffer: Buffer.from(TARGET) },
   ]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ has: page.getByTitle("ספר.txt", { exact: true }) }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).getByRole("button", { name: "יעד" }).click();
+  await books.filter({ has: page.getByTitle("ספר.txt", { exact: true }) }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).locator('button.side-btn[data-side="target"]').click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption("pattern");
@@ -77,8 +77,8 @@ test("a structure preset in simple mode: a nested reference lands under h2 › h
     { name: "שולחן.txt", mimeType: "text/plain", buffer: Buffer.from(NESTED) },
   ]);
   const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ has: page.getByTitle("פירוש.txt", { exact: true }) }).getByRole("button", { name: "מקור" }).click();
-  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).getByRole("button", { name: "יעד" }).click();
+  await books.filter({ has: page.getByTitle("פירוש.txt", { exact: true }) }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ has: page.getByTitle("שולחן.txt", { exact: true }) }).locator('button.side-btn[data-side="target"]').click();
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption("pattern");

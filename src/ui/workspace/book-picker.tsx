@@ -44,6 +44,7 @@ interface Group {
 export function BookList({ query, onPick }: { query: string; onPick?: (side: Side, key: string) => void }) {
   const store = useStore();
   const { hits } = useBookSearch(query);
+  const roles = store.roles.value;
   const show = onPick ?? ((side: Side, key: string) => store.showBook(side, key));
   const sources = store.sources.value;
   const multi = sources.length > 1;
@@ -76,12 +77,11 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
             </span>
           )}
         </button>
-        <button class="side-btn" aria-pressed={store.view.source.value === b.key} onClick={() => show("source", b.key)} title="להציג כספר המקור" aria-label={`מקור: ${b.title}`}>
-          מקור
-        </button>
-        <button class="side-btn" aria-pressed={store.view.target.value === b.key} onClick={() => show("target", b.key)} title="להציג כספר היעד" aria-label={`יעד: ${b.title}`}>
-          יעד
-        </button>
+        {(["source", "target"] as const).map((side) => (
+          <button key={side} class="side-btn" data-side={side} aria-pressed={store.view[side].value === b.key} onClick={() => show(side, b.key)} title={`להציג בתור ${roles[side].name} — ${roles[side].hint}`} aria-label={`${roles[side].short}: ${b.title}`}>
+            {roles[side].short}
+          </button>
+        ))}
       </li>
     );
   };

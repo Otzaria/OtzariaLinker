@@ -31,6 +31,7 @@ import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
 import { SuggestionsState } from "./suggestions";
+import { roleLabels } from "./roles";
 import { ExchangeState } from "./exchange";
 import { PersonalCsvState } from "./personal-csv";
 import { QualityState } from "./quality";
@@ -142,6 +143,18 @@ export class AppStore {
   readonly recovery = signal<{ links: number; restore: () => void; dismiss: () => void } | null>(null);
   /** what a home-screen task asked for: the engine and panel to start with (guided tasks) */
   readonly intent = signal<{ engine?: EngineId; sourceId?: string; allBooks?: boolean } | null>(null);
+  /**
+   * What the two sides are called now (issue 19): by the job the user is on — only while the suggestions tab is open
+   * (a finished run must not rename the sides for manual linking of other books): the run being reviewed (a max-link
+   * run mixes engines: neutral), else the engine picked in the form, else the one a home task asked for. Words only:
+   * the side ids never change.
+   */
+  readonly roles = computed(() => {
+    if (this.sideTab.value !== "suggestions") return roleLabels(undefined);
+    const run = this.suggestions.run.value;
+    if (run?.maxlink) return roleLabels(undefined);
+    return roleLabels(run?.engine ?? this.suggestions.formEngine.value ?? this.intent.value?.engine);
+  });
   readonly task = signal<Task | null>(null);
   /** the link revision last written to disk — "unsaved changes" compares against it */
   readonly savedRevision = signal(0);

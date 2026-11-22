@@ -61,8 +61,8 @@ async function openFiles(page: Page, files: { name: string; mimeType: string; bu
 
 async function pickBooks(page: Page, source: string | RegExp, target: string | RegExp) {
   const books = page.locator(".book-list li");
-  await books.filter({ hasText: source }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: target }).first().getByRole("button", { name: "יעד" }).click();
+  await books.filter({ hasText: source }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: target }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: "בונה" }).click();
 }
 
@@ -246,7 +246,7 @@ for (const [width, viewport] of WIDTHS) {
       const V2 = JSON.stringify([LIB_1, ROWS[0], rec(397, YEHUDA, 450, 460), rec(425, MEIR, 1980), ROWS[3], rec(500, MEIR, 2000)], null, 2);
       const NAME = "ארצות החיים_links.json";
       await openFiles(page, []);
-      await page.locator(".book-list li").filter({ hasText: /^ארצות החיים/ }).getByRole("button", { name: "מקור" }).click();
+      await page.locator(".book-list li").filter({ hasText: /^ארצות החיים/ }).locator('button.side-btn[data-side="source"]').click();
       await page.getByRole("tab", { name: /קישורים/ }).first().click();
       await page.getByRole("button", { name: "השוואה ומיזוג" }).click();
       const dlg = page.getByRole("dialog");

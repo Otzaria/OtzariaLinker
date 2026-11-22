@@ -27,11 +27,11 @@ import { ReopenSources } from "./reopen-sources";
  *   drag a line NUMBER from the source onto a target line = fill both ends of the builder.
  */
 const DRAG_TYPE = "application/x-otzaria-line";
-const SIDE_LABEL: Record<Side, string> = { source: "מקור", target: "יעד" };
 const NO_HITS: ReadonlySet<number> = new Set();
 
 export function Reader({ side }: { side: Side }) {
   const store = useStore();
+  const role = store.roles.value[side]; // what this side is called for the job in hand (state/roles.ts)
   const bookKey = store.view[side].value;
   const book = bookKey ? store.books.value.get(bookKey) : undefined;
   const [choosing, setChoosing] = useState(false);
@@ -59,13 +59,13 @@ export function Reader({ side }: { side: Side }) {
   };
 
   return (
-    <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={`ספר ה${SIDE_LABEL[side]}`} onKeyDown={onKeyDown}>
+    <section class={`panel reader ${side}${book && isCommentaryTitle(book.title) ? " rashi" : ""}`} aria-label={role.name} data-side={side} onKeyDown={onKeyDown}>
       <ReaderHead side={side} bookKey={book?.key} title={book?.title} onChoose={() => setChoosing(!choosing)} onFind={reading ? () => (find.open.peek() ? find.close() : openFind()) : undefined} findOpen={reading && find.open.value} infoOpen={infoOpen && !!book} onInfo={() => setInfoOpen(!infoOpen)} infoId={`book-info-${side}`} />
       {infoOpen && book && <BookInfo id={`book-info-${side}`} bookKey={book.key} />}
       {choosing || !book ? (
         <div class="panel-body">
           <div class="book-search">
-            <input type="search" placeholder={`חיפוש ספר ל${SIDE_LABEL[side]}…`} value={query} onInput={(e) => setQuery(e.currentTarget.value)} autoFocus={choosing} />
+            <input type="search" placeholder={`חיפוש ספר ל${role.short}…`} value={query} onInput={(e) => setQuery(e.currentTarget.value)} autoFocus={choosing} />
           </div>
           {store.books.value.size ? (
             <BookList query={query} onPick={(_s, key) => (store.showBook(side, key), setChoosing(false))} />
@@ -87,6 +87,7 @@ export function Reader({ side }: { side: Side }) {
 
 function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen, onInfo, infoId }: { side: Side; bookKey: string | undefined; title: string | undefined; onChoose: () => void; onFind: (() => void) | undefined; findOpen: boolean; infoOpen: boolean; onInfo: () => void; infoId: string }) {
   const store = useStore();
+  const role = store.roles.value[side];
   // several sources open: which one this book comes from (with its name when another source has the same title)
   const origin = useBookOrigin()(bookKey);
   const showSource = !!origin.source && store.sources.value.length > 1;
@@ -95,7 +96,7 @@ function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen
       <span class="grip" title="גררו כדי להזיז את הפאנל">
         <Icon name="fl_re_order_dots_vertical" size={16} />
       </span>
-      <span class={`side-badge ${side}`}>{SIDE_LABEL[side]}</span>
+      <span class={`side-badge ${side}`} title={role.hint}>{role.short}</span>
       <h2 class="grow book-title" title={title}>
         {title ? (
           <button type="button" class="title-btn" aria-expanded={infoOpen} aria-controls={infoOpen ? infoId : undefined} onClick={onInfo}>
@@ -114,13 +115,14 @@ function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen
       <button class="icon-btn" onClick={onChoose} title="בחירת ספר אחר" aria-label="בחירת ספר">
         <Icon name="oz_book_search" />
       </button>
-      <HideButton id={side} label={`ספר ה${SIDE_LABEL[side]}`} />
+      <HideButton id={side} label={role.name} />
     </div>
   );
 }
 
 function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: string; lineCount: number | undefined; findSeq: number }) {
   const store = useStore();
+  const role = store.roles.value[side];
   const find = store.find[side];
   const findOpen = find.open.value;
   // hits of this book only: a result for the previous book must not mark lines of this one
@@ -277,7 +279,7 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
       <ReaderTools side={side} bookKey={bookKey} count={count} />
       {findOpen && <FindBar side={side} bookKey={bookKey} focusSeq={findSeq} onClose={() => scroller.current?.focus()} />}
       {/* the arrows pick lines here (keyboard use); what was picked is said aloud, the eye sees the highlight */}
-      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ספר ה${SIDE_LABEL[side]} (החצים בוחרים שורה)`}>
+      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ${role.name} (החצים בוחרים שורה)`}>
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
             <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} />

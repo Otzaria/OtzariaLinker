@@ -149,6 +149,8 @@ export class SuggestionsState {
   readonly rejected = computed<ReadonlySet<string>>(() => this.host.linkState.value.rejected);
   /** the suggestion shown in the inline/card views */
   readonly current = signal<string | null>(null);
+  /** the engine picked in the run form, before any run: it decides what the two sides are called (state/roles.ts) */
+  readonly formEngine = signal<EngineId | null>(null);
   /** how the list is ordered for the user (issue 8); the run itself keeps the engine's order */
   readonly sortOrder = signal<SuggestionSort>("book");
   /** the run's suggestions in the chosen order: the table and the one-at-a-time views read this one list */
