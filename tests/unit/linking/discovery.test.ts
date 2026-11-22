@@ -48,6 +48,21 @@ describe("discoverPairs", () => {
     expect(p.reasons.join(" ")).toContain("קישורים");
   });
 
+  it("two books share the base's title: the links the book already has say WHICH (by book, not by title)", () => {
+    const books = [
+      b("p:20", "ספר הנר על ברכות", "personal", { lineCount: 600, linkedLines: 500, linkedTo: { ברכות: 500 }, linkedKeys: { "o:1": 500 } }),
+      b("o:1", "ברכות", "otzaria", { lineCount: 6000 }),
+      b("p:8", "ברכות", "personal", { lineCount: 20 }),
+    ];
+    const p = discoverPairs(books, { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(p.base.key).toBe("o:1");
+    expect(p.confidence).toBe("high");
+    expect(p.reasons.join(" ")).toContain("הקישורים הקיימים");
+    // without the keys the title alone cannot tell: the planner's rule (the dependant's own source first) picks the personal one, low
+    const blind = discoverPairs(books.map((x) => ({ ...x, linkedKeys: undefined as never })), { dependants: (x) => x.key === "p:20" }).proposals[0]!;
+    expect(blind.base.key).toBe("p:8");
+  });
+
   it("a base that is not open and a title that names none are listed as unresolved, with the reason, not as proposals", () => {
     expect(out.proposals.some((p) => p.dependant.title === "ביאור על ספר שאין")).toBe(false);
     expect(out.unresolved.map((u) => u.book.title)).toContain("ביאור על ספר שאין");

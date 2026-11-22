@@ -22,6 +22,8 @@ export interface DiscoveryBook extends BookRef {
   lineCount?: number;
   /** titles of the books this one already has links to, with how many (the source's own link summary) */
   linkedTo?: Readonly<Record<string, number>>;
+  /** the same by the other book's KEY: when a title is shared by two books, this says which one the links go to */
+  linkedKeys?: Readonly<Record<string, number>>;
   /** how many of its lines already carry a link (any) */
   linkedLines?: number;
 }
@@ -84,15 +86,25 @@ export function discoverPairs(books: readonly DiscoveryBook[], options: Discover
       unresolved.push({ book: dep, reason: r.reason });
       continue;
     }
-    const base = byKey.get(r.target.key)!;
-    const toBase = dep.linkedTo?.[base.title];
+    let base = byKey.get(r.target.key)!;
+    // the title is shared by books of two sources and the links the book already has go to the OTHER one: they decide (by key)
+    let byLinks = false;
+    if (dep.linkedKeys && !dep.linkedKeys[base.key]) {
+      const sameTitle = (index.exact.get(baseTitleKey(base.title)) ?? []).filter((x) => x.key !== base.key && dep.linkedKeys![x.key]);
+      if (sameTitle.length === 1) {
+        base = byKey.get(sameTitle[0]!.key)!;
+        byLinks = true;
+      }
+    }
+    const toBase = dep.linkedKeys?.[base.key] ?? dep.linkedTo?.[base.title];
     const sameFolder = !!dep.category && !!base.category && (dep.category === base.category || dep.category.startsWith(`${base.category}/`) || base.category.startsWith(`${dep.category}/`));
     const reasons = [`השם "${dep.title}" מציין את "${named}", והוא ספר ${base.origin === "personal" ? "אישי" : "של המאגר הרשמי"} פתוח בשם "${base.title}".`];
-    if (r.note) reasons.push(r.note);
+    if (r.note && !byLinks) reasons.push(r.note);
+    if (byLinks) reasons.push(`יש כמה ספרים בשם "${base.title}"; הקישורים הקיימים של הספר מצביעים על זה (${base.origin === "personal" ? "אישי" : "של המאגר הרשמי"}), ולכן נבחר הוא.`);
     if (toBase) reasons.push(`לספר כבר יש ${toBase.toLocaleString("he")} קישורים אל "${base.title}".`);
     if (sameFolder) reasons.push(`שני הספרים באותה קטגוריה ("${dep.category}").`);
     // links the book already has to that title confirm even a choice made between lookalikes; a folder only confirms a plain match
-    const confidence: PairConfidence = toBase ? "high" : r.note ? "low" : sameFolder ? "high" : "medium";
+    const confidence: PairConfidence = toBase ? "high" : r.note && !byLinks ? "low" : sameFolder ? "high" : "medium";
     const linked = dep.linkedLines;
     const status: PairStatus = !linked ? "unlinked" : dep.lineCount && linked / dep.lineCount < THIN_LINKED_SHARE ? "partly-linked" : "linked";
     proposals.push({
