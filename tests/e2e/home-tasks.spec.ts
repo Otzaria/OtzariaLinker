@@ -143,3 +143,19 @@ test("home: 'open an existing project' picks the project file, 'manual' opens it
   await expect(page.getByRole("dialog", { name: "קישור ידני" })).toBeVisible();
   expect(seen.errors).toEqual([]);
 });
+
+test("home: 'coverage of a book' (repository path) opens the check tab with the coverage section", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await chooseTask(page, "repo", "coverage");
+  const sheet = page.getByRole("dialog", { name: "כיסוי קישורים של ספר" });
+  const chooser = page.waitForEvent("filechooser");
+  await sheet.getByRole("button", { name: "הספר והקישורים שלו: קבצים" }).click();
+  await (await chooser).setFiles([txt("ספר שלי.txt", ["<h1>ספר שלי</h1>", "שורה שנייה", "שורה שלישית"])]);
+  await expect(sheet.locator(".steps > li").first()).toHaveClass(/done/, { timeout: 30_000 });
+  await sheet.getByRole("button", { name: "התחלה" }).click();
+  await expect(page.getByRole("tab", { name: /בדיקה/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("details.coverage")).toBeVisible();
+  expect(seen.errors).toEqual([]);
+});

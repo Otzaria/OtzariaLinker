@@ -138,6 +138,17 @@ export const TASKS: readonly TaskDef[] = [
     then: { tab: "suggestions", mode: "maxlink", scopeStep: 0 },
   },
   {
+    // issue 17: which lines of a book no link touches yet — the check tab's coverage section
+    id: "coverage",
+    icon: "oz_search_in_links",
+    title: "כיסוי קישורים של ספר",
+    hint: "אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן",
+    steps: [
+      { label: "הספר והקישורים שלו", hint: `הספר (${ltr(".txt")}), תיקייה או מסד, ואם יש — קובץ ${ltr("_links.json")}.`, options: ["files", "folder", "db", "zip"] },
+    ],
+    then: { tab: "qa" },
+  },
+  {
     id: "edit-links",
     icon: "oz_link_edit",
     title: "עריכת קישורים קיימים",
@@ -198,7 +209,7 @@ const PATHS: Record<PathId, { icon: IconName; title: string; hint: string; ask: 
   repo: {
     icon: "oz_library_link",
     title: "ניתוח והשלמת קישורים במאגר",
-    hint: "מה שמסד אוצריא או מסד אישי כבר מקשר, והשלמת מה שחסר — מסד מול מסד, בתוך מסד, או הקישורים הקיימים",
+    hint: "מה שמסד אוצריא או מסד אישי כבר מקשר, והשלמת מה שחסר — מסד מול מסד, בתוך מסד, הקישורים הקיימים, או אילו שורות עוד בלי קישור",
     ask: "מה לעשות במאגר?",
   },
   fix: {

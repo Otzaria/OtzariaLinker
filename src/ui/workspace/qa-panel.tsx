@@ -5,6 +5,7 @@ import { QA_CATEGORIES, qaAction, redundantDuplicates, suggestedFix, type QaCate
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable } from "../keyboard";
+import { CoveragePanel } from "./coverage-panel";
 
 /*
  * Quality check (stage 16): every project link checked against Otzaria's rules, grouped by what
@@ -34,6 +35,8 @@ export function QaPanel() {
 
   if (!report)
     return (
+      <>
+      <CoveragePanel />
       <div class="empty">
         <Icon name="oz_link_check" size={40} />
         <span>הבדיקה עוברת על כל הקישורים בפרויקט ומוצאת מה אוצריא תדחה, תשנה או תכפיל — לפני הייצוא.</span>
@@ -42,11 +45,13 @@ export function QaPanel() {
           בדיקת הקישורים
         </button>
       </div>
+      </>
     );
 
   const dups = redundantDuplicates(report);
   return (
     <>
+      <CoveragePanel />
       <div class="sug-head">
         <div class="grow">
           <b>{report.checked.toLocaleString("he")} קישורים נבדקו</b>

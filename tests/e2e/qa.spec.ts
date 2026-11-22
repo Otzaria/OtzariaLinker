@@ -26,3 +26,52 @@ test("QA finds a duplicate and a link to a heading line; the bulk fix removes on
   await expect(page.getByRole("button", { name: /^כפולים/ })).toHaveCount(0);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 17: which parts of a book no link touches yet. The "coverage" section of the check tab lists the unlinked content
+ * lines of the book in the source reader as ranges (headings are not content), counts every line by what links it, jumps to
+ * a range, and starts a manual link from it.
+ */
+test("coverage: the unlinked ranges of a book, the buckets, jump to a range and link it by hand", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const nl = String.fromCharCode(10);
+  // line numbers are 1-based in the file: 1 h1, 2 linked, 3 unlinked, 4 unlinked, 5 h2, 6 linked, 7 unlinked
+  const book = ["<h1>ספר שלי</h1>", "שורה שנייה", "שורה שלישית", "שורה רביעית", "<h2>פרק ב</h2>", "שורה שישית", "שורה שביעית"].join(nl);
+  const rec = (l1: number) => ({ line_index_1: l1, heRef_2: "בראשית", path_2: "בראשית.txt", line_index_2: 3, "Conection Type": "reference" });
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "ספר שלי.txt", mimeType: "text/plain", buffer: Buffer.from(book) },
+    { name: "ספר שלי_links.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify([rec(2), rec(6)])) },
+  ]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /בדיקה/ }).click();
+  const cov = page.locator("details.coverage");
+  await cov.locator("summary").click();
+  await cov.getByRole("button", { name: "חישוב כיסוי" }).click();
+
+  await expect(cov.locator(".cov-count[data-bucket=unlinked]")).toContainText("3");
+  await expect(cov.locator(".cov-count[data-bucket=linked]")).toContainText("2");
+  await expect(cov.locator(".cov-count[data-bucket=not-suitable]")).toContainText("2"); // the two headings
+  const ranges = cov.locator(".cov-range");
+  await expect(ranges).toHaveCount(2);
+  await expect(ranges.nth(0)).toContainText("שורות 3–4");
+  await expect(ranges.nth(0)).toContainText("שורה שלישית"); // the start of the range's text
+  await expect(ranges.nth(1)).toContainText("שורה 7");
+
+  // jump: the reader shows the line
+  await ranges.nth(1).getByRole("button", { name: /^הצגה/ }).click();
+  await expect(page.locator('.reader.source .ln[data-i="6"]')).toBeVisible();
+  // link it by hand: the range is picked as the source line and the builder opens
+  await ranges.nth(0).getByRole("button", { name: /^קישור ידני/ }).click();
+  await expect(page.getByRole("tab", { name: /בונה/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('.reader.source .ln[data-i="2"]')).toHaveClass(/picked/);
+  await expect(page.locator('.reader.source .ln[data-i="3"]')).toHaveClass(/picked/);
+
+  // linking a line takes it out of the list (the numbers are read again from the links as they are now)
+  await page.getByRole("tab", { name: /בדיקה/ }).click();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

@@ -32,7 +32,7 @@ describe("the home paths", () => {
 
   it("the choices: commentary, notes, citations, several and a folder against Otzaria are one path", () => {
     expect(TASK_PATHS.find((p) => p.id === "auto")!.choose).toEqual(["commentary", "notes", "citations", "several", "folder-otzaria"]);
-    expect(TASK_PATHS.find((p) => p.id === "repo")!.choose).toEqual(["db-db", "within-db", "db-links"]);
+    expect(TASK_PATHS.find((p) => p.id === "repo")!.choose).toEqual(["db-db", "within-db", "db-links", "coverage"]);
     expect(TASK_PATHS.find((p) => p.id === "fix")!.choose).toEqual(["edit-links", "relink"]);
   });
 

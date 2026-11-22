@@ -112,6 +112,17 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .match-hl { background: color-mix(in srgb, var(--highlight) 75%, transparent); color: inherit; border-radius: var(--radius-xs); text-decoration: underline 2px; text-decoration-color: var(--primary); text-underline-offset: 3px; font-weight: 700; padding-inline: 1px; }
 ::highlight(match-source), ::highlight(match-target) { background-color: color-mix(in srgb, var(--highlight) 75%, transparent); text-decoration: underline 2px; text-decoration-color: var(--primary); }
 .match-legend { margin: 0; font-size: var(--fs-sm); }
+/* coverage: which lines are still unlinked (issue 17) */
+.coverage { margin: 6px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.coverage > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
+.cov-body { padding: 0 10px 10px; display: grid; gap: 8px; min-width: 0; }
+.cov-sum { margin: 0; }
+.cov-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.cov-count { padding: 2px 10px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); font-size: var(--fs-sm); }
+.cov-count[data-bucket="unlinked"] { border-color: var(--warning); background: var(--warning-container); color: var(--on-warning-container); }
+.cov-ranges { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.cov-range { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 6px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); }
+.cov-where { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
 .title-btn { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; max-width: 100%; }
 .title-btn:focus-visible { outline-offset: -2px; }
 .title-btn:hover { text-decoration: underline dotted; }
