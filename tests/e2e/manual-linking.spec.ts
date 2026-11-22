@@ -158,8 +158,8 @@ test("link types help: every type, grouped, with where it shows in Otzaria and t
   await page.getByRole("button", { name: "מה כל סוג אומר?" }).tap();
   const dlg = page.getByRole("dialog", { name: "סוגי הקישור" });
   await expect(dlg).toBeVisible();
-  const groups = await dlg.locator("section.types-group h3").allTextContents();
-  expect(groups).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  // (locator.allTextContents crashes the page in Firefox with Playwright 1.65 here; toHaveText with an array asserts the same list, in order)
+  await expect(dlg.locator("section.types-group h3")).toHaveText(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
   // every type a user can write, once, with its description as visible text
   expect(await dlg.locator("li.type-item").count()).toBe(23);
   await expect(dlg.locator("li.type-item", { hasText: "הערות שוליים" })).toContainText("הערות על הטקסט");
