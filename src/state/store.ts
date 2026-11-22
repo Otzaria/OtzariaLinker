@@ -26,6 +26,7 @@ import { diagnosticsFile, diagnosticsFileName, diagnosticsLog, logNotice, logTas
 import { DbLinksState } from "./db-links";
 import { LinkCompareState } from "./link-compare";
 import { LinkFixes } from "./link-fixes";
+import { CoverageState } from "./coverage";
 import { RangesState } from "./ranges";
 import type { BooksService, InputFile, KeyValueStore, OpenedSource, Saver } from "./services";
 import { MaxLinkState } from "./maxlink";
@@ -98,6 +99,8 @@ export class AppStore {
   readonly maxLink: MaxLinkState;
   /** range suggestions, cutting and completion (state/ranges.ts) */
   readonly ranges: RangesState;
+  /** which lines of a book are linked, partly covered or still unlinked (state/coverage.ts) */
+  readonly coverage: CoverageState;
   /** automatic suggestions: engine, citations and batch runs, and the user's decisions (state/suggestions.ts) */
   readonly suggestions: SuggestionsState;
   /** importing links files, sheets and records; the export (state/exchange.ts) */
@@ -224,6 +227,7 @@ export class AppStore {
     this.fixes = new LinkFixes(this);
     this.maxLink = new MaxLinkState(this, service, saver);
     this.ranges = new RangesState(this, service);
+    this.coverage = new CoverageState(this, service);
     this.suggestions = new SuggestionsState(this, service);
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
