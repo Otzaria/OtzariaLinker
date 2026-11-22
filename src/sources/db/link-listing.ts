@@ -11,7 +11,7 @@ import type { BookOrigin, Link } from "../../core/links/model";
  */
 export interface ListingRows {
   /** what `fetch` takes back: a database link id, or a position in an in-memory list */
-  ref: Int32Array;
+  ref: ArrayLike<number>;
   /** 0 = the book is the stored source, 1 = the stored target */
   dir: Uint8Array;
   /** index into `otherKeys` */
@@ -38,6 +38,11 @@ export class LinkListing {
     const order = new Int32Array(n);
     for (let i = 0; i < n; i++) order[i] = i;
     this.order = order.sort((a, b) => rows.ownIndex[a]! - rows.ownIndex[b]! || rows.ref[a]! - rows.ref[b]!);
+  }
+
+  /** the keys of the books at the other end of the rows (the ones a summary counts by) */
+  otherBookKeys(): readonly string[] {
+    return this.otherKeys;
   }
 
   get size(): number {
@@ -104,12 +109,13 @@ export function listingFromLinks(bookKey: string, links: readonly Link[], ms: nu
   const otherKeys: string[] = [];
   const otherAt = new Map<string, number>();
   const n = links.length;
-  const rows: ListingRows = { ref: new Int32Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
+  const ref = new Int32Array(n);
+  const rows: ListingRows = { ref, dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
   links.forEach((l, i) => {
     const isOut = l.source.book.key === bookKey;
     const otherKey = (isOut ? l.target : l.source).book.key;
     if (!otherAt.has(otherKey)) otherAt.set(otherKey, otherKeys.push(otherKey) - 1);
-    rows.ref[i] = i;
+    ref[i] = i;
     rows.dir[i] = isOut ? 0 : 1;
     rows.other[i] = otherAt.get(otherKey)!;
     rows.type[i] = CONNECTION_TYPES.indexOf(parseConnectionType(l.declaredType).type);

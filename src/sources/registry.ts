@@ -14,6 +14,7 @@ import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
+import type { ExternalTargetResolver, TargetBook } from "./db/external-target";
 import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
@@ -75,6 +76,14 @@ export class SourceRegistry {
   private idPrefix = "s";
   /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
   private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
+  /** per source: its books by exact title (a personal database's external_link names its targets by title) */
+  private readonly titleIndexes = new Map<string, Promise<Map<string, SourceBook>>>();
+  /** per book key: heRef → 0-based line, for the books external_link rows were resolved in (a few at a time) */
+  private readonly refIndexes = new Map<string, Promise<Map<string, number>>>();
+  private readonly resolver: ExternalTargetResolver = {
+    book: (title, targetSource, from) => this.findTarget(title, targetSource, from),
+    lineOfRef: async (bookKey, heRef) => (await this.refIndex(bookKey)).get(heRef) ?? null,
+  };
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
@@ -168,6 +177,16 @@ export class SourceRegistry {
     const l = await this.listing(bookKey, ctx);
     if (typeof l === "string") return { bookKey, reason: l };
     const books = new Map((await this.of(bookKey).books()).map((b) => [b.key, b]));
+    // the other end of a personal database's external_link is a book of another source, or only a title
+    for (const k of l.otherBookKeys()) {
+      if (books.has(k)) continue;
+      if (k.startsWith("unresolved:")) books.set(k, { key: k, title: k.slice("unresolved:".length), origin: "unknown" });
+      else {
+        const id = sourceIdOfBookKey(k);
+        const found = this.sources.has(id) ? (await this.sources.get(id)!.books()).find((b) => b.key === k) : undefined;
+        if (found) books.set(k, found);
+      }
+    }
     return l.summary((k) => ({ title: books.get(k)?.title ?? k, origin: books.get(k)?.origin ?? "unknown" }));
   }
 
@@ -191,9 +210,59 @@ export class SourceRegistry {
     return p;
   }
 
+  /** The book with this exact title in a source another source's external_link points at (see ExternalTargetResolver). */
+  private async findTarget(title: string, targetSource: string | null, from: string): Promise<TargetBook | null> {
+    const candidates = [...this.sources.values()].filter((s) => s.info.id !== from);
+    const named = targetSource === null || targetSource === "official" ? [] : candidates.filter((s) => s instanceof DbBookSource && s.capabilities.meta["library_id"] === targetSource);
+    // 'official' (or none given): the library's own sources, first; a null source then also any other
+    const pool = targetSource === "official" ? candidates.filter((s) => s.info.library) : targetSource === null ? [...candidates.filter((s) => s.info.library), ...candidates.filter((s) => !s.info.library)] : named;
+    for (const s of pool) {
+      const b = (await this.titleIndex(s)).get(title);
+      if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) };
+    }
+    return null;
+  }
+
+  private titleIndex(s: BookSource): Promise<Map<string, SourceBook>> {
+    let p = this.titleIndexes.get(s.info.id);
+    if (!p) {
+      p = s.books().then((books) => {
+        const m = new Map<string, SourceBook>();
+        for (const b of books) if (!m.has(b.title)) m.set(b.title, b);
+        return m;
+      });
+      this.titleIndexes.set(s.info.id, p);
+    }
+    return p;
+  }
+
+  private refIndex(bookKey: string): Promise<Map<string, number>> {
+    let p = this.refIndexes.get(bookKey);
+    if (!p) {
+      const s = this.sources.get(sourceIdOfBookKey(bookKey));
+      p = (s?.heRefs ? s.heRefs(bookKey) : Promise.resolve([])).then((rows) => {
+        const m = new Map<string, number>();
+        for (const r of rows) if (r.heRef && !m.has(r.heRef)) m.set(r.heRef, r.index);
+        return m;
+      });
+      this.refIndexes.set(bookKey, p);
+      while (this.refIndexes.size > 8) this.refIndexes.delete(this.refIndexes.keys().next().value!);
+      p.catch(() => this.refIndexes.delete(bookKey));
+    }
+    return p;
+  }
+
+  /** a source opened or closed: the databases that resolve external_link targets by title must look again */
+  private sourcesChanged(closed?: string): void {
+    this.titleIndexes.clear();
+    if (closed !== undefined) for (const k of [...this.refIndexes.keys()]) if (sourceIdOfBookKey(k) === closed) this.refIndexes.delete(k);
+    for (const s of this.sources.values()) if (s instanceof DbBookSource) s.targetsChanged();
+  }
+
   close(sourceId: string): void {
     this.sources.get(sourceId)?.close();
     this.sources.delete(sourceId);
+    this.sourcesChanged(sourceId);
     const identity = this.identityOf.get(sourceId);
     if (identity !== undefined) this.byIdentity.delete(identity);
     this.identityOf.delete(sourceId);
@@ -299,6 +368,8 @@ export class SourceRegistry {
 
   private async add(s: BookSource): Promise<OpenedSource> {
     this.sources.set(s.info.id, s);
+    if (s instanceof DbBookSource) s.setTargetResolver(this.resolver);
+    this.sourcesChanged();
     return { info: s.info, books: await s.books() };
   }
 
