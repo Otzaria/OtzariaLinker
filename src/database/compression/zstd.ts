@@ -73,30 +73,45 @@ function module(): WebAssembly.Module {
  * the OFFICIAL dictionary without carrying it in its own zstd_dict; it can be read as soon as the
  * dictionary is available from anywhere — another open database (seforim.db) or a dictionary file
  * the user opens. A database's own dictionaries always win; the pool is only a fallback.
- * Two different dictionaries with the same id make that id unusable from the pool (never guess).
+ * Two different dictionaries with the same id make that id unusable from the pool (never guess). Every
+ * dictionary is kept with its owner (the database that brought it): when that database closes it `release`s
+ * what it added, and an id that was in conflict is usable again once only one dictionary is left (QA round 2, H8).
  */
 export class DictionaryPool {
-  private readonly byId = new Map<number, { dict: Uint8Array; origin: string } | "conflict">();
+  /** per dictID: the DISTINCT dictionaries seen with it, each with the owners that brought it (undefined = a file the user opened: never released) */
+  private readonly byId = new Map<number, { dict: Uint8Array; owners: Set<object | undefined> }[]>();
 
-  /** Adds a trained dictionary; returns its id, or null when it is not one (raw content). */
-  add(dict: Uint8Array, origin: string): number | null {
+  /** Adds a trained dictionary; returns its id, or null when it is not one (raw content). `owner` can `release` it later. */
+  add(dict: Uint8Array, origin: string, owner?: object): number | null {
     const id = dictionaryId(dict);
     if (id === null) return null;
     if (dict.length > MAX_DICT_BYTES)
       throw new LinkerError("db/dictionary-too-large", `מילון הדחיסה "${origin}" גדול מ־2MB (${dict.length} בתים), ומפענח הדפדפן אינו תומך בו עדיין.`, { size: dict.length });
-    const had = this.byId.get(id);
-    if (had === undefined) this.byId.set(id, { dict, origin });
-    else if (had !== "conflict" && !sameBytes(had.dict, dict)) this.byId.set(id, "conflict");
+    const list = this.byId.get(id) ?? [];
+    const same = list.find((e) => sameBytes(e.dict, dict));
+    if (same) same.owners.add(owner);
+    else list.push({ dict, owners: new Set([owner]) });
+    this.byId.set(id, list);
     return id;
   }
 
+  /** Takes back everything `owner` added (its database closed). */
+  release(owner: object): void {
+    for (const [id, list] of this.byId) {
+      for (const e of list) e.owners.delete(owner);
+      const rest = list.filter((e) => e.owners.size > 0);
+      if (rest.length) this.byId.set(id, rest);
+      else this.byId.delete(id);
+    }
+  }
+
   get(id: number): Uint8Array | undefined {
-    const e = this.byId.get(id);
-    return e && e !== "conflict" ? e.dict : undefined;
+    const list = this.byId.get(id);
+    return list?.length === 1 ? list[0]!.dict : undefined;
   }
 
   isConflicted(id: number): boolean {
-    return this.byId.get(id) === "conflict";
+    return (this.byId.get(id)?.length ?? 0) > 1;
   }
 }
 
@@ -126,8 +141,13 @@ export class LineContentCodec {
       if (this.dictionaries.has(id))
         throw new LinkerError("db/dictionary-conflict", `במסד יש שני מילוני דחיסה עם אותו מזהה (${id}). המסד פגום או שנבנה בצורה לא תקינה.`, { dictId: id });
       this.dictionaries.set(id, d);
-      if (origin) pool.add(d, origin);
+      if (origin) pool.add(d, origin, this);
     }
+  }
+
+  /** The database this codec belongs to closed: its dictionaries leave the pool. */
+  release(): void {
+    this.pool.release(this);
   }
 
   get dictionaryIds(): number[] {

@@ -69,6 +69,11 @@ export class OtzariaDbReader {
     });
   }
 
+  /** The database is closed: its dictionaries leave the worker's pool. */
+  close(): void {
+    this.codec.release();
+  }
+
   async books(): Promise<DbBook[]> {
     const sources = new Map<number, string>();
     if (this.t.source) {
