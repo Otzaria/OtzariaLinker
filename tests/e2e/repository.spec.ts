@@ -278,7 +278,9 @@ test("repository: with links in the project, no action of the screen removes or 
   await expect(detail.getByRole("status").filter({ hasText: /שורות (ה)?תוכן/ })).toBeVisible({ timeout: 30_000 });
   await detail.getByRole("button", { name: "סגירת הפרטים" }).click();
   await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
-  await expect(dlg.getByRole("list", { name: "זוגות מוצעים" })).toBeVisible({ timeout: 30_000 });
+  // the books that are already linked are hidden from the proposals unless asked for (as in the first test of this file)
+  await dlg.getByLabel("גם ספרים שכבר מקושרים").check();
+  await expect(dlg.locator(".repo-pair").first()).toBeVisible({ timeout: 30_000 });
   await dlg.getByRole("checkbox", { name: /^בחירה: / }).first().check();
   await expect(dlg.locator(".repo-chosen")).toContainText("נבחר ספר אחד");
 

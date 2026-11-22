@@ -230,6 +230,9 @@ for (const size of SIZES) {
       test.slow();
       const seen = watchPage(page);
       const dir = folder("הספרים שלי");
+      // Chrome on Linux (the CI) suppresses a file chooser when the window is under 400px wide ("File chooser dialog was suppressed because the
+      // top-level window size is smaller than the minimum required size"): the books are chosen in a wide window, then the window is made narrow
+      await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(distUrl);
       await chooseTask(page, "auto", "folder-otzaria");
       const main = page.locator("main.guided");
@@ -246,6 +249,7 @@ for (const size of SIZES) {
       await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
       await next.click();
       await expect(page).toHaveURL(/#\/guided\/plan$/);
+      await page.setViewportSize({ width: size.width, height: size.height });
       const pairs = main.locator("details.guided-pairs");
       await pairs.locator("summary").click();
       await expect(pairs.locator(".pair-row").first()).toBeVisible({ timeout: 30_000 });
