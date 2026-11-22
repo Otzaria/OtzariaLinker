@@ -1,4 +1,4 @@
-import { APP_DEPENDENT_TYPES, canonicalTypeString, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
+import { APP_DEPENDENT_TYPES, canonicalTypeString, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
 import { storedLinkIdentity, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
@@ -96,7 +96,7 @@ export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "miss
  * library's file wrongly. Every link of that book is held back — also untouched imports and in expert
  * mode — or the written file would silently drop the library's other records (security review A1–A4).
  */
-export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held"]);
+export const FILE_LEVEL_CODES: ReadonlySet<string> = new Set(["export/unsafe-title", "export/file-unverified", "export/library-file-not-loaded", "export/db-copy-no-file", "export/file-held", "export/inline-linker-private-only"]);
 
 export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   const out: Problem[] = [];
@@ -136,7 +136,21 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // The generator stores an unknown type as OTHER, but the app's personal import rejects the WHOLE
   // file for one unknown type (otzaria upstream/dev user_import_parser.dart:496-502 and
   // user_content_importer.dart:142-144), so for private use it is an error.
-  if (!f.knownType)
+  // INLINE_LINKER (LINK_FORMATS §1.12): the app's own type for a clickable citation. The library does not know it
+  // (the generator would store OTHER), so it is accepted ONLY for private use — and only in the two spellings the
+  // app documents. ctx.purpose is undefined for the library, which is the default: nothing else lifts this.
+  const inline = isInlineLinkerType(link.declaredType);
+  const inlinePrivate = inline && ctx.purpose === "private" && isDocumentedInlineLinker(link.declaredType);
+  if (inline && ctx.purpose !== "private")
+    add("error", "export/inline-linker-private-only", `הסוג "ציטוט בטקסט" (INLINE_LINKER) מוכר רק לייבוא האישי של אוצריא. ספריית אוצריא והסנכרון השבועי שלה לא מכירים אותו ויישמרו את הקישור כ"אחר", בלי הציטוט בגוף הטקסט. בחרו בחלון הייצוא "לשימוש פרטי", או בחרו סוג אחר.`, "Conection Type INLINE_LINKER");
+  if (inlinePrivate) {
+    // the app's own rules (user_import_parser.dart): start and an end after it, from one source line
+    if (!link.anchor || link.anchor.rawEnd === undefined || link.anchor.rawEnd <= link.anchor.rawStart)
+      add("error", "export/inline-linker-anchor", 'ציטוט בטקסט דורש סימון של המילים בשורת המקור: תחילה וסוף אחרי התחילה. סמנו את המילים בבונה, או בחרו סוג אחר.', "start, end");
+    if (link.source.end !== undefined && link.source.end > link.source.line)
+      add("error", "export/inline-linker-source-range", "ציטוט בטקסט יוצא משורת מקור אחת. קשרו משורה אחת, או בחרו סוג אחר.", "line_index_1_end");
+  }
+  if (!f.knownType && !inlinePrivate)
     ctx.purpose === "private"
       ? add("error", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא. ייבוא אישי באוצריא דוחה את כל הקובץ בגלל קישור אחד כזה. בחרו סוג מוכר.`)
       : add("warning", "export/unknown-type", `סוג הקשר "${link.declaredType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
@@ -147,7 +161,7 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   // Sefaria priority-list books are base books (isBaseBook), so the generator does not fix it.
   if (!f.skipped && !f.flipped && SOURCE_VIEW_TYPES.has(f.stored) && titleDeclaresDependencyOn(f.storedSource.book.title, f.storedTarget.book.title))
     add("warning", "export/reversed-dependency", `הקישור יישמר הפוך: "${f.storedTarget.book.title}" יופיע כמפרש של "${f.storedSource.book.title}". בקישור מפירוש אל הספר שעליו נכתב בחרו את הסוג "מקור".`, 'Conection Type "source"');
-  if (ctx.purpose === "private" && !f.skipped && f.declared !== "SOURCE") {
+  if (ctx.purpose === "private" && !f.skipped && f.declared !== "SOURCE" && !inlinePrivate) {
     const app = appReverses(link, ctx);
     if (app !== undefined && app !== f.flipped) {
       const [base, dependant] = app ? [t.book.title, s.book.title] : [s.book.title, t.book.title];
@@ -298,9 +312,11 @@ function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
   if (tgtSef && !srcSef && link.ref2 === undefined) add(need, "sefaria/ref2-required", `ספר היעד הוא ספר ספריא, וחסר ציון ספריא של השורה (באנגלית, למשל Genesis 1:1). ${forSubmission}`, "ref_2");
   if ((tgtSef && isRange(link.target)) || (srcSef && isRange(link.source)))
     add(need, "sefaria/range-side", `טווח בצד של ספר ספריא: הסנכרון השבועי מעדכן רק את שורת ההתחלה לפי ציון ספריא, וסוף הטווח נשאר במקום ונסחף. ${submit ? "לשליחה לספרייה קשרו שורה אחת." : "לשימוש פרטי זה עובד, עד שספריא תשתנה."}`);
-  if ((srcSef || tgtSef) && link.anchor?.rawEnd !== undefined)
+  // an INLINE_LINKER of a PRIVATE export (never reaches the sync): its offsets are in the user's own source line
+  const inlinePrivate = ctx.purpose === "private" && isDocumentedInlineLinker(link.declaredType);
+  if (!inlinePrivate && (srcSef || tgtSef) && link.anchor?.rawEnd !== undefined)
     add("error", "sefaria/anchor-range", "עוגן על כמה מילים אינו נתמך בקישור שנוגע בספר ספריא: אפשר עוגן על מילה אחת בלבד, או בלי עוגן.", "anchor end");
-  if (tgtSef && !srcSef && link.anchor)
+  if (!inlinePrivate && tgtSef && !srcSef && link.anchor)
     add("error", "sefaria/anchor-into-sefaria", "עוגן על מילה אינו מותר בקישור מספר של אוצריא אל ספר ספריא.", "start");
   // The user's own book that only shares its name with a library Sefaria book (a text file, a personal
   // database: product audit F2). The Sefaria rules are not its rules — but sent to the library, the
@@ -310,7 +326,7 @@ function sefariaChecks(link: Link, ctx: ValidationContext, add: Add) {
     for (const [side, label] of [[link.source, "ספר המקור"], [link.target, "ספר היעד"]] as const)
       if (!owned(side.book) && ctx.sefariaTitle?.(side.book))
         add("error", "sefaria/not-library-edition", `${label} "${side.book.title}" שפתחתם הוא ספר שלכם (מקובץ או ממסד אישי), אבל בספריית אוצריא השם הזה שייך לספר של ספריא. קישור שיישלח לספרייה יחובר לספר של ספריא, במספרי השורות של הספר שלכם. לשימוש שלכם בחרו בחלון הייצוא "לשימוש פרטי". אם זה עותק של הספר מהספרייה, סמנו ברשימת המקורות "ספרי ספריית אוצריא".`);
-  if (link.ref1 !== undefined && link.anchor && link.passthrough?.["anchor_src_hash"] === undefined)
+  if (!inlinePrivate && link.ref1 !== undefined && link.anchor && link.passthrough?.["anchor_src_hash"] === undefined)
     add("error", "sefaria/pending-anchor-hash", "עוגן חדש בשורה של ספר ספריא צריך חתימה של הטקסט, שרק הסנכרון של הספרייה מחשב. הסירו את העוגן או השאירו אותו לתהליך של הספרייה.", "ref_1 + anchor_src_hash");
 }
 

@@ -11,6 +11,28 @@ export const CONNECTION_TYPES = [
 
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
+/*
+ * INLINE_LINKER — "ציטוט בטקסט": a connection type of OTZARIA'S PERSONAL IMPORT only (Otzaria/otzaria, docs/personal_databases.md,
+ * commit 6f71470e, issue #4308), a citation clickable inside the text. It is NOT in the generator's enum above:
+ * appending it there would give it a database id (index + 1) that the generator may give to another type later,
+ * and the library generator reads it as an unknown type, OTHER. So it is a declared string of a private-use file,
+ * accepted by validateLink only when the export purpose is "private" (LINK_FORMATS §1.12).
+ */
+export const INLINE_LINKER_TYPE = "INLINE_LINKER";
+export const INLINE_LINKER_LABEL = "ציטוט בטקסט";
+
+/** Whether a declared type is meant as INLINE_LINKER in any spelling the app might read (the library gate is this broad on purpose). */
+export function isInlineLinkerType(raw: unknown): boolean {
+  const s = String(raw ?? "").trim();
+  return s === INLINE_LINKER_LABEL || s.toLowerCase().replaceAll(" ", "_") === "inline_linker";
+}
+
+/** The two spellings the app's documentation gives; the private export accepts only these. */
+export const isDocumentedInlineLinker = (raw: unknown): boolean => {
+  const s = String(raw ?? "").trim();
+  return s === INLINE_LINKER_TYPE || s === INLINE_LINKER_LABEL;
+};
+
 /** connection_type.id in the database. */
 export const connectionTypeId = (t: ConnectionType): number => CONNECTION_TYPES.indexOf(t) + 1;
 

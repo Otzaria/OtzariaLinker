@@ -76,6 +76,9 @@ const CATEGORY_OF: Record<string, QaCategory> = {
   "export/private-source-to-base": "type",
   "export/private-source-kept": "type",
   "export/private-reversed": "type",
+  "export/inline-linker-private-only": "type",
+  "export/inline-linker-anchor": "anchor",
+  "export/inline-linker-source-range": "type",
   "export/private-title-in-library": "title",
   "export/anchor-on-notes-line": "anchor",
   "export/book-changed": "edition",
@@ -99,6 +102,8 @@ const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/anchor-out-of-line": "סמנו מחדש את המילים בבונה.",
   "export/unknown-type": "בחרו בבונה סוג קשר מהרשימה.",
   "export/linker": "בחרו בבונה סוג קשר אחר.",
+  "export/inline-linker-private-only": 'בחרו בחלון הייצוא "לשימוש פרטי" (הסוג "ציטוט בטקסט" מוכר רק לייבוא האישי של אוצריא), או בחרו סוג אחר.',
+  "export/inline-linker-anchor": "סמנו בבונה את המילים של הציטוט בשורת המקור, או בחרו סוג אחר.",
   "export/reversed-dependency": "בחרו בבונה את הסוג \"מקור\".",
   "export/private-source-to-base": "אין צורך לתקן: כך הפירוש יופיע בפאנל המפרשים של ספר הבסיס באוצריא שלכם.",
   "export/private-source-kept": "הסיבה כתובה בהודעה. אם קובץ ספר הבסיס מוחזק, תקנו את מה שעוצר אותו (ההסבר ליד הקישורים שלו), והקישור ייכתב שם כפירוש.",
@@ -153,7 +158,7 @@ const FIX_BY_CATEGORY: Readonly<Record<QaCategory, string>> = {
  *   "accept-edition" — the user checked the links of a book that changed since the project was saved.
  */
 export type QaAction = "private" | "drop-anchor" | "accept-edition";
-const PRIVATE_REMEDY = new Set(["sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
+const PRIVATE_REMEDY = new Set(["export/inline-linker-private-only", "sefaria/ref1-required", "sefaria/ref2-required", "sefaria/range-side", "sefaria/both-sides", "sefaria/not-library-edition"]);
 const ANCHOR_REMEDY = new Set(["sefaria/anchor-range", "sefaria/anchor-into-sefaria", "sefaria/pending-anchor-hash", "export/anchor-on-notes-line", "export/anchor-dropped-flip", "export/companion-merge-broken"]);
 
 export function qaAction(p: Problem, purpose: "submission" | "private" = "submission"): QaAction | null {
