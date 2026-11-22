@@ -190,6 +190,12 @@ PK הוא `(linkId, side, charStart)`, ולכן ייתכנו כמה עוגנים
 - **יכולת `external_link`:** מספיקות שלוש עמודות, `sourceBookId`, `sourceLineIndex` ו־`targetTitle`
   (`db_capabilities.dart:203-207`). כל השאר אופציונליות.
 - **PDC:** כותב `connectionType='SOURCE'` לקישורים לספרייה הרשמית. COMMENTARY מתהפך ל־SOURCE.
+- **נמדד על v52** ([`PERSONAL_DB_V52_AUDIT.md`](../research/PERSONAL_DB_V52_AUDIT.md) §4): `targetSource` הוא רק `official` או
+  ה־`library_id` של המסד עצמו (קישור פנימי: `FOOTNOTES` בסיס ← הערות, `REFERENCE`, `SOURCE`, `COMMENTARY`);
+  `targetRef` ב־`official` שווה ל־`heRef` של שורת היעד ברשמית ב־562,808 מ־562,808; `connectionType` הוא טקסט חופשי
+  (`FOOTNOTES`, `SOURCE`, `REFERENCE`, `COMMENTARY`), לא `connection_type.id`. אין מזהה קישור: המזהה בכלי הוא
+  `<מקור>:ext:<rowid>`. הקורא ממומש (#13); fixture: `tests/fixtures/db/pdc-personal-mini.db` (DDL אמיתי של v52, שורות
+  placeholder, `scripts/fixtures/make_pdc_mini_db.py`).
 
 ## 7. איך לקרוא, לכל ספר
 
