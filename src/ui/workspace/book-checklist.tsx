@@ -11,11 +11,11 @@ import { useBookSearch } from "./book-picker";
  */
 const SHOWN = 200;
 
-export function BookChecklist({ label, selected, onChange, exclude }: { label: string; selected: readonly string[]; onChange: (keys: readonly string[]) => void; exclude?: string | null }) {
+export function BookChecklist({ label, selected, onChange, exclude }: { label: string; selected: readonly string[]; onChange: (keys: readonly string[]) => void; exclude?: readonly (string | null | undefined)[] }) {
   const store = useStore();
   const [query, setQuery] = useState("");
   const { hits } = useBookSearch(query);
-  const list = hits.filter((b) => b.key !== exclude);
+  const list = hits.filter((b) => !exclude?.includes(b.key));
   const byTitle = store.booksByTitle.value;
   const ticked = new Set(selected);
   const toggle = (key: string, on: boolean) => onChange(on ? [...selected, key] : selected.filter((k) => k !== key));

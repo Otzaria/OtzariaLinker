@@ -217,7 +217,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
             <>
               <details class="held more-targets" open={extra.length > 0 || undefined}>
                 <summary>עוד ספרי יעד לאותו ספר (לא חובה){extra.length > 0 && ` · נבחרו ${extra.length.toLocaleString("he")}`}</summary>
-                <BookChecklist label="עוד ספרי יעד" selected={extra} onChange={setExtra} exclude={s} />
+                <BookChecklist label="עוד ספרי יעד" selected={extra} onChange={setExtra} exclude={[s, t]} />
               </details>
               {commentaryEngine && (
                 <label class="check">
