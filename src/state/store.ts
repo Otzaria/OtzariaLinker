@@ -14,7 +14,7 @@ import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTit
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -325,8 +325,15 @@ export class AppStore {
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
-    if (res.skipped.length)
-      this.notify("warning", `${res.skipped.length} קבצים לא נפתחו.`, res.skipped.map((s) => `${s.path}: ${s.reason}`));
+    if (res.skipped.length) {
+      // the registry calls any file with no known extension a "text file that is not .txt": for a file with no bytes that is not the reason
+      const empty = new Set(files.filter((f) => f.blob.size === 0).map((f) => f.path));
+      this.notify(
+        "warning",
+        `${filesCount(res.skipped.length)} ${res.skipped.length === 1 ? "לא נפתח" : "לא נפתחו"}.`,
+        res.skipped.map((s) => `${s.path}: ${empty.has(s.path) ? "הקובץ ריק (אין בו אף בייט)." : s.reason}`),
+      );
+    }
     const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
       this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} מקורות — אפשר לקשר בין ספרים של מקורות שונים.` : ""}`);
