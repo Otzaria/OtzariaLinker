@@ -8,8 +8,8 @@ import { Icon } from "../icons/icon";
  * Opened from the type picker (TypesHelpButton); a plain <dialog>, closed with Escape or the button.
  */
 const WHERE: Record<keyof typeof TYPE_GROUP_LABELS, string> = {
-  commentaries: "בפאנל המפרשים של הספר שאליו הקישור מצביע",
-  links: "בפאנל הקישורים",
+  commentaries: "בפאנל המפרשים של הספר שממנו יוצא הקישור (ספר הבסיס); הספר שאליו הוא מצביע מופיע שם כמפרש",
+  links: "בפאנל הקישורים, בכל אחד משני הספרים",
   direction: "נשמר כפירוש בכיוון ההפוך, ולכן הפירוש מופיע בפאנל המפרשים של ספר הבסיס",
 };
 const GROUPS = typeGroups();
