@@ -19,9 +19,9 @@ test("dibur hamatchil: only the lines that start with [א], with a preview of wh
     { name: "פירוש על בראשית.txt", mimeType: "application/octet-stream", buffer: Buffer.from(commentary) },
   ]);
   await expect(page.locator(".source-row").first()).toBeVisible({ timeout: 30_000 });
-  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
-  await books.filter({ hasText: "פירוש על בראשית" }).first().getByRole("button", { name: "מקור" }).click();
-  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "פירוש על בראשית" }).first().locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
 
