@@ -37,6 +37,9 @@ let seen: ReturnType<typeof watchPage>;
 
 test.beforeEach(async ({ page }) => {
   seen = watchPage(page);
+  // the date the screens print (when a coverage or an analysis was counted) is fixed: a masked box is as wide as its text, so a baseline made at
+  // 19:07 differed by an edge pixel from a run at 20:12 (the digits of the time have different widths)
+  await page.clock.setFixedTime(new Date("2026-11-22T10:00:00+02:00"));
   await embedFonts(page);
   await page.goto(distUrl);
   await expect(page.getByRole("heading", { name: "מה תרצו לעשות?" })).toBeVisible();
@@ -67,7 +70,7 @@ async function pickBooks(page: Page, source: string | RegExp, target: string | R
 }
 
 /** Anything that shows a time or a duration. */
-const timeMasks = (page: Page): Locator[] => [page.locator("summary", { hasText: "שניות" }), page.locator(".ml-steps"), page.locator(".cov-time"), page.locator(".repo-time")];
+const timeMasks = (page: Page): Locator[] => [page.locator("summary", { hasText: "שניות" }), page.locator(".ml-steps"), page.locator(".cov-time"), page.locator(".repo-time"), page.locator(".cmp-time")];
 
 async function snap(page: Page, name: string, { keepErrors = false } = {}) {
   // success/info notices fade by themselves after 5 s, so whether one is still there depends on how
@@ -432,6 +435,9 @@ for (const [width, viewport] of WIDTHS) {
       if (!(await pairs.evaluate((el) => (el as HTMLDetailsElement).open))) await pairs.locator("summary").click();
       const row = pairs.locator('.pair-row[data-pair="פירוש קצר על בראשית>בראשית"]');
       await expect(row.locator(".pair-fit")).toContainText("הכותרות", { timeout: 30_000 });
+      // "בודק את הכותרות…" contains the same word: the shot waits until no pair is still being checked (the checks end at different moments, and the page
+      // under them is scrolled by what has grown)
+      await expect(main.getByText("בודק את הכותרות")).toHaveCount(0, { timeout: 60_000 });
       await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^סוג הקישור/).selectOption("targum");
       await pairs.locator('.pair-row[data-pair="ביאור על בראשית>בראשית"]').getByLabel(/^הצעות מרמת ביטחון/).selectOption("high");
       await row.getByRole("checkbox", { name: /לכלול את הזוג/ }).uncheck();
@@ -540,6 +546,7 @@ for (const [width, viewport] of WIDTHS) {
       await expect(page).toHaveURL(/#\/guided\/plan$/);
       await main.locator("details.guided-pairs > summary").click();
       await expect(main.locator(".guided-pairs .pair-fit").first()).toContainText("הכותרות", { timeout: 30_000 });
+      await expect(main.getByText("בודק את הכותרות")).toHaveCount(0, { timeout: 60_000 });
       await expect(main.locator(".guided-existing")).toContainText(/במסד [\d,]+/, { timeout: 30_000 });
       await main.locator(".guided-final").scrollIntoViewIfNeeded();
       await snap(page, "guided-plan");

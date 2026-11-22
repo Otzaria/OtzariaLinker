@@ -190,7 +190,7 @@ function DiffView() {
         </tbody>
       </table>
       {rows.length > shown && <button class="btn outlined" onClick={() => setShown(shown + PAGE * 5)}>הצגת עוד ({(rows.length - shown).toLocaleString("he")})</button>}
-      <p class="muted" style="margin:0">ההשוואה נמשכה {r.ms.toLocaleString("he")} אלפיות שנייה.</p>
+      <p class="muted cmp-time" style="margin:0">ההשוואה נמשכה {r.ms.toLocaleString("he")} אלפיות שנייה.</p>
     </section>
   );
 }
