@@ -222,7 +222,7 @@ export class SourceRegistry {
     const pool = targetSource === "official" ? candidates.filter((s) => s.info.library) : targetSource === null ? [...candidates.filter((s) => s.info.library), ...candidates.filter((s) => !s.info.library)] : named;
     for (const s of pool) {
       const b = (await this.titleIndex(s)).get(title);
-      if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) };
+      if (b) return { key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.lineCount !== undefined && { lineCount: b.lineCount }) };
     }
     return null;
   }

@@ -11,6 +11,8 @@ export interface TargetBook {
   title: string;
   origin: BookOrigin;
   isBaseBook?: boolean;
+  /** the book's number of lines, when the source says (a target line past it is flagged) */
+  lineCount?: number;
 }
 
 export interface ExternalTargetResolver {

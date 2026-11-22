@@ -1,5 +1,5 @@
 import { CONNECTION_TYPES, parseConnectionType } from "../../core/links/connection-type";
-import type { DbLinkPage, DbLinkQuery, DbLinkSummary } from "../../core/links/db-links";
+import { DB_LINK_FLAGS, type DbLinkPage, type DbLinkQuery, type DbLinkSummary } from "../../core/links/db-links";
 import type { BookOrigin, Link } from "../../core/links/model";
 
 /*
@@ -20,6 +20,8 @@ export interface ListingRows {
   type: Uint8Array;
   /** 0-based line of the listed book (-1 when unknown) */
   ownIndex: Int32Array;
+  /** bit i = DB_LINK_FLAGS[i] (external_link rows); absent = no flags */
+  flags?: Uint8Array;
 }
 
 export class LinkListing {
@@ -67,9 +69,11 @@ export class LinkListing {
       else if (type[i] === targum) b[key === "out" ? "targumOut" : "targumIn"]++;
       else if (type[i] === midrash) b[key === "out" ? "midrashOut" : "midrashIn"]++;
     }
+    const flagCounts = this.rows.flags ? DB_LINK_FLAGS.map((flag, b) => ({ flag, count: this.rows.flags!.reduce((n, f) => n + ((f >> b) & 1), 0) })).filter((f) => f.count > 0) : [];
     return {
       bookKey: this.bookKey,
       total: dir.length,
+      ...(flagCounts.length && { flags: flagCounts }),
       out,
       in: dir.length - out,
       byType: types.filter((t) => t.out + t.in > 0),
@@ -80,7 +84,8 @@ export class LinkListing {
   }
 
   async page(q: DbLinkQuery): Promise<DbLinkPage> {
-    const { dir, type, other, ownIndex, ref } = this.rows;
+    const { dir, type, other, ownIndex, ref, flags } = this.rows;
+    const wantFlag = q.flag === undefined ? 0 : 1 << DB_LINK_FLAGS.indexOf(q.flag);
     const wantDir = q.dir === undefined ? -1 : q.dir === "out" ? 0 : 1;
     const wantTypes = q.types?.length ? new Set(q.types.map((t) => CONNECTION_TYPES.indexOf(t))) : null;
     const wantOther = q.otherBookKey === undefined ? -1 : this.otherKeys.indexOf(q.otherBookKey);
@@ -93,6 +98,7 @@ export class LinkListing {
       if (wantDir >= 0 && dir[i] !== wantDir) continue;
       if (wantTypes && !wantTypes.has(type[i]!)) continue;
       if (wantOther >= 0 && other[i] !== wantOther) continue;
+      if (wantFlag && !((flags?.[i] ?? 0) & wantFlag)) continue;
       if (q.lines && (ownIndex[i]! < q.lines.from || ownIndex[i]! > q.lines.to)) continue;
       if (total >= offset && picked.length < limit) picked.push(ref[i]!);
       total++;

@@ -47,6 +47,10 @@ export interface InternalLinks {
    * the library does not have that title — the registry decides when the links are listed, never the scan
    */
   readonly viaNull: Uint8Array;
+  /** 1 when the same two lines are also linked the other way round (a reversed record is a duplicate link, AGENTS §3) */
+  readonly reverse: Uint8Array;
+  /** the position of a row in these arrays by its rowid, or -1 (it is not an internal row) */
+  positionOf(rowid: number): number;
   /** first and last+1 position of a target book's rows */
   readonly range: ReadonlyMap<number, readonly [number, number]>;
   /** rows whose target line is unknown (no targetLineIndex): left out */
@@ -181,7 +185,39 @@ export class ExternalLinksReader {
       if (r) r[1] = i + 1;
       else range.set(cap.tb[from]!, [i, i + 1]);
     });
-    return { ...out, range, skipped };
+    // the reversed pair: for each row, is there a row from its target line to its source line? (sorted, then a binary search)
+    const cmp = (a: number, b: number) => out.sourceBook[a]! - out.sourceBook[b]! || out.sourceLine[a]! - out.sourceLine[b]! || out.targetBook[a]! - out.targetBook[b]! || out.targetLine[a]! - out.targetLine[b]!;
+    const bySource = Int32Array.from({ length: m }, (_, i) => i).sort(cmp);
+    const reverse = new Uint8Array(m);
+    for (let i = 0; i < m; i++) {
+      let lo = 0;
+      let hi = m - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const j = bySource[mid]!;
+        const c = out.sourceBook[j]! - out.targetBook[i]! || out.sourceLine[j]! - out.targetLine[i]! || out.targetBook[j]! - out.sourceBook[i]! || out.targetLine[j]! - out.sourceLine[i]!;
+        if (c === 0) {
+          reverse[i] = 1;
+          break;
+        }
+        if (c < 0) lo = mid + 1;
+        else hi = mid - 1;
+      }
+    }
+    const byRowid = Int32Array.from({ length: m }, (_, i) => i).sort((a, b) => out.rowid[a]! - out.rowid[b]!);
+    const positionOf = (rowid: number): number => {
+      let lo = 0;
+      let hi = m - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const v = out.rowid[byRowid[mid]!]!;
+        if (v === rowid) return byRowid[mid]!;
+        if (v < rowid) lo = mid + 1;
+        else hi = mid - 1;
+      }
+      return -1;
+    };
+    return { ...out, reverse, positionOf, range, skipped };
   }
 
   /** NULL (or empty) is REFERENCE; every other text goes through the generator's parser (unknown → OTHER) */

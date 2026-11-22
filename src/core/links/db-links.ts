@@ -1,5 +1,16 @@
 import { parseConnectionType, type ConnectionType } from "./connection-type";
-import type { BookOrigin, Link } from "./model";
+import { DB_LINK_FLAGS, type BookOrigin, type DbLinkFlag, type Link } from "./model";
+
+export { DB_LINK_FLAGS, type DbLinkFlag };
+
+/** The flags in the user's words (the panel shows them; docs/research/PERSONAL_DB_V52_AUDIT.md §5 has the real counts). */
+export const DB_LINK_FLAG_LABELS: Readonly<Record<DbLinkFlag, { he: string; hint: string }>> = {
+  "target-out-of-range": { he: "יעד מחוץ לספר", hint: "שורת היעד גדולה ממספר השורות של ספר היעד: הקישור כנראה מצביע על ספר אחר או על גרסה אחרת" },
+  "header-target": { he: "היעד הוא כותרת", hint: "שורת היעד היא כותרת (יש לה ערך בתוכן העניינים)" },
+  "header-source": { he: "המקור הוא כותרת", hint: "שורת המקור היא כותרת: אוצריא של הספרייה מדלגת על קישור כזה" },
+  "reverse-duplicate": { he: "כפילות הפוכה", hint: "אותן שתי שורות מקושרות גם בכיוון ההפוך: באפליקציה זה קישור כפול" },
+  "ambiguous-title": { he: "כותרת עמומה", hint: "שם ספר היעד הוא גם שם של ספר בספרייה הרשמית, ולא ידוע לאיזה מהם הקישור התכוון" },
+};
 
 /*
  * Links that already exist in an opened database, as the worker lists them for one book (stage 10:
@@ -20,6 +31,8 @@ export interface DbLinkQuery {
   otherBookKey?: string;
   /** lines of the listed book, 0-based inclusive */
   lines?: { from: number; to: number };
+  /** only links that carry this flag */
+  flag?: DbLinkFlag;
   offset: number;
   limit: number;
 }
@@ -62,6 +75,8 @@ export interface DbLinkSummary {
   byType: DbLinkTypeCount[];
   /** by the book at the other end, most links first */
   byBook: DbLinkBookCount[];
+  /** how many of the book's links carry each flag (only those with any; external_link databases only) */
+  flags?: { flag: DbLinkFlag; count: number }[];
   /** "index": through idx_link_source_book/idx_link_target_book; "scan": the database has neither (slow) */
   method: "index" | "scan";
   /** what reading the summary cost, for the status line and the real-database test */

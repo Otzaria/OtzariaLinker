@@ -45,6 +45,16 @@ export interface DbAnchor {
   readonly label?: string;
 }
 
+/**
+ * What a reader should know about an EXISTING database link before trusting it (a personal database's external_link,
+ * #13): the target line is past the end of its book; the target or the source line is a heading; the same two lines
+ * are linked the other way round too (AGENTS §3: a reversed record is a duplicate link); the target title is the name
+ * of two books (the database's own and the library's), so which one was meant is not known. Only a note on a "db"
+ * link: it is never exported, and a copy to the project does not carry it.
+ */
+export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title"] as const;
+export type DbLinkFlag = (typeof DB_LINK_FLAGS)[number];
+
 export type LinkStatus = "new" | "edited" | "existing" | "deleted";
 
 /**
@@ -74,6 +84,8 @@ export interface Link {
   readonly ref2?: string;
   readonly anchor?: RawAnchor;
   readonly dbAnchors?: readonly DbAnchor[];
+  /** database links only: what to doubt about this link (see DbLinkFlag) */
+  readonly dbFlags?: readonly DbLinkFlag[];
   /** database links only: stored sides Sefaria hides (link_suppressed_side) — not expressible in a file */
   readonly dbSuppressed?: readonly (0 | 1)[];
   /** Pipeline fields (anchor_src_hash, anchor_context) and unknown keys, kept for a lossless round-trip. */

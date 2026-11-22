@@ -48,3 +48,41 @@ describe.runIf(path)("external_link in a real personal database (read-only)", ()
     sql.close();
   }, 600_000);
 });
+
+/*
+ * The flags on a real personal database next to the real library (#13): 6,522 internal SOURCE links name the title
+ * "ברכות", which the personal database and the library both have (the audit: PERSONAL_DB_V52_AUDIT.md §5), and 162 of
+ * them point past the end of the personal book. Needs OTZARIA_DB as well (the library, read-only).
+ */
+import { DB_LINK_FLAGS } from "../../../src/core/links/db-links";
+import { DbBookSource } from "../../../src/sources/db/db-source";
+
+const libraryPath = process.env.OTZARIA_DB;
+describe.runIf(path && libraryPath)("flags of the links of a real personal book", () => {
+  it("'ברכות': 162 past the end of the personal book, and every link to that title is ambiguous", { timeout: 600_000 }, async () => {
+    const fdOf = (p: string): ByteSource => {
+      const fd = openSync(p, "r");
+      return { size: fstatSync(fd).size, async read(offset, length) { const buf = new Uint8Array(length); return buf.subarray(0, readSync(fd, buf, 0, length, offset)); } };
+    };
+    const library = await DbBookSource.open("s1", "seforim.db", fdOf(libraryPath!));
+    const libBooks = new Map((await library.books()).map((b) => [b.title, b]));
+    const personal = await DbBookSource.open("s2", "personal.db", fdOf(path!));
+    personal.setTargetResolver({
+      book: async (title, source) => {
+        const b = source === "official" || source === null ? libBooks.get(title) : undefined;
+        return b ? { key: b.key, title: b.title, origin: b.origin, ...(b.lineCount !== undefined && { lineCount: b.lineCount }) } : null;
+      },
+      lineOfRef: async () => null,
+    });
+    const book = (await personal.books()).find((b) => b.title === "ברכות")!;
+    const t0 = performance.now();
+    const listing = await personal.linkListing(book.key);
+    if (typeof listing === "string") throw new Error(listing);
+    const s = listing.summary((k) => ({ title: k, origin: "unknown" }));
+    console.log(`flags of 'ברכות': ${JSON.stringify(s.flags)}; ${s.total} links in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    const count = Object.fromEntries((s.flags ?? []).map((f) => [f.flag, f.count]));
+    expect(count["target-out-of-range"]).toBe(162);
+    expect(count["ambiguous-title"]).toBeGreaterThanOrEqual(6522);
+    for (const f of s.flags ?? []) expect(DB_LINK_FLAGS).toContain(f.flag);
+  });
+});

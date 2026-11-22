@@ -1,15 +1,16 @@
 import { CONNECTION_TYPES, canonicalTypeString } from "../../core/links/connection-type";
-import type { BookOrigin, BookRef, Link } from "../../core/links/model";
+import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
 import type { LibraryAltTocStructure } from "../../core/alt-toc/model";
 import { readAltToc } from "../../database/otzaria/alt-toc-reader";
 import { ExternalLinksReader, type ExternalLinkRow, type InternalLinks } from "../../database/otzaria/external-links-reader";
 import { DbLinksReader, type DbLinkRow } from "../../database/otzaria/links-reader";
 import { OtzariaDbReader, type DbBook, type DbLine } from "../../database/otzaria/reader";
+import { TocLines } from "../../database/otzaria/toc-lines";
 import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
 import type { ExternalTargetResolver } from "./external-target";
-import { LinkListing } from "./link-listing";
+import { LinkListing, type ListingRows } from "./link-listing";
 
 /*
  * An Otzaria-family database as a book source. Read-only by construction: nothing here can write.
@@ -44,8 +45,8 @@ export class DbBookSource implements BookSource {
   static async open(id: string, label: string, src: ByteSource): Promise<DbBookSource> {
     const reader = await OtzariaDbReader.open(src);
     const links = await DbLinksReader.open(reader.file, reader.caps);
-    // a database with both tables keeps using `link`; external_link is for the ones without it (#13)
-    const ext = links ? null : await ExternalLinksReader.open(reader.file, reader.caps);
+    // a database with both tables lists the links of both, each once (mergeParts); external_link alone is a personal database (#13)
+    const ext = await ExternalLinksReader.open(reader.file, reader.caps);
     const warnings = [...reader.caps.warnings];
     if (ext && !ext.indexed)
       warnings.push({ code: "db/external-links-unindexed", message: "לטבלת הקישורים החיצוניים (external_link) במסד אין אינדקס לפי ספר, ולכן הצגת הקישורים של ספר תסרוק את כל הטבלה: איטי במסד גדול. כדי להאיץ, צרו במסד אינדקס על (sourceBookId, sourceLineIndex) בכלי שיצר אותו." });
@@ -99,11 +100,12 @@ export class DbBookSource implements BookSource {
   }
 
   async existingLinks(bookKey: string, from: number, to: number): Promise<Link[]> {
-    if (this.ext) return this.externalLinksAt(this.idOf(bookKey), from, to);
-    if (!this.links) return [];
+    const fromExt = this.ext ? await this.externalLinksAt(this.idOf(bookKey), from, to) : [];
+    if (!this.links) return fromExt;
     const lines = await this.reader.lineEntries(this.idOf(bookKey));
     const ids = lines.filter((e) => e.index >= from && e.index <= to).map((e) => e.id);
-    return (await this.links.atLines(ids)).map((r) => this.toLink(r));
+    const fromLink = (await this.links.atLines(ids)).map((r) => this.toLink(r));
+    return fromExt.length ? [...fromLink, ...fromExt.filter((e) => !fromLink.some((l) => sameLink(l, e)))] : fromLink;
   }
 
   /**
@@ -116,7 +118,7 @@ export class DbBookSource implements BookSource {
     const id = this.idOf(bookKey);
     let p = this.listings.get(id);
     if (!p) {
-      p = this.ext ? this.buildExternalListing(bookKey, id, ctx) : this.buildListing(bookKey, id, ctx);
+      p = this.buildAnyListing(bookKey, id, ctx);
       this.listings.set(id, p);
       p.catch(() => this.listings.delete(id)); // a cancelled or failed read is not cached
       while (this.listings.size > 3) this.listings.delete(this.listings.keys().next().value!);
@@ -124,8 +126,20 @@ export class DbBookSource implements BookSource {
     return p;
   }
 
-  private async buildListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
+  /**
+   * The listing of a book: from the `link` table, from `external_link`, or — a database that has BOTH — from the two
+   * together, each link once (an external_link row that repeats a `link` row of the same own line, other book, other
+   * line and type is dropped) and each keeping its own id and provenance "db".
+   */
+  private async buildAnyListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
     const t0 = performance.now();
+    const parts: ListingPart[] = [];
+    if (this.links) parts.push(await this.buildListing(id, ctx));
+    if (this.ext) parts.push(await this.buildExternalListing(id, ctx));
+    return mergeParts(bookKey, parts, Math.round(performance.now() - t0));
+  }
+
+  private async buildListing(id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<ListingPart> {
     const rows = await this.links!.bookLinks(id, ctx);
     const own = new Map((await this.reader.lineEntries(id)).map((e) => [e.id, e.index]));
     const others = [...new Set(rows.other)];
@@ -137,17 +151,16 @@ export class DbBookSource implements BookSource {
       ownIndex[i] = own.get(rows.ownLine[i]!) ?? -1;
       other[i] = otherAt.get(rows.other[i]!)!;
     }
-    return new LinkListing(
-      bookKey,
-      { ref: rows.ids, dir: rows.dir, other, type: rows.type, ownIndex },
-      others.map((b) => this.keyOf(b)),
-      async (ids) => {
+    return {
+      rows: { ref: rows.ids, dir: rows.dir, other, type: rows.type, ownIndex },
+      otherLine: rows.otherLine,
+      keys: others.map((b) => this.keyOf(b)),
+      fetch: async (ids) => {
         const got = new Map((await this.links!.byIds(ids)).map((r) => [r.id, this.toLink(r)]));
         return ids.map((i) => got.get(i)).filter((l): l is Link => !!l);
       },
-      rows.method,
-      Math.round(performance.now() - t0),
-    );
+      method: rows.method,
+    };
   }
 
   /* ---------------- external_link (a personal database without a link table, #13) ---------------- */
@@ -158,7 +171,11 @@ export class DbBookSource implements BookSource {
 
   /** The open sources changed (a library opened or closed): what the listings resolved may be stale. */
   targetsChanged(): void {
-    if (this.ext) this.listings.clear();
+    if (this.ext) {
+      this.listings.clear();
+      this.targets.clear();
+      this.libraryTitles.clear();
+    }
   }
 
   private get libraryId(): string | undefined {
@@ -182,11 +199,70 @@ export class DbBookSource implements BookSource {
     return this.internalLinks;
   }
 
-  /** the target book of a row: this database's own, or the one the registry finds in another source; null when none is open */
+  /** (source, title) → what the row's target is: memoized; cleared when the open sources change */
+  private targets = new Map<string, Promise<ResolvedTarget>>();
+  private libraryTitles = new Map<string, Promise<boolean>>();
+  private toc: Promise<TocLines | null> | null = null;
+
+  /**
+   * The target of a row: this database's own book, or the one the registry finds in another source (by the row's
+   * targetSource and the exact title); `book` is null when none is open — the link keeps the title alone.
+   */
+  private resolveTarget(r: Pick<ExternalLinkRow, "targetSource" | "targetTitle">): Promise<ResolvedTarget> {
+    const memo = `${r.targetSource ?? ""}\u0000${r.targetTitle}`;
+    let p = this.targets.get(memo);
+    if (!p) {
+      p = (async (): Promise<ResolvedTarget> => {
+        const own = this.titles().get(r.targetTitle);
+        if (own !== undefined && (r.targetSource === this.libraryId || (r.targetSource === null && !(await this.resolver?.book(r.targetTitle, null, this.info.id)))))
+          return { book: this.bookRef(own), own: true, bookId: own, ...(this.booksById.get(own)?.totalLines != null && { lineCount: this.booksById.get(own)!.totalLines! }) };
+        const t = await this.resolver?.book(r.targetTitle, r.targetSource, this.info.id);
+        return t ? { book: { key: t.key, title: t.title, origin: t.origin, ...(t.isBaseBook !== undefined && { isBaseBook: t.isBaseBook }) }, own: false, ...(t.lineCount !== undefined && { lineCount: t.lineCount }) } : { book: null, own: false };
+      })();
+      this.targets.set(memo, p);
+    }
+    return p;
+  }
+
   private async targetBook(r: Pick<ExternalLinkRow, "targetSource" | "targetTitle">): Promise<BookRef | null> {
-    const own = this.titles().get(r.targetTitle);
-    if (own !== undefined && (r.targetSource === this.libraryId || (r.targetSource === null && !(await this.resolver?.book(r.targetTitle, null, this.info.id))))) return this.bookRef(own);
-    return (await this.resolver?.book(r.targetTitle, r.targetSource, this.info.id)) ?? null;
+    return (await this.resolveTarget(r)).book;
+  }
+
+  /** whether the open library has a book of this title (an own book of the same title is then ambiguous) */
+  private libraryHas(title: string): Promise<boolean> {
+    let p = this.libraryTitles.get(title);
+    if (!p) {
+      p = (async () => !!(await this.resolver?.book(title, "official", this.info.id)))();
+      this.libraryTitles.set(title, p);
+    }
+    return p;
+  }
+
+  private tocLines(): Promise<TocLines | null> {
+    return (this.toc ??= TocLines.read(this.reader.file, this.reader.caps).catch(() => null));
+  }
+
+  /**
+   * The flags of a row (DbLinkFlag): from the row and the books alone, so the summary's count and the page's links
+   * agree. A heading is a line with a table-of-contents entry (TocLines: a close proxy). A target line past the end of
+   * the book is flagged only when the line is known without the heRef (the own book, or no ref) and the book's length
+   * is: the library's book must be open. Reverse duplicates are internal rows (InternalLinks.reverse).
+   */
+  private async flagsOf(r: ExternalLinkRow, ix: InternalLinks | null, toc: TocLines | null): Promise<number> {
+    const t = await this.resolveTarget(r);
+    const bit = (f: DbLinkFlag) => 1 << DB_LINK_FLAGS.indexOf(f);
+    let f = 0;
+    if (r.targetLine !== null && t.lineCount !== undefined && (t.own || !r.targetRef?.trim()) && r.targetLine >= t.lineCount) f |= bit("target-out-of-range");
+    if (toc && toc.has(r.bookId, r.lineIndex)) f |= bit("header-source");
+    if (t.own) {
+      if (toc && t.bookId !== undefined && r.targetLine !== null && toc.has(t.bookId, r.targetLine)) f |= bit("header-target");
+      if (ix) {
+        const at = ix.positionOf(r.rowid);
+        if (at >= 0 && ix.reverse[at]) f |= bit("reverse-duplicate");
+      }
+      if (await this.libraryHas(r.targetTitle)) f |= bit("ambiguous-title");
+    }
+    return f;
   }
 
   /**
@@ -198,7 +274,7 @@ export class DbBookSource implements BookSource {
     const tb = ix.targetBook[i]!;
     let ok = memo.get(tb);
     if (ok === undefined) {
-      ok = !(await this.resolver?.book(this.booksById.get(tb)?.title ?? "", null, this.info.id));
+      ok = !(await this.libraryHas(this.booksById.get(tb)?.title ?? ""));
       memo.set(tb, ok);
     }
     return ok;
@@ -216,7 +292,7 @@ export class DbBookSource implements BookSource {
 
   private async externalLinksAt(bookId: number, from: number, to: number): Promise<Link[]> {
     const rows = await this.ext!.atLines(bookId, from, to);
-    const out = (await Promise.all(rows.map((r) => this.externalToLink(r)))).filter((l): l is Link => !!l);
+    const out = (await Promise.all(rows.map((r) => this.externalToLink(r, false)))).filter((l): l is Link => !!l);
     // links INTO these lines from this database's own books — only once the scan that finds them has been made
     // (the listing builds it; a click on a line must not wait for a scan of the whole table)
     if (this.internalLinks) {
@@ -226,7 +302,7 @@ export class DbBookSource implements BookSource {
         const ids: number[] = [];
         const memo = new Map<number, boolean>();
         for (let i = at[0]; i < at[1]; i++) if (ix.targetLine[i]! >= from && ix.targetLine[i]! <= to && ix.sourceBook[i] !== bookId && (await this.reachesOwn(ix, i, memo))) ids.push(ix.rowid[i]!);
-        out.push(...(await Promise.all((await this.ext!.byRowids(ids)).map((r) => this.externalToLink(r)))).filter((l): l is Link => !!l));
+        out.push(...(await Promise.all((await this.ext!.byRowids(ids)).map((r) => this.externalToLink(r, false)))).filter((l): l is Link => !!l));
       }
     }
     return out;
@@ -237,13 +313,13 @@ export class DbBookSource implements BookSource {
    * table scan, the links into it from this database's own books. Compact rows only; a page resolves its own
    * targets (the registry, by title and heRef) when it is shown.
    */
-  private async buildExternalListing(bookKey: string, id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing> {
-    const t0 = performance.now();
+  private async buildExternalListing(id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<ListingPart> {
     // a row that cannot be placed (no targetLineIndex, and no ref that an open book resolves) is no link: it is left
     // out of the counts exactly as externalToLink leaves it out of the pages
     const rows: ExternalLinkRow[] = [];
     for (const r of await this.ext!.outgoing(id, ctx)) if (r.targetLine !== null || (await this.lineOf(r)) !== null) rows.push(r); // only a row with no targetLineIndex needs its ref resolved here
     const ix = await this.internal(ctx);
+    const toc = await this.tocLines();
     const incoming: number[] = [];
     const at = ix.range.get(id);
     const memo = new Map<number, boolean>();
@@ -252,46 +328,46 @@ export class DbBookSource implements BookSource {
     const keys: string[] = [];
     const keyAt = new Map<string, number>();
     const slot = (key: string) => keyAt.get(key) ?? (keyAt.set(key, keys.length), keys.push(key) - 1);
-    const lis = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
-    const targets = new Map<string, string>(); // (source, title) → the key of the book it names
+    const lis = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n), flags: new Uint8Array(n) };
+    const otherLine = new Int32Array(n).fill(-1);
     let k = 0;
     for (const r of rows) {
-      const memo = `${r.targetSource ?? ""}\u0000${r.targetTitle}`;
-      let key = targets.get(memo);
-      if (key === undefined) {
-        key = (await this.targetBook(r))?.key ?? `unresolved:${r.targetTitle}`;
-        targets.set(memo, key);
-      }
-      lis.ref[k] = r.rowid;
+      const key = (await this.targetBook(r))?.key ?? `unresolved:${r.targetTitle}`;
+      // external rows are told from link-table rows by the sign of their ref (a row has no id of its own): -rowid
+      lis.ref[k] = -r.rowid;
       lis.dir[k] = 0;
       lis.other[k] = slot(key);
       lis.type[k] = CONNECTION_TYPES.indexOf(this.ext!.typeOf(r.typeName));
       lis.ownIndex[k] = r.lineIndex;
+      lis.flags[k] = await this.flagsOf(r, ix, toc);
+      if (r.targetLine !== null && !r.targetRef?.trim()) otherLine[k] = r.targetLine;
       k++;
     }
+    const ownTitle = this.booksById.get(id)?.title ?? "";
     for (const i of incoming) {
-      lis.ref[k] = ix.rowid[i]!;
+      lis.ref[k] = -ix.rowid[i]!;
       lis.dir[k] = 1;
       lis.other[k] = slot(this.keyOf(ix.sourceBook[i]!));
       lis.type[k] = ix.type[i]!;
       lis.ownIndex[k] = ix.targetLine[i]!;
+      lis.flags[k] = await this.flagsOf({ rowid: ix.rowid[i]!, bookId: ix.sourceBook[i]!, lineIndex: ix.sourceLine[i]!, targetSource: this.libraryId ?? null, targetTitle: ownTitle, targetRef: null, targetLine: ix.targetLine[i]!, typeName: null }, ix, toc);
+      otherLine[k] = ix.sourceLine[i]!;
       k++;
     }
-    return new LinkListing(
-      bookKey,
-      lis,
+    return {
+      rows: lis,
+      otherLine,
       keys,
-      async (ids) => {
+      fetch: async (refs) => {
         const got = new Map<number, Link>();
-        for (const r of await this.ext!.byRowids(ids)) {
-          const l = await this.externalToLink(r);
+        for (const r of await this.ext!.byRowids(refs.map((x) => Math.abs(x)))) {
+          const l = await this.externalToLink(r, true);
           if (l) got.set(r.rowid, l);
         }
-        return ids.map((i) => got.get(i)).filter((l): l is Link => !!l);
+        return refs.map((x) => got.get(Math.abs(x))).filter((l): l is Link => !!l);
       },
-      this.ext!.indexed ? "index" : "scan",
-      Math.round(performance.now() - t0),
-    );
+      method: this.ext!.indexed ? "index" : "scan",
+    };
   }
 
   /**
@@ -308,12 +384,15 @@ export class DbBookSource implements BookSource {
     return r.targetLine;
   }
 
-  private async externalToLink(r: ExternalLinkRow): Promise<Link | null> {
+  private async externalToLink(r: ExternalLinkRow, withFlags: boolean): Promise<Link | null> {
     const book = await this.targetBook(r);
     const line = await this.lineOf(r, book);
     // no targetLineIndex and a ref that no open book resolves: the line is unknown, and a link to a guessed line is worse than none (AGENTS §8)
     if (line === null) return null;
     const target: BookRef = book ?? { key: `unresolved:${r.targetTitle}`, title: r.targetTitle, origin: "unknown" };
+    // the flags are read from the scan and the table of contents the listing built (a page is shown after it)
+    const bits = withFlags ? await this.flagsOf(r, this.internalLinks ? await this.internalLinks : null, await this.tocLines()) : 0;
+    const dbFlags = DB_LINK_FLAGS.filter((_, i) => (bits >> i) & 1);
     return {
       id: `${this.info.id}:ext:${r.rowid}`,
       status: "existing",
@@ -322,6 +401,7 @@ export class DbBookSource implements BookSource {
       target: { book: target, line },
       declaredType: canonicalTypeString(this.ext!.typeOf(r.typeName)),
       heRef2: r.targetRef?.trim() ? r.targetRef : `${target.title} ${line + 1}`,
+      ...(dbFlags.length && { dbFlags }),
     };
   }
 
@@ -352,6 +432,9 @@ export class DbBookSource implements BookSource {
     this.listings.clear();
     this.internalLinks = null;
     this.titleToId = null;
+    this.targets.clear();
+    this.libraryTitles.clear();
+    this.toc = null;
   }
 
   private toLink(r: DbLinkRow): Link {
@@ -405,4 +488,77 @@ export function isLibraryDb(kind: string, label: string, books: Iterable<Pick<Db
   if (/^seforim\.db$/i.test(label)) return true;
   for (const b of books) if (b.source && /sefaria/i.test(b.source)) return true;
   return false;
+}
+
+interface ResolvedTarget {
+  book: BookRef | null;
+  /** the target is a book of this very database */
+  own: boolean;
+  bookId?: number;
+  lineCount?: number;
+}
+
+/** One table's part of a book's links: compact rows plus how to fetch the full links of a page. */
+interface ListingPart {
+  rows: ListingRows;
+  /** 0-based line at the other end where the row says it without a lookup, else -1 (for the merge of two tables) */
+  otherLine: Int32Array;
+  keys: string[];
+  /** a ref of this part (a link id; for external_link -rowid) → the links, in order */
+  fetch: (refs: number[]) => Promise<Link[]>;
+  method: "index" | "scan";
+}
+
+/** The same link in two tables: same stored ends (book and line) and type. */
+const sameLink = (a: Link, b: Link) => a.source.book.key === b.source.book.key && a.source.line === b.source.line && a.target.book.key === b.target.book.key && a.target.line === b.target.line && a.declaredType === b.declaredType;
+
+/**
+ * One listing from the parts of a book: one part is its own listing; two (a database with a `link` table AND
+ * `external_link`) are concatenated, a ref telling which table it is from by its sign, and an external row that
+ * repeats a `link` row (same own line, other book, other line, type; known for rows that point out) is dropped.
+ */
+function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkListing {
+  if (parts.length === 1) return new LinkListing(bookKey, parts[0]!.rows, parts[0]!.keys, parts[0]!.fetch, parts[0]!.method, ms);
+  const [link, ext] = parts as [ListingPart, ListingPart];
+  const keys = [...link.keys];
+  const keyAt = new Map(keys.map((k, i) => [k, i]));
+  const slot = (k: string) => keyAt.get(k) ?? (keyAt.set(k, keys.length), keys.push(k) - 1);
+  const seen = new Set<string>();
+  for (let i = 0; i < link.rows.ref.length; i++) if (link.rows.dir[i] === 0 && link.otherLine[i]! >= 0) seen.add(`${link.rows.ownIndex[i]}|${link.keys[link.rows.other[i]!]}|${link.otherLine[i]}|${link.rows.type[i]}`);
+  const keep: number[] = [];
+  for (let i = 0; i < ext.rows.ref.length; i++) {
+    const dup = ext.rows.dir[i] === 0 && ext.otherLine[i]! >= 0 && seen.has(`${ext.rows.ownIndex[i]}|${ext.keys[ext.rows.other[i]!]}|${ext.otherLine[i]}|${ext.rows.type[i]}`);
+    if (!dup) keep.push(i);
+  }
+  const nl = link.rows.ref.length;
+  const n = nl + keep.length;
+  const rows = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n), flags: new Uint8Array(n) };
+  for (let i = 0; i < nl; i++) {
+    rows.ref[i] = link.rows.ref[i]!;
+    rows.dir[i] = link.rows.dir[i]!;
+    rows.other[i] = link.rows.other[i]!;
+    rows.type[i] = link.rows.type[i]!;
+    rows.ownIndex[i] = link.rows.ownIndex[i]!;
+  }
+  keep.forEach((i, j) => {
+    rows.ref[nl + j] = ext.rows.ref[i]!;
+    rows.dir[nl + j] = ext.rows.dir[i]!;
+    rows.other[nl + j] = slot(ext.keys[ext.rows.other[i]!]!);
+    rows.type[nl + j] = ext.rows.type[i]!;
+    rows.ownIndex[nl + j] = ext.rows.ownIndex[i]!;
+    rows.flags[nl + j] = ext.rows.flags?.[i] ?? 0;
+  });
+  return new LinkListing(
+    bookKey,
+    rows,
+    keys,
+    async (refs) => {
+      const [a, b] = await Promise.all([link.fetch(refs.filter((x) => x > 0)), ext.fetch(refs.filter((x) => x < 0))]);
+      const byId = new Map([...a, ...b].map((l) => [l.id, l]));
+      const sid = bookKey.split(":")[0];
+      return refs.map((x) => byId.get(x > 0 ? `${sid}:link:${x}` : `${sid}:ext:${-x}`)).filter((l): l is Link => !!l);
+    },
+    link.method === "index" && ext.method === "index" ? "index" : "scan",
+    ms,
+  );
 }
