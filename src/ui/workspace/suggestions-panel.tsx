@@ -3,7 +3,7 @@ import { CONFIDENCE_LABELS, ENGINES, SUGGESTION_SORTS, type Confidence, type Eng
 import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import type { SuggestionsView } from "../../state/preferences";
-import type { SuggestionState } from "../../state/suggestions";
+import { placeText, type SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
@@ -363,6 +363,9 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
   // read from the user's book (audit F18), with the start of the target line's text (audit F17)
   const v = store.suggestions.display(s);
   const snippet = store.suggestions.snippet(v.to);
+  // the target's line number: the place name alone repeats down a chapter of a book without verse headings (issue 12);
+  // a cited span belongs to the record's own target, which is the displayed one unless the row is shown reversed
+  const place = placeText(v.to, v.reversed ? undefined : s);
   return (
     <tr
       class={`st-${state}`}
@@ -374,12 +377,13 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
       <td onClick={(e) => e.stopPropagation()}>
         {/* the label is the hit area: the bare checkbox is 13px (WCAG 2.5.8 asks 24) */}
         <label class="hit">
-          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}`} />
+          <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.currentTarget.checked)} aria-label={`בחירת ההצעה לשורה ${v.from.line + 1}: ${v.toLabel}, ${place}`} />
         </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
       <td>
         <div>{v.toLabel}</div>
+        <div class="where muted">{place}</div>
         {snippet && <div class="snippet muted">{snippet}</div>}
       </td>
       <td>
@@ -480,8 +484,8 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
       {card && <CardTexts s={s} />}
       {!card && (
         <div class="end source set">
-          <span class="side-badge source">שורה {s.source.line + 1}</span>
-          <span>← {s.heRef2}</span>
+          <span class="side-badge source">{placeText(s.source)}</span>
+          <span>← {s.heRef2} · {placeText(s.target, s)}</span>
         </div>
       )}
       <ul class="problems">
@@ -550,11 +554,11 @@ function CardTexts({ s }: { s: Suggestion }) {
   return (
     <>
       <div class="end source set">
-        <span class="side-badge source">{s.source.book.title} {s.source.line + 1}</span>
+        <span class="side-badge source">{s.source.book.title} · {placeText(s.source)}</span>
         <span class="snip" style="-webkit-line-clamp:6">{text(s.source.book.key, s.source.line)}</span>
       </div>
       <div class="end target set">
-        <span class="side-badge target">{s.heRef2}</span>
+        <span class="side-badge target">{s.heRef2} · {placeText(s.target, s)}</span>
         <span class="snip" style="-webkit-line-clamp:6">{text(s.target.book.key, s.target.line)}</span>
       </div>
     </>

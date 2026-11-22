@@ -98,3 +98,40 @@ test("sort the suggestions: weakest first, strongest first, and back to the book
   expect(seen.external).toEqual([]);
   expect(seen.errors).toEqual([]);
 });
+
+/*
+ * Issue 12: both ends of a suggestion are numbered — the source line in its own column, the target line under the place
+ * name — in the table, in the one-at-a-time view and on the card, and the number is the one the reader shows.
+ */
+test("a suggestion shows the target's line number in the table, the step view and the card — the one the reader marks", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
+  const books = page.getByRole("region", { name: "מקורות וספרים" }).locator(".book-list li");
+  await books.filter({ hasText: 'רש"י על בראשית' }).first().getByRole("button", { name: "מקור" }).click();
+  await books.filter({ hasText: /^בראשית/ }).first().getByRole("button", { name: "יעד" }).click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await page.getByRole("button", { name: "הכול", exact: true }).click({ timeout: 30_000 });
+  const row = page.locator("table.sug-table tbody tr").nth(2);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+
+  await row.click();
+  const marked = await page.locator(".reader.target .ln.picked").first().getAttribute("data-i");
+  const n = Number(marked) + 1;
+  const place = new RegExp(String.raw`שור(?:ה|ות) ${n}(?!\d)`);
+  await expect(row.locator("td").nth(2)).toContainText(place);
+  await expect(row.getByRole("checkbox")).toHaveAccessibleName(place);
+
+  await page.getByRole("radio", { name: "בתוך הטקסט" }).click();
+  await expect(page.locator(".builder .end.source.set")).toContainText(place);
+  await page.getByRole("radio", { name: "כרטיס" }).click();
+  await expect(page.locator(".builder .end.target.set .side-badge")).toContainText(/שור(?:ה|ות) \d+/);
+  await expect(page.locator(".builder .end.source.set .side-badge")).toContainText(/שור(?:ה|ות) \d+/);
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});

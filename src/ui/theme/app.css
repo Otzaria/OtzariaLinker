@@ -273,6 +273,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .tabs button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .count { font-size: 11px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-container-highest); }
 .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
+/* the target's line number sits on its own line under the place name, so a narrow row never cuts it (as in the links list) */
+.sug-table td .where { font-size: var(--fs-sm); white-space: nowrap; }
 .sort-select { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .sort-select select { max-width: 11em; }
 .chip { font-size: var(--fs-sm); padding: 2px 10px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); cursor: pointer; }

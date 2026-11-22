@@ -122,6 +122,18 @@ export interface BulkPreview {
 /** The levels a bulk approval starts with; the others only when the user ticks them. */
 export const BULK_DEFAULT_LEVELS: readonly Confidence[] = ["certain", "high"];
 
+/**
+ * Where a suggestion's end is, in the words of the readers (1-based, like the line gutter and the links list): "שורה 12",
+ * a range "שורות 12–15", or — for a mention that names a whole place (Sefaria's cited unit) — the whole span, because the
+ * stored line is only its first (core/links/sefaria-owned.ts withoutRange).
+ */
+export function placeText(side: LinkSide, s?: Pick<Suggestion, "citedSpan">): string {
+  const span = s?.citedSpan && s.citedSpan.end > s.citedSpan.line ? s.citedSpan : undefined;
+  const from = span ? span.line : side.line;
+  const to = span ? span.end : side.end;
+  return to !== undefined && to > from ? `שורות ${from + 1}–${to + 1}` : `שורה ${from + 1}`;
+}
+
 /** The order of the decision states in the "by state" sort: what still needs a decision first. */
 const STATE_RANK: Readonly<Record<SuggestionState, number>> = { pending: 0, approved: 1, rejected: 2, exists: 3 };
 
