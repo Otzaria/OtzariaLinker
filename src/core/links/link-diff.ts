@@ -100,7 +100,7 @@ const anchorKey = (l: Link) => (l.anchor ? `${l.anchor.rawStart}-${l.anchor.rawE
  */
 export const seenRef = (v: string | undefined): string =>
   (v ?? "")
-    .replace(/[​-‏‪-‮⁠-⁤﻿]/g, "")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 const detailsKey = (l: Link) => `${seenRef(l.heRef2)}\u0001${seenRef(l.ref1)}\u0001${seenRef(l.ref2)}`;
