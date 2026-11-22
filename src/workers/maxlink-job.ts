@@ -4,6 +4,7 @@ import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
 import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
 import { capSpanned, runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { titleFit } from "../linking/title-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -177,6 +178,28 @@ function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reas
   return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
 }
 
+/**
+ * The title gate (issue #21): a headings step whose books' titles do not fit (linking/title-fit.ts) is not run — its
+ * guards only lower confidence AFTER a run, and a wrong method yields many wrong links. The skipped step says why,
+ * so the report shows it; the user can run the method on that pair by naming it (PlanChoices.methods). A check that
+ * cannot be made never blocks the step. Null: run it.
+ */
+function titleGateSkip(source: EngineBook, target: EngineBook): EngineResult | null {
+  let fit;
+  try {
+    fit = titleFit(source, target);
+  } catch {
+    return null;
+  }
+  if (fit.verdict !== "unfit") return null;
+  const why = fit.reasons.filter((r) => !r.ok).map((r) => r.text).join(" ");
+  return {
+    suggestions: [],
+    notes: [{ code: "title-fit/skipped", text: `שיטת הכותרות לא הורצה על "${source.book.title}" מול "${target.book.title}": ${why} שיטת דיבור המתחיל לא תלויה בכותרות. אפשר להריץ את שיטת הכותרות על הזוג הזה בבחירה מפורשת.` }],
+    unmatched: [],
+  };
+}
+
 export async function maxlinkJob(
   registry: SourceRegistry,
   steps: readonly PlanStep[],
@@ -256,7 +279,8 @@ export async function maxlinkJob(
         // the plan's options for this pair (a translation: declaredType "targum", B8) under the user's own
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
         const byLinks = step.relation.scope && step.relation.scope.baseSection === undefined && !sectionFor(loaded.source, step.relation.scope.section) ? await partByLinks(registry, loaded.source, step.target.key, partLinks) : null;
-        result = await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks);
+        const unfit = step.titleGate && !step.relation.scope && !step.relation.through ? titleGateSkip(loaded.source, loaded.target) : null;
+        result = unfit ?? (await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks));
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);

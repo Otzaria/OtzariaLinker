@@ -190,7 +190,7 @@ export function linkedProps(f: LinkedFields | undefined): Pick<PlanBook, "linked
  * suggestions carry the type the database stores them under (MISHNAH_IN_TALMUD).
  */
 export type RelationKind = "commentary" | "notes" | "mishnah-in-talmud";
-export type RelationVia = "base-text" | "title" | "links" | "corpus";
+export type RelationVia = "base-text" | "title" | "links" | "corpus" | "user";
 
 /**
  * A commentary written on SEVERAL bases is linked to each base only through the part of it that is
@@ -264,6 +264,11 @@ export type PlanStep =
       why: string;
       /** engine options the plan sets for this pair (e.g. declaredType "targum"); the user's own options win */
       options?: Readonly<Record<string, unknown>>;
+      /**
+       * A headings step the job runs only when the titles fit (linking/title-fit.ts: not "unfit"); a step the
+       * user chose for the pair by name has no gate (issue #21: the title engine only where titles match).
+       */
+      titleGate?: true;
     }
   | { id: string; kind: "single"; engine: SingleEngineId; source: BookRef; why: string };
 
@@ -299,6 +304,35 @@ export interface MaxLinkPlan {
   baseSources: { title: string; sources: string[] }[];
 }
 
+/**
+ * The user's own choices, keyed by BOOK TITLES (the keys of a session change on every opening, and a resumed
+ * job plans again from the titles it saved — state/maxlink.ts ensurePlan).
+ */
+export interface PlanChoices {
+  /**
+   * Explicit relations (issue #26): "this book is written on that book" (or its notes book), whatever its name
+   * or the database say. A dependant that has any is linked ONLY through them: nothing is added by its name.
+   */
+  readonly pairs?: readonly UserPair[];
+  /**
+   * Per pair (pairMethodKey), the methods to run, instead of the plan's own choice and the ticked engines.
+   * Naming "headings" runs it even where the titles do not fit (no title gate): an explicit decision.
+   */
+  readonly methods?: Readonly<Record<string, readonly PairEngineId[]>>;
+}
+
+export interface UserPair {
+  /** title of the commentary, the notes book, or the book that quotes */
+  readonly dependant: string;
+  /** title of the book it is written on (for notes: the main book with the markers) */
+  readonly base: string;
+  /** default: a notes book when the title says so (notesBaseTitle), else a commentary */
+  readonly kind?: RelationKind;
+}
+
+/** The key of a pair in PlanChoices.methods. */
+export const pairMethodKey = (dependantTitle: string, baseTitle: string): string => `${dependantTitle}>${baseTitle}`;
+
 export interface PlanInput {
   /** keys of the selected books */
   selected: readonly string[];
@@ -310,6 +344,8 @@ export interface PlanInput {
   singleEngines?: readonly SingleEngineId[];
   /** the source whose books are the bases when a base is open in several sources (batch.ts resolveBaseKey) */
   preferSource?: string;
+  /** explicit relations and per-pair methods (PlanChoices) */
+  choices?: PlanChoices;
 }
 
 const NOTES_PREFIX = "הערות";
@@ -742,7 +778,7 @@ function intermediateSteps(selected: readonly string[], byKey: ReadonlyMap<strin
   return out;
 }
 
-const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם", links: "לפי הקישורים שבמסד", corpus: "לפי השמות: משנה ובבלי" };
+const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", title: "לפי השם", links: "לפי הקישורים שבמסד", corpus: "לפי השמות: משנה ובבלי", user: "לפי בחירתכם" };
 
 /*
  * A translation (book.dependenceType "targum", or "תרגום…") linked by headings is declared "targum",
@@ -754,7 +790,19 @@ const VIA_TEXT: Record<RelationVia, string> = { "base-text": "לפי המסד", 
  */
 const targumTypeOk = (dep: BookRef, base: BookRef): boolean => base.isBaseBook === true && titleDeclaresDependencyOn(dep.title, base.title);
 
-function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>> }[] {
+type StepSpec = { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>>; titleGate?: true };
+
+/** A method the user named for a pair that the relation does not give by itself (PlanChoices.methods). */
+function chosenStep(engine: PairEngineId, rel: Relation): StepSpec | null {
+  const d = quote(rel.dependant.title);
+  const b = quote(rel.base.title);
+  if (engine === "footnotes") return { engine, source: rel.base, target: rel.dependant, why: `${d} ו${b}: שיטת הערות השוליים, לפי בחירתכם. כל סימן הערה ב־${b} מותאם לשורה בספר ההערות ${d}.` };
+  if (engine === "headings" || engine === "dibur-hamatchil")
+    return { engine, source: rel.dependant, target: rel.base, why: `${d} ו${b}: שיטת ${engine === "headings" ? "הכותרות" : "דיבור המתחיל"}, לפי בחירתכם.` };
+  return null;
+}
+
+function stepsFor(rel: Relation, depBook: PlanBook): StepSpec[] {
   const d = quote(rel.dependant.title);
   const b = quote(rel.base.title);
   const scoped = rel.scope
@@ -801,9 +849,10 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
     ];
   const targum = isTargum(depBook) || rel.dependence === "targum";
   const asTargum = targum && targumTypeOk(rel.dependant, rel.base);
-  const out: { engine: PairEngineId; source: BookRef; target: BookRef; why: string; options?: Readonly<Record<string, unknown>> }[] = [
+  const out: StepSpec[] = [
     {
       engine: "headings",
+      titleGate: true,
       source: rel.dependant,
       target: rel.base,
       why: `${d} כתוב על ${b} (${VIA_TEXT[rel.via]}). שיטת הכותרות מקשרת כל שורה בפירוש לפי הכותרות שמעליה (פרק ופסוק, סימן וסעיף, דף ועמוד).${asTargum ? " זה תרגום, ולכן הקישורים נכתבים מסוג \"תרגום\" (targum) ויוצגו באוצריא כתרגום." : ""}${tail}`,
@@ -820,6 +869,34 @@ function stepsFor(rel: Relation, depBook: PlanBook): { engine: PairEngineId; sou
   return out;
 }
 
+/**
+ * PlanChoices.pairs as relations, by dependant key. A title open in several sources: the first book of that title.
+ * A title that names no open book gives the dependant a problem instead (the plan says which).
+ */
+function userRelations(pairs: readonly UserPair[] | undefined, library: readonly PlanBook[]): Map<string, Relation[] | { problem: string }> {
+  const relations = new Map<string, Relation[] | { problem: string }>();
+  if (!pairs?.length) return relations;
+  const byTitle = new Map<string, PlanBook>();
+  for (const b of library) if (!byTitle.has(b.title)) byTitle.set(b.title, b);
+  const bad = new Map<string, string[]>();
+  for (const p of pairs) {
+    const dep = byTitle.get(p.dependant);
+    const base = byTitle.get(p.base);
+    if (!dep) continue;
+    if (!base || base.key === dep.key) {
+      pushTo(bad, dep.key, base ? `${quote(p.base)} הוא אותו ספר` : `הספר ${quote(p.base)} שבחרתם אינו פתוח`);
+      continue;
+    }
+    const kind: RelationKind = p.kind ?? (notesBaseTitle(dep.title) !== null ? "notes" : "commentary");
+    const rel: Relation = { kind, dependant: ref(dep), base: ref(base), via: "user", caveats: [] };
+    const list = relations.get(dep.key);
+    if (Array.isArray(list)) list.push(rel);
+    else relations.set(dep.key, [rel]);
+  }
+  for (const [key, why] of bad) if (!relations.has(key)) relations.set(key, { problem: `${why.join("; ")}. פתחו אותו ונסו שוב.` });
+  return relations;
+}
+
 export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const enabled = (e: EngineId) => !input.engines || input.engines.has(e);
   const byKey = new Map(input.library.map((b) => [b.key, b] as const));
@@ -830,10 +907,11 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   // every relation that touches a selected book: as the dependant, or as the base of an open dependant
   const relations = new Map<string, Relation[]>(); // by dependant key
   const problems = new Map<string, string>();
+  const user = userRelations(input.choices?.pairs, input.library);
   /** every open commentary on a base, selected or not: the intermediate commentators come from here */
   const commentariesOn = new Map<string, Relation[]>();
   for (const b of input.library) {
-    const rs = relationsOf(b, byKey, index);
+    const rs = user.get(b.key) ?? relationsOf(b, byKey, index);
     if ("problem" in rs) {
       if (isSelected.has(b.key)) problems.set(b.key, rs.problem);
       continue;
@@ -848,9 +926,21 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const touches = new Map<string, number>();
   const bump = (k: string) => touches.set(k, (touches.get(k) ?? 0) + 1);
   for (const [depKey, rels] of relations)
-    for (const rel of rels)
-      for (const s of stepsFor(rel, byKey.get(depKey)!)) {
-      if (!enabled(s.engine)) continue;
+    for (const rel of rels) {
+      const wanted = input.choices?.methods?.[pairMethodKey(rel.dependant.title, rel.base.title)];
+      const own = stepsFor(rel, byKey.get(depKey)!);
+      // the user named the methods of this pair: exactly those (headings then runs with no title gate)
+      const list: StepSpec[] = wanted
+        ? wanted.flatMap((e) => {
+            const found = own.find((x) => x.engine === e);
+            const step = found ?? chosenStep(e, rel);
+            if (!step) return [];
+            const { titleGate: _gate, ...free } = step;
+            return [{ ...free, why: found ? `${free.why} השיטה נבחרה לפי בחירתכם גם אם הכותרות אינן תואמות.` : free.why }];
+          })
+        : own;
+      for (const s of list) {
+      if (!wanted && !enabled(s.engine)) continue;
       // one step per part when a part of the dependant is linked to the same part of the base
       const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
       if (seen.has(id)) continue;
@@ -858,6 +948,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       steps.push({ id, kind: "pair", ...s, relation: rel });
       bump(s.source.key);
       bump(s.target.key);
+      }
     }
   if (enabled("dibur-hamatchil"))
     for (const step of intermediateSteps(selected, byKey, relations, commentariesOn)) {

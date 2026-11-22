@@ -403,7 +403,7 @@ function abortedResult(notes: Reason[], done: () => EngineResult): EngineResult 
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
-function lastKey(e: PathElement): string {
+export function lastKey(e: PathElement): string {
   if (e.kind === "name") return "$";
   if (e.kind === "daf") return `d${e.n}`;
   return `#${e.n}`;
