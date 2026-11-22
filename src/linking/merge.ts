@@ -1,7 +1,7 @@
 import { pushTo } from "../core/collections";
 import { linePairIdentity } from "../core/links/equality";
 import type { LinkSide, RawAnchor } from "../core/links/model";
-import { capSpanned, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type Reason, type Suggestion } from "./automatic";
+import { capSpanned, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type MatchedWords, type Reason, type Suggestion } from "./automatic";
 
 /*
  * Merging the suggestions of many engine runs into ONE list (max-link, stage 8.4). Pure, and a
@@ -434,6 +434,19 @@ const TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const engineTitle = (e: EngineId) => `"${TITLE.get(e) ?? e}"`;
 const r = (code: string, text: string): Reason => ({ code, text });
 
+/**
+ * The matched words of a group: the representative's own, else those of the member that has them (an engine that
+ * places a line by its words, next to one that places it by its layout), turned to the representative's sides when
+ * that member writes the link the other way round (the anchored record is base → commentary).
+ */
+function matchedOf(g: Group): MatchedWords | undefined {
+  if (g.rep.s.matched) return g.rep.s.matched;
+  const from = g.exact.find((x) => x.s.matched);
+  if (!from) return undefined;
+  const m = from.s.matched!;
+  return from.s.source.book.key === g.rep.s.source.book.key ? m : { ...(m.target && { source: m.target }), ...(m.source && { target: m.source }) };
+}
+
 /** where another group's suggestion points: its line, and its book when that is not the winner's */
 const placeOf = (o: Group, to: Group): string => (o.rep.oEnd.book.key === to.rep.oEnd.book.key ? `שורה ${o.rep.oEnd.line + 1}` : `${o.rep.oEnd.book.title}, שורה ${o.rep.oEnd.line + 1}`);
 
@@ -544,7 +557,8 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   const seen = new Set<string>();
   const lost = g.outweighs.flatMap((o) => [...o.exact, ...o.consistent, ...o.inner]);
   const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner, ...lost].filter((x) => !seen.has(x.s.id) && seen.add(x.s.id)).map((x) => ({ suggestion: x.s, focus: x.focus }));
-  const merged: MergedSuggestion = { ...rep, id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
+  const matched = matchedOf(g);
+  const merged: MergedSuggestion = { ...rep, ...(matched && { matched }), id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
   const where = opts.existing?.(merged) ?? null;
   if (!where) return merged;
   stats.existing++;

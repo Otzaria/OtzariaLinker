@@ -37,12 +37,30 @@ export interface Candidate {
   readonly reasons: readonly Reason[];
 }
 
+/** A span of words in a line: raw offsets (UTF-16, end exclusive) in the engine's line text, as RawAnchor counts them. */
+export interface MatchedSpan {
+  readonly rawStart: number;
+  readonly rawEnd: number;
+}
+
+/**
+ * Where the matched words are, on the line of each side of the suggestion (`source` = the line of `source`, `target`
+ * = the line of `target`; a side with no known words is absent). Data for a screen to highlight; never written to a
+ * file, and not part of the suggestion's id or its rejection key.
+ */
+export interface MatchedWords {
+  readonly source?: MatchedSpan;
+  readonly target?: MatchedSpan;
+}
+
 export interface Suggestion {
   /** deterministic for the same input (engine + source position + target), so re-runs keep decisions */
   readonly id: string;
   readonly engine: EngineId;
   readonly source: LinkSide;
   readonly anchor?: RawAnchor;
+  /** the words the engine matched on both lines (dibur-hamatchil: the ד"ה on the commentary line, the quoted words on the base line) */
+  readonly matched?: MatchedWords;
   readonly target: LinkSide;
   /**
    * The whole place the mention names, when `target` is only its first line (a cited unit in a Sefaria

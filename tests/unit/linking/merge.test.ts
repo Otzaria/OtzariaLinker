@@ -415,3 +415,22 @@ describe("mergeSuggestions — the candidate books of one line (candidateBooks)"
     expect(b.map((s) => s.confidence)).toEqual(a.map((s) => s.confidence));
   });
 });
+
+describe("mergeSuggestions — matched words (#11 data)", () => {
+  it("the merged link keeps the words of the member that has them, on the right sides", () => {
+    // headings: commentary → base, no words; dibur-hamatchil: base → commentary, with the words of both lines
+    const dh: MergeItem = { suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "high", { declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 9 }, matched: { source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } } }), focus: C.key };
+    const { suggestions } = mergeSuggestions([H(5, 10, "high"), dh]);
+    expect(suggestions[0]!.engine).toBe("dibur-hamatchil");
+    expect(suggestions[0]!.matched).toEqual({ source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } });
+  });
+
+  it("when the representative is the engine without words, the words are turned to its own orientation", () => {
+    // the headings record (commentary → base) is the representative when it is more certain and the other has the weaker anchor
+    const dh: MergeItem = { suggestion: sg("dibur-hamatchil", side(B, 10), side(C, 5), "ambiguous", { declaredType: "commentary", matched: { source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } } }), focus: C.key };
+    const { suggestions } = mergeSuggestions([H(5, 10, "certain"), dh]);
+    const s = suggestions[0]!;
+    if (s.source.book.key === C.key) expect(s.matched).toEqual({ source: { rawStart: 0, rawEnd: 6 }, target: { rawStart: 3, rawEnd: 9 } });
+    else expect(s.matched).toEqual({ source: { rawStart: 3, rawEnd: 9 }, target: { rawStart: 0, rawEnd: 6 } });
+  });
+});
