@@ -27,7 +27,7 @@ test("file://: no 'download the tool' control (the user already has the file)", 
 
 test("http(s): the control is a same-origin download link to OtzariaLinker.html and nothing else leaves the page", async ({ browser }) => {
   // a hosted copy simulated by routing: the only origin that answers is the fake host, everything else is aborted and counted
-  const ctx = await browser.newContext({ locale: "he-IL" });
+  const ctx = await browser.newContext({ locale: "he-IL", offline: false });
   const html = readFileSync(resolve("dist/OtzariaLinker.html"));
   const stray: string[] = [];
   const asked: string[] = [];
