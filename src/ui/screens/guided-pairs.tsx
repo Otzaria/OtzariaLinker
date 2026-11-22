@@ -23,6 +23,8 @@ const CHOICES: Record<Choice, { label: string; methods: readonly PairEngineId[] 
 };
 const VERDICT: Record<TitleFitVerdict, string> = { fit: "הכותרות מתאימות", partial: "הכותרות מתאימות חלקית", unfit: "הכותרות לא מתאימות" };
 const MAX_AUTO = 12;
+/** the verdicts are kept per pair of BOOKS (a same-titled book from another source is another pair) */
+const fitKey = (p: { dependant: BookRef; base: BookRef }): string => `${p.dependant.key}>${p.base.key}`;
 
 interface Pair {
   dependant: BookRef;
@@ -53,7 +55,7 @@ export function PairChoices() {
   const forceDh = !!forced && forced.size === 1 && forced.has("dibur-hamatchil");
 
   const check = async (p: Pair) => {
-    const k = pairMethodKey(p.dependant.title, p.base.title);
+    const k = fitKey(p);
     if (fits[k]) return;
     setFits((f) => ({ ...f, [k]: "loading" }));
     const report = await store.maxLink.titleFit(p.dependant.key, p.base.key).catch(() => null);
@@ -79,7 +81,11 @@ export function PairChoices() {
           <input
             type="checkbox"
             checked={forceDh}
-            onChange={(e) => g.setMethods(e.currentTarget.checked ? new Set(["dibur-hamatchil"]) : null)}
+            onChange={(e) => {
+              // a pair with methods of its own would bypass the forced set (plan.ts), so forcing starts from the defaults
+              if (e.currentTarget.checked) for (const p of pairs) g.setPairMethods(p.dependant.title, p.base.title, null);
+              g.setMethods(e.currentTarget.checked ? new Set(["dibur-hamatchil"]) : null);
+            }}
           />
           <span>
             <b>לכפות דיבור המתחיל לכל הזוגות</b>
@@ -88,13 +94,13 @@ export function PairChoices() {
         </label>
         {forceDh && (
           <p class="pair-force-note warn-text" role="status">
-            דיבור המתחיל ירוץ גם היכן שהכותרות מתאימות, ובספרי הערות שוליים (שם הוא לא ימצא כלום). הוא איטי יותר, ושורות בלי ד"ה ברור יקבלו הצעות חלשות. בדקו את ההצעות בקפידה.
+            דיבור המתחיל ירוץ גם היכן שהכותרות מתאימות, ושיטת הערות השוליים לא תרוץ, כך שספרי הערות לא יקושרו. הוא איטי יותר, ושורות בלי ד"ה ברור יקבלו הצעות חלשות. בדקו את ההצעות בקפידה.
           </p>
         )}
         <ul class="pair-list">
           {pairs.map((p) => {
             const k = pairMethodKey(p.dependant.title, p.base.title);
-            const fit = fits[k];
+            const fit = fits[fitKey(p)];
             const choice = choiceOf(k);
             const risky = (choice === "headings" || choice === "both") && fit && fit !== "loading" && fit.verdict === "unfit";
             return (
@@ -106,10 +112,10 @@ export function PairChoices() {
                   <span class="pair-base">{p.base.title}</span>
                 </div>
                 {p.notes ? (
-                  <div class="muted">ספר הערות: רצה שיטת הערות השוליים.</div>
+                  <div class="muted">ספר הערות: תרוץ שיטת הערות השוליים.</div>
                 ) : (
                   <>
-                    <div class="pair-fit" aria-live="polite">
+                    <div class="pair-fit">
                       {fit === "loading" ? (
                         <span class="muted">בודק את הכותרות…</span>
                       ) : fit ? (
@@ -118,7 +124,10 @@ export function PairChoices() {
                           {(advanced || fit.verdict !== "fit") && (
                             <ul class="pair-reasons">
                               {fit.reasons.map((r) => (
-                                <li key={r.code} class={r.ok ? "ok" : "no"}>{r.text}</li>
+                                <li key={r.code} class={r.ok ? "ok" : "no"}>
+                                  <span class="sr-only">{r.ok ? "מתקיים: " : "לא מתקיים: "}</span>
+                                  {r.text}
+                                </li>
                               ))}
                             </ul>
                           )}

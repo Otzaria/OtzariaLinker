@@ -122,6 +122,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .cov-count[data-bucket="unlinked"] { border-color: var(--warning); background: var(--warning-container); color: var(--on-warning-container); }
 .cov-ranges { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .cov-range { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px 6px; align-items: center; padding: 4px 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); }
+.cov-range .btn.small, .pair-row .btn.small { min-height: 24px; }
 .cov-where { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
 /* the guided plan's pairs: title fit and a method per pair (issues 21, 26) */
 .guided-pairs { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }

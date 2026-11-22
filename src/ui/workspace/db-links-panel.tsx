@@ -320,7 +320,7 @@ function End({ end, where }: { end: Link["source"]; where: (line: number, end?: 
     return (
       <span>
         {end.book.title}{" "}
-        <span class="dbl-unresolved" title="הספר שהקישור מצביע אליו לא פתוח (למשל ספריית אוצריא), ולכן אין שורה להציג. פתחו אותו ושורת הקישור תימצא.">
+        <span class="dbl-unresolved" title="הספר שהקישור מצביע אליו לא פתוח (למשל ספריית אוצריא), ולכן אין שורה להציג. פתחו אותו ואז אפשר יהיה להציג את השורה.">
           הספר לא פתוח
         </span>
       </span>

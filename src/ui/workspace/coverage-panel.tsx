@@ -32,6 +32,7 @@ export function CoveragePanel() {
   const [shown, setShown] = useState(PAGE);
   const bookKey = store.view[side].value;
   const book = bookKey ? store.books.value.get(bookKey) : undefined;
+  const dbBook = !!bookKey && store.sources.value.some((x) => x.info.kind !== "text-files" && x.books.some((b) => b.key === bookKey));
   const revision = store.linkState.value.revision;
   store.lines.tick.value; // the start of each range's text arrives with its chunk
 
@@ -47,7 +48,7 @@ export function CoveragePanel() {
   // once computed, a change of the links (a link made, undone, imported) makes the numbers again
   useEffect(() => {
     if (summary && summary.bookKey === bookKey && summary.revision !== revision && !busy) void compute();
-  }, [revision]);
+  }, [revision, bookKey, busy]);
 
   const current = summary && summary.bookKey === bookKey ? summary : null;
   // the start of the text of the ranges shown
@@ -86,14 +87,19 @@ export function CoveragePanel() {
           </button>
         </div>
         {!book && <p class="muted">בחרו ספר באחד הקוראים כדי לראות מה עוד לא מקושר בו.</p>}
+        {book && dbBook && (
+          <p class="warn-text" role="note">
+            הספר הזה הוא מתוך מסד. הקישורים שיש לו במסד לא נספרים כאן, ולכן שורות שמקושרות במסד יופיעו כ"בלי קישור". רק קישורי הפרויקט נספרים.
+          </p>
+        )}
         {current && (
           <>
             <p class="cov-sum" role="status">
               {current.suitable === 0
                 ? "אין בספר שורות תוכן."
                 : current.unlinked === 0
-                  ? `כל ${n(current.suitable)} שורות התוכן של הספר מקושרות או מכוסות בטווח.`
-                  : `${n(current.unlinked)} מתוך ${n(current.suitable)} שורות תוכן (${Math.round(current.unlinkedShare * 100)}%) עדיין בלי קישור, ב־${n(current.ranges.length)} קטעים.`}
+                  ? current.suitable === 1 ? "שורת התוכן היחידה של הספר מקושרת או מכוסה בטווח." : `כל ${n(current.suitable)} שורות התוכן של הספר מקושרות או מכוסות בטווח.`
+                  : `${n(current.unlinked)} מתוך ${n(current.suitable)} שורות תוכן (${Math.round(current.unlinkedShare * 100)}%) עדיין בלי קישור, ${current.ranges.length === 1 ? "בקטע אחד" : `ב־${n(current.ranges.length)} קטעים`}.`}
               <span class="muted"> רק קישורי הפרויקט נספרים, לא קישורי המסד.</span>
             </p>
             <ul class="cov-counts">

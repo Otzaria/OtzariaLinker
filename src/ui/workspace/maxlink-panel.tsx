@@ -34,7 +34,10 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
   const [kind, setKind] = useState<ScopeKind>(() => (store.intent.value?.allBooks ? "all" : askedSource || sources.some((s) => s.info.kind === "text-files") || !current ? (sources.length > 1 ? "source" : "all") : "book"));
   const [sourceId, setSourceId] = useState<string>(() => askedSource ?? sources.find((s) => s.info.kind === "text-files")?.info.id ?? sources.at(-1)?.info.id ?? "");
   /** the books ticked for "books I choose" (issue 26); none to begin with */
-  const [picked, setPicked] = useState<readonly string[]>([]);
+  const [pickedRaw, setPicked] = useState<readonly string[]>([]);
+  /** the ticked books that are still open */
+  const openBooks = store.books.value;
+  const picked = useMemo(() => pickedRaw.filter((k) => openBooks.has(k)), [pickedRaw, openBooks]);
   const [off, setOff] = useState<ReadonlySet<EngineId>>(new Set());
   /** the source whose books are the bases when a base is open in several sources ("" = automatic) */
   const [prefer, setPrefer] = useState("");

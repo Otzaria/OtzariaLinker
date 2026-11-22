@@ -21,11 +21,11 @@ export function BookChecklist({ label, selected, onChange, exclude }: { label: s
   const toggle = (key: string, on: boolean) => onChange(on ? [...selected, key] : selected.filter((k) => k !== key));
   const sourceLabel = (key: string) => store.sources.value.find((s) => s.info.id === sourceIdOfBookKey(key))?.info.label ?? "";
   return (
-    <fieldset class="book-checklist" role="group" aria-label={label}>
+    <fieldset class="book-checklist">
       <legend>{label}</legend>
-      <input type="search" aria-label="חיפוש ספר" placeholder="חיפוש ספר…" value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
-      <p class="muted pick-count" role="status">
-        נבחרו {selected.length.toLocaleString("he")}
+      <input type="search" aria-label={`חיפוש ספר: ${label}`} placeholder="חיפוש ספר…" value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
+      <p class="muted pick-count">
+        <span role="status">נבחרו {selected.length.toLocaleString("he")}</span>
         {selected.length > 0 && (
           <>
             {" · "}
@@ -50,7 +50,7 @@ export function BookChecklist({ label, selected, onChange, exclude }: { label: s
         })}
       </ul>
       {list.length > SHOWN && <p class="muted">מוצגים {SHOWN} מתוך {list.length.toLocaleString("he")} — הקלידו כדי לצמצם.</p>}
-      {!list.length && <p class="muted">אין ספר בשם הזה במקורות הפתוחים.</p>}
+      {!list.length && <p class="muted">{query.trim() ? "אין ספר בשם הזה במקורות הפתוחים." : "אין ספרים פתוחים."}</p>}
     </fieldset>
   );
 }

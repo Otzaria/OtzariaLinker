@@ -383,11 +383,15 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
   await row("פירוש קצר על בראשית").getByLabel(/^שיטה לזוג/).selectOption("");
   await expect(row("פירוש קצר על בראשית").locator(".pair-warn")).toHaveCount(0);
 
+  // a pair with a method of its own: forcing dibur-hamatchil for all starts from the defaults (a named pair would bypass it)
+  await row("ביאור על בראשית").getByLabel(/^שיטה לזוג/).selectOption("headings");
   // force dibur-hamatchil for all pairs: the plan then runs no other method
   await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).check();
   const methods = main.locator(".guided-books li b");
   await expect(methods).toHaveText(["לפי דיבור המתחיל"]);
   await expect(main.locator(".pair-force-note")).toContainText("גם היכן שהכותרות מתאימות");
+  await expect(main.locator(".pair-force-note")).toContainText("שיטת הערות השוליים לא תרוץ");
+  await expect(row("ביאור על בראשית").getByLabel(/^שיטה לזוג/)).toHaveValue("");
   await main.getByRole("checkbox", { name: /לכפות דיבור המתחיל לכל הזוגות/ }).uncheck();
   expect(await methods.count()).toBeGreaterThan(1);
   expect(seen.errors).toEqual([]);

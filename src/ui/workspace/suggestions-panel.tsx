@@ -148,8 +148,10 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const [mergeAll, setMergeAll] = useState(false);
   const commentaryEngine = engine === "headings" || engine === "dibur-hamatchil";
   const multiEligible = mode === "pair" && !single && engine !== "pattern";
-  const targets = [...new Set([t, ...extra].filter((k): k is string => !!k && k !== s))];
-  const multi = multiEligible && (extra.length > 0 || (mergeAll && commentaryEngine));
+  // ticked books that were closed, or became the book in a reader, no longer count
+  const live = extra.filter((k) => store.books.value.has(k) && k !== s && k !== t);
+  const targets = [...new Set([t, ...live].filter((k): k is string => !!k && k !== s))];
+  const multi = multiEligible && (live.length > 0 || (mergeAll && commentaryEngine));
   const ready = single ? !!s : mode === "pair" ? (multi ? !!s && targets.length > 0 : !!s && !!t && s !== t) : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
@@ -215,9 +217,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
           )}
           {multiEligible && (
             <>
-              <details class="held more-targets" open={extra.length > 0 || undefined}>
-                <summary>עוד ספרי יעד לאותו ספר (לא חובה){extra.length > 0 && ` · נבחרו ${extra.length.toLocaleString("he")}`}</summary>
-                <BookChecklist label="עוד ספרי יעד" selected={extra} onChange={setExtra} exclude={[s, t]} />
+              <details class="held more-targets">
+                <summary>עוד ספרי יעד לאותו ספר (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
+                <BookChecklist label="עוד ספרי יעד" selected={live} onChange={setExtra} exclude={[s, t]} />
               </details>
               {commentaryEngine && (
                 <label class="check">
