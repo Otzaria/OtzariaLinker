@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { TYPE_LABELS, parseConnectionType, typeShown, type ConnectionType } from "../../core/links/connection-type";
-import { DB_LINK_ORIGIN_LABELS, dbLinkOrigin, type DbLinkSummary } from "../../core/links/db-links";
+import { DB_LINK_FLAG_LABELS, DB_LINK_ORIGIN_LABELS, dbLinkOrigin, type DbLinkSummary } from "../../core/links/db-links";
 import { isRange, type Link } from "../../core/links/model";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
@@ -14,6 +14,8 @@ import "./db-links.css";
  * book shown in a reader — READ-ONLY. Counted by the other book and by type (both are filters),
  * by direction and by the picked line; paged from the worker. A click shows both ends in the
  * readers. "העתקה לפרויקט" turns chosen links into project links that can be edited and exported.
+ * A personal database's links may carry flags (DbLinkFlag: what to doubt about the link): counted in the summary, a filter,
+ * and on each link as words with their explanation — never only a colour.
  */
 const BOOK_ROWS = 40;
 
@@ -32,7 +34,7 @@ export function DbLinksPanel() {
     if (!bookKey) return;
     if (!summary || summary.bookKey !== bookKey) {
       s.forgetSummary();
-      if (s.filter.peek().otherBookKey) s.setFilter({ otherBookKey: undefined });
+      if (s.filter.peek().otherBookKey || s.filter.peek().flag) s.setFilter({ otherBookKey: undefined, flag: undefined });
       void s.loadSummary(bookKey);
     }
   }, [bookKey]);
@@ -118,6 +120,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
         {summary.method === "scan" && " (במסד הזה אין אינדקס לפי ספר, ולכן הקריאה איטית.)"}
       </p>
       <LineView side={side} />
+      <FlagFilter summary={summary} />
       <div class="filters" role="group" aria-label="כיוון">
         {(["all", "out", "in"] as const).map((d) => (
           <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? `הספר הוא צד המקור של הקישור במסד${advanced ? " (side 0)" : ""}` : d === "in" ? `הספר הוא צד היעד של הקישור במסד${advanced ? " (side 1)" : ""}` : undefined}>
@@ -147,8 +150,13 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       ) : (
         <BookGroups summary={summary} />
       )}
-      {(f.types?.length || f.otherBookKey) && (
+      {(f.types?.length || f.otherBookKey || f.flag) && (
         <div class="filters" style="padding-top:0">
+          {f.flag && (
+            <button class="chip" aria-pressed onClick={() => s.setFilter({ flag: undefined })} title="ביטול הסינון לפי סימון">
+              {DB_LINK_FLAG_LABELS[f.flag].he} <Icon name="fl_dismiss" size={12} />
+            </button>
+          )}
           {f.otherBookKey && (
             <button class="chip" aria-pressed onClick={() => s.setFilter({ otherBookKey: undefined })} title="ביטול הסינון לפי ספר">
               {summary.byBook.find((b) => b.bookKey === f.otherBookKey)?.title} <Icon name="fl_dismiss" size={12} />
@@ -192,6 +200,40 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       )}
       {list && !list.loading && !list.total && <p class="empty">אין קישורים שמתאימים לסינון.</p>}
     </>
+  );
+}
+
+/**
+ * The flags a personal database's links carry in this book (the summary counts them): one chip per flag narrows the list to
+ * the links that carry it, and what a flag means is said in words below. Not shown when the book has none.
+ */
+function FlagFilter({ summary }: { summary: DbLinkSummary }) {
+  const s = useStore().dbLinks;
+  const cur = s.filter.value.flag;
+  if (!summary.flags?.length) return null;
+  return (
+    <details class="dbl-flags-sum" open={!!cur || undefined}>
+      <summary>
+        סימוני בדיקה בקישורים של הספר ({summary.flags.length.toLocaleString("he")} {summary.flags.length === 1 ? "סוג" : "סוגים"})
+      </summary>
+      <p class="muted small">
+        המסד לא נשנה: הסימון רק אומר מה כדאי לבדוק בקישור לפני שסומכים עליו. אפשר לסנן לפי סימון, ולהעתיק לפרויקט רק את מה שבדקתם.
+      </p>
+      <div class="filters" role="group" aria-label="סינון לפי סימון בדיקה">
+        {summary.flags.map(({ flag, count }) => (
+          <button key={flag} class="chip" aria-pressed={cur === flag} onClick={() => s.setFilter({ flag: cur === flag ? undefined : flag })} title={DB_LINK_FLAG_LABELS[flag].hint}>
+            {DB_LINK_FLAG_LABELS[flag].he} <span class="count">{count.toLocaleString("he")}</span>
+          </button>
+        ))}
+      </div>
+      <ul class="dbl-flag-legend">
+        {summary.flags.map(({ flag }) => (
+          <li key={flag}>
+            <b>{DB_LINK_FLAG_LABELS[flag].he}</b> — {DB_LINK_FLAG_LABELS[flag].hint}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -309,6 +351,18 @@ function DbLinkItem({ l, checked }: { l: Link; checked?: boolean }) {
         {inProject === "same-lines" && <span class="dbl-in"> · בפרויקט בסוג אחר</span>}
         {l.heRef2 && <span> · {l.heRef2}</span>}
       </div>
+      {l.dbFlags?.length ? (
+        <ul class="dbl-flags" aria-label="מה כדאי לבדוק בקישור הזה">
+          {l.dbFlags.map((f) => (
+            <li key={f}>
+              <Icon name="fl_warning" size={14} />
+              <span>
+                <b>כדאי לבדוק: {DB_LINK_FLAG_LABELS[f].he}.</b> {DB_LINK_FLAG_LABELS[f].hint}.
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
 }
