@@ -36,7 +36,8 @@ export interface DbLinkRow {
  * Nothing about lines, anchors or ranges: those are read only for the page shown (DbLinksReader.byIds).
  */
 export interface BookLinkRows {
-  ids: Int32Array;
+  /** link ids: Float64 — a personal database numbers links and lines past 2^32 */
+  ids: Float64Array;
   /** 0 = the book is the stored source, 1 = the stored target */
   dir: Uint8Array;
   /** book id at the other end (the book itself for a link inside one book) */
@@ -44,7 +45,7 @@ export interface BookLinkRows {
   /** index into CONNECTION_TYPES (unknown stored names count as OTHER) */
   type: Uint8Array;
   /** line id at the listed book's end */
-  ownLine: Int32Array;
+  ownLine: Float64Array;
   /** "index": through the book indexes of `link`; "scan": a full scan (the database has no such index) */
   method: "index" | "scan";
 }
@@ -118,11 +119,11 @@ export class DbLinksReader {
       }
     }
     const out: BookLinkRows = {
-      ids: new Int32Array(rows.length),
+      ids: new Float64Array(rows.length),
       dir: new Uint8Array(rows.length),
       other: new Int32Array(rows.length),
       type: new Uint8Array(rows.length),
-      ownLine: new Int32Array(rows.length),
+      ownLine: new Float64Array(rows.length),
       method,
     };
     rows.forEach(({ id, v }, i) => {
