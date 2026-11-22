@@ -1,6 +1,7 @@
 import { anchorLabelFromHeRef } from "../../core/text/anchor-label";
 import type { BookRef, Link, LinkSide } from "../../core/links/model";
 import { isRange } from "../../core/links/model";
+import { MAX_BOOK_LINES } from "../../core/limits";
 import { path2ForTitle, titleFromPath2 } from "../../core/links/titles";
 import { mayBeSpelledOtherwise, stringifyElement } from "./layout";
 import { recordFromText, type ParseIssue } from "./parse";
@@ -37,6 +38,10 @@ export function recordToLink(
     const line = toLine(oneBased);
     if (endOneBased === undefined) return { book: sourceBook, line };
     const end = toLine(endOneBased);
+    if (end >= MAX_BOOK_LINES) {
+      warn("record/range-too-large", `${key} (${endOneBased}) גדול מכל ספר אפשרי (עד ${MAX_BOOK_LINES.toLocaleString("he")} שורות). אוצריא מתעלמת מהטווח ומשאירה את הקישור לשורה אחת.`);
+      return { book: sourceBook, line };
+    }
     if (end < line) warn("record/range-reversed", `${key} לפני שורת ההתחלה. אוצריא מתעלמת מהטווח ומשאירה את הקישור לשורה אחת.`);
     return end > line ? { book: sourceBook, line, end } : { book: sourceBook, line };
   };

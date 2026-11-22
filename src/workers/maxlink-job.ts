@@ -1,3 +1,4 @@
+import { scanEnd } from "../core/limits";
 import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection-type";
 import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
@@ -341,7 +342,7 @@ async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { ki
       const [mine, mid] = sg.source.book.key === step.source.key ? [sg.source, sg.target] : [sg.target, sg.source];
       if (mid.book.key !== via.book.key) continue;
       const lines: number[] = [];
-      for (let m = mid.line; m <= (mid.end ?? mid.line); m++) for (const [a, b] of toBase.get(m) ?? []) for (let x = a; x <= b; x++) lines.push(x);
+      for (let m = mid.line; m <= scanEnd(mid.line, mid.end ?? mid.line); m++) for (const [a, b] of toBase.get(m) ?? []) for (let x = a; x <= b; x++) lines.push(x);
       if (!lines.length) {
         unlinked++;
         continue;
@@ -402,7 +403,7 @@ async function linkedLines(registry: SourceRegistry, a: string, b: string): Prom
   const structural = new Map<number, [number, number][]>();
   const any = new Map<number, [number, number][]>();
   const add = (out: Map<number, [number, number][]>, aSide: { line: number; end?: number }, bSide: { line: number; end?: number }) => {
-    for (let x = aSide.line; x <= (aSide.end ?? aSide.line); x++) {
+    for (let x = aSide.line; x <= scanEnd(aSide.line, aSide.end ?? aSide.line); x++) {
       const list = out.get(x) ?? [];
       list.push([bSide.line, bSide.end ?? bSide.line]);
       out.set(x, list);
