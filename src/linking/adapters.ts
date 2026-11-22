@@ -67,11 +67,19 @@ export const LINES_PER_READ = 200;
  */
 export async function loadEngineBook(books: BooksPort, book: BookRef, signal?: AbortSignal, perRead = LINES_PER_READ): Promise<EngineBook> {
   const lines: EngineBook["lines"][number][] = [];
-  for (let from = 0; ; from += perRead) {
+  // The next read starts after the last line that CAME BACK, not after the window that was asked for: a host may cap a read
+  // (50 lines for a window of 200), and stepping a whole window would skip the rest. Only an empty read ends the book.
+  for (let from = 0; ; ) {
     signal?.throwIfAborted();
     const got = await books.lines(book.key, from, from + perRead - 1, signal);
-    for (const l of got) lines.push({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef });
-    if (got.length < perRead) break;
+    if (got.length === 0) break;
+    let last = from - 1;
+    for (const l of got) {
+      lines.push({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef });
+      last = Math.max(last, l.index);
+    }
+    if (last < from) break; // the host ignored the window (it gave nothing at or after `from`): do not ask for it again for ever
+    from = last + 1;
   }
   return { book, lines };
 }

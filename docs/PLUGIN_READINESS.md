@@ -12,7 +12,7 @@
 | `core`, `matching`, `linking`, `formats` לא מייבאות Preact ולא שכבה שמעליהן | `tests/unit/architecture.test.ts` ("no layer imports a layer it may not depend on") |
 | אף אחת מהן לא נוגעת בגלובל של דפדפן בקוד (`document`, `navigator`, `localStorage`, `indexedDB`, `window.<חבר של דפדפן>` ועוד; הערות ומחרוזות לא נספרות) | אותו קובץ, "the headless surface" |
 | `src/linking/adapters.ts` מגיע, דרך הייבואים שלו בזמן ריצה, רק אל `core`, `matching` ו־`linking` (בלי `database`, `sources`, `workers`, `state`, `ui`, בלי `.tsx`) | אותו קובץ |
-| המנועים רצים דרך ממשק המתאמים בלבד, בזיכרון, ב־Node, ונותנים בדיוק את מה ש־`runEngine` נותן על אותן שורות; ההתקדמות והביטול עוברים דרך הממשק | `tests/unit/linking/adapters.test.ts` (5 בדיקות; הספרים שלו נוצרים בקוד, כמו ב־`engine-steps.test.ts`) |
+| המנועים רצים דרך ממשק המתאמים בלבד, בזיכרון, ב־Node, ונותנים בדיוק את מה ש־`runEngine` נותן על אותן שורות; ההתקדמות והביטול עוברים דרך הממשק | `tests/unit/linking/adapters.test.ts` (8 בדיקות, כולל מארח שמגביל קריאה; הספרים שלו נוצרים בקוד, כמו ב־`engine-steps.test.ts`) |
 
 ## 2. ממשק המתאמים (`src/linking/adapters.ts`)
 
@@ -27,7 +27,9 @@
 | `SavePort` | לאן הולך קובץ שהכלי יצר | `Saver` (הורדה) ב־`state/services.ts` |
 | `progress`, `cancel` | התקדמות, ו־`AbortSignal` לביטול | `EngineContext` |
 
-`runPair(adapters, engine, source, target, options)` קורא את שני הספרים בחלונות של 200 שורות, ומריץ את המנוע בפרוסות
+**`adapters.ts` אינו מחובר לשום דבר:** אף קובץ ב־`src/` לא מייבא אותו (האפליקציה קוראת ספרים דרך `BooksService` וה־Worker, ולא דרכו). הוא חוזה ובדיקה שמוכיחים שהמנועים רצים בלי DOM, בלי מסד ובלי Worker, **לא** קוד שהאפליקציה או תוסף כבר משתמשים בו; עד שיש תוסף שמייבא אותו, כל מה שנאכף כאן הוא הבדיקה.
+
+`runPair(adapters, engine, source, target, options)` קורא את שני הספרים בחלונות של עד 200 שורות (הקריאה הבאה מתחילה אחרי השורה האחרונה שחזרה, כך שמארח שמגביל קריאה, למשל ל־50 שורות, לא גורם לדילוג על שורות; רק קריאה ריקה מסיימת ספר), ומריץ את המנוע בפרוסות
 (`runEngineSliced`), כמו `engineJob` ב־Worker. **הוא לא מחליף את `BooksService`**: זה הממשק העשיר של האפליקציה
 (מקורות, מיפוי, RPC). תוסף שרוצה את כל שכבת `state` (AppStore) מממש `BooksService`; תוסף שרוצה רק את המנועים מממש
 את הנמלים שיש לו.

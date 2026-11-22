@@ -99,3 +99,33 @@ describe("the engines through the adapter interface, headless", () => {
     expect(b.lines[1]!.text).toBe(base[1]);
   });
 });
+
+describe("a host that caps a single read", () => {
+  /** A port that never returns more than `cap` lines, whatever window it is asked for (a plugin's host API may do that). */
+  function cappedBooks(total: number, cap: number): BooksPort {
+    const line = (index: number): SourceLine => ({ index, text: `שורה ${index}`, anchorText: `שורה ${index}`, heRef: null, heading: null, existsInDb: true });
+    return {
+      list: async () => [],
+      lines: async (_key, from, to) => Array.from({ length: Math.max(0, Math.min(to - from + 1, cap, total - from)) }, (_, i) => line(from + i)),
+      headings: async () => [],
+    };
+  }
+
+  it("loadEngineBook reads the whole book when the host returns fewer lines than asked", async () => {
+    const b = await loadEngineBook(cappedBooks(1000, 50), BASE);
+    expect(b.lines).toHaveLength(1000);
+    expect(b.lines.map((l) => l.index)).toEqual(Array.from({ length: 1000 }, (_, i) => i));
+  });
+
+  it("an empty read ends it, and a book that is shorter than one window is read once", async () => {
+    expect((await loadEngineBook(cappedBooks(0, 50), BASE)).lines).toHaveLength(0);
+    expect((await loadEngineBook(cappedBooks(7, 50), BASE)).lines).toHaveLength(7);
+    expect((await loadEngineBook(cappedBooks(200, 200), BASE)).lines).toHaveLength(200);
+  });
+
+  it("a host that ignores the window cannot make it loop for ever", async () => {
+    const stuck: BooksPort = { list: async () => [], headings: async () => [], lines: async () => [{ index: 0, text: "א", anchorText: "א", heRef: null, heading: null, existsInDb: true }] };
+    const b = await loadEngineBook(stuck, BASE);
+    expect(b.lines.length).toBeLessThan(3);
+  });
+});
