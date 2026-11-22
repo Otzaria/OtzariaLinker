@@ -5,7 +5,7 @@ import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
 import type { EngineId } from "../linking/automatic";
 import { ENGINES } from "../linking/automatic";
-import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairEngineId, type Relation } from "../linking/plan";
+import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
 import type { LinkState } from "./history";
@@ -375,6 +375,8 @@ export interface GuidedRecord {
   /** the methods chosen for every pair (GuidedFlowState.methods), and for single pairs (pairMethods); absent in older records */
   methods?: string[];
   pairMethods?: Record<string, string[]>;
+  /** the controls of single pairs (switched off, link type, confidence threshold); absent in older records */
+  pairControls?: Record<string, PairControl>;
   links: number;
   /** the result was downloaded: nothing to continue */
   done: boolean;
@@ -382,6 +384,25 @@ export interface GuidedRecord {
 }
 
 export const GUIDED_KEY = "guided:v1";
+
+const CONFIDENCES = ["certain", "high", "possible", "ambiguous"] as const;
+function cleanControl(raw: unknown): PairControl | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const out: { enabled?: false; connectionType?: string; minConfidence?: (typeof CONFIDENCES)[number] } = {};
+  if (r.enabled === false) out.enabled = false;
+  if (typeof r.connectionType === "string" && r.connectionType.trim()) out.connectionType = r.connectionType.trim();
+  if ((CONFIDENCES as readonly unknown[]).includes(r.minConfidence)) out.minConfidence = r.minConfidence as (typeof CONFIDENCES)[number];
+  return Object.keys(out).length ? out : null;
+}
+function cleanPairControls(raw: object): Record<string, PairControl> {
+  const out: Record<string, PairControl> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const c = cleanControl(v);
+    if (c) out[k] = c;
+  }
+  return out;
+}
 
 function cleanPairMethods(raw: object): Record<string, string[]> {
   // keys come from JSON.parse, so "__proto__" can be one: on a plain object `out[k] =` would set the prototype. No prototype, and that key is dropped.
@@ -410,6 +431,7 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
       ...(typeof r.preferBase === "string" && r.preferBase && { preferBase: r.preferBase }),
       ...(Array.isArray(r.methods) && r.methods.some((e) => typeof e === "string") && { methods: r.methods.filter((e): e is string => typeof e === "string" && ENGINES.some((x) => x.id === e)) }),
       ...(r.pairMethods && typeof r.pairMethods === "object" && Object.keys(cleanPairMethods(r.pairMethods)).length > 0 && { pairMethods: cleanPairMethods(r.pairMethods) }),
+      ...(r.pairControls && typeof r.pairControls === "object" && Object.keys(cleanPairControls(r.pairControls)).length > 0 && { pairControls: cleanPairControls(r.pairControls) }),
       links: Number(r.links) || 0,
       done: r.done === true,
       savedAt: Number(r.savedAt) || 0,
@@ -460,6 +482,8 @@ export class GuidedFlowState {
   readonly methods = signal<ReadonlySet<EngineId> | null>(null);
   /** the methods the user named for one pair (plan.ts pairMethodKey): exactly those run there, headings with no title gate */
   readonly pairMethods = signal<Readonly<Record<string, readonly PairEngineId[]>>>({});
+  /** the controls of single pairs by pairMethodKey (advanced): a pair switched off, its link type, its confidence threshold; none = automatic */
+  readonly pairControls = signal<Readonly<Record<string, PairControl>>>({});
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
   readonly saved = signal<GuidedRecord | null>(null);
   /** where a continued flow had got to: step 1 leads back there once its books are open again */
@@ -486,7 +510,9 @@ export class GuidedFlowState {
     if (!scope) return null;
     const prefer = this.preferSource.value || (this.preferLabel ? this.host.sources.value.find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
     const methods = this.pairMethods.value;
-    return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(methods).length ? { methods } : undefined);
+    const controls = this.pairControls.value;
+    const choices = { ...(Object.keys(methods).length && { methods }), ...(Object.keys(controls).length && { controls }) };
+    return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(choices).length ? choices : undefined);
   });
 
   readonly missing = computed<MissingBase[]>(() => {
@@ -546,6 +572,7 @@ export class GuidedFlowState {
       // a new flow starts from the default methods: "dibur-hamatchil for all pairs" of the previous one must not leak into it
       this.methods.value = null;
       this.pairMethods.value = {};
+      this.pairControls.value = {};
       this.resumeTo.value = null;
       this.saved.value = null;
       this.bundle.value = null;
@@ -576,6 +603,7 @@ export class GuidedFlowState {
       this.preferLabel = r.preferBase;
       this.methods.value = r.methods?.length ? new Set(r.methods as EngineId[]) : null;
       this.pairMethods.value = (r.pairMethods ?? {}) as Record<string, readonly PairEngineId[]>;
+      this.pairControls.value = r.pairControls ?? {};
       this.bookSources.value = [];
       this.resumeTo.value = r.step;
       this.active.value = true;
@@ -634,6 +662,19 @@ export class GuidedFlowState {
     if (engines?.length) next[key] = engines;
     else delete next[key];
     this.pairMethods.value = next;
+  }
+
+  /**
+   * The controls of one pair, by the titles: switched off (enabled false), its link type, its confidence threshold. Only what
+   * differs from the automatic choice is kept: an empty control (or enabled true) takes the pair back to automatic.
+   */
+  setPairControl(dependantTitle: string, baseTitle: string, control: PairControl | null): void {
+    const key = pairMethodKey(dependantTitle, baseTitle);
+    const next = { ...this.pairControls.peek() };
+    const kept = control ? cleanControl(control) : null;
+    if (kept) next[key] = kept;
+    else delete next[key];
+    this.pairControls.value = next;
   }
 
   setPreferSource(id: string): void {
@@ -767,6 +808,7 @@ export class GuidedFlowState {
       ...(prefer && { preferBase: prefer }),
       ...(this.methods.value && { methods: [...this.methods.value] }),
       ...(Object.keys(this.pairMethods.value).length && { pairMethods: Object.fromEntries(Object.entries(this.pairMethods.value).map(([k, v]) => [k, [...v]])) }),
+      ...(Object.keys(this.pairControls.value).length && { pairControls: { ...this.pairControls.value } }),
       links: this.facts.value.links,
       done: this.downloaded.value !== null,
       savedAt: Date.now(),
