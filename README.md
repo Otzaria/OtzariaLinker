@@ -10,10 +10,13 @@
 
 ## הורדה
 
-**[הורדת OtzariaLinker.html](https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html)**
+בשלב האלפא הקובץ נמצא בדף [Releases](https://github.com/Otzaria/OtzariaLinker/releases), ובאתר
+ש־GitHub Pages מפרסם מהענף הראשי: בדף הפתיחה שלו יש כפתור "הורדת הכלי לעבודה בלי אינטרנט" (הוא מופיע רק
+כשהכלי נפתח מאתר, לא כשפותחים את הקובץ מהמחשב).
 
-עד השחרור היציב הראשון, הקובץ נמצא בדף [Releases](https://github.com/Otzaria/OtzariaLinker/releases)
-(גרסאות pre-release אינן "latest", ולכן הקישור הישיר עלול לא לעבוד עד אז).
+הקישור הקבוע `https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html` יעבוד
+רק אחרי שתפורסם גרסה יציבה (לא pre-release) של 4.x עם הקובץ הזה; כרגע "latest" של GitHub הוא גרסה 3, ולכן
+הקישור הקבוע אינו עובד עדיין. השלבים לבעלים: [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md) §5א.
 
 זה קובץ אחד, בגודל של כ־1MB. שומרים אותו במחשב ופותחים בלחיצה כפולה, ב־Chrome, ב־Edge או ב־Firefox. אין התקנה ואין שרת.
 

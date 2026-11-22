@@ -6,6 +6,7 @@ import type { SideTab } from "../../state/store";
 import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
+import { OfflineDownload } from "../shell/offline-download";
 import { OtzariaDbHint, SOURCE_OPTIONS, type SourceOption } from "../workspace/add-sources";
 import { SourceBadge } from "../workspace/source-badge";
 import { assignOpenSources, candidatesFor, type OpenSource } from "./task-sources";
@@ -248,6 +249,7 @@ export function Home() {
           ))}
         </div>
         <OtzariaDbHint />
+        <OfflineDownload />
         <p class="privacy">
           <Icon name="fl_info" size={16} />
           <span>מסדי נתונים נפתחים לקריאה בלבד. הכלי לעולם לא משנה את הקבצים שלכם — כל תוצר נשמר כקובץ חדש.</span>

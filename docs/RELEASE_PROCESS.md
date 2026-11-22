@@ -72,8 +72,25 @@
 אם ה־workflow נכשל, ל־Release לא יהיו קבצים. מתקנים, ומריצים שוב את ה־job (או מוחקים את ה־Release
 וה־tag ויוצרים מחדש).
 
-**שימו לב:** הקישור `releases/latest/download/...` של GitHub מצביע על ה־Release האחרון שאינו pre-release.
+**שימו לב:** הקישור `releases/latest/download/OtzariaLinker.html` של GitHub מצביע על ה־Release האחרון שאינו pre-release.
 כל עוד יש רק גרסאות pre-release, ייתכן שהקישור לא יעבוד. בדקו את זה לפני שמפרסמים את הקישור.
+
+## 5א. הקישור הקבוע והכפתור "הורדת הכלי" (נבדק 2026-11-22)
+
+מצב הקישור `releases/latest/download/OtzariaLinker.html` לפני השחרור היציב הראשון של 4.x: **404**. סיבה:
+`gh release list` מראה רק v1, v2 ו־v3 (v3 הוא "Latest"), והנכס היחיד של v3 הוא `Otzaria-Link-Manager-v3.html`.
+גרסאות pre-release (כמו `4.0.0-alpha.*`) אינן "latest". **אין לצרף עותק בשם `OtzariaLinker.html` ל־v3** (זה כלי אחר).
+
+מה צריך לעשות (פעולת בעלים, לא קוד):
+
+1. מוודאים ש־`version` ב־`package.json` הוא `4.0.0` (או 4.x יציבה אחרת), ועוברים את §3–§4 כרגיל.
+2. מפרסמים את ה־Release ו**לא** מסמנים "pre-release". ה־workflow מעלה את `OtzariaLinker.html`.
+3. בודקים: `curl -sIL https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html` מחזיר 200
+   (ו־`gh release list` מסמן את 4.x כ־Latest). רק אז מעדכנים את ה־README: הקישור הקבוע כבר מוצג שם, עם הסבר שעדיין
+   לא עובד, ומוחקים את ההסבר.
+4. הכפתור "הורדת הכלי לעבודה בלי אינטרנט" (`src/ui/shell/offline-download.tsx`) לא תלוי ב־Release: זה קישור יחסי
+   באותו מקור (`OtzariaLinker.html`) שמופיע רק כשהכלי נפתח מ־http(s). הוא עובד כל עוד `pages.yml` מעתיק את הקובץ
+   ל־`_site/OtzariaLinker.html` (בדיקה: `tests/unit/release-asset-name.test.ts`). **לא אומת** מול האתר החי.
 
 ## 6. אימות למשתמש
 

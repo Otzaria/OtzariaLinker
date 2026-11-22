@@ -84,6 +84,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .drop-strip.over, .drop-zone-over { border-color: var(--primary); background: color-mix(in srgb, var(--primary-container) 45%, var(--surface)); }
 .drop-strip .icon { justify-self: center; color: var(--primary); }
 .drop-strip .actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.drop-strip .offline-download { justify-self: center; text-decoration: none; white-space: normal; text-align: start; }
 .recent { margin-top: 24px; }
 .privacy { margin-top: 24px; font-size: var(--fs-sm); color: var(--on-surface-variant); display: flex; gap: 8px; align-items: start; }
 
