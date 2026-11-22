@@ -37,6 +37,17 @@ export interface RawAnchor {
   readonly contentHash?: string;
 }
 
+/**
+ * The words an automatic method matched on the line of each side of a link (issue #11), raw UTF-16 offsets into the line as
+ * stored, end exclusive — the same convention as RawAnchor. Only a note for a screen to highlight: it lives in the saved
+ * project and NEVER in an exported record (formats/links-json/convert.ts writes named fields only), so the library's
+ * file format is unchanged. The same shape as `MatchedWords` of a suggestion (linking/automatic/types.ts).
+ */
+export interface LinkMatched {
+  readonly source?: { readonly rawStart: number; readonly rawEnd: number };
+  readonly target?: { readonly rawStart: number; readonly rawEnd: number };
+}
+
 /** An anchor read from link_anchor in a database: VISIBLE offsets, possibly on either stored side. */
 export interface DbAnchor {
   readonly side: 0 | 1;
@@ -83,6 +94,8 @@ export interface Link {
   readonly ref1?: string;
   readonly ref2?: string;
   readonly anchor?: RawAnchor;
+  /** an approved suggestion's matched words, so the readers can show them again after a save and a reopen (see LinkMatched) */
+  readonly matched?: LinkMatched;
   readonly dbAnchors?: readonly DbAnchor[];
   /** database links only: what to doubt about this link (see DbLinkFlag) */
   readonly dbFlags?: readonly DbLinkFlag[];

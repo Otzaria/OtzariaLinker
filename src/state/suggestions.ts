@@ -1,6 +1,6 @@
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
-import type { BookRef, Link, LinkSide } from "../core/links/model";
+import type { BookRef, Link, LinkMatched, LinkSide } from "../core/links/model";
 import { CONFIDENCE_ORDER, recordsOf, sortSuggestions, type Confidence, type EngineId, type EngineResult, type Reason, type Suggestion, type SuggestionSort } from "../linking/automatic";
 import { pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
@@ -358,6 +358,7 @@ export class SuggestionsState {
           // every engine's reference, never blank (B3): the target's title and line otherwise
           heRef2: r.heRef2.trim() ? r.heRef2 : `${at.target.book.title} ${at.target.line + 1}`,
           ...(s.anchor && { anchor: s.anchor }),
+          ...matchedOf(s, at),
         };
       })
       .filter((l) => records.length === 1 || !existing.has(linePairKey(l)));
@@ -531,6 +532,18 @@ export class SuggestionsState {
 }
 
 /** One record of a suggestion: the suggestion with its target moved to that line (recordsOf). */
+/**
+ * The matched words an approved record keeps (issue #11). The spans are offsets in the line of the suggestion's own `source`
+ * and `target`: a record written on another line of a span (spanLines) keeps only the side whose line is still the one the
+ * engine measured.
+ */
+function matchedOf(s: Suggestion, at: { source: LinkSide; target: LinkSide }): { matched?: LinkMatched } {
+  const m = s.matched;
+  const source = at.source.line === s.source.line ? m?.source : undefined;
+  const target = at.target.line === s.target.line ? m?.target : undefined;
+  return source || target ? { matched: { ...(source && { source: { rawStart: source.rawStart, rawEnd: source.rawEnd } }), ...(target && { target: { rawStart: target.rawStart, rawEnd: target.rawEnd } }) } } : {};
+}
+
 function recordAt(s: Suggestion, line: number): { source: LinkSide; target: LinkSide } {
   return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
 }

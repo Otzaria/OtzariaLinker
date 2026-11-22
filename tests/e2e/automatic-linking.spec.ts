@@ -229,6 +229,57 @@ test("dibur hamatchil: the matched words are marked on both texts in the card an
 });
 
 /*
+ * Issue 11, the approved link: the matched words stay with the link (and in the saved project), and are painted again when
+ * the link is shown from the links list — not only while the suggestion is on screen. Chrome and Edge have the highlight
+ * API; Firefox keeps the card only, so the reader part is checked where the API exists.
+ */
+test("dibur hamatchil: an approved link shows its matched words again from the links list", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  // neutral synthetic books: three commentary lines that open with words quoted from three base lines (no suggestion exists yet)
+  const nl = String.fromCharCode(10);
+  const verses = ["אלפא בטא גמא דלתא הא וו זין", "כף למד מם נון סמך עין פא", "שין תיו אלף בית גימל דלת הי"];
+  const dh = ["אלפא בטא גמא", "כף למד מם", "שין תיו אלף"];
+  const base = ["<h1>ספר בסיס</h1>", "<h2>פרק א</h2>", ...verses].join(nl);
+  const comm = ["<h1>פירוש על ספר בסיס</h1>", "<h2>פרק א</h2>", ...dh.map((d, i) => `<b>${d}</b> – הסבר קצר על שורה ${i + 1} כאן`)].join(nl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "ספר בסיס.txt", mimeType: "text/plain", buffer: Buffer.from(base) },
+    { name: "פירוש על ספר בסיס.txt", mimeType: "text/plain", buffer: Buffer.from(comm) },
+  ]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "פירוש על ספר בסיס" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^ספר בסיס/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "לפי דיבור המתחיל" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  await expect(page.locator("table.sug-table tbody tr").first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("radio", { name: "כרטיס" }).click();
+  await expect(page.locator(".builder mark.match-hl")).toHaveCount(2, { timeout: 15_000 });
+  await page.locator(".builder button.btn.filled", { hasText: /^\s*אישור\s*A\s*$/ }).click();
+
+  // a link now exists; leave the suggestions, and show the link from the list
+  const painted = () =>
+    page.evaluate(() => {
+      const h = (globalThis as unknown as { CSS?: { highlights?: Map<string, { size: number }> } }).CSS?.highlights;
+      return h ? ["match-source", "match-target"].map((n) => h.get(n)?.size ?? 0) : null;
+    });
+  const total = async () => ((await painted()) ?? []).reduce((a, b) => a + b, 0);
+  const hasApi = (await painted()) !== null;
+  await page.getByRole("tab", { name: /^קישורים/ }).click();
+  const item = page.locator(".link-item").first();
+  await expect(item).toBeVisible();
+  // the suggestions tab was left: nothing is painted until the link is shown
+  if (hasApi) await expect.poll(total, { timeout: 5_000 }).toBe(0);
+  await item.click();
+  if (hasApi) await expect.poll(total, { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});
+
+/*
  * Issue 26: in pair mode one book can be linked against several targets at once, with every method that fits the pair
  * merged into one run (instead of choosing one method and one target).
  */

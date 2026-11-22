@@ -1,6 +1,6 @@
 import type { AltTocBook, AltTocEntry, AltTocOrigin, AltTocStructure } from "../core/alt-toc/model";
 import { parseSavedDbMappings, type SavedDbMapping } from "../core/db-mapping";
-import type { BookOrigin, BookRef, Link, LinkSide } from "../core/links/model";
+import type { BookOrigin, BookRef, Link, LinkMatched, LinkSide } from "../core/links/model";
 import { NUMERIC_KEYS } from "../formats/links-json/layout";
 
 /*
@@ -13,6 +13,8 @@ import { NUMERIC_KEYS } from "../formats/links-json/layout";
  * book TITLES and bound again on load. "format" is the first key: the file detector looks for it
  * in the first KiB.
  *
+ * A link may carry `matched` (the words the engine matched, issue #11): another optional field of version 1, kept in the
+ * project only — an exported record never has it.
  * `altToc` (alternative TOC structures, by book title) was added later as an OPTIONAL field of
  * version 1: older project files simply have none, and nothing else changed.
  */
@@ -324,6 +326,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
   const a = l.anchor as unknown as Record<string, unknown> | undefined;
   if (a !== undefined && (!a || !isInt(a.rawStart) || (a.rawEnd !== undefined && !isInt(a.rawEnd)) || (a.label !== undefined && !str(a.label)))) return null;
   if (l.keyOrder !== undefined && !(Array.isArray(l.keyOrder) && l.keyOrder.every(str))) return null;
+  const matched = rebuildMatched(l.matched);
   const pass = l.passthrough as unknown;
   if (pass !== undefined && (typeof pass !== "object" || pass === null || Array.isArray(pass))) return null;
   return {
@@ -337,6 +340,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(str(l.ref1) && { ref1: l.ref1 }),
     ...(str(l.ref2) && { ref2: l.ref2 }),
     ...(a && { anchor: { rawStart: a.rawStart as number, ...(a.rawEnd !== undefined && { rawEnd: a.rawEnd as number }), ...(a.label !== undefined && { label: a.label as string }), ...(str(a.contentHash) && { contentHash: a.contentHash }) } }),
+    ...(matched && { matched }),
     ...(pass !== undefined && { passthrough: copyData(pass as Record<string, unknown>) }),
     ...(l.keyOrder !== undefined && { keyOrder: [...l.keyOrder] }),
     ...(l.typeNull === true && { typeNull: true }),
@@ -347,6 +351,20 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(str(l.fileText) && { fileText: l.fileText }),
     ...(Array.isArray(l.origins) && l.origins.every(str) && { origins: l.origins.slice(0, 50) }),
   };
+}
+/**
+ * An approved link's matched words (issue #11), optional and only a note: a missing or damaged one is dropped, and the link
+ * stays. Added to version 1 without a bump: a project saved before has none, and an older tool reads the rest and ignores it.
+ */
+function rebuildMatched(raw: unknown): LinkMatched | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const span = (x: unknown) => {
+    const v = x as Record<string, unknown> | null;
+    return v && typeof v === "object" && isInt(v.rawStart) && isInt(v.rawEnd) && v.rawEnd > v.rawStart ? { rawStart: v.rawStart, rawEnd: v.rawEnd } : undefined;
+  };
+  const source = span((raw as Record<string, unknown>).source);
+  const target = span((raw as Record<string, unknown>).target);
+  return source || target ? { ...(source && { source }), ...(target && { target }) } : undefined;
 }
 function copyData(o: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

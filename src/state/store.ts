@@ -5,6 +5,7 @@ import { parseProject, serializeProject, type ProjectSource } from "../projects/
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
+import { matchedAfterEdit } from "../core/links/matched";
 import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
@@ -122,6 +123,8 @@ export class AppStore {
   readonly linkState = signal<LinkState>(emptyLinkState());
   readonly view = { source: signal<string | null>(null), target: signal<string | null>(null) };
   readonly pick = { source: signal<Pick | null>(null), target: signal<Pick | null>(null) };
+  /** the link whose two ends revealLink last showed: its matched words (issue #11) are painted while those lines stay picked */
+  readonly revealedLink = signal<Link | null>(null);
   /** the reader that receives the next click in "click" create mode and keyboard focus */
   readonly activeSide = signal<Side>("source");
   readonly draftType = signal<string>("commentary");
@@ -192,10 +195,13 @@ export class AppStore {
     const target: LinkSide = { book: this.refOf(t.bookKey), line: t.line, ...(t.end !== undefined && t.end > t.line && { end: t.end }) };
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
-    const { anchor: _a, ref1: _r1, ref2: _r2, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
+    const { anchor: _a, ref1: _r1, ref2: _r2, matched: _m, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
     const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
     const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
+    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) };
+    // the engine's matched words stay with the side the user did not change (issue #11)
+    const matched = base && matchedAfterEdit(base, source, target, anchor);
     const d: Link = {
       ...kept,
       source,
@@ -203,7 +209,8 @@ export class AppStore {
       declaredType: this.draftType.value,
       // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
       heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
-      ...(s.anchor && { anchor: { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) } }),
+      ...(anchor && { anchor }),
+      ...(matched && { matched }),
       ...(ref1 && { ref1 }),
       ...(ref2 && { ref2 }),
       ...(base && base.target.book.title !== target.book.title && { targetPath: path2ForTitle(target.book.title) }),
@@ -517,6 +524,7 @@ export class AppStore {
     batch(() => {
       if (s) this.reveal("source", s.key, l.source.line);
       if (t) this.reveal("target", t.key, l.target.line);
+      this.revealedLink.value = this.editing.peek() ? null : l;
       if (this.editing.peek()) return;
       if (s) this.pick.source.value = at(s.key, l.source);
       if (t) this.pick.target.value = at(t.key, l.target);

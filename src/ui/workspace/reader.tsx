@@ -181,12 +181,18 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   }, [hits, currentHit, tick, active]);
   useEffect(() => () => clearMatches(side), []);
 
-  // the words the engine matched in the suggestion being reviewed (issue #11), on whichever of its lines this reader holds
+  // the words the engine matched (issue #11): in the suggestion being reviewed, or in the approved link whose two ends were
+  // just shown (store.revealLink; it keeps them in the project) — on whichever of its lines this reader holds
   const reviewed = store.sideTab.value === "suggestions" ? store.suggestions.currentSuggestion.value : null;
+  const revealed = store.revealedLink.value;
+  const pickS = store.pick.source.value;
+  const pickT = store.pick.target.value;
   const matchHere = (() => {
-    if (!reviewed?.matched) return null;
-    for (const [end, span] of [[reviewed.source, reviewed.matched.source], [reviewed.target, reviewed.matched.target]] as const) {
-      if (end.book.key !== bookKey || !span) continue;
+    // a revealed link counts only while the lines it revealed are still the picked ones
+    const shown = reviewed?.matched ? reviewed : revealed?.matched && pickS?.line === revealed.source.line && pickT?.line === revealed.target.line ? revealed : null;
+    if (!shown?.matched) return null;
+    for (const [end, span] of [[shown.source, shown.matched.source], [shown.target, shown.matched.target]] as const) {
+      if (!span || store.bookOf(end.book)?.key !== bookKey) continue;
       const line = store.lines.peek(bookKey, end.line);
       const words = line ? splitMatched(line.anchorText, span)?.match : undefined;
       if (words) return { line: end.line, words };
@@ -196,7 +202,7 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   useEffect(() => {
     const id = requestAnimationFrame(() => paintMatched(scroller.current, side, matchHere?.line ?? null, matchHere?.words ?? null));
     return () => cancelAnimationFrame(id);
-  }, [matchHere?.line, matchHere?.words, tick, active, reviewed?.id]);
+  }, [matchHere?.line, matchHere?.words, tick, active, reviewed?.id, revealed?.id]);
   useEffect(() => () => clearMatched(side), []);
 
   // the content lines no link touches yet, marked when asked for (state/coverage.ts + linking/coverage.ts); null = off
