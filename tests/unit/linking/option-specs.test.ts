@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENGINES } from "../../../src/linking/automatic";
-import { customKey, defaultFormValues, ENGINE_OPTION_SPECS, MARKER_CHOICES, toEngineOptions } from "../../../src/linking/automatic/option-specs";
+import { customKey, defaultFormValues, ENGINE_OPTION_SPECS, isEssential, MARKER_CHOICES, toEngineOptions } from "../../../src/linking/automatic/option-specs";
 import { DEFAULT_THRESHOLDS } from "../../../src/linking/automatic/types";
 
 describe("engine option specs", () => {
@@ -69,4 +69,11 @@ describe("engine option specs", () => {
       expect(r.options.notesMarkers).toBeUndefined();
     }
   });
-});
+  it("footnotes: how the notes are marked in the book is offered in basic mode, bare digits included (#14)", () => {
+    const spec = ENGINE_OPTION_SPECS.footnotes.find((s) => s.key === "mainMarkers")!;
+    expect(isEssential(spec, defaultFormValues("footnotes"))).toBe(true);
+    expect(MARKER_CHOICES.map(([c]) => c)).toContain("digits");
+    // a changed choice reaches the engine through the essential scope (basic mode), the others stay at their defaults
+    const r = toEngineOptions("footnotes", { ...defaultFormValues("footnotes"), mainMarkers: "digits", numbering: "letters" }, "essential");
+    expect(r.options).toEqual({ mainMarkers: "digits" });
+  });});
