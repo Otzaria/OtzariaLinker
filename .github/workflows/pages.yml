@@ -15,9 +15,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  actions: read
 
 concurrency:
   group: pages
@@ -29,8 +26,12 @@ env:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # `branches: [main]` of the trigger filters by the head branch NAME, which a fork's PR branch can also be called:
+    # so a workflow_run counts only when it is a push (not a pull_request) and its head repository is this one.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +58,12 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # the write permissions are only here: the job that checks out and runs npm (build) has none
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

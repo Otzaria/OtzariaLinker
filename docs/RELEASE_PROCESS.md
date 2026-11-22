@@ -56,7 +56,11 @@
 
 **פרסום האתר (`.github/workflows/pages.yml`)**: האתר לא מתפרסם בעצם ה־push. `pages.yml` נדלק כש־run של CI על `main` **הסתיים בהצלחה**
 (`workflow_run`, `conclusion == 'success'`), בונה מחדש את אותו commit (`head_sha` של ה־run, לא ראש `main` בזמן הפרסום) ומפרסם את
-`OtzariaLinker.html` ואת `SHA256SUMS`. commit שנכשל בבדיקות לא מגיע לאתר. `workflow_dispatch` נשאר לפרסום ידני של ראש הענף, בלי בדיקה.
+`OtzariaLinker.html` ואת `SHA256SUMS`. commit שנכשל בבדיקות לא מגיע לאתר.
+**הגנה מפני fork:** המסנן `branches: [main]` של `workflow_run` בודק את **שם** ענף ה־head, ו־PR מ־fork יכול לקרוא לענף שלו `main`;
+בלי בדיקה נוספת, CI ירוק של ה־PR היה גורם ל־`pages.yml` למשוך את `head_sha` של ה־fork, להריץ עליו `npm ci` ו־`npm run build` ולפרסם.
+לכן ה־`if` של `build` דורש גם `workflow_run.event == 'push'` וגם `workflow_run.head_repository.full_name == github.repository`,
+והרשאות הכתיבה (`pages: write`, `id-token: write`) נמצאות רק ב־job של `deploy`; ל־job שמריץ npm יש `contents: read` בלבד. `workflow_dispatch` נשאר לפרסום ידני של ראש הענף, בלי בדיקה.
 **אי אפשר להוכיח את ה־workflows בלי להריץ אותם ב־GitHub:** בדקתי שהקבצים הם YAML תקין (`js-yaml`) ושהשדות והביטויים נכונים לפי התיעוד,
 `actionlint` לא היה זמין, ולכן ריצה ראשונה אחרי המיזוג היא הבדיקה: ב־Actions רואים ש־Pages נדלק אחרי CI ירוק, ולא נדלק אחרי CI אדום.
 
