@@ -220,6 +220,19 @@ describe("AppStore — max-link: these books (#26) and the user's choices (#21)"
     expect(store.maxLink.job.value!.choices).toEqual(plan.choices);
   });
 
+  it("pair mode with two targets: a line that fits both is not linked to both (the candidates are folded or left ambiguous)", async () => {
+    const { store, key } = await opened();
+    // the commentary against its real base and against a second book it also quotes: every line of the commentary
+    // that finds a place in both is checked line by line, never two certain links
+    const plan = store.maxLink.pairPlan(key("ביאור על בראשית"), [key("בראשית"), key("תרגום אונקלוס על בראשית")], ["headings"]);
+    expect(await store.maxLink.run(plan, "זוג עם שני יעדים")).toBe(true);
+    const sugs = store.suggestions.run.value!.result.suggestions as MergedSuggestion[];
+    const lines = new Map<number, string[]>();
+    for (const s of sugs.filter((x) => x.source.book.key === key("ביאור על בראשית"))) lines.set(s.source.line, [...(lines.get(s.source.line) ?? []), `${s.target.book.title}:${s.confidence}`]);
+    // no source line has two "certain" links into different books
+    for (const [, v] of lines) expect(v.filter((x) => x.endsWith(":certain")).length).toBeLessThanOrEqual(1);
+  });
+
   it("titleFit: the screens ask before offering the headings method", async () => {
     const { store, key } = await opened();
     expect((await store.maxLink.titleFit(key("ביאור על בראשית"), key("בראשית")))!.verdict).toBe("fit");

@@ -365,3 +365,53 @@ describe("mergeSuggestions — regression: nothing absorbed on the way is lost",
     expect(new Set(ids).size).toBe(ids.length); // each once
   });
 });
+
+/* #10: one line, several target books the user chose — never linked to all of them blindly */
+describe("mergeSuggestions — the candidate books of one line (candidateBooks)", () => {
+  const B2: BookRef = { key: "d:2", title: "ספר שני", origin: "otzaria" };
+  const toB = (c: number, b: number, conf: Confidence): MergeItem => H(c, b, conf);
+  const toB2 = (c: number, b: number, conf: Confidence): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B2, b), conf), focus: C.key });
+  const opts = { candidateBooks: [B.key, B2.key] };
+
+  it("without the option nothing changes: two books, two certain suggestions", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")]);
+    expect(suggestions.map((s) => s.confidence)).toEqual(["certain", "certain"]);
+  });
+
+  it("the more certain candidate wins one step down, the other is folded in as its alternative, with the reason", () => {
+    const { suggestions, stats } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "possible")], opts);
+    expect(suggestions).toHaveLength(1);
+    const s = suggestions[0]!;
+    expect(s.target.book.key).toBe(B.key);
+    expect(s.confidence).toBe("high"); // a won conflict costs a step: never bulk-approved
+    expect(s.rules).toContain("maxlink/multi-target-winner");
+    expect(s.alternatives.map((a) => a.target.book.key)).toEqual([B2.key]);
+    expect(s.alternatives[0]!.reasons[0]!.text).toContain("ספר שני");
+    expect(s.warnings.map((w) => w.code)).toContain("maxlink/multi-target-winner");
+    expect(stats).toMatchObject({ settled: 1, outweighed: 1 });
+  });
+
+  it("equally sure candidates: both stay, both 'ambiguous', each names the other", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")], opts);
+    expect(suggestions).toHaveLength(2);
+    for (const s of suggestions) {
+      expect(s.confidence).toBe("ambiguous");
+      expect(s.rules).toContain("maxlink/multi-target");
+      expect(s.alternatives).toHaveLength(1);
+    }
+  });
+
+  it("other lines, and books that are not candidates, are untouched", () => {
+    const { suggestions } = mergeSuggestions([toB(5, 10, "certain"), toB2(6, 3, "certain"), toB(7, 4, "certain")], opts);
+    expect(suggestions.map((s) => s.confidence)).toEqual(["certain", "certain", "certain"]);
+    const other = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "certain")], { candidateBooks: [B.key] });
+    expect(other.suggestions.map((s) => s.confidence)).toEqual(["certain", "certain"]);
+  });
+
+  it("deterministic: the input order does not matter", () => {
+    const a = mergeSuggestions([toB(5, 10, "certain"), toB2(5, 3, "high")], opts).suggestions;
+    const b = mergeSuggestions([toB2(5, 3, "high"), toB(5, 10, "certain")], opts).suggestions;
+    expect(b.map((s) => s.id)).toEqual(a.map((s) => s.id));
+    expect(b.map((s) => s.confidence)).toEqual(a.map((s) => s.confidence));
+  });
+});

@@ -64,6 +64,13 @@ export interface MergeOptions {
    * pair whose suggestions mostly CONTRADICT them is suspect (REFERENCE_DISAGREEMENT).
    */
   reference?: Iterable<string>;
+  /**
+   * Keys of books the user chose as alternative targets of the same commentary (an explicit multi-target run,
+   * plan.ts PlanChoices.pairs). A line that has suggestions in two of them is never linked to both blindly: the
+   * more certain one wins (one step down, so it is not approved in bulk) and the other is folded in as its
+   * alternative; equally sure ones both stay "ambiguous", each naming the other (step 4d).
+   */
+  candidateBooks?: Iterable<string>;
 }
 
 export interface MergeStats {
@@ -168,9 +175,11 @@ interface Group {
   /** the sides this one won a conflict against (settle), folded into it as alternatives */
   outweighs: Group[];
   /** why it won: the only certain side, or the only one placed by the line's words */
-  wonBy?: "certain" | "words";
+  wonBy?: "certain" | "words" | "candidates";
   /** made only of single-book engines (citations): outside the structural statistics */
   single: boolean;
+  /** the same line's equally sure suggestions in the user's other candidate books (candidateBooks, step 4d) */
+  multi: Group[];
 }
 
 /*
@@ -192,7 +201,7 @@ function makeGroup(id: string, exact: Raw[]): Group {
   // a citation's span is in its id ("…@start-end>…") even without an anchor: two mentions, two positions
   const span = single ? (rep.fAnchor ? `@${rep.fAnchor.rawStart}` : /@\d+-\d+>/.exec(rep.s.id)?.[0] ?? `@${rep.s.id}`) : rep.fAnchor ? `@${rep.fAnchor.rawStart}` : "";
   const position = `${single ? "single:" : ""}${endKey(rep.fEnd)}${span}>${rep.oEnd.book.key}`;
-  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [], outweighs: [], single };
+  return { id, exact, rep, engines, position, consistent: [], inner: [], folded: false, conflictWith: [], outweighs: [], single, multi: [] };
 }
 
 /** an engine that reads one book and links into all open books (ENGINES[].singleBook) */
@@ -388,6 +397,22 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
       }
   }
 
+  // 4d. a line with suggestions in several of the user's candidate books: one winner or none, never all blindly
+  const candidates = new Set(opts.candidateBooks ?? []);
+  if (candidates.size > 1) {
+    const byLine = new Map<string, Group[]>();
+    for (const g of groups) if (!g.folded && !g.single && candidates.has(g.rep.oEnd.book.key)) pushTo(byLine, `${g.rep.fEnd.book.key}#${g.rep.fEnd.line}`, g);
+    for (const at of [...byLine.keys()].sort().map((k) => byLine.get(k)!)) {
+      if (new Set(at.map((g) => g.rep.oEnd.book.key)).size < 2) continue;
+      const ranked = [...at].sort((a, b) => supportLevel(a) - supportLevel(b) || b.rep.s.score - a.rep.s.score || cmp(a.id, b.id));
+      const [best, second] = [ranked[0]!, ranked.find((g) => g.rep.oEnd.book.key !== ranked[0]!.rep.oEnd.book.key)!];
+      if (supportLevel(best) < supportLevel(second)) {
+        best.wonBy = "candidates";
+        for (const g of ranked) if (g !== best && g.rep.oEnd.book.key !== best.rep.oEnd.book.key) (best.outweighs.push(g), (g.folded = true));
+      } else for (const g of at) g.multi = at.filter((o) => o !== g && o.rep.oEnd.book.key !== g.rep.oEnd.book.key);
+    }
+  }
+
   // 5. one suggestion per live group
   const stats: MergeStats = { input: raws.length, output: 0, duplicates: 0, agreements: 0, raised: 0, consistent: 0, conflicts: 0, settled: 0, outweighed: 0, existing: 0, suspectPairs: suspect.size, contradictedPairs: contradicted.size };
   const out: MergedSuggestion[] = [];
@@ -408,6 +433,9 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
 const TITLE = new Map(ENGINES.map((e) => [e.id, e.title]));
 const engineTitle = (e: EngineId) => `"${TITLE.get(e) ?? e}"`;
 const r = (code: string, text: string): Reason => ({ code, text });
+
+/** where another group's suggestion points: its line, and its book when that is not the winner's */
+const placeOf = (o: Group, to: Group): string => (o.rep.oEnd.book.key === to.rep.oEnd.book.key ? `שורה ${o.rep.oEnd.line + 1}` : `${o.rep.oEnd.book.title}, שורה ${o.rep.oEnd.line + 1}`);
 
 function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { conflicts: number; support: number } | null, against: { judged: number; contradicted: number } | null): MergedSuggestion {
   const rep = g.rep.s;
@@ -457,15 +485,17 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     const others = [...g.outweighs].sort((a, b) => cmp(a.id, b.id));
     stats.outweighed += others.length;
     const why =
-      g.wonBy === "certain"
-        ? "ההצעה הזו ודאית, והאחרות אינן"
-        : "ההצעה הזו נמצאה לפי המילים של השורה (ציטוט מהבסיס), והאחרות רק לפי הכותרות או המספור, שמתבלבלים במקרים כאלה הרבה יותר";
+      g.wonBy === "candidates"
+        ? "ההצעה הזו בטוחה יותר מההצעות לספרים האחרים שבחרתם"
+        : g.wonBy === "certain"
+          ? "ההצעה הזו ודאית, והאחרות אינן"
+          : "ההצעה הזו נמצאה לפי המילים של השורה (ציטוט מהבסיס), והאחרות רק לפי הכותרות או המספור, שמתבלבלים במקרים כאלה הרבה יותר";
     if (level < POSSIBLE) level = level === 0 ? rank("high") : POSSIBLE;
-    rules.push("maxlink/outweighs");
-    warnings.push(r("maxlink/outweighs", `שיטות אחרות הציעו לשורה הזו יעדים אחרים: ${others.map((o) => `${o.engines.map(engineTitle).join(", ")} ← שורה ${o.rep.oEnd.line + 1}`).join("; ")}. ${why}, ולכן היא נבחרה. בגלל הסתירה היא לבדיקה ולא לאישור בקבוצה, והיעדים האחרים מוצגים כמועמדים חלופיים.`));
+    rules.push(g.wonBy === "candidates" ? "maxlink/multi-target-winner" : "maxlink/outweighs");
+    warnings.push(r(g.wonBy === "candidates" ? "maxlink/multi-target-winner" : "maxlink/outweighs", `${g.wonBy === "candidates" ? "השורה הזו מתאימה גם לספרים אחרים שבחרתם" : "שיטות אחרות הציעו לשורה הזו יעדים אחרים"}: ${others.map((o) => `${o.engines.map(engineTitle).join(", ")} ← ${placeOf(o, g)}`).join("; ")}. ${why}, ולכן היא נבחרה. בגלל הסתירה היא לבדיקה ולא לאישור בקבוצה, והיעדים האחרים מוצגים כמועמדים חלופיים.`));
     for (const o of others) {
       seenAlt.add(endKey(o.rep.oEnd));
-      alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/outweighed", `הצעה של ${o.engines.map(engineTitle).join(", ")}, שנדחתה מפני ההצעה הזו: ${why}.`)] });
+      alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/outweighed", `הצעה של ${o.engines.map(engineTitle).join(", ")} (${placeOf(o, g)}), שנדחתה מפני ההצעה הזו: ${why}.`)] });
     }
   } else if (g.conflictWith.length) {
     stats.conflicts++;
@@ -476,6 +506,17 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     for (const o of others) {
       seenAlt.add(endKey(o.rep.oEnd));
       alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/alternative", `הצעה של ${o.engines.map(engineTitle).join(", ")}.`)] });
+    }
+  }
+  if (g.multi.length) {
+    // equally sure suggestions to several of the books the user chose: none is picked for them
+    stats.conflicts++;
+    rules.push("maxlink/multi-target");
+    warnings.push(r("maxlink/multi-target", `השורה הזו מתאימה באותה מידה לכמה מהספרים שבחרתם: ${g.multi.map((o) => placeOf(o, g)).join("; ")}. לא נבחר ביניהם: בדקו ובחרו.`));
+    if (level < AMBIGUOUS) level = AMBIGUOUS;
+    for (const o of g.multi) {
+      seenAlt.add(endKey(o.rep.oEnd));
+      alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/multi-target", `הצעה של ${o.engines.map(engineTitle).join(", ")} ל${o.rep.oEnd.book.title} (שורה ${o.rep.oEnd.line + 1}).`)] });
     }
   }
   for (const x of g.exact)

@@ -656,8 +656,11 @@ export class MaxLinkState {
     // "already exists": the database's links, and the project's — except the link a suggestion's own approval made
     const project = new Map<string, string[]>();
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
+    // the books the user named as targets of one book (PlanChoices.pairs): a line is never linked to several of them blindly
+    const userTargets = plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" ? [s.target.key] : []));
     const raw = mergeSuggestions(items, {
       reference: db,
+      ...(userTargets.length > 1 && { candidateBooks: userTargets }),
       existing: (s) => (db.has(linePairKey(s)) ? "db" : project.get(linePairKey(s))?.some((id) => id !== `auto:${stableId(s)}`) ? "project" : null),
     });
     // the merged ids are made of book keys too: without them an approval is recognised in every session (stableId)
