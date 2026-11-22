@@ -72,6 +72,25 @@ describe("validateLink — generator gates", () => {
     // without a list the text is the earlier one
     expect(validateLink(link(), base).find((x) => x.code === "export/library-file-not-loaded")!.message).toContain("ייתכן שבספרייה אין לו קובץ");
   });
+  /*
+   * docs/audit/POLICY_TO_CODES.md: the conditions of the filtering policy that had a code but no test of their own
+   * (the codes were there; these lock them).
+   */
+  it("policy: a range that ends past the book is an error; an unknown target book is a warning; a commentary written towards its own base is flagged", () => {
+    expect(codes(link({ target: { book: B, line: 3, end: 12 } }))).toContain("error:export/range-out-of-range");
+    expect(codes(link({ target: { book: book("ספר שאינו פתוח", { origin: "unknown" }), line: 3 } }))).toContain("warning:export/target-unknown");
+    const base = book("בסיס");
+    const dep = book("פירוש על בסיס");
+    expect(codes(link({ source: { book: dep, line: 1 }, target: { book: base, line: 2 }, declaredType: "commentary" }))).toContain("warning:export/reversed-dependency");
+  });
+
+  it("policy: when it is not known which book is the base, the link says so (info) and is not held", () => {
+    const unknownBase = (title: string): BookRef => ({ key: `k:${title}`, title, origin: "otzaria" }); // no isBaseBook: a text file
+    const got = codes(link({ source: { book: unknownBase("פירוש א"), line: 1 }, target: { book: unknownBase("ספר ב"), line: 2 }, declaredType: "commentary" }));
+    expect(got).toContain("info:export/base-unknown");
+    expect(got.filter((c) => c.startsWith("error:"))).toEqual([]);
+  });
+
   it("db links cannot be exported as file records", () => expect(codes(link({ provenance: "db", status: "existing" }))).toContain("error:export/db-link"));
   it("a companion 'הערות על X' target is silently dropped by the generator", () => {
     expect(codes(link({ target: { book: book("הערות על ספר א"), line: 2 } }))).toContain("warning:export/companion-merged");
