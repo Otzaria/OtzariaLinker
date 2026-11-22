@@ -240,3 +240,54 @@ describe("a database that reports an absurd line count (QA round 2, B)", () => {
     expect(reads).toEqual({ headings: 0, lines: 0, existing: 0 });
   });
 });
+
+describe("what coverage saves in the project, and the table's cost (QA round 2, F)", () => {
+  const fresh = () => new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+  const commentaryKey = (s: AppStore) => [...s.books.value.values()].find((b) => b.title === "ביאור על בראשית")!.key;
+
+  it("a partial count (no database links, no candidates, no QA, custom links or unsuitable lines) is returned but not saved as 'the coverage'", async () => {
+    const store = fresh();
+    await store.openFiles([DB, COMMENTARY]);
+    const key = commentaryKey(store);
+    for (const options of [{ includeDb: false }, { includeCandidates: false }, { includeQa: false }, { unsuitable: new Set<number>() }]) {
+      expect(await store.coverage.summary(key, options), JSON.stringify(options)).not.toBeNull();
+      expect(store.coverage.snapshot(), JSON.stringify(options)).toEqual([]);
+    }
+    expect(await store.coverage.summary(key, { extraLinks: [{ id: "x", status: "new", provenance: "user", source: { book: { key, title: "ביאור על בראשית", origin: "personal" }, line: 3 }, target: { book: { key: "z", title: "ז", origin: "otzaria" }, line: 1 }, declaredType: "commentary", heRef2: "" }] })).not.toBeNull();
+    expect(store.coverage.snapshot()).toEqual([]);
+    await store.coverage.summary(key);
+    expect(store.coverage.snapshot()).toHaveLength(1);
+    // and a later partial count does not overwrite the full one
+    const before = JSON.stringify(store.coverage.snapshot());
+    await store.coverage.summary(key, { includeDb: false });
+    expect(JSON.stringify(store.coverage.snapshot())).toBe(before);
+  });
+
+  it("the table of 1,500 books with 60,000 project links reads the links by book once, not once per book", async () => {
+    const BOOKS = 1_500;
+    const ref = (i: number) => ({ key: `k${i}`, title: `ספר ${i}`, origin: "otzaria" as const });
+    const books = new Map(Array.from({ length: BOOKS }, (_, i) => [`k${i}`, { key: `k${i}`, title: `ספר ${i}`, origin: "otzaria", lineCount: 10 }] as const));
+    const links = Array.from({ length: 60_000 }, (_, i) => ({ id: `l${i}`, status: "new", provenance: "user", source: { book: ref(i % BOOKS), line: i % 10 }, target: { book: ref((i * 7 + 1) % BOOKS), line: 0 }, declaredType: "commentary", heRef2: "" }));
+    let owned = 0;
+    const host = {
+      linkState: signal({ links: new Map(links.map((l) => [l.id, l])) }),
+      books: signal(books),
+      lines: { count: () => 10, learnCount: async () => 10 },
+      sameBook: (r: { key: string }, k: string) => (owned++, r.key === k),
+      runTask: async (_l: string, run: (o: object) => Promise<unknown>) => run({}),
+      suggestions: { run: signal(null), state: signal(new Map()) },
+      quality: { report: signal(null) },
+    } as unknown as CoverageHost;
+    const state = new CoverageState(host, { headings: async () => [], lines: async () => [], existingLinks: async () => [] } as never);
+    const t0 = Date.now();
+    const rows = await state.table([...books.keys()]);
+    const ms = Date.now() - t0;
+    expect(rows).toHaveLength(BOOKS);
+    // book 0 is the source of the links with i % 1500 = 0 (always line 0) and the target of line 0 elsewhere: line 0 reaches several places and the other nine lines are unlinked
+    expect(rows[0]!.counts.byBucket).toMatchObject({ multiple: 1, unlinked: 9 });
+    expect(owned, "ownership checks").toBeLessThan(BOOKS * 2_000);
+    expect(ms).toBeLessThan(2_500);
+  }, 60_000);
+});
+
+

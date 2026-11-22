@@ -104,7 +104,19 @@ export class CoverageState {
    * A book that is not open, or whose length is not known, has no row. The rows are not cached: a table is a moment.
    */
   async *rows(bookKeys: readonly string[], options: CoverageTableOptions = {}): AsyncGenerator<CoverageRow> {
-    const project = [...this.host.linkState.value.links.values()];
+    // the project's links by the key of each end, once: a book reads only its own (and the unresolved ones that name its title), not all of them
+    const byKey = new Map<string, Link[]>();
+    const unresolved = new Map<string, Link[]>();
+    const put = (m: Map<string, Link[]>, k: string, l: Link) => {
+      const list = m.get(k);
+      if (!list) m.set(k, [l]);
+      else if (list[list.length - 1] !== l) list.push(l);
+    };
+    for (const l of this.host.linkState.value.links.values())
+      for (const ref of [l.source.book, l.target.book]) {
+        put(byKey, ref.key, l);
+        if (ref.key.startsWith("unresolved:")) put(unresolved, ref.title, l);
+      }
     for (const key of bookKeys) {
       if (options.signal?.aborted) return;
       const b = this.host.books.value.get(key);
@@ -124,7 +136,8 @@ export class CoverageState {
       const db = options.includeDb === false ? [] : await this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}).catch(() => [] as Link[]);
       if (options.signal?.aborted) return;
       const book: CoverageBook = { owns: (ref) => this.host.sameBook(ref, key), lineCount, headings };
-      yield { key, title: b.title, lineCount, counts: coverageCounts([...project, ...db], book), exact: options.headings === true };
+      const mine = new Set([...(byKey.get(key) ?? []), ...(unresolved.get(b.title) ?? [])]);
+      yield { key, title: b.title, lineCount, counts: coverageCounts([...mine, ...db], book), exact: options.headings === true };
     }
   }
 
@@ -182,7 +195,10 @@ export class CoverageState {
       db = got;
     }
     const summary = coverageSummary([...this.host.linkState.value.links.values(), ...db, ...(options.extraLinks ?? [])], book);
-    this.remember(bookKey, book.lineCount, summary);
+    // only the full picture is the project's "coverage": a count without the database's links, the candidates or the QA, with other links
+    // or another set of unsuitable lines describes something else, and a reopened project would show it as if it were the whole
+    const full = options.includeDb !== false && options.includeCandidates !== false && options.includeQa !== false && !options.extraLinks?.length && !options.unsuitable;
+    if (full) this.remember(bookKey, book.lineCount, summary);
     return summary;
   }
 
@@ -206,4 +222,5 @@ export class CoverageState {
     this.saved.value = new Map(list.map((c) => [c.title, c] as const));
   }
 }
+
 
