@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../../core/csv";
 import { detailDifferences, type DetailField, diffGroup, type LinkDiff, type LinkDiffGroup, type LinkDiffKind } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
 
@@ -48,7 +49,7 @@ const place = (s: LinkSide) => `${s.line + 1}${s.end !== undefined && s.end > s.
 const sideCells = (l?: Link) => (l ? [l.source.book.title, place(l.source), l.target.book.title, place(l.target), l.declaredType, l.anchor ? String(l.anchor.rawStart) : "", l.heRef2, l.ref1 ?? "", l.ref2 ?? ""] : ["", "", "", "", "", "", "", "", ""]);
 
 export function linkDiffCsv(d: LinkDiff, a: string, b: string): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const side = (n: string) => [`${n}: ספר מקור`, "שורה", "ספר יעד", "שורה", "סוג", "עוגן", "שם המקום ביעד", "ref_1", "ref_2"];
   const groups = diffGroupLabels(a, b);
   const head = ["קבוצה", "שינוי", ...side(a), ...side(b)];

@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../core/csv";
 import type { BookRef } from "../core/links/model";
 import { combineFingerprints } from "../core/text/fingerprint";
 import { ENGINES, type EngineId, type Suggestion } from "./automatic";
@@ -238,7 +239,7 @@ export const STATUS_TEXT: Readonly<Record<JobBookStatus, string>> = {
 
 /** The per-book report as CSV (Excel opens it: BOM, CRLF). */
 export function jobCsv(job: JobRecord): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const title = new Map(ENGINES.map((e) => [e.id, e.title]));
   const rows = [
     ["ספר", "מצב", "הצעות", "שיטות", "שניות", "פירוט"].map(esc).join(","),

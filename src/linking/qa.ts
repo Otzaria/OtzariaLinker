@@ -1,3 +1,4 @@
+import { humanCsvCell } from "../core/csv";
 import type { Link } from "../core/links/model";
 import { exportVerdicts, type Problem, type Severity, type ValidationContext } from "../core/links/validate";
 
@@ -224,7 +225,7 @@ export function redundantDuplicates(report: QaReport): string[] {
 
 /** The report as CSV (UTF-8 with BOM so Excel shows Hebrew), for review outside the tool. */
 export function qaCsv(report: QaReport): string {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = humanCsvCell;
   const head = ["חומרה", "קטגוריה", "ספר מקור", "שורת מקור", "ספר יעד", "שורת יעד", "שם המקום ביעד", "סוג", "הסבר", "קוד", "פרטים טכניים"];
   const sev: Record<Severity, string> = { error: "שגיאה", warning: "אזהרה", info: "מידע" };
   const rows = report.issues.map((i) =>

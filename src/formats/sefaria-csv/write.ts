@@ -12,7 +12,7 @@ import { CONNECTION_TYPE_KEY } from "../links-json/record";
  * The format is reproduced byte for byte:
  *   • one file per source book, named "<source title>.links.csv";
  *   • header `Citation 1,Citation 2,Conection Type` (the generator's one-"n" key, as v3 wrote it);
- *   • a field is quoted only when it holds `"`, `,` or a line feed, with `"` doubled;
+ *   • a field is quoted only when it holds `"`, `,` or a line feed, with `"` doubled; never neutralised against spreadsheet formulas, and a lone CR is not quoted either (v3 did not, and tests/unit/formats/sefaria-csv.test.ts pins it) — this is a byte contract, see core/csv.ts;
  *   • rows joined with "\n", no line break after the last row, no BOM;
  *   • Citation 1 = the source line's heading trail ("אורח חיים, סימן א"), or the book title when
  *     no heading precedes it; Citation 2 = the link's heRef_2 (v3: `heRef`, else the target's
