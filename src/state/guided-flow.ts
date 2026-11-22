@@ -5,7 +5,7 @@ import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
 import type { EngineId } from "../linking/automatic";
 import { ENGINES } from "../linking/automatic";
-import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation } from "../linking/plan";
+import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation, type UserPair } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
 import type { LinkState } from "./history";
@@ -472,6 +472,11 @@ export class GuidedFlowState {
   readonly active = signal(false);
   /** the sources opened in step 1: the books to link */
   readonly bookSources = signal<readonly string[]>([]);
+  /**
+   * The flow started from the repository analysis: books of an open database chosen one by one (not a whole source), and
+   * the pairs the user chose for them — a book with pairs is linked ONLY through them. Not kept in the saved flow.
+   */
+  readonly repoScope = signal<{ keys: readonly string[]; pairs: readonly UserPair[] } | null>(null);
   /** the source whose books are the bases when a base is open in several ("" = the planner's default) */
   readonly preferSource = signal("");
   /**
@@ -499,6 +504,11 @@ export class GuidedFlowState {
 
   /** the books of step 1 */
   readonly scope = computed<MaxLinkScope | null>(() => {
+    const chosen = this.repoScope.value;
+    if (chosen) {
+      const keys = chosen.keys.filter((k) => this.host.books.value.has(k));
+      return keys.length ? { kind: "books", keys } : null;
+    }
     const open = new Set(this.host.sources.value.map((s) => s.info.id));
     const ids = this.bookSources.value.filter((id) => open.has(id));
     return ids.length ? { kind: "sources", ids } : null;
@@ -511,7 +521,8 @@ export class GuidedFlowState {
     const prefer = this.preferSource.value || (this.preferLabel ? this.host.sources.value.find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
     const methods = this.pairMethods.value;
     const controls = this.pairControls.value;
-    const choices = { ...(Object.keys(methods).length && { methods }), ...(Object.keys(controls).length && { controls }) };
+    const pairs = this.repoScope.value?.pairs ?? [];
+    const choices = { ...(pairs.length && { pairs }), ...(Object.keys(methods).length && { methods }), ...(Object.keys(controls).length && { controls }) };
     return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(choices).length ? choices : undefined);
   });
 
@@ -567,6 +578,7 @@ export class GuidedFlowState {
     const adopt = this.host.sources.peek().filter((s) => this.isBooksSource(s)).map((s) => s.info.id);
     batch(() => {
       this.bookSources.value = adopt;
+      this.repoScope.value = null;
       this.preferSource.value = "";
       this.preferLabel = undefined;
       // a new flow starts from the default methods: "dibur-hamatchil for all pairs" of the previous one must not leak into it
@@ -581,6 +593,19 @@ export class GuidedFlowState {
       this.active.value = true;
       this.step.value = adopt.length ? "books" : "files";
       this.host.screen.value = "guided";
+    });
+  }
+
+  /**
+   * Starts a flow for books of an open database, chosen in the repository analysis, with the pairs the user chose (none: the
+   * planner finds each book's base itself). Nothing runs: the flow opens at "the books found", as for any other start.
+   */
+  startForBooks(keys: readonly string[], pairs: readonly UserPair[]): void {
+    this.start();
+    batch(() => {
+      this.bookSources.value = [];
+      this.repoScope.value = { keys: [...keys], pairs: [...pairs] };
+      this.step.value = "books";
     });
   }
 
@@ -604,6 +629,7 @@ export class GuidedFlowState {
       this.methods.value = r.methods?.length ? new Set(r.methods as EngineId[]) : null;
       this.pairMethods.value = (r.pairMethods ?? {}) as Record<string, readonly PairEngineId[]>;
       this.pairControls.value = r.pairControls ?? {};
+      this.repoScope.value = null;
       this.bookSources.value = [];
       this.resumeTo.value = r.step;
       this.active.value = true;
@@ -627,7 +653,7 @@ export class GuidedFlowState {
     const before = new Set(this.host.sources.peek().map((s) => s.info.id));
     await this.host.openFiles(files);
     const added = this.host.sources.peek().filter((s) => !before.has(s.info.id) && this.isBooksSource(s)).map((s) => s.info.id);
-    if (added.length) this.bookSources.value = [...this.bookSources.peek(), ...added];
+    if (added.length) batch(() => ((this.repoScope.value = null), (this.bookSources.value = [...this.bookSources.peek(), ...added])));
     return added.length;
   }
 
