@@ -104,7 +104,7 @@ export class SourceRegistry {
     for (const f of files) {
       signal?.throwIfAborted();
       const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, texts, notUtf8);
+      await this.route(f, kind, result, texts, notUtf8, signal);
     }
     if (texts.length) {
       const src = new TextFilesSource(this.nextId(), labelForTexts(texts), texts);
@@ -335,7 +335,7 @@ export class SourceRegistry {
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
-  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[]): Promise<void> {
+  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[], signal?: AbortSignal): Promise<void> {
     switch (kind) {
       case "sqlite":
         try {
@@ -369,7 +369,7 @@ export class SourceRegistry {
         }
         return;
       case "zip":
-        return this.openZip(f, result);
+        return this.openZip(f, result, signal);
       case "links-json":
       case "alt-toc-json":
       case "project":
@@ -425,13 +425,16 @@ export class SourceRegistry {
     }
   }
 
-  private async openZip(f: InputFile, result: OpenResult): Promise<void> {
+  private async openZip(f: InputFile, result: OpenResult, signal?: AbortSignal): Promise<void> {
     if (f.blob.size > MAX_ZIP)
       return void result.skipped.push({ path: f.path, reason: "הארכיון גדול מ־512MB, ולכן לא נפתח בדפדפן. חלצו אותו במחשב ובחרו את התיקייה." });
     let entries;
     try {
-      entries = safeUnzip(new Uint8Array(await f.blob.arrayBuffer()), { include: (p) => /\.(txt|json)$/i.test(p) });
+      const bytes = new Uint8Array(await f.blob.arrayBuffer());
+      entries = safeUnzip(bytes, { include: (p) => /\.(txt|json)$/i.test(p), ...(signal && { signal }) });
     } catch (err) {
+      // a cancel stops the whole open (as between files in open()), it is not a reason to skip this one
+      if (signal?.aborted) throw err;
       return void result.skipped.push({ path: f.path, reason: reasonOf(err, "הארכיון פגום או חשוד.") });
     }
     if (!entries.length)

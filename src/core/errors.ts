@@ -4,6 +4,7 @@
  */
 export type ErrorCode =
   | "archive/unsafe-path"
+  | "archive/duplicate-path"
   | "export/unsafe-path"
   | "export/library-record-dropped"
   | "export/accounting"
