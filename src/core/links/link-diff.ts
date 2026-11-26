@@ -1,4 +1,5 @@
 import { parseConnectionType } from "./connection-type";
+import { linePairIdentity } from "./equality";
 import type { Link, LinkSide } from "./model";
 import { storedForm } from "./stored-form";
 
@@ -247,13 +248,17 @@ export interface LinkMerge {
  * of its links is kept as it is (also its own duplicates — never dropped silently); each other source,
  * in order, is diffed against what is held so far: a "same" link only adds its origin, a new one is
  * added, and a link that says something else about a place already held (another target, type, range,
- * anchor…) is a CONFLICT — kept out unless `keepConflicts`, so nothing held is ever overwritten.
+ * anchor…) is a CONFLICT — kept out unless `keepConflicts`, so nothing held is ever overwritten. A record of
+ * two lines already held is never a new link, even when the diff had nothing left to pair it with.
  */
 export function mergeLinkSets(sources: readonly MergeSource[], preferred: number, keepConflicts = false): LinkMerge {
   const base = sources[preferred];
   type Entry = { link: Link; origins: string[]; base: boolean };
   const entries: Entry[] = (base?.links ?? []).map((link) => ({ link, origins: [base!.name], base: true }));
   const byLink = new Map<Link, Entry>(entries.map((e) => [e.link, e]));
+  /** the first link held of each two lines (equality.ts "same-lines"): a later record of them is no NEW link */
+  const byLines = new Map<string, Entry>();
+  for (const e of entries) if (!byLines.has(linePairIdentity(e.link))) byLines.set(linePairIdentity(e.link), e);
   const conflicts: MergeConflict[] = [];
   let duplicates = 0;
   sources.forEach((src, i) => {
@@ -270,8 +275,13 @@ export function mergeLinkSets(sources: readonly MergeSource[], preferred: number
       entries.map((e) => e.link),
       own,
     );
-    for (const r of d.rows) {
-      if (r.kind === "removed") continue;
+    for (const row of d.rows) {
+      if (row.kind === "removed") continue;
+      // The diff pairs one link with one: a second record of two lines already held (the first paired as "same")
+      // comes out "added". It is no new link — the database would hold the lines twice — but a disagreement
+      // about them (another ref, type, anchor…), or the same link again; also within one source (V7 §1.7).
+      const held = row.kind === "added" ? byLines.get(linePairIdentity(row.b!)) : undefined;
+      const r: LinkDiffRow = held ? { ...diffLinks([held.link], [row.b!]).rows[0]!, a: held.link } : row;
       if (r.kind === "same") {
         const e = byLink.get(r.a!)!;
         if (!e.origins.includes(src.name)) e.origins.push(src.name);
@@ -283,6 +293,7 @@ export function mergeLinkSets(sources: readonly MergeSource[], preferred: number
         const e = { link: r.b!, origins: [src.name], base: false };
         entries.push(e);
         byLink.set(e.link, e);
+        if (!byLines.has(linePairIdentity(e.link))) byLines.set(linePairIdentity(e.link), e);
       }
     }
   });

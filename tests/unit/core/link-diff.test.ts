@@ -270,6 +270,34 @@ describe("mergeLinkSets", () => {
     expect(both.entries.map((e) => e.link.id)).toContain("o2");
   });
 
+  /*
+   * V7 §1.7 (found by the round-trip property, compare-roundtrip.test.ts): the diff pairs one link with one link, so when
+   * another source held TWO records of a link the base holds once — the same record, and the same link with a ref_2
+   * (or of another type) — the first paired as "same" and the second was "added": the merge took in a second record
+   * of a link already held, a duplicate in the database that says something else about the same two lines. It is a
+   * conflict with the held link (kept out unless asked), like any other disagreement about a place already held.
+   */
+  it("a second record of the same two lines in another source is a conflict with the link held, not a new link", () => {
+    const held = [link(1, 10)];
+    const other = [link(1, 10, { id: "b1" }), link(1, 10, { id: "b2", ref2: "Rashi on Genesis 1:1:1" }), link(1, 10, { id: "b3", declaredType: "reference" }), link(1, 10, { id: "b4", heRef2: "x  y" }), link(1, 10, { id: "b5", heRef2: "x y" })];
+    const m = mergeLinkSets([{ name: "a", links: held }, { name: "b", links: other }], 0);
+    expect(m.entries.map((e) => [e.link.id, e.origins])).toEqual([[held[0]!.id, ["a", "b"]]]);
+    expect(m.conflicts.map((c) => [c.kind, c.kept.id, c.other.id])).toEqual([
+      ["ref", held[0]!.id, "b2"],
+      ["type", held[0]!.id, "b3"],
+      ["details", held[0]!.id, "b4"],
+    ]);
+    expect(m.duplicates).toBe(2); // b1 = the held link; b5 = b4 written differently, folded within its own source
+    // kept on request, as every conflict is
+    expect(mergeLinkSets([{ name: "a", links: held }, { name: "b", links: other }], 0, true).entries.map((e) => e.link.id)).toEqual([held[0]!.id, "b2", "b3", "b4"]);
+    // two lines that are not held yet still come in, once; a second record of them in the same source is a conflict with the first
+    const fresh = mergeLinkSets([{ name: "a", links: held }, { name: "b", links: [link(2, 20, { id: "n1" }), link(2, 20, { id: "n2", declaredType: "reference" })] }], 0);
+    expect([fresh.entries.map((e) => e.link.id), fresh.conflicts.map((c) => [c.kind, c.kept.id, c.other.id])]).toEqual([
+      [held[0]!.id, "n1"],
+      [["type", "n1", "n2"]],
+    ]);
+  });
+
   it("merging is idempotent: the merged set merged with its sources adds nothing", () => {
     const m = mergeLinkSets([{ name: "a.json", links: base }, { name: "b.json", links: other }], 0);
     const again = mergeLinkSets([{ name: "m", links: m.entries.map((e) => e.link) }, { name: "a.json", links: base }, { name: "b.json", links: other }], 0);
