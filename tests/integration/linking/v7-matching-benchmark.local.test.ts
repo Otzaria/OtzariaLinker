@@ -29,17 +29,20 @@ import type { EngineBook } from "../../../src/linking/automatic/types";
  *               (as a plain text file without headings: the engine searches the whole base for every line; #41 B2, #42 C9 —
  *               the database has almost no commentary with a declared base and no headings). Every other pair (by that order)
  *               is the half the caps were calibrated on ("tune"), the rest the half they were checked on ("heldout");
- * With V7_BENCH_PERSONAL=1 the same rules run on the personal v52 database (OTZARIA_PERSONAL_DB), whose books declare no base: the title
- * "X על <a book of the same database>" stands for the declaration (notes books and the masorah left out). It was never tuned on.
+ * With V7_BENCH_PERSONAL=1 the personal v52 database (OTZARIA_PERSONAL_DB) is opened NEXT TO the official one (OTZARIA_DB), as a user
+ * opens them: its commentaries are written on books of the official library, and its links name those books by title. The sets are the
+ * commentaries of the personal database, the title "X על <a book of the official library>" standing for the declaration (notes books and
+ * the masorah left out); the database's own links are the gold. It was never tuned on.
  *   yd        — every book declared written on the שולחן ערוך יורה דעה (finding #41 B2 was measured there): an independent held-out set;
  *   unrelated — pairs that are NOT commentary and base: named same-genre neighbours, and each held-out commentary
  *               against the base of the next held-out pair (rotation). Nothing there is a correct pair.
  * "Right"/"wrong" is AGREEMENT WITH THE DATABASE: the suggested place (line or range) holds a line the database
  * links the commentary line to. The database is not ground truth (it is incomplete and sometimes wrong).
  */
-/** V7_BENCH_PERSONAL=1: the personal (v52) database of OTZARIA_PERSONAL_DB instead, its books included (they are "personal" there) */
+/** V7_BENCH_PERSONAL=1: the commentaries of the personal (v52) database of OTZARIA_PERSONAL_DB, against the official library */
 const PERSONAL = process.env.V7_BENCH_PERSONAL === "1";
-const path = PERSONAL ? process.env.OTZARIA_PERSONAL_DB : process.env.OTZARIA_DB;
+const path = process.env.OTZARIA_DB;
+const personalPath = PERSONAL ? process.env.OTZARIA_PERSONAL_DB : undefined;
 const OUT = process.env.V7_BENCH_OUT;
 const DIS = process.env.V7_BENCH_DIS;
 const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings" | "yd";
@@ -88,14 +91,19 @@ const add = (t: Tally, k: string, v: boolean | null) => {
   e[v === true ? 0 : v === false ? 1 : 2]++;
 };
 
-describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-only)", () => {
+describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmark on the real seforim.db (read-only)", () => {
   it(`set "${SET}"`, async () => {
     const fd = openSync(path!, "r");
+    const pfd = personalPath ? openSync(personalPath, "r") : -1;
     try {
       const reg = new SourceRegistry();
-      const opened = await reg.open([{ path: "seforim.db", blob: fileBlob(fd) }]);
-      const books: SourceBook[] = opened.sources.flatMap((s) => s.books).filter((b) => PERSONAL || b.origin !== "personal");
+      const opened = await reg.open([{ path: "seforim.db", blob: fileBlob(fd) }, ...(pfd >= 0 ? [{ path: "personal.db", blob: fileBlob(pfd) }] : [])]);
+      const all: SourceBook[] = opened.sources.flatMap((s) => s.books);
+      const books: SourceBook[] = all.filter((b) => b.origin !== "personal");
+      const personal: SourceBook[] = all.filter((b) => b.origin === "personal");
       const byTitle = new Map(books.map((b) => [b.title, b] as const));
+      // the personal commentaries by title (the official book of the same title wins in byTitle: the bases are there)
+      for (const b of personal) if (!byTitle.has(b.title)) byTitle.set(b.title, b);
       const byKey = new Map(books.map((b) => [b.key, b] as const));
       const ref = (b: SourceBook): BookRef => ({ key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) });
 
@@ -104,7 +112,8 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         const gold = new Map<number, Set<number>>();
         for (const l of await reg.existingLinks(c.key, 0, Number.MAX_SAFE_INTEGER)) {
           const [mine, other] = l.source.book.key === c.key ? [l.source, l.target] : [l.target, l.source];
-          if (other.book.key !== b.key || mine.book.key !== c.key) continue;
+          // a personal database's link names the official book by title only ("unresolved:<title>")
+          if ((other.book.key !== b.key && !(PERSONAL && other.book.title === b.title)) || mine.book.key !== c.key) continue;
           for (let x = other.line; x <= (other.end ?? other.line) && x - other.line < 400; x++) gold.set(mine.line, (gold.get(mine.line) ?? new Set()).add(x));
         }
         return gold;
@@ -114,15 +123,16 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
       const candidates = (): [string, string][] => {
         const tuned = new Set(TUNE.map(([c, b]) => `${c}>${b}`));
         const cands: [string, string][] = [];
-        for (const c of books) {
+        for (const c of PERSONAL ? personal : books) {
           // the personal (v52) database declares no bases: there the title alone says it ("X על <a book of the same database>"),
           // without notes books ("הערות על", the footnotes method) and the masorah
           const bases = PERSONAL ? (/^(הערות|מסורה)/.test(c.title) ? [] : [byTitle.get(c.title.slice(c.title.lastIndexOf(" על ") + 4))?.key].filter((k): k is string => !!k)) : c.bases;
-          // (the personal database has few such books: 100 to 20,000 lines there)
-          if (!bases?.length || !c.title.includes(" על ") || (c.lineCount ?? 0) < (PERSONAL ? 100 : 300) || (c.lineCount ?? 0) > (PERSONAL ? 20000 : 6000)) continue;
+          // (the personal database has few such books, and often no line count: 100 to 20,000 lines there, or not known)
+          const n = c.lineCount ?? (PERSONAL ? 1000 : 0);
+          if (!bases?.length || !c.title.includes(" על ") || n < (PERSONAL ? 100 : 300) || n > (PERSONAL ? 20000 : 6000)) continue;
           for (const bk of bases) {
             const b = byKey.get(bk);
-            if (!b || !c.title.endsWith(` על ${b.title}`) || (b.lineCount ?? Infinity) > 40000) continue;
+            if (!b || !c.title.endsWith(` על ${b.title}`) || (b.lineCount ?? (PERSONAL ? 0 : Infinity)) > 40000) continue;
             if (!tuned.has(`${c.title}>${b.title}`)) cands.push([c.title, b.title]);
           }
         }
@@ -189,7 +199,7 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
           items = r.suggestions.map((suggestion) => ({ suggestion, focus: c.key }));
           res = { items: [{ result: r }], dbLinkKeys: (await reg.existingLinks(c.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => linePairKey(l)) };
         } else {
-        const plan = planMaxLink({ selected: [c.key], library: books });
+        const plan = planMaxLink({ selected: [c.key], library: PERSONAL ? all : books });
         steps = plan.steps.filter((s) => s.kind === "pair" && s.source.key === c.key && s.target.key === b.key && !s.relation.through && (s.engine === "headings" || s.engine === "dibur-hamatchil"));
         planned = steps.length > 0;
         if (!planned)
@@ -300,6 +310,7 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
       expect(pairs.length).toBeGreaterThan(0);
     } finally {
       closeSync(fd);
+      if (pfd >= 0) closeSync(pfd);
     }
   }, 6 * 3_600_000);
 });
