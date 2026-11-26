@@ -2,7 +2,7 @@ import { pushTo } from "../core/collections";
 import { sourceIdOfBookKey } from "../core/books";
 import type { DbLinkBookCount } from "../core/links/db-links";
 import type { BookRef } from "../core/links/model";
-import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
+import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, looseTitleKey, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
 import { parseConnectionType } from "../core/links/connection-type";
 import { ENGINES, type EngineId } from "./automatic";
 import { editionKey, editionText, pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
@@ -283,6 +283,11 @@ export type PlanStep =
        * (workers/maxlink-job.ts), so nothing of it is approved in bulk until the user names the book.
        */
       ambiguousBase?: true;
+      /**
+       * The step's place in the dependant's target hierarchy (PlanChoices.targets, #45): "secondary" steps search only the lines that
+       * name the target; "primary-review" steps are capped at "possible" (TargetHierarchy.fallback "review", workers/maxlink-job.ts).
+       */
+      targetRole?: "primary" | "primary-review" | "secondary";
       /** a rough cost (estimateMs); absent when a book's length is not known */
       estimate?: StepEstimate;
     }
@@ -354,6 +359,17 @@ export interface MaxLinkPlan {
   unestimated: number;
   /** the confidence a pair's suggestions must reach (UserPair.minConfidence), by pairMethodKey */
   minConfidence?: Record<string, "certain" | "high" | "possible" | "ambiguous">;
+  /** the target hierarchies the plan applied (PlanChoices.targets, or inferred: targetHierarchies) */
+  hierarchies?: AppliedHierarchy[];
+}
+
+export interface AppliedHierarchy {
+  readonly dependant: BookRef;
+  readonly primary: BookRef;
+  readonly secondary: readonly BookRef[];
+  readonly fallback: "primary" | "review";
+  /** true: the plan inferred it (the secondary targets are written on the primary one); false: the user's PlanChoices.targets */
+  readonly inferred: boolean;
 }
 
 /**
@@ -377,6 +393,29 @@ export interface PlanChoices {
    * in `pairs` keeps the controls it carries there.
    */
   readonly controls?: Readonly<Record<string, PairControl>>;
+  /**
+   * The target hierarchy of a dependant with several targets, by its title (#41 B13, issues #10, #45, V7 §2.7). Without one, a
+   * dependant whose targets are a base and books written on that base (the Shulchan Aruch and its ש"ך, ט"ז…) gets it inferred
+   * (PlanStep.targetRole, MaxLinkPlan.hierarchies).
+   */
+  readonly targets?: Readonly<Record<string, TargetHierarchy>>;
+}
+
+/**
+ * Which of a dependant's targets is primary (#45): every line goes to the primary base unless the line itself says it is about another
+ * target — a name with ד"ה, or a name with a seif katan ("בש"ך ס"ק ג"). A secondary target is searched ONLY for the lines that name it
+ * (dibur-hamatchil addressedOnly, no headings), so it never wins a line because its similarity score is a little higher.
+ */
+export interface TargetHierarchy {
+  /** title of the primary base */
+  readonly primary: string;
+  /** titles of the secondary targets, in priority order; default: every other target of the dependant */
+  readonly secondary?: readonly string[];
+  /**
+   * A line that names no target: "primary" (default) — linked to the primary base as usual; "review" — linked to it, but nothing of
+   * the primary steps above "possible" (maxlink/target-fallback), for a book whose lines mostly speak of the commentators.
+   */
+  readonly fallback?: "primary" | "review";
 }
 
 /** What the user may change about one pair without choosing its relation. */
@@ -1014,6 +1053,43 @@ function userRelations(pairs: readonly UserPair[] | undefined, library: readonly
   return { relations, unmade: bad };
 }
 
+/**
+ * The target hierarchy of each dependant that is aimed at two or more whole books as a commentary (#45, V7 §2.7). The user's
+ * (PlanChoices.targets, by the dependant's title) wins; else, among the targets the user chose, it is inferred when exactly one target is the base that every other
+ * target is written on by its title ("שפתי כהן על שולחן ערוך יורה דעה" on "שולחן ערוך, יורה דעה"; titles compared by the loose
+ * key, only to recognise the relation). No hierarchy otherwise: the targets stay equals (merge.ts candidateBooks).
+ */
+export function targetHierarchies(relations: ReadonlyMap<string, readonly Relation[]>, given?: PlanChoices["targets"]): Map<string, AppliedHierarchy> {
+  const out = new Map<string, AppliedHierarchy>();
+  for (const [depKey, rels] of relations) {
+    const whole = rels.filter((r) => r.kind === "commentary" && r.dependant.key === depKey && !r.scope && !r.through);
+    const bases = [...new Map(whole.map((r) => [r.base.key, r.base] as const)).values()];
+    if (bases.length < 2) continue;
+    const dependant = whole[0]!.dependant;
+    const mine = given?.[dependant.title];
+    if (mine) {
+      const primary = bases.find((b) => b.title === mine.primary);
+      if (!primary) continue;
+      const named = mine.secondary?.map((t) => bases.find((b) => b.title === t && b.key !== primary.key)).filter((b): b is BookRef => !!b);
+      const secondary = named ?? bases.filter((b) => b.key !== primary.key);
+      out.set(depKey, { dependant, primary, secondary, fallback: mine.fallback ?? "primary", inferred: false });
+      continue;
+    }
+    // inferred only among the targets the user chose (#45, "more target books"): the plan's own relations to a commentary on the base
+    // (siblings, the base of a base, intermediate commentators) already search what they should, each in its own way
+    if (!whole.every((r) => r.via === "user")) continue;
+    const writtenOnBase = (x: BookRef, p: BookRef) => {
+      const named = declaredBaseTitle(x.title);
+      return named !== null && looseTitleKey(named) === looseTitleKey(p.title);
+    };
+    const primaries = bases.filter((p) => bases.every((x) => x.key === p.key || writtenOnBase(x, p)));
+    if (primaries.length !== 1) continue;
+    const primary = primaries[0]!;
+    out.set(depKey, { dependant, primary, secondary: bases.filter((b) => b.key !== primary.key), fallback: "primary", inferred: true });
+  }
+  return out;
+}
+
 export function planMaxLink(input: PlanInput): MaxLinkPlan {
   const enabled = (e: EngineId) => !input.engines || input.engines.has(e);
   const byKey = new Map(input.library.map((b) => [b.key, b] as const));
@@ -1065,6 +1141,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     const inPreferred = input.preferSource ? all.filter((b) => sourceIdOfBookKey(b.key) === input.preferSource) : [];
     return !(inPreferred.length === 1 && inPreferred[0]!.key === rel.base.key);
   };
+  const hierarchies = targetHierarchies(new Map([...relations].map(([k, rs]) => [k, rs.filter((r) => r.dependant.key === k)] as const)), input.choices?.targets);
   const steps: PlanStep[] = [];
   const unsuitable: PlanUnsuitable[] = [];
   const unsuitableSeen = new Set<string>();
@@ -1088,7 +1165,14 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const declared = type?.known ? ctl!.connectionType!.trim().toLowerCase().replaceAll(" ", "_") : undefined;
       // the user named the methods of this pair: exactly those for the matching of the two books (headings then runs with no title gate);
       // the notes step of a notes book is a different job and goes on, unless the user turned the notes engine off (fix round, claim 5)
-      const list: StepSpec[] = wanted
+      const tier = hierarchies.get(depKey);
+      const role: Extract<PlanStep, { kind: "pair" }>["targetRole"] =
+        !tier || rel.dependant.key !== depKey || rel.kind !== "commentary" || rel.scope || rel.through
+          ? undefined
+          : tier.primary.key === rel.base.key
+            ? tier.fallback === "review" ? "primary-review" : "primary"
+            : tier.secondary.some((b) => b.key === rel.base.key) ? "secondary" : undefined;
+      const listed: StepSpec[] = wanted
         ? [
             ...wanted.flatMap((e) => {
               const found = own.find((x) => x.engine === e);
@@ -1100,6 +1184,11 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
             ...(wanted.includes("footnotes") || !enabled("footnotes") ? [] : own.filter((x) => x.engine === "footnotes")),
           ]
         : own;
+      // a secondary target (#45): only the lines that name it, by ד"ה or by seif katan; never all lines by structure or by score
+      const list: StepSpec[] =
+        role === "secondary"
+          ? [{ engine: "dibur-hamatchil", source: rel.dependant, target: rel.base, why: `${quote(rel.base.title)} הוא יעד משני של ${quote(rel.dependant.title)}; היעד הראשי הוא ${quote(tier!.primary.title)}. רק שורה שמזכירה את ${quote(rel.base.title)} בשמה ("ד"ה", או "ס"ק" ומספר) מקושרת אליו; כל שאר השורות הולכות ליעד הראשי.`, options: { addressedOnly: true } }]
+          : listed;
       if (!wanted)
         for (const engine of ["headings", "dibur-hamatchil", "footnotes"] as const) {
           const planned = own.some((x) => x.engine === engine);
@@ -1118,7 +1207,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
       const id = `${s.engine}|${s.source.key}>${s.target.key}${rel.scope?.baseSection ? `#${rel.scope.baseSection}` : ""}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      steps.push({ id, kind: "pair", ...s, relation: rel, ...(sharesTitle(rel) && { ambiguousBase: true as const }) });
+      steps.push({ id, kind: "pair", ...s, relation: rel, ...(sharesTitle(rel) && { ambiguousBase: true as const }), ...(role && { targetRole: role }) });
       bump(s.source.key);
       bump(s.target.key);
       }
@@ -1162,6 +1251,11 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
     const shared = new Map<string, BookRef>();
     for (const st of steps) if (st.kind === "pair" && st.ambiguousBase && st.source.key === k) shared.set(st.target.key, st.target);
+    const tier = hierarchies.get(k);
+    if (tier)
+      decisions.push(
+        `היעד הראשי הוא ${quote(tier.primary.title)}${tier.inferred ? " (כי שאר היעדים כתובים עליו)" : " (לפי בחירתכם)"}; היעדים המשניים, לפי הסדר: ${tier.secondary.map((x) => quote(x.title)).join(", ")}. שורה מקושרת ליעד משני רק כשהיא מזכירה אותו בשמה (ד"ה, או ס"ק ומספר), אף פעם לא רק כי ציון הדמיון שלה שם גבוה מעט יותר.${tier.fallback === "review" ? " שורה שאינה מזכירה אף יעד מקושרת ליעד הראשי לבדיקה בלבד (לא מעל \"אפשרית\")." : ""}`,
+      );
     for (const t of shared.values()) {
       const others = (editions.get(editionKey(t.title)) ?? []).filter((x) => x.key !== t.key);
       decisions.push(`יש עוד ספר בשם ${quote(t.title)} או בשם שקול (${others.map(editionText).join("; ")}), והבסיס נבחר לפי כלל (המקור של הספר, או המאגר הרשמי) ולא לפי ראיה. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו במפורש את הספר (בחירת מקור לספרי הבסיס, או זוג עם הספר עצמו).`);
@@ -1208,7 +1302,7 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
   }
   const minConfidence: Record<string, "certain" | "high" | "possible" | "ambiguous"> = {};
   for (const [key, c] of controls) if (c.minConfidence) minConfidence[key] = c.minConfidence;
-  return { steps, books, identified, perEngine, baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }), unsuitable, estimatedMs, unestimated, ...(Object.keys(minConfidence).length && { minConfidence }) };
+  return { steps, books, identified, perEngine, ...(hierarchies.size && { hierarchies: [...hierarchies.values()] }), baseSources: [...baseSources].map(([title, s]) => ({ title, sources: [...s] })), ...(choices && { choices }), unsuitable, estimatedMs, unestimated, ...(Object.keys(minConfidence).length && { minConfidence }) };
 }
 
 /** The book names a base it is written on: by its title ("X על Y", "הערות על Y") or by the database. */

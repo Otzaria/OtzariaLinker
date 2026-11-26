@@ -174,7 +174,7 @@ export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "
  * any of them runs the book again even when no text changed (a result found under another filter is never reused).
  */
 export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRecord["engineOptions"], lineFilter?: SourceFilter | null): string {
-  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}${s.kind === "pair" && s.ambiguousBase ? "|amb" : ""}${s.kind === "pair" && s.titleForced ? "|forced" : ""}`).sort();
+  const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}${s.kind === "pair" && s.ambiguousBase ? "|amb" : ""}${s.kind === "pair" && s.titleForced ? "|forced" : ""}${s.kind === "pair" && s.targetRole ? `|${s.targetRole}` : ""}`).sort();
   const engines = [...new Set(steps.map((s) => s.engine))].sort();
   const sig = [parts, engines.map((e) => engineOptions?.[e] ?? null)];
   // no filter: the signature of a job recorded before the filter was the run's, so its books are still recognised as unchanged

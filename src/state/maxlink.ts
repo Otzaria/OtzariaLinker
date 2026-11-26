@@ -673,7 +673,8 @@ export class MaxLinkState {
     for (const l of this.host.linkState.value.links.values()) if (l.status !== "deleted") pushTo(project, linePairKey(l), l.id);
     // the books a book is aimed at in more than one way (the user's own pairs, PlanChoices.pairs, and any commentary the plan relates to two
     // whole books): a line is never linked to several of them blindly (merge.ts step 4d)
-    const userTargets = [...new Set([...plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" ? [s.target.key] : [])), ...competingTargets(plan.steps)])];
+    // a secondary target of a hierarchy (PlanStep.targetRole, #45) is searched only for the lines that name it: no competitor of the primary
+    const userTargets = [...new Set([...plan.steps.flatMap((s) => (s.kind === "pair" && s.relation.via === "user" && s.targetRole !== "secondary" ? [s.target.key] : [])), ...competingTargets(plan.steps)])];
     const raw = mergeSuggestions(items, {
       reference: db,
       ...(userTargets.length > 1 && { candidateBooks: userTargets }),

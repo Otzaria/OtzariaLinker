@@ -314,6 +314,9 @@ export async function maxlinkJob(
         if (!skipped && fit && advice && advice.action !== "run") result = titleAdvice(result, fit, advice, step.titleForced === true, loaded.source.book.title, loaded.target.book.title);
         // a base chosen between editions by a rule (PlanStep.ambiguousBase): the one rule of every path (linking/batch.ts capUndecided)
         if (step.ambiguousBase) result = capUndecided(result, step.target.title, "maxlink/ambiguous-base");
+        // the primary target of a hierarchy whose fallback is "review" (PlanChoices.targets, #45): nothing of it above "possible"
+        if (step.targetRole === "primary-review")
+          result = capConfidence(result, ["certain", "high"], { code: "maxlink/target-fallback", text: `השורה אינה מזכירה אף יעד בשמה, ולכן היא מקושרת ליעד הראשי "${step.target.title}" לבדיקה בלבד, לפי מדיניות היעדים שנבחרה.` });
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         result = await guard(step, result, loaded.source);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only

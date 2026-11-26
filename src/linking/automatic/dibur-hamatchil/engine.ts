@@ -43,6 +43,7 @@ import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, 
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
+import { toGematria } from "../../../core/text/gematria";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
 import { contextScore, contextWords, lineKeys, pickByContext, pickByOrder, type TieCandidate } from "./tie-break";
 import { refBlockOf, sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
@@ -1073,6 +1074,32 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     return null;
   };
 
+  /*
+   * "בש"ך ס"ק ג - …" against the Shach itself (#41 B13, #10): the line names the place by number and quotes nothing, so it goes to the
+   * base line that opens with seif katan ג — "(ג)", "[ג]" — inside the line's window. One such line in a section window → high (a number,
+   * not words: never certain); several, or a window that is the whole book → the first at or after the previous line's place, possible.
+   */
+  const seifOpenings = new Map<number, number[]>();
+  if (baseIs)
+    for (const l of bLines) {
+      if (l.heading !== null) continue;
+      const n = openingNoteNumbers(l.text)[0];
+      if (n !== undefined) seifOpenings.set(n, [...(seifOpenings.get(n) ?? []), l.index]);
+    }
+  const placeOnSeifKatan = (n: number, who: Commentator, cLine: number, prev: number | null): Placement | null => {
+    const window = windowFor(cLine);
+    const at = (seifOpenings.get(n) ?? []).filter((i) => i >= window.from && i <= window.to);
+    if (!at.length) return null;
+    const prevIn = prev !== null && prev >= window.from && prev <= window.to ? prev : null;
+    const base = (prevIn === null ? undefined : at.find((i) => i >= prevIn)) ?? at[0]!;
+    const sure = at.length === 1 && window.kind !== "book";
+    const score = sure ? 0.9 : 0.7;
+    const reasons = [r("dh/seif-katan", `השורה מפנה ל${who.name} ס"ק ${toGematria(n)} במספר, בלי לצטט; שורת הבסיס הזו נפתחת בס"ק ${toGematria(n)}`)];
+    if (!sure) reasons.push(r("dh/seif-katan-many", `בטווח יש ${at.length} שורות שנפתחות בס"ק ${toGematria(n)}, או שהטווח הוא כל הספר; לבדיקה`));
+    const alternatives = at.filter((i) => i !== base).slice(0, 3).map((line) => ({ line, score: 0.5 }));
+    return { cLine, base, score, confidence: confidenceOf(score, null, thresholds), reasons, rules: ["dh/seif-katan", `dh/window-${window.kind}`], warnings: [], alternatives, rootScore: score, depth: 0 };
+  };
+
   /** A line that continues `parent` (בא"ד, שם, עוד כתב, an item paragraph): its place, weakened. */
   const inherited = (cLine: number, parent: Placement, code: string, text: string, score: number): Placement => ({
     cLine,
@@ -1187,6 +1214,15 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       continue;
     }
     if (unaddressed && !active) unaddressed.add(line.index);
+    const named = ex.addressee?.kind === "named" ? ex.addressee : null;
+    const bySeif: Placement | null = named?.seifKatan !== undefined && baseIs?.key === named.commentator.key ? placeOnSeifKatan(named.seifKatan, named.commentator, line.index, prev) : null;
+    if (bySeif) {
+      crossedHeading = false;
+      place(bySeif, false, bySeif.cLine);
+      chain = bySeif;
+      prev = bySeif.base;
+      continue;
+    }
     const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
     if (marked) {
       crossedHeading = false;

@@ -44,7 +44,41 @@ export type DhBoundary = "bold" | "etc" | "range" | "punctuation" | "dash" | "no
  * Whose words the line quotes, as far as the line itself says: an intermediate commentator it names
  * ("named"), the base text by a label ("text"), or a bare ד"ה that names nobody ("bare").
  */
-export type DhAddressee = { readonly kind: "named"; readonly commentator: Commentator } | { readonly kind: "text" } | { readonly kind: "bare" };
+export type DhAddressee =
+  /** `seifKatan`: the line points at the commentator by a number, with no quotation ("בש"ך ס"ק ג"; #41 B13, #10) */
+  | { readonly kind: "named"; readonly commentator: Commentator; readonly seifKatan?: number }
+  | { readonly kind: "text" }
+  | { readonly kind: "bare" };
+
+/** A Hebrew numeral token in its canonical spelling ("ג", "יב"), or null: a word is not a number. */
+function numeralOf(t: HebToken | undefined): number | null {
+  if (!t || t.key.length > 3) return null;
+  const n = fromGematria(t.key);
+  return n !== null && n > 0 && toGematria(n).replace(/["'״׳]/g, "") === t.key ? n : null;
+}
+
+/**
+ * "ס"ק ג", "סק"ג", "סעיף קטן ג" at tokens[k]: the seif katan of a commentator of the Shulchan Aruch, as a number and the tokens it
+ * takes; else null. Only right after the commentator's name at the opening of the line (extractDh), where it says which book and
+ * which place the line is about, without quoting it (#41 B13).
+ */
+function seifKatanAt(tokens: readonly HebToken[], k: number): { n: number; len: number } | null {
+  const t = tokens[k];
+  if (!t) return null;
+  if (t.key === "סק" && t.acronym) {
+    const n = numeralOf(tokens[k + 1]);
+    return n === null ? null : { n, len: 2 };
+  }
+  if (t.acronym && t.key.startsWith("סק") && t.key.length <= 5) {
+    const n = numeralOf({ ...t, key: t.key.slice(2) });
+    return n === null ? null : { n, len: 1 };
+  }
+  if (t.key === "סעיפ" && tokens[k + 1]?.key === "קטנ") {
+    const n = numeralOf(tokens[k + 2]);
+    return n === null ? null : { n, len: 3 };
+  }
+  return null;
+}
 
 export interface ExtractedDh {
   readonly kind: DhLineKind;
@@ -212,6 +246,13 @@ export function extractDh(line: string | Pick<EngineLine, "text" | "heading">, m
     const t = tokens[p]!;
     const next = tokens[p + 1];
     const named = commentatorOfToken(t);
+    // "בש"ך ס"ק ג - …": the commentator and the place, by number (#41 B13, #10): explicit evidence the line is about that book
+    const sk = named ? seifKatanAt(tokens, p + 1) : null;
+    if (named && sk) {
+      addressee = { kind: "named", commentator: named, seifKatan: sk.n };
+      take(1 + sk.len);
+      continue;
+    }
     if (named && isDhMark(next)) {
       addressee = { kind: "named", commentator: named };
       take(2);
