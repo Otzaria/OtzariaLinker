@@ -9,6 +9,7 @@ import { addChanges, commit, type Change, type LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource } from "./services";
 import type { NoticeKind, Pick as LinePick, Side, SideTab } from "./store";
 import { CHUNK, type LineStore } from "./lines";
+import { countOf } from "./task-progress";
 import { htmlToPlainText } from "../core/text/html";
 import { canonicalTypeString, parseConnectionType } from "../core/links/connection-type";
 
@@ -35,7 +36,7 @@ export interface SuggestionsHost {
   autoHeRef(at: { bookKey: string; line: number }): string;
   reveal(side: Side, bookKey: string, line: number): void;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
-  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null>;
   /** keys of the open books (of the given keys) the library treats as Sefaria's (AppStore.sefariaOwnedKeys) */
   sefariaOwnedKeys?(keys?: Iterable<string>): string[];
 }
@@ -60,6 +61,10 @@ export interface SuggestionRun {
    * the library, so one that exists there shows as pending — a bulk approval waits for retryDbLinks().
    */
   dbLinksUnread?: readonly { key: string; title: string }[];
+  /** runs the same search again, whole (a stopped run's "הרצה חוזרת", V7 §3.16) */
+  again?: () => Promise<boolean>;
+  /** a batch run: what rerunFailed needs to run some of its books again */
+  batchArgs?: { sourceId: string; options: Record<string, unknown>; choice: { preferSource?: string } };
 }
 
 /** A suggestion as the table shows it: from the user's book to the other (audit F17, F18). */
@@ -239,7 +244,8 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const again = () => this.runEngine(engine, sourceKey, targetKey, options);
+    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, again, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) this.host.notify("warning", partialNotice(result.suggestions.length));
     else this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -252,11 +258,12 @@ export class SuggestionsState {
    */
   async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
-    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), { ...opts, keepPartial: true }));
+    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), { ...opts, keepPartial: true }), citationStage);
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    this.startRun({ engine: "citations", label: `${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const again = () => this.runCitations(sourceKey, options);
+    this.startRun({ engine: "citations", label: `${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), again, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) return this.host.notify("warning", partialNotice(result.suggestions.length)), true;
     this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -269,26 +276,30 @@ export class SuggestionsState {
    * `choice.preferSource`: the source the user chose for bases open in several sources; without it a base chosen among editions
    * by a rule is undecided, and what its pair finds is capped at "possible" (V7 §2.8, #41 B4).
    */
-  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}, choice: { preferSource?: string } = {}): Promise<boolean> {
+  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}, choice: { preferSource?: string } = {}, only?: ReadonlySet<string>): Promise<boolean> {
     const src = this.host.sources.value.find((s) => s.info.id === sourceId);
     if (!src) return false;
     const commentaries = src.books.map((b) => this.host.refOf(b.key));
     const bases = [...this.host.books.value.values()].map((b) => this.host.refOf(b.key));
     const pairs = pairByTitle(commentaries, bases, choice.preferSource);
-    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
+    // `only`: some books of the current batch run again (rerunFailed); the others keep their rows and suggestions
+    const prev = only ? this.run.peek() : null;
+    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null && (!only || only.has(p.source.key)));
     if (!runnable.length) {
       this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר בקובץ או במסד הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
-    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }));
+    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }), (d, n) => countOf("ספר", d + 1, n));
     if (!items) return false;
     const unread = await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
-    const suggestions: Suggestion[] = [];
-    const notes: Reason[] = [];
+    const mine = (s: Suggestion) => !only || only.has(s.source.book.key) || only.has(s.target.book.key);
+    const suggestions: Suggestion[] = (prev?.result.suggestions ?? []).filter((s) => !mine(s));
+    const notes: Reason[] = [...(prev?.result.notes ?? [])];
     // a cancel keeps the books done and what the last one found (keepPartial); the rest say they did not run
     const reached = new Set(items.map((it) => it.source.key));
     const partial = items.length < runnable.length || items.some((it) => it.result && isPartial(it.result));
-    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.note && { note: p.note }), ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 }));
+    const kept = new Map((prev?.batch ?? []).map((r) => [r.source.key, r]));
+    const rows: BatchRow[] = pairs.map((p) => (only && !only.has(p.source.key) && kept.get(p.source.key)) || { source: p.source, target: p.target, ...(p.note && { note: p.note }), ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 });
     for (const it of items) {
       const row = rows.find((r) => r.source.key === it.source.key)!;
       if (it.error) row.problem = it.error;
@@ -303,11 +314,27 @@ export class SuggestionsState {
       }
       for (const n of result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
-    this.startRun({ engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const paired = pairs.filter((p) => p.target).length;
+    const batchArgs = { sourceId, options, choice };
+    this.startRun({ engine, label: `אצווה: ${paired} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, batchArgs, again: () => this.runBatch(engine, sourceId, options, choice), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;
     const failed = rows.filter((r) => r.problem).length;
-    this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
+    this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${paired} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
     return true;
+  }
+
+  /** The books of the current batch run that failed or were not reached, and can run again (they have a base). */
+  failedBatchBooks(): string[] {
+    return (this.run.value?.batch ?? []).filter((r) => r.problem && r.target).map((r) => r.source.title);
+  }
+
+  /** Runs again only the failed books of the current batch run, keeping the others' suggestions and every decision (V7 §3.16). */
+  async rerunFailed(): Promise<boolean> {
+    const run = this.run.peek();
+    const keys = (run?.batch ?? []).filter((r) => r.problem && r.target).map((r) => r.source.key);
+    if (!run?.batchArgs || !keys.length) return false;
+    const { sourceId, options, choice } = run.batchArgs;
+    return this.runBatch(run.engine, sourceId, options, choice, new Set(keys));
   }
 
   /**
@@ -610,7 +637,16 @@ export function suggestionFacets(list: readonly Suggestion[], to: (s: Suggestion
 /** An engine result cut short by a cancel: the engines stop with an "engine/aborted" note and return what they found. */
 export const isPartial = (r: EngineResult): boolean => r.notes.some((n) => n.code === "engine/aborted");
 const PARTIAL_LABEL = " (חלקי: הריצה נעצרה)";
-const partialNotice = (n: number) => `הריצה נעצרה לפני הסוף: מוצגות ${n.toLocaleString("he")} ההצעות שנמצאו עד העצירה, והן חלקיות — לא כל הספר נבדק. הריצו שוב כדי לקבל את כולן.`;
+const partialNotice = (n: number) =>
+  n
+    ? `הריצה נעצרה לפני הסוף: מוצגות ${n.toLocaleString("he")} ההצעות שנמצאו עד העצירה, והן חלקיות — לא כל הספר נבדק. הריצו שוב כדי לקבל את כולן.`
+    : 'הריצה נעצרה לפני שנמצאו הצעות. מה שנבדק עד העצירה מסוכם בלשונית ההצעות; כדי לחפש בכל הספר לחצו שם "הרצה חוזרת".';
+
+/** The citations job's progress (per mille: the scan of the book, then its target books; workers/citations-job.ts) as the stage it is in. */
+const citationStage = (d: number, n: number): string => {
+  const f = d / n;
+  return !d ? "מכין: קורא את רשימת הספרים הפתוחים" : f < 0.5 ? `קורא את הספר: ${Math.round(f * 200)}%` : `בודק את הספרים המצוטטים: ${Math.min(100, Math.round((f - 0.5) * 200))}%`;
+};
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {

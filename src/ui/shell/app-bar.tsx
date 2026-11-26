@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { chooseLayout, PRESETS, resetLayout, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import type { RoleLabels } from "../../state/roles";
-import { remainingText } from "../../state/task-progress";
+import { elapsedText, remainingText, stageText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
@@ -17,6 +17,14 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const ls = store.linkState.value;
   const task = store.task.value;
   const eta = task ? remainingText(task.startedAt, task.done, task.total, Date.now()) : null;
+  // a running task re-reads the clock every second: a step with no progress report still shows the time going (V7 §3.16)
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!task) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [!task]);
+  const elapsed = task ? elapsedText(task.startedAt, Date.now()) : null;
   const inWorkspace = store.screen.value === "workspace";
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
   const layout = prefs.layout.value;
@@ -79,10 +87,12 @@ export function AppBar({ onExport }: { onExport: () => void }) {
       {task && !(store.screen.value === "guided" && store.guided.step.value === "run") && (
         <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
-          {task.total > 0 && <progress max={task.total} value={task.done} />}
-          {/* the task's own count and the time left, once an estimate means something (audit F21) */}
-          {task.count && <span class="task-count">{task.count}</span>}
+          {/* before the first count the bar moves without a value: the job is preparing, not stuck at 0/0 (#41 B11) */}
+          {task.total > 0 ? <progress max={task.total} value={task.done} /> : <progress />}
+          {/* the task's own count (or that it is preparing), the time left once an estimate means something (audit F21), and the time so far */}
+          {(task.count || !task.total) && <span class="task-count">{stageText(task)}</span>}
           {eta && <span class="task-eta">· {eta}</span>}
+          {elapsed && <span class="task-eta" title="הזמן מאז שהפעולה התחילה">· {elapsed}</span>}
           <button class="btn text" onClick={task.cancel}>ביטול</button>
         </div>
       )}

@@ -6,6 +6,8 @@ import type { SourceRegistry } from "../sources/registry";
 /** Lines read per step of the source scan (as the in-book search). */
 const CHUNK = 500;
 const YIELD_MS = 25;
+/** how long the target books may still be read after a cancel, to rank what the scan found (below rpc.ts PARTIAL_WAIT_MS) */
+const RESOLVE_AFTER_CANCEL_MS = 3_000;
 /**
  * Target indexes kept between runs, per registry (LRU), bounded by the lines they cover. An index
  * holds numbers, short labels and the lines' references, never their text (~60 bytes a line), so
@@ -54,8 +56,16 @@ async function citationsRun(registry: SourceRegistry, source: BookRef, options: 
   // not without a reason (2.1): a book with no sign of a place in it (suitability.ts CITATION_GATE: one line with a place word and a number, or with the
   // name of an open book and two numbers) has little to find. The look stops as soon as the gate opens, so a book with references pays one
   // chunk; one without pays a read of its lines, far below the scanner. A user who knows better runs it anyway (CitationsOptions.noGate).
-  const { aliases, units } = await aliasesOf(registry);
-  if ((options as CitationsOptions).noGate !== true && !(await showsReferences(registry, source, (key) => aliases.hasFirstWord(key)))) {
+  // the catalog of every open book takes seconds on the whole library: the bar says so from the start (#41 B11; the stage text: state/suggestions.ts)
+  ctx.progress?.(0, 1000);
+  const aborted = () => ctx.signal?.aborted === true;
+  const { aliases, units } = await aliasesOf(registry, aborted);
+  // a cancel while preparing stops here, saying so — no line of the book was read, so there is nothing partial to rank
+  const stopped = (): EngineResult => ({ suggestions: [], notes: [{ code: "engine/aborted", text: "החיפוש נעצר בשלב ההכנה, לפני שנקראה שורה מהספר, ולכן אין הצעות. כדי לחפש, הריצו שוב." }], unmatched: [] });
+  if (aborted()) return stopped();
+  const gateOpen = (options as CitationsOptions).noGate === true || (await showsReferences(registry, source, (key) => aliases.hasFirstWord(key)));
+  if (aborted()) return stopped();
+  if (!gateOpen) {
     ctx.progress?.(1000, 1000);
     return {
       suggestions: [],
@@ -68,7 +78,6 @@ async function citationsRun(registry: SourceRegistry, source: BookRef, options: 
   // a cancel (or the benchmark's time cap) stops the scan and the resolution, never throws: finish() still ranks
   // the citations of the books already read, with an "engine/aborted" note — partial results survive (as the
   // other engines return theirs)
-  const aborted = () => ctx.signal?.aborted === true;
   const tick = async () => {
     if (Date.now() - last > YIELD_MS) {
       await new Promise((r) => setTimeout(r, 0));
@@ -88,8 +97,12 @@ async function citationsRun(registry: SourceRegistry, source: BookRef, options: 
     if (aborted()) break;
   }
   const targets = run.targets();
+  // a scan cut short by a cancel still checks the books it named for a short while (#41 B11): what it recognised becomes a partial
+  // result instead of nothing, and the cancel still answers well within the UI's wait (rpc.ts PARTIAL_WAIT_MS). A cancel during this
+  // stage stops at the next book: the books already checked are the partial result.
+  const cancelledAt = aborted() ? Date.now() : 0;
   for (const [i, book] of targets.entries()) {
-    if (aborted()) break;
+    if (cancelledAt ? Date.now() - cancelledAt > RESOLVE_AFTER_CANCEL_MS : aborted()) break;
     const { index, heRefs } = await loadIndex(registry, book);
     const own = run.needsUnits(book) ? await ownUnits(registry, book) : null;
     const pages = run.wantsPages(book, index) ? await pagesOf(registry, book) : null;
@@ -123,7 +136,7 @@ async function showsReferences(registry: SourceRegistry, source: BookRef, knowsN
  * every Bavli tractate, the parshiyot of the Torah: their alt_toc, ~40 books), rebuilt only when the
  * set of open books changed.
  */
-async function aliasesOf(registry: SourceRegistry): Promise<{ aliases: AliasIndex; units: NamedUnitIndex }> {
+async function aliasesOf(registry: SourceRegistry, aborted: () => boolean = () => false): Promise<{ aliases: AliasIndex; units: NamedUnitIndex }> {
   const books = await registry.citationCatalog();
   const catalog: CatalogBook[] = books.map(({ book, aliases }) => ({
     book: { key: book.key, title: book.title, origin: book.origin, ...(book.isBaseBook !== undefined && { isBaseBook: book.isBaseBook }) },
@@ -137,6 +150,8 @@ async function aliasesOf(registry: SourceRegistry): Promise<{ aliases: AliasInde
   for (const { book } of books) {
     const kind = unitKindOf(book.title);
     if (!kind) continue;
+    // cancelled: the caller stops before using it, and an incomplete index is never cached
+    if (aborted()) return { aliases, units: NamedUnitIndex.build([]) };
     const ref: BookRef = { key: book.key, title: book.title, origin: book.origin };
     sources.push(...(await readUnits(registry, ref, [kind], book.lineCount)));
   }

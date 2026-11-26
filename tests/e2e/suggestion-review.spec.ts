@@ -88,6 +88,39 @@ test("filter by method, decide from the keyboard on a row, and take a selection 
   expect(seen.external).toEqual([]);
 });
 
+test("a citations search: the bar says its stage, and a cancel keeps the run on the screen with a re-run (#41 B11)", async ({ page }) => {
+  const seen = watchPage(page);
+  const lines = ["<h1>חיבור גדול</h1>", "<h2>פרק א</h2>", ...Array.from({ length: 40_000 }, (_, i) => `שורה ${i + 1} כמו שנאמר (בראשית א, ${["א", "ב", "ג", "כח"][i % 4]}) ועוד מילים.`)];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "חיבור גדול.txt", mimeType: "text/plain", buffer: Buffer.from(lines.join("\n")) },
+  ]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "חיבור גדול" }).first().locator('button.side-btn[data-side="source"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByLabel("שיטה").selectOption({ label: "מראי מקומות" });
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  const task = page.locator(".app-bar .task");
+  // the stage, never a bare bar: preparing, then reading the book
+  await expect(task.locator(".task-count")).toHaveText(/מכין|קורא את הספר/);
+  await task.getByRole("button", { name: "ביטול" }).click();
+  await expect(task).toHaveCount(0, { timeout: 20_000 });
+  // the run stays: the form does not come back, and the panel says the run stopped and offers it again
+  await expect(page.getByRole("button", { name: "חיפוש התאמות" })).toHaveCount(0);
+  const stopped = page.locator(".sug-results li.warning", { hasText: "הריצה נעצרה" });
+  await expect(stopped).toBeVisible();
+  await stopped.getByRole("button", { name: "הרצה חוזרת" }).click();
+  // the whole search this time: it ends by itself, whole
+  await expect(stopped).toHaveCount(0, { timeout: 90_000 });
+  await expect(page.getByRole("table", { name: "הצעות" }).locator("tbody tr").first()).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
 test("a second press of 'אישור' takes the approval back to pending, not to rejected (#41 B22)", async ({ page }) => {
   const seen = watchPage(page);
   const table = await headingsRun(page);

@@ -94,6 +94,20 @@ export function SuggestionsPanel() {
           ))}
         </ul>
       )}
+      {/* a stopped run keeps what it found, says so, and runs again whole on request (#41 B11, V7 §3.16) */}
+      {run.partial && (
+        <ul class="problems" style="padding:0 6px 6px">
+          <li class="warning" role="status">
+            <Icon name="fl_warning" size={16} />
+            <span class="grow">
+              {run.result.suggestions.length
+                ? `הריצה נעצרה לפני הסוף: ${run.result.suggestions.length.toLocaleString("he")} ההצעות שכאן נמצאו עד העצירה, ולא כל הספר נבדק.`
+                : "הריצה נעצרה לפני שנמצאו הצעות. מה שנבדק עד העצירה מסוכם כאן."}
+            </span>
+            {run.again && <button class="btn text" disabled={!!store.task.value} onClick={() => void run.again!()}>הרצה חוזרת</button>}
+          </li>
+        </ul>
+      )}
       {run.dbLinksUnread?.length ? (
         <ul class="problems" style="padding:0 6px 6px">
           <li class="warning" role="alert">
@@ -301,7 +315,17 @@ function BatchSummary() {
   const store = useStore();
   const rows = store.suggestions.run.value?.batch;
   if (!rows) return null;
+  const failed = store.suggestions.failedBatchBooks();
   return (
+    <>
+    {failed.length > 0 && (
+      <div class="row" style="padding:0 6px 6px">
+        <span class="grow muted">{failed.length === 1 ? `ספר אחד לא קושר: ${failed[0]}.` : `${failed.length.toLocaleString("he")} ספרים לא קושרו.`} הסיבה בסיכום לפי ספר.</span>
+        <button class="btn outlined" disabled={!!store.task.value} onClick={() => void store.suggestions.rerunFailed()} title="מריץ שוב רק את הספרים שנכשלו או שלא הגיעו אליהם; ההצעות וההחלטות של השאר נשמרות">
+          הרצה חוזרת לספרים שנכשלו
+        </button>
+      </div>
+    )}
     <details class="held" style="margin:0 6px 6px">
       <summary>סיכום לפי ספר ({rows.length})</summary>
       <table class="sug-table" style="margin-top:6px" aria-label="סיכום לפי ספר">
@@ -321,6 +345,7 @@ function BatchSummary() {
         </tbody>
       </table>
     </details>
+    </>
   );
 }
 
