@@ -7,6 +7,8 @@ import { distUrl, watchPage } from "./helpers";
  * Reviewing suggestions (V7 §3.11, findings #41 B22): a commentary written verse by verse against the real Bereshit slice,
  * run by headings in the worker of the built file.
  */
+/** a suggestion row's height at most in the narrow panel (#41 B23: 160px in the review; 125px on this fixture before, 75px after) */
+const ROW_MAX = 80;
 const HEB = ["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י", "יא", "יב", "יג", "יד", "טו", "טז", "יז", "יח", "יט", "כ"];
 
 async function headingsRun(page: Page, width = 1440, height = 900) {
@@ -183,6 +185,25 @@ test("the methods that will run and why; the line filter's preview in pair, batc
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * #41 B23: at 1366 the table was 288px wide with rows 160px tall — about four suggestions on a screen — and at 768 it fell below the fold.
+ */
+for (const [width, height] of [[1366, 768], [768, 1024]] as const) {
+  test(`the suggestions table at ${width}×${height}: short rows, and the first ones on the screen (#41 B23)`, async ({ page }) => {
+    // the books are chosen in a wide window (at 768 the books panel is folded away), then the window narrows
+    const table = await headingsRun(page);
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(300);
+    const rows = table.locator("tbody tr");
+    await expect(rows.nth(5)).toBeVisible();
+    const boxes = await rows.evaluateAll((trs) => trs.slice(0, 8).map((tr) => tr.getBoundingClientRect()).map((r) => ({ top: r.top, h: r.height, w: r.width })));
+    const median = boxes.map((b) => b.h).sort((a, b) => a - b)[4]!;
+    expect(median).toBeLessThanOrEqual(ROW_MAX);
+    // the first two rows are on the screen as the panel opens (before: at most one and a half)
+    expect(boxes[1]!.top + boxes[1]!.h).toBeLessThanOrEqual(height);
+  });
+}
 
 test("a second press of 'אישור' takes the approval back to pending, not to rejected (#41 B22)", async ({ page }) => {
   const seen = watchPage(page);

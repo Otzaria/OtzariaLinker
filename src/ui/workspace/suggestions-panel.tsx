@@ -411,6 +411,8 @@ function TableView() {
 
   return (
     <>
+      {/* the two filter rows share a line where the panel is wide (#41 B23) */}
+      <div class="sug-filters">
       <div class="filters">
         {(["all", "certain", "high", "possible", "ambiguous"] as const).map((k) =>
           k === "all" || c[k] ? (
@@ -420,7 +422,7 @@ function TableView() {
           ) : null,
         )}
       </div>
-      <div class="filters" style="padding-top:0">
+      <div class="filters">
         {(["pending", "approved", "rejected", "exists", "all"] as const).map((k) =>
           k === "all" || c[k] ? (
             <button key={k} class="chip" aria-pressed={state === k} onClick={() => narrow("state", k)}>
@@ -429,6 +431,7 @@ function TableView() {
           ) : null,
         )}
         <SortSelect onChange={() => setShown(PAGE)} />
+      </div>
       </div>
       {/* method, target book, connection type: only where the run holds more than one */}
       {(facets.engines.length > 1 || facets.books.length > 1 || facets.types.length > 1) && (
@@ -450,8 +453,8 @@ function TableView() {
             {decided && <button class="btn text" onClick={() => (store.suggestions.reset([...sel]), setSel(new Set()))} title="מבטל את ההחלטה על ההצעות שנבחרו: אישור או דחייה">החזרה להמתנה</button>}
           </>
         )}
+        <BulkApprove />
       </div>
-      <BulkApprove />
       <div class="sug-wrap">
       <table class="sug-table" aria-label="הצעות">
         <thead>
@@ -527,11 +530,11 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
         </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
-      <td>
+      <td class="to">
         <div>{v.toLabel}</div>
         <div class="where muted">{place}</div>
         {/* narrow: the method and the type under the target; wide (a container query): their own columns */}
-        <div class="meta-inline muted">{engineText} · {typeText}</div>
+        <div class="meta-inline muted" title={`${engineText} · ${typeText}`}>{engineText} · {typeText}</div>
         {snippet && <div class="snippet muted">{snippet}</div>}
       </td>
       <td class="col-meta">{engineText}</td>

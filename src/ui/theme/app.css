@@ -168,6 +168,17 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
   .sug-table .meta-inline { display: none; }
 }
 .meta-inline { font-size: var(--fs-sm); }
+/* #41 B23: a narrow table keeps each row short. The target cell takes the rest of the width, and the method and type, and the
+   start of the line, are one line each, cut with an ellipsis (the whole text is in the title and in the card) */
+@container (max-width: 559px) {
+  .sug-table td.to { width: 100%; max-width: 0; }
+  .sug-table td.to :is(.meta-inline, .snippet) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+/* the two filter rows share a line, and the bulk choice sits next to the approve-all button, where the panel is wide enough */
+.sug-filters { display: flex; flex-wrap: wrap; padding-bottom: 6px; }
+.sug-filters > .filters { padding: 6px 6px 0; }
+.bulk > .bulk-approve { margin: 0; flex: 1 1 14rem; }
+.bulk > .bulk-approve[open] { flex-basis: 100%; }
 /* the reader's tools: heading jump and the unlinked-lines switch (3.8) */
 .reader-tools { flex-wrap: wrap; }
 .heading-jump { position: relative; }
