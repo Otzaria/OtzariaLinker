@@ -118,6 +118,41 @@ describe("continue the previous passage (#44)", () => {
     expect(store.linkState.value.links.get(prev.id)!.source.end).toBe(3);
   });
 
+  it("the notice's undo takes back the continuation only while nothing else was done since", async () => {
+    const { store, main, create } = await opened();
+    const prev = create(2, 1);
+    store.ranges.applyContinue((await store.ranges.planContinue(main.key, "source", 3))!);
+    const notice = store.notices.value.at(-1)!;
+    expect(notice.action?.label).toBe("ביטול");
+    // another action after the continuation: the old notice must not undo it
+    const other = create(6, 2);
+    notice.action!.run();
+    expect(store.linkState.value.links.get(other.id)).toBeDefined();
+    expect(store.linkState.value.links.get(prev.id)!.source.end).toBe(3);
+    // right after the action, the notice still undoes it (back to before the other link and the continuation first)
+    store.undo();
+    store.undo();
+    expect(store.linkState.value.links.get(prev.id)!.source.end).toBeUndefined();
+    store.ranges.applyContinue((await store.ranges.planContinue(main.key, "source", 3))!);
+    store.notices.value.at(-1)!.action!.run();
+    expect(store.linkState.value.links.get(prev.id)!.source.end).toBeUndefined();
+  });
+
+  it("the range-completion notice's undo is guarded the same way", async () => {
+    const { store, main, create } = await opened();
+    const first = create(1, 1);
+    create(3, 2);
+    expect(await store.ranges.fill(main.key, "source", false)).toBeGreaterThan(0);
+    const notice = store.notices.value.at(-1)!;
+    expect(notice.action?.label).toBe("ביטול");
+    const filled = store.linkState.value.links.get(first.id)!.source.end;
+    expect(filled).toBeDefined();
+    const other = create(7, 3);
+    notice.action!.run();
+    expect(store.linkState.value.links.get(other.id)).toBeDefined();
+    expect(store.linkState.value.links.get(first.id)!.source.end).toBe(filled);
+  });
+
   it("a saved project keeps where a link was continued from", async () => {
     const { store, main, create } = await opened();
     create(2, 1);

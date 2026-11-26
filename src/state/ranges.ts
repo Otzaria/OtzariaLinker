@@ -113,7 +113,7 @@ export class RangesState {
     }
     const n = r.edits.length;
     this.host.linkState.value = commit(this.host.linkState.value, `השלמת טווחים ב"${title}" (${linksCount(n)})`, this.toChanges(r.edits));
-    this.host.notify("success", `הושלמו הטווחים של ${linksCount(n)} ב"${title}".`, undefined, { label: "ביטול", run: () => this.host.undo() });
+    this.host.notify("success", `הושלמו הטווחים של ${linksCount(n)} ב"${title}".`, undefined, this.undoAction());
     return n;
   }
 
@@ -165,7 +165,7 @@ export class RangesState {
       return 0;
     }
     this.host.linkState.value = commit(s, `המשך לקטע הקודם (${linksCount(changes.length)})`, changes);
-    this.host.notify("success", `השורה ${plan.line + 1} סומנה כהמשך של שורה ${plan.fromLine! + 1} (${linksCount(changes.length)}).`, undefined, { label: "ביטול", run: () => this.host.undo() });
+    this.host.notify("success", `השורה ${plan.line + 1} סומנה כהמשך של שורה ${plan.fromLine! + 1} (${linksCount(changes.length)}).`, undefined, this.undoAction());
     return changes.length;
   }
 
@@ -182,6 +182,16 @@ export class RangesState {
     }
     if (changes.length) this.host.linkState.value = commit(s, `ביטול ההמשך לקטע הקודם (${linksCount(changes.length)})`, changes);
     return changes.length;
+  }
+
+  /**
+   * The "ביטול" of a success notice: it undoes the action it reports only while nothing else was done since —
+   * clicked later, a plain undo would take back another action (like the delete notice, store.ts deleteLinks).
+   * Called right after the commit, so the revision it captures is the action's own.
+   */
+  private undoAction(): { label: string; run: () => void } {
+    const at = this.host.linkState.peek().revision;
+    return { label: "ביטול", run: () => void (this.host.linkState.peek().revision === at && this.host.undo()) };
   }
 
   private links(): Link[] {
