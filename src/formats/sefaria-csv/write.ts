@@ -97,14 +97,19 @@ const DROPPED_BY_OTZARIA = new Set(["export/heading-line", "export/line-out-of-r
  * is no link to upload to Sefaria.
  */
 export function sefariaCsvOmissions(plan: Pick<ExportPlan, "warned"> & Partial<Pick<ExportPlan, "written">>): { link: Link; problems: Problem[] }[] {
-  const out: { link: Link; problems: Problem[] }[] = [];
+  // ONE entry per link, with every reason: a link left out for two reasons is still one link (V7 §1.9)
+  const out = new Map<string, { link: Link; problems: Problem[] }>();
+  const add = (link: Link, problems: Problem[]) => {
+    const had = out.get(link.id);
+    if (had) had.problems.push(...problems);
+    else out.set(link.id, { link, problems });
+  };
   for (const l of plan.written ?? [])
     if (isInlineLinkerType(l.declaredType))
-      out.push({ link: l, problems: [{ code: "csv/omitted", severity: "error", message: 'לא נכלל בקובץ ה־CSV לספריא: הסוג "ציטוט בטקסט" מוכר רק לייבוא האישי של אוצריא, ולקובץ CSV של ספריא אין סוג כזה. ייצאו אותו כקובץ קישורים (JSON) לשימוש פרטי.', detail: "INLINE_LINKER" }] });
+      add(l, [{ code: "csv/omitted", severity: "error", message: 'לא נכלל בקובץ ה־CSV לספריא: הסוג "ציטוט בטקסט" מוכר רק לייבוא האישי של אוצריא, ולקובץ CSV של ספריא אין סוג כזה. ייצאו אותו כקובץ קישורים (JSON) לשימוש פרטי.', detail: "INLINE_LINKER" }]);
   for (const w of plan.warned) {
     const why = w.problems.filter((p) => DROPPED_BY_OTZARIA.has(p.code));
-    if (why.length)
-      out.push({ link: w.link, problems: why.map((p) => ({ code: "csv/omitted", severity: "error", message: `לא נכלל בקובץ ה־CSV לספריא: ${p.message}`, detail: p.code })) });
+    if (why.length) add(w.link, why.map((p) => ({ code: "csv/omitted", severity: "error", message: `לא נכלל בקובץ ה־CSV לספריא: ${p.message}`, detail: p.code })));
   }
-  return out;
+  return [...out.values()];
 }
