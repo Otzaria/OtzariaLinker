@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { booksService } from "../../../src/app/books-service";
@@ -89,6 +90,51 @@ function realWorker(): HostedWorker {
   const handle = serve<SourcesApi>(sourcesHandlers(new SourceRegistry()), (m: FromWorker) => queueMicrotask(() => !dead && w.onmessage?.({ data: m } as MessageEvent<FromWorker>)));
   return w;
 }
+
+/*
+ * Found by the staged load run on seforim.db (V7 §4.9, stage 50): after a reload the job resumed with 22,034 suggestions instead of
+ * 23,230, and 35 approved suggestions were no longer in it. The plan of the run had read the database's links of the chosen books
+ * (gatherEvidence: "שער הציון" is on "משנה ברורה" only by its links); the resumed job planned again without them, so its finished
+ * books' steps differed from those they ran with — "changed" — and they ran again with a poorer plan. The job keeps the evidence its
+ * plan used, by title, and plans the same after a reload.
+ */
+describe("a job planned with the database's own links resumes with the same plan", () => {
+  const DB = () => ({ path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) });
+
+  // every engine, as the app ticks them: without the evidence the book still has a step (citations), so a poorer plan is not "no plan"
+  it("after a reload nothing finished runs again, and the suggestions and decisions are those of the run", async () => {
+    const { kv } = memKv();
+    const a = withCalls(registryService(new SourceRegistry()));
+    a.store.maxLink.startPersist(kv);
+    await a.store.openFiles([DB()]);
+    const key = (s: AppStore, t: string) => [...s.books.value.values()].find((b) => b.title === t)!.key;
+    const scope = { kind: "book", key: key(a.store, "שער הציון") } as const;
+    await a.store.maxLink.gatherEvidence(scope);
+    const plan = a.store.maxLink.plan(scope);
+    expect(plan.steps.map((s) => (s.kind === "pair" ? `${s.engine}:${s.target.title}` : s.engine)).sort()).toEqual(["citations", "dibur-hamatchil:משנה ברורה", "headings:משנה ברורה"]);
+    await a.store.maxLink.run(plan, "שער הציון");
+    const status = a.store.maxLink.job.value!.books.find((x) => x.title === "שער הציון")!.status;
+    expect(["done", "no-match"]).toContain(status);
+    const was = a.store.suggestions.run.value?.result.suggestions.map((s) => s.id) ?? [];
+    a.store.suggestions.approve(was.slice(0, 1));
+    await new Promise((res) => setTimeout(res, 1100)); // the job record is written a second after a book
+    const project = a.store.projectText();
+
+    const b = withCalls(registryService(new SourceRegistry()));
+    b.store.maxLink.startPersist(kv);
+    await new Promise((res) => setTimeout(res, 0));
+    await b.store.openFiles([DB()]);
+    b.store.openProject("p.otzlinker.json", project);
+    await b.store.maxLink.resume();
+    expect(b.calls).toEqual([]);
+    expect(b.store.maxLink.job.value!.books.find((x) => x.title === "שער הציון")!.status).toBe(status);
+    expect(b.store.suggestions.run.value?.result.suggestions.map((s) => s.id) ?? []).toEqual(was);
+    if (was.length) expect(b.store.suggestions.state.value.get(was[0]!)).toBe("approved");
+    // and "run again what changed" finds nothing changed
+    await b.store.maxLink.rerunChanged();
+    expect(b.calls).toEqual([]);
+  });
+});
 
 describe("max-link job: interruptions (V7 §4.11)", () => {
   it("the worker is replaced in the middle (a crash, out of memory, the watchdog): the finished books are kept, nothing points at the lost sources, and the resume completes the job", async () => {

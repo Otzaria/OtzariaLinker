@@ -5,7 +5,7 @@ import { ENGINES, type EngineId, type Suggestion } from "./automatic";
 import { sanitizeStoredOptions } from "./automatic/option-specs";
 import { compileSourceFilter, parseSourceFilter, runLineFilter, type SourceFilter } from "./automatic/source-filter";
 import type { StepResult } from "./maxlink-report";
-import { PAIR_ENGINES, type MaxLinkPlan, type PairEngineId, type PlanChoices, type PlanStep, type RelationKind, type UserPair } from "./plan";
+import { PAIR_ENGINES, type LinkedEvidence, type MaxLinkPlan, type PairEngineId, type PlanChoices, type PlanStep, type RelationKind, type UserPair } from "./plan";
 
 /*
  * The batch job (V5 P1-8, "Jobs" and incremental linking): a max-link plan run book after book, so a
@@ -62,6 +62,12 @@ export interface JobRecord {
   preferBase?: string;
   /** the user's explicit pairs and per-pair methods (PlanChoices), by title: a resumed job plans the same */
   choices?: PlanChoices;
+  /**
+   * The database's existing-links evidence the plan was made with (state/maxlink.ts gatherEvidence), by TITLES: a resumed job plans
+   * from it again, so its finished books keep the steps they ran with — without it a reload planned them anew without the evidence,
+   * found them "changed" and ran them again with a poorer plan (V7 §4.9, stage 50).
+   */
+  evidence?: LinkedEvidence[];
   state: JobState;
   books: JobBook[];
   startedAt: number;
@@ -157,7 +163,7 @@ export function runOrder(titles: readonly string[], steps: ReadonlyMap<string, r
 }
 
 /** A new job of a plan: a book with steps waits; one without is "not planned", with the planner's reason. */
-export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "sources" | "engines" | "engineOptions" | "lineFilter" | "preferBase" | "choices">, now = Date.now()): JobRecord {
+export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "sources" | "engines" | "engineOptions" | "lineFilter" | "preferBase" | "choices" | "evidence">, now = Date.now()): JobRecord {
   const by = stepsByBook(plan);
   const books: JobBook[] = plan.books.map((row) => {
     const steps = by.get(row.book.key) ?? [];
@@ -354,6 +360,25 @@ function parseChoices(raw: unknown): { choices?: PlanChoices } {
   return Object.keys(choices).length ? { choices } : {};
 }
 
+/** The existing-links evidence read back from storage: by titles, only well-formed entries (a damaged one plans as if never read). */
+function parseEvidence(raw: unknown): { evidence?: LinkedEvidence[] } {
+  if (!Array.isArray(raw)) return {};
+  const evidence = raw.flatMap((e): LinkedEvidence[] => {
+    const x = e as Partial<LinkedEvidence> | null;
+    if (!x || typeof x.dependant !== "string" || typeof x.base !== "string") return [];
+    return [
+      {
+        dependant: x.dependant,
+        base: x.base,
+        ...((x.kind === "targum" || x.kind === "midrash") && { kind: x.kind }),
+        ...(typeof x.count === "number" && Number.isFinite(x.count) && { count: x.count }),
+        ...(x.complete === true && { complete: true }),
+      },
+    ];
+  });
+  return evidence.length ? { evidence } : {};
+}
+
 const MIN_CONFIDENCES: readonly string[] = ["certain", "high", "possible", "ambiguous"];
 const USER_KINDS: readonly RelationKind[] = ["commentary", "notes", "mishnah-in-talmud"];
 
@@ -389,6 +414,7 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
       ...lineFilter,
       ...(typeof r.preferBase === "string" && { preferBase: r.preferBase }),
       ...parseChoices(r.choices),
+      ...parseEvidence(r.evidence),
       // a job that was running when the tab closed is paused: nothing runs until the user says so
       state: r.state === "running" || !states.includes(r.state as JobState) ? "paused" : r.state!,
       books: books.map((b) => ({ ...b, suggestions: Number(b.suggestions) || 0, ms: Number(b.ms) || 0 })),
