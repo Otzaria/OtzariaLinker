@@ -109,14 +109,15 @@ export function titleCorpus(raw: string): string {
 /*
  * A looser key, tried only when the exact key finds nothing: the same title in another spelling.
  * "שלחן ערוך אורח חיים" and "שולחן ערוך, אורח חיים" differ by a mater lectionis and a comma; a
- * trailing volume ("… חלק ו") names the same book. Letters ו/י are dropped (plene vs. defective
- * spelling), punctuation and a leading "ירושלמי " are folded. Two books that meet under this key are
- * ambiguous like any other (batch.ts), so it never picks between them.
+ * trailing volume ("… חלק ו") names the same book. Letters ו/י inside a word are dropped (plene vs.
+ * defective spelling); a word-initial ו/י is a consonant (a conjunction, a root letter) and stays — dropping
+ * it made "הזוהר" meet "והזהיר" (V7 §4.10, v52). Punctuation and a leading "ירושלמי " are folded. Two books
+ * that meet under this key are ambiguous like any other (batch.ts), so it never picks between them.
  */
 export function looseTitleKey(raw: string): string {
   let v = baseTitleKey(raw).replace(/^ירושלמי\s+/, "");
   v = v.replace(/\s+חלק\s+[א-ת]{1,3}$/u, "");
-  return v.replace(/[,.:;()\-־–]/g, " ").replace(/[וי]/g, "").replace(/\s+/g, " ").trim();
+  return v.replace(/[,.:;()\-־–]/g, " ").replace(/\s+/g, " ").trim().replace(/(?<=\S)[וי]/g, "");
 }
 
 /** True only when a dependant-style title ("X על <base>") explicitly names `baseTitle`. */
