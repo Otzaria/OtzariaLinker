@@ -208,7 +208,9 @@ describe("max-link job: interruptions (V7 §4.11)", () => {
     expect(job.state).toBe("done");
     const failed = job.books.find((b) => b.status === "failed")!;
     expect(failed.title).toBe(TITLES[3]);
-    expect(failed.why).toContain("בחרו את התיקייה או הקבצים שוב");
+    // what to do, for this very file (the reason of an unreadable file, V3 F-012, PR3)
+    expect(failed.why).toContain("ביאורים/ביאור 4 על בראשית.txt");
+    expect(failed.why).toContain("בחרו אותו שוב");
     expect(job.books.filter((b) => b.status === "done")).toHaveLength(4);
     expect(store.suggestions.run.value!.result.suggestions).toHaveLength(20);
     // the file is back (chosen again): only it runs
