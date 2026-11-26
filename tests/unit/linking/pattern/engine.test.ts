@@ -100,6 +100,29 @@ describe("target = chapter-line (v3's 'notes file split into chapters')", () => 
     expect(res.suggestions[2]!.heRef2).toBe("יעד, פרק ב אות א");
   });
 
+  it("a very large notes book: the diagnosis does not spread 200,000 line numbers into one call (V7 round 2 review, finding 10)", () => {
+    // `Math.max(...perTarget.keys())` threw RangeError above ~120K referenced target lines, and the whole run failed for a diagnostic
+    // note. A number is at most 9999, so only chapter-line reaches that many target lines: 25 chapters of 8,000 notes
+    const CH = 25;
+    const L = 8_000;
+    const tgtBig: string[] = [];
+    const srcBig: string[] = [];
+    for (let c = 0; c < CH; c++) {
+      tgtBig.push(`<h2>פרק ${c + 1}</h2>`);
+      for (let k = 1; k <= L; k++) {
+        tgtBig.push(`הערה ${k}`);
+        srcBig.push(`(${k})`);
+      }
+    }
+    // note L-1 of the last chapter gets no reference; the last referenced line is the book's last
+    srcBig[CH * L - 2] = "בלי הפניה";
+    const res = run(srcBig, tgtBig, opts);
+    expect(res.suggestions.length).toBe(CH * L - 1);
+    const unused = res.notes.find((n) => n.code === "pattern/unreferenced-targets")!;
+    expect(unused.text).toContain("1 שורות ביעד");
+    expect(unused.text).toContain(`(שורות ${(CH - 1) * (L + 1) + (L - 1) + 1})`);
+  });
+
   it("more numbering series than chapters: the extra ones are reported, the rest marked for review", () => {
     const res = run([...src, "(1)"], tgt, opts);
     expect(pairs(res)).toEqual(["0>1", "1>2", "2>4", "3>5"]);
