@@ -408,6 +408,37 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
  * tool" is where every control starts. A pair switched off stays on the list so that it can be switched back on.
  */
 /*
+ * V7 §3.3 (#22): a database opened before the flow starts is not asked for again, and the first step says it is open and what it
+ * is used for — the database step is skipped when no base is missing, so it would not be seen there.
+ */
+test("guided flow: a database that is open already is named in the first step, and not asked for again", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]! });
+  await page.goto(distUrl);
+  const dbChooser = page.waitForEvent("filechooser");
+  await page.locator(".drop-strip").getByRole("button", { name: "מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(page.getByRole("region", { name: "קבצים ומסדים" })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /מנהל הקישורים — למסך הפתיחה/ }).click();
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  await expect(main.locator(".guided-open-others")).toContainText(/כבר פתוחים, ולא צריך לבחור אותם שוב: ".?seforim.db.?"/);
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("1 ספרים", { timeout: 30_000 });
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  await next.click();
+  // the base is in the open database: the next step is the plan, and the database step was not needed
+  await expect(next).toHaveText("הבא: התוכנית");
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+  await plain(page);
+  expect(seen.errors).toEqual([]);
+});
+
+/*
  * V7 §3.7, issues #26 and #45: several target books for one commentary, in the plan. The user searches and ticks a target book
  * (a filter by file or database, a count), sees the primary one and the secondary ones in order, makes another one primary, and
  * removes an added book in one click; the plan (its pairs list) follows each change.

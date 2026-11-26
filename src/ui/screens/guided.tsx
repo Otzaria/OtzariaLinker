@@ -181,6 +181,12 @@ function FilesStep() {
           ))}
         </ul>
       )}
+      {g.otherSources.value.length > 0 && (
+        // V7 §3.3 (#22): what is open already is used, not asked for again — said here, since the database step is skipped when nothing is missing
+        <p class="muted guided-open-others">
+          <Icon name="fl_checkmark_circle" size={16} /> כבר פתוחים, ולא צריך לבחור אותם שוב: {g.otherSources.value.map((s) => `"${sourceNameText(s.info.label)}"`).join(", ")}. מהם יילקחו ספרי הבסיס שהספרים כתובים עליהם.
+        </p>
+      )}
       <p class="muted small">
         מעדיפים את המסלול הקודם, עם גיליון המשימה?{" "}
         <button class="adv-link" onClick={() => ((store.startTask.value = "folder-otzaria"), (store.dialog.value = "start"))}>
