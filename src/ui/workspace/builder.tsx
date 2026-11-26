@@ -256,7 +256,7 @@ function ContinuePrevious({ side, pick }: { side: Side; pick: Pick }) {
   if (!plan)
     return (
       <span style="grid-column:1/-1" class="row">
-        <button class="adv-link" onClick={() => preview()} title="השורה הזו ממשיכה את הקטע שלפניה: היא תקבל את הקישורים שלו (הרחבת הטווח שלהם, או קישור נפרד כשהייצוא דורש). תוצג תצוגה מקדימה לפני השינוי.">
+        <button class="adv-link" style="display:inline-flex;align-items:center;gap:4px" onClick={() => preview()} title="השורה הזו ממשיכה את הקטע שלפניה: היא תקבל את הקישורים שלו (הרחבת הטווח שלהם, או קישור נפרד כשהייצוא דורש). תוצג תצוגה מקדימה לפני השינוי.">
           <Icon name="fl_arrow_upload" size={14} /> המשך לקטע הקודם
         </button>
       </span>
