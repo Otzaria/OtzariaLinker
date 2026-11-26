@@ -683,6 +683,11 @@ main.guided .bulk-approve { margin: 0; }
 .sug-results .chip { min-height: 24px; }
 .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 24px; box-sizing: border-box; padding-block: 2px; }
 @media (pointer: coarse) {
+  /* #42 C27: what a finger operates is 44px — the icon buttons and main buttons were 34, a summary 21, the "advanced" link 17 */
+  .btn, .icon-btn { min-height: 44px; }
+  .icon-btn { min-width: 44px; }
+  .marks-btn, .book-list .side-btn, .adv-link { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  details > summary { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
   .guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check { min-height: 44px; align-items: center; }
   .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 44px; display: flex; align-items: center; }
 }
