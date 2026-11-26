@@ -144,7 +144,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       {inWorkspace && (
-        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
+        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json (Ctrl+E)" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
           <Icon name="oz_link_download" size={18} />
           <span>
             <span class="lbl">ייצוא</span>

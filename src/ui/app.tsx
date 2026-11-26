@@ -30,6 +30,14 @@ export function App() {
         return;
       }
       const typing = (e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable]");
+      const open = !!store.dialog.value || !!document.querySelector("dialog[open]");
+      // v3's Escape chain ended with "cancel the re-pick" (§16): here, an edit open in the builder is cancelled — the
+      // link stays as it was. Only when nothing nearer took the key (a menu, a dialog, the search bar, a popover).
+      if (e.key === "Escape" && !e.defaultPrevented && !typing && !open && store.editing.value && store.screen.value === "workspace" && !(e.target as HTMLElement).closest?.(".menu")) {
+        store.clearPicks();
+        store.notify("info", "העריכה בוטלה, והקישור נשאר כמו שהיה.");
+        return;
+      }
       // shortcuts belong to the workspace; on the home screen Ctrl+S would save an empty project
       if (typing || !(e.ctrlKey || e.metaKey) || store.screen.value !== "workspace") return;
       const k = e.key.toLowerCase();
@@ -38,6 +46,14 @@ export function App() {
       else if (k === "s") (e.preventDefault(), store.saveProject());
       // the history list (v3 had Ctrl+H): opened through its own button, so focus and closing behave the same
       else if (k === "h") (e.preventDefault(), document.querySelector<HTMLButtonElement>(".history-menu .menu > button.icon-btn")?.click());
+      // the export (v3 had Ctrl+E): through its own button, so it opens only when the button would
+      else if (k === "e" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        if (open) return;
+        const btn = document.querySelector<HTMLButtonElement>(".app-bar .btn.export");
+        if (btn && !btn.disabled) btn.click();
+        else store.notify("info", "אין עדיין מה לייצא. צרו או ייבאו קישורים, ואז Ctrl+E יפתח את חלון הייצוא.");
+      }
     };
     // warn before closing with links that were not exported
     const onUnload = (e: BeforeUnloadEvent) => {

@@ -335,6 +335,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .ln.flash { animation: flash 1.2s var(--ease); }
 @keyframes flash { from { background: var(--highlight); } }
 .ln.drop-over { outline: 2px dashed var(--tertiary); outline-offset: -2px; }
+/* the keyboard cursor of Ctrl+arrows (Ctrl+Space adds its line to the picked ones) */
+.ln.cursor { outline: 2px solid var(--primary); outline-offset: -2px; }
+.reader.target .ln.cursor { outline-color: var(--tertiary); }
 .ln .marks { display: flex; gap: 3px; padding-top: 0.55em; user-select: none; }
 .mark { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); font: 600 10px/16px var(--font-ui); text-align: center; }
 .mark.new { background: var(--primary); color: var(--on-primary); }
@@ -367,6 +370,14 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .builder .end .snip { grid-column: 1 / -1; font-family: var(--font-book); font-size: 15px; color: var(--on-surface-variant); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .builder label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .builder .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* v3's "עד שורה" (F-054), the anchor label (F-075) and the range settings (F-055/F-079/F-083) */
+.builder .range-end { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.builder .range-end input { inline-size: 8ch; }
+.builder .anchor-label input { inline-size: 10ch; }
+.builder .error-text { color: var(--error); }
+.builder .range-settings { font-size: var(--fs-sm); }
+.builder .range-settings > summary { cursor: pointer; color: var(--on-surface-variant); min-height: 24px; }
+.builder .range-settings > .body { display: grid; gap: 8px; padding-block: 6px 4px; }
 .problems { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .problems li { display: flex; gap: 6px; align-items: start; padding: 6px 8px; border-radius: var(--radius); }
 .problems li > *, .stored-as > * { min-width: 0; overflow-wrap: anywhere; }
@@ -723,4 +734,6 @@ main.guided .bulk-approve { margin: 0; }
   .guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check { min-height: 44px; align-items: center; }
   .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 44px; display: flex; align-items: center; }
   .variant-choice .chip { min-height: 44px; }
+  .builder :is(.range-end, .anchor-label) input { min-height: 44px; box-sizing: border-box; }
+  .builder .range-settings label.check, .builder .range-settings > summary { min-height: 44px; align-items: center; }
 }
