@@ -479,7 +479,7 @@ export class AppStore {
     const memo = new Map<string, BookRef | null>();
     const resolve = (ref: BookRef): BookRef => {
       if (!ref.key.startsWith("unresolved:")) return ref;
-      const id = `${ref.origin} ${ref.source ?? ""} ${ref.title}`;
+      const id = `${ref.origin}\u0000${ref.source ?? ""}\u0000${ref.title}`;
       if (!memo.has(id)) memo.set(id, this.resolveTitle(ref.title, ref.origin, ref.source));
       return memo.get(id) ?? ref;
     };
