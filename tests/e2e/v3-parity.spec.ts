@@ -43,7 +43,13 @@ test("remove one book with its links, and undo brings both back (F-035)", async 
   await link(page, 2, 2);
   await expect(page.locator('.reader.source .ln[data-i="2"] .mark.new')).toHaveText("1");
   const row = books.filter({ hasText: "פירוש על בראשית" });
-  await row.getByRole("button", { name: "הסרת פירוש על בראשית מהכלי" }).click();
+  // with a mouse the ✕ shows when its row is pointed at (it takes no room otherwise); Tab reaches it too
+  const remove = row.getByRole("button", { name: "הסרת פירוש על בראשית מהכלי" });
+  await expect(remove).toBeHidden();
+  await remove.focus();
+  await expect(remove).toBeVisible();
+  await row.hover();
+  await remove.click();
   await expect(books.filter({ hasText: "פירוש על בראשית" })).toHaveCount(0);
   const notice = page.locator(".notice", { hasText: '"פירוש על בראשית" הוסר מהכלי' });
   await expect(notice).toContainText("קישור אחד");
