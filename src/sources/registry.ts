@@ -15,7 +15,7 @@ import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
 import { DbBookSource } from "./db/db-source";
-import type { ExternalTargetResolver, TargetBook } from "./db/external-target";
+import { otzariaSlug, type ExternalTargetResolver, type TargetBook } from "./db/external-target";
 import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
@@ -93,7 +93,7 @@ export class SourceRegistry {
   /** entries of each finished ref index: the cache is capped by their SUM (a big book's map is megabytes), see REF_INDEX_BUDGET */
   private readonly refIndexSizes = new Map<string, number>();
   private readonly resolver: ExternalTargetResolver = {
-    book: (title, targetSource, from) => this.findTarget(title, targetSource, from),
+    book: (title, targetSource, from, by) => this.findTarget(title, targetSource, from, by),
     lineOfRef: async (bookKey, heRef) => (await this.refIndex(bookKey)).get(heRef) ?? null,
   };
 
@@ -254,9 +254,13 @@ export class SourceRegistry {
   }
 
   /** The book with this exact title in a source another source's external_link points at (see ExternalTargetResolver). */
-  private async findTarget(title: string, targetSource: string | null, from: string): Promise<TargetBook | null> {
+  private async findTarget(title: string, targetSource: string | null, from: string, by: "library-id" | "slug" = "library-id"): Promise<TargetBook | null> {
     const candidates = [...this.sources.values()].filter((s) => s.info.id !== from);
-    const named = targetSource === null || targetSource === "official" ? [] : candidates.filter((s) => s instanceof DbBookSource && s.capabilities.meta["library_id"] === targetSource);
+    // a database is named by its library_id (external_link), or by the slug Otzaria derives from it (user_link's sourceDb/targetDb)
+    const named =
+      targetSource === null || targetSource === "official"
+        ? []
+        : candidates.filter((s) => s instanceof DbBookSource && (by === "slug" ? otzariaSlug(s.capabilities.meta["library_id"], s.info.label) : s.capabilities.meta["library_id"]) === targetSource);
     // 'official' (or none given): the library's own sources, first; a null source then also any other
     const pool = targetSource === "official" ? candidates.filter((s) => s.info.library) : targetSource === null ? [...candidates.filter((s) => s.info.library), ...candidates.filter((s) => !s.info.library)] : named;
     for (const s of pool) {

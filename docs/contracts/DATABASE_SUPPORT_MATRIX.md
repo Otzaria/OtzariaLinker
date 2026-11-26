@@ -290,7 +290,7 @@
 - **טבלאות משתמש:**
   - `book` עם עמודות נוספות: `isContentExternal`, `externalLibraryId`, `isPersonal`, `filePath`, `fileType`,
     `fileSize`, `lastModified`, `pages`, `volume`.
-  - `user_link` מבוסס כותרת ו־lineIndex, כולל `anchorStart/anchorEnd/anchorLabel` וקצות טווח.
+  - `user_link` מבוסס כותרת ו־lineIndex, כולל `anchorStart/anchorEnd/anchorLabel` וקצות טווח. הכלי קורא אותו (Issue #41 B20) בשתי הצורות שלו, ובטבלה שאינו יכול לקרוא הוא מזהיר `db/user-link-not-read` ולא מציג 0 קישורים: [`LINK_SCHEMA_MATRIX.md`](LINK_SCHEMA_MATRIX.md) §6.1.
   - `user_alt_toc_*`, `user_book_version`, `user_import_file`, `user_sidecar_*`.
   - מטמוני PDF/DOCX.
 - **מזהים.** `book.id` הוא AUTOINCREMENT **וחופף** למזהים הרשמיים. ההפרדה נעשית רק במפתח עם תחילית מקור:

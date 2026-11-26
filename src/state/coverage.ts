@@ -81,11 +81,13 @@ const isCancel = (err: unknown, signal?: AbortSignal): boolean => {
 
 /**
  * The database's links of a book, and what the read says about them: a failure is NOT an empty list (the book would look as if it had
- * no links); a cancel is rethrown for the caller to treat as a cancel.
+ * no links); a cancel is rethrown for the caller to treat as a cancel. `unread` (SourceBook.linksUnread): the database has a table of
+ * links it cannot read — the links read are counted, but the answer is "unknown", never "none" or a count that looks complete.
  */
-async function readDbLinks(read: () => Promise<Link[]>, signal?: AbortSignal): Promise<{ links: Link[]; reading: LinksReading }> {
+async function readDbLinks(read: () => Promise<Link[]>, signal?: AbortSignal, unread?: string): Promise<{ links: Link[]; reading: LinksReading }> {
   try {
     const links = await read();
+    if (unread) return { links, reading: { state: "unknown", why: "unreadable", message: unread } };
     return { links, reading: links.length ? { state: "counted", count: links.length } : { state: "none" } };
   } catch (err) {
     if (isCancel(err, signal)) throw err;
@@ -162,7 +164,7 @@ export class CoverageState {
       if (options.includeDb === false) read = { links: [], reading: { state: "unknown", why: "not-requested" } };
       else {
         try {
-          read = await readDbLinks(() => this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}), options.signal);
+          read = await readDbLinks(() => this.service.existingLinks(key, 0, Number.MAX_SAFE_INTEGER, options.signal ? { signal: options.signal } : {}), options.signal, b.linksUnread);
         } catch {
           return; // cancelled: the table stops
         }
@@ -224,7 +226,7 @@ export class CoverageState {
     let reading: LinksReading = { state: "unknown", why: "not-requested" };
     if (options.includeDb !== false) {
       // a failed read is part of the answer (links.state "failed"), never an empty list; a cancel answers null
-      const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => readDbLinks(() => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts), opts.signal));
+      const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => readDbLinks(() => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts), opts.signal, b.linksUnread));
       if (got === null) return null;
       db = got.links;
       reading = got.reading;

@@ -70,8 +70,8 @@ export interface DbAnchor {
  */
 export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title", "source-out-of-range"] as const;
 export type DbLinkFlag = (typeof DB_LINK_FLAGS)[number];
-/** The table of a database link: the official `link`, or the `external_link` of a personal database (Personal-DB-Creator). */
-export type DbLinkTable = "link" | "external_link";
+/** The table of a database link: the official `link`, the `external_link` of a personal database (Personal-DB-Creator), or the `user_link` of Otzaria's user_books.db. */
+export type DbLinkTable = "link" | "external_link" | "user_link";
 
 export type LinkStatus = "new" | "edited" | "existing" | "deleted";
 

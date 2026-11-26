@@ -130,6 +130,14 @@ describe("copying a database link into the project (core/links/from-db.ts)", () 
     expect(r.link).toMatchObject({ source: { book: MB }, anchor: { rawStart: 6, label: "יב" }, heRef2: "שער הציון 9328 אות יב" });
   });
 
+  /* Issue #41 B20: a user_link row of user_books.db keeps the anchor as the native links file wrote it (raw offsets of the source
+   * line, user_import_models.dart:360-365), not link_anchor's visible ones: the copy carries it unchanged, or says it is lost */
+  it("a user_link anchor (raw, as the file wrote it) is copied unchanged, and pins the unflipped record", () => {
+    const db = dbLink(ARZOT, 322, MEIR, 1306, "commentary", { id: "s1:user:4", dbTable: "user_link", anchor: { rawStart: 3, rawEnd: 8, label: "יב" } });
+    const r = adoptDbLink(db, "c:1", ctx());
+    expect(r.link).toMatchObject({ source: { book: ARZOT, line: 322 }, declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 8, label: "יב" }, heRef2: "המאיר לארץ על ארצות החיים 1307 אות יב" });
+  });
+
   it("ranges move with their side when the record is flipped", () => {
     const db = dbLink(ARZOT, 332, MEIR, 313, "commentary", { source: { book: ARZOT, line: 332 }, target: { book: MEIR, line: 313, end: 316 } });
     const r = adoptDbLink(db, "c:1", ctx());

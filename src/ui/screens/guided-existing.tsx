@@ -37,7 +37,8 @@ export function ExistingLinks() {
     <>
       <p class="guided-existing" role="status">
         <b>קישורים שכבר יש לספרים האלה:</b> בפרויקט {n(inProject)} · {db === null ? "במסד: אין מסד פתוח לספרים האלה" : db === "loading" ? "במסד: סופר…" : `במסד ${n(db.total)}`}
-        {db && db !== "loading" && db.of > BOOKS_COUNTED && <span class="muted"> (נספרו {n(db.books)} מתוך {n(db.of)} ספרים)</span>}
+        {/* fewer books than asked: past BOOKS_COUNTED, or books whose links could not be (all) read — never counted as 0 (totalsOf) */}
+        {db && db !== "loading" && db.books < db.of && <span class="muted"> (נספרו {n(db.books)} מתוך {n(db.of)} ספרים)</span>}
         {db && db !== "loading" && <span class="muted"> — קישור של הספר נספר פעם אחת, מכל צד</span>}
       </p>
       <div class="guided-final">

@@ -99,7 +99,8 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
     return (
       <div class="empty">
         <Icon name="oz_library_link" size={40} />
-        <span>במסד אין קישורים לספר "{title}".</span>
+        {/* a table of links that was not read: the book's links are unknown, not none (DbLinkSummary.unread) */}
+        <span>{summary.unread ? `לא ידוע אם יש במסד קישורים לספר "${title}": ${summary.unread}` : `במסד אין קישורים לספר "${title}".`}</span>
       </div>
     );
 
@@ -118,6 +119,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       <p class="dbl-sum">
         <b>{summary.total.toLocaleString("he")}</b> קישורים במסד ל"{title}": {summary.out.toLocaleString("he")} שהספר הוא צד המקור שלהם, {summary.in.toLocaleString("he")} שהוא צד היעד; עם {summary.byBook.length.toLocaleString("he")} ספרים.
         {summary.method === "scan" && " (במסד הזה אין אינדקס לפי ספר, ולכן הקריאה איטית.)"}
+        {summary.unread && ` אלה רק הקישורים שנקראו: ${summary.unread}`}
       </p>
       <LineView side={side} />
       <FlagFilter summary={summary} />

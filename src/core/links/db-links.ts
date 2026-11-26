@@ -91,7 +91,12 @@ export interface DbLinkSummary {
    * rows into this book are listed without being compared with the `link` table (its far end is not known without a
    * lookup), so a link that both tables hold may appear twice among them.
    */
-  tables?: { link: number; externalLink: number; duplicatesDropped: number; incomingUnchecked: number };
+  tables?: { link: number; externalLink: number; duplicatesDropped: number; incomingUnchecked: number; /** only when the database has a readable user_link */ userLink?: number };
+  /**
+   * The book's database links were NOT all read (Hebrew, why and what to do): a table of links exists but cannot be read (user_link
+   * in a layout the tool does not know, db/user-link-not-read). The counts are of the tables that were read; a 0 here is NOT "no links".
+   */
+  unread?: string;
   /** "index": through idx_link_source_book/idx_link_target_book; "scan": the database has neither (slow) */
   method: "index" | "scan";
   /** what reading the summary cost, for the status line and the real-database test */

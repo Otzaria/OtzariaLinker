@@ -78,9 +78,16 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
   // unflipped (Generator.kt:2318-2321), so it pins candidate A. Then a file the project already holds,
   // then the library's convention: a commentary's own file, with "source" (LINK_FORMATS §1.5).
   const anchors0 = (db.dbAnchors ?? []).filter((a) => a.side === 0);
+  // a user_link row (Otzaria's user_books.db) keeps the anchor as the links file wrote it: raw offsets of the stored source line
+  // (user_import_models.dart:360-365 @ a6be90800). Carried as it is, on the record whose source is that same line, unflipped.
+  const rawAnchor = anchors0.length ? undefined : db.anchor;
   const flips = (c: Candidate) => storedForm(c).flipped;
   const score = (c: Candidate) =>
-    (anchors0.length && !flips(c) ? 8 : 0) + (ctx.hasLinksFile(c.source.book.title) ? 4 : 0) + (titleDeclaresDependencyOn(c.source.book.title, c.target.book.title) ? 2 : 0) + (c.name === "B" ? 1 : 0);
+    (anchors0.length && !flips(c) ? 8 : 0) +
+    (rawAnchor && c.source === S && !flips(c) ? 8 : 0) +
+    (ctx.hasLinksFile(c.source.book.title) ? 4 : 0) +
+    (titleDeclaresDependencyOn(c.source.book.title, c.target.book.title) ? 2 : 0) +
+    (c.name === "B" ? 1 : 0);
   const chosen = [...valid].sort((a, b) => score(b) - score(a))[0]!;
   const f = storedForm(chosen);
 
@@ -106,6 +113,10 @@ export function adoptDbLink(db: Link, id: string, ctx: AdoptContext): AdoptResul
     }
     if (anchors0.length > 1) add("warning", "adopt/anchors-extra", `לקישור במסד ${anchors0.length} עוגנים בשורת המקור; הועתק רק הראשון. כל עוגן נוסף הוא רשומה נפרדת בקובץ.`);
   } else if (anchors0.length) add("warning", "adopt/anchor-lost", "לקישור במסד יש עוגן על מילה, אבל הרשומה שנבחרה מתהפכת באוצריא, ובכיוון הזה העוגן נזרק.");
+  if (rawAnchor && chosen.source === S && !f.flipped) {
+    anchor = rawAnchor;
+    if (rawAnchor.label) heRef2 = withAnchorLabel(heRef2, rawAnchor.label);
+  } else if (rawAnchor) add("warning", "adopt/anchor-lost", "לקישור במסד יש עוגן על מילה, אבל הרשומה שנבחרה מתהפכת באוצריא, ובכיוון הזה העוגן נזרק.");
   if ((db.dbAnchors ?? []).some((a) => a.side === 1)) add("warning", "adopt/anchor-target", "לקישור במסד יש עוגן בצד היעד. לקובץ קישורים אין שדה כזה, והוא לא הועתק.");
   if (db.dbSuppressed?.length) add("warning", "adopt/suppressed", "ספריא מסתירה את הקישור הזה באחד הצדדים. בקובץ קישורים אין דרך לומר זאת, ובקובץ הוא יוצג בשני הצדדים.");
 
