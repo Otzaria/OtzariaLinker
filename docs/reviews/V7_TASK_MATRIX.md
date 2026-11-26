@@ -25,7 +25,7 @@
 סביבה: Windows 11, ‏Node 24.19.0, ‏npm 11.17.0, ‏Playwright 1.65.0, ‏Git 2.52. בכונן Z פנויים 1.8TB, ובכונן C פנויים 44GB. זיכרון: 32GB, מהם כ־9GB פנויים.
 אוצריא מותקנת ב־`C:\Program Files\otzaria`. המסד הרשמי: `C:\ProgramData\otzaria\books\seforim.db` (4.77GB, קריאה בלבד).
 **מסד v52:** לא נמצא בהתחלה. הבעלים מסר אותו במהלך העבודה (`C:\Users\User\Documents\DEV\otzarya-unofficial-books-52.db`, ‏1.74GB), והוא נקרא לקריאה בלבד.
-**`gh` אינו מחובר** (ה־token פג), לכן פתיחת PRs דרכו חסומה. ‏`git push` עובד דרך Credential Manager, וקריאת Issues נעשית דרך ה־API הציבורי.
+**`gh` לא היה מחובר** בהתחלה (ה־token פג). הבעלים התחברו בסוף העבודה, וה־PRs נפתחו (#48–#51). ‏`gh` עובד כאן רק עם `GODEBUG=x509negativeserial=1`, בגלל התעודה של NetFree. ‏`git push` עובד דרך Credential Manager, וקריאת Issues נעשית דרך ה־API הציבורי.
 
 ## 1. ממצאי #40 (A)
 

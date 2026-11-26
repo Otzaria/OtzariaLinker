@@ -5,7 +5,7 @@
 התיאורים מוכנים להדבקה, לפי המבנה של §10 במפרט. כל PR בנוי על הקודם, ולכן ה־diff של כל אחד הוא רק השינויים שלו.
 ב־"Issues addressed" אין `Closes`: Issue נסגר ידנית אחרי המיזוג, לפי [`V7_FINAL_REPORT.md`](V7_FINAL_REPORT.md) §ז.
 
-פתיחה (אחרי `gh auth login`), מתיקיית המאגר. הקטע של כל PR נשמר קודם לקובץ, למשל `pr1.md`:
+**נפתחו:** PR1 #48, ‏PR2 #49, ‏PR3 #50, ‏PR4 #51. הפקודות שבהן נפתחו, מתיקיית המאגר. הקטע של כל PR נשמר קודם לקובץ, למשל `pr1.md`:
 
 ```
 gh pr create --base main --head v7/01-data-integrity-security --title "V7 PR1: שלמות נתונים, מסדים, חוזים ואבטחה" --body-file pr1.md
