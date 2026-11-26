@@ -69,13 +69,20 @@ export class OtzariaDbReader {
         if (d instanceof Uint8Array) dicts.push(d);
       }
     }
-    return new OtzariaDbReader(file, caps, new LineContentCodec(dicts, undefined, "מסד פתוח"), {
-      book,
-      line,
-      content: caps.text === "line_content" ? await file.table("line_content") : null,
-      note: caps.lineNotes ? await file.table("line_note") : null,
-      source: caps.sources ? await file.table("source") : null,
-    });
+    // the codec offers the dictionaries to the worker's pool: an open that fails after it must take them back (Issue #41 C3)
+    const codec = new LineContentCodec(dicts, undefined, "מסד פתוח");
+    try {
+      return new OtzariaDbReader(file, caps, codec, {
+        book,
+        line,
+        content: caps.text === "line_content" ? await file.table("line_content") : null,
+        note: caps.lineNotes ? await file.table("line_note") : null,
+        source: caps.sources ? await file.table("source") : null,
+      });
+    } catch (err) {
+      codec.release();
+      throw err;
+    }
   }
 
   /** The database is closed: its dictionaries leave the worker's pool. */

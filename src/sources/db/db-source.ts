@@ -48,6 +48,17 @@ export class DbBookSource implements BookSource {
 
   static async open(id: string, label: string, src: ByteSource): Promise<DbBookSource> {
     const reader = await OtzariaDbReader.open(src);
+    // the reader holds the database's dictionaries in the worker's pool: a failure past this point must release them,
+    // or they stay there (and can make a dictionary id conflicted) for the rest of the session (Issue #41 C3)
+    try {
+      return await DbBookSource.build(id, label, reader);
+    } catch (err) {
+      reader.close();
+      throw err;
+    }
+  }
+
+  private static async build(id: string, label: string, reader: OtzariaDbReader): Promise<DbBookSource> {
     const links = await DbLinksReader.open(reader.file, reader.caps);
     // a database with both tables lists the links of both, each once (mergeParts); external_link alone is a personal database (#13)
     const extProblems: { code: string; message: string }[] = [];
