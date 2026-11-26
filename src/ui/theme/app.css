@@ -215,7 +215,7 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .book-info .src-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: var(--radius); line-height: 18px; }
 .panel-head .grip { cursor: grab; color: var(--outline); display: grid; place-items: center; }
 /* a focusable handle (V7 §3.9) is a control: at least 24px (WCAG 2.5.8), 44px for a finger */
-.grip[data-grip] { display: grid; place-items: center; min-inline-size: 24px; min-block-size: 24px; border-radius: 4px; }
+.grip[data-grip] { display: grid; place-items: center; min-inline-size: 24px; min-block-size: 24px; margin: -4px; border-radius: 4px; } /* the 16px icon's place in the head does not move */
 .alt-tools .btn.small { min-height: 24px; }
 @media (pointer: coarse) { .grip[data-grip] { min-inline-size: 44px; min-block-size: 44px; } .alt-tools .btn.small { min-height: 44px; } }
 .panel.drag-over { outline: 2px solid var(--primary); outline-offset: -2px; }
