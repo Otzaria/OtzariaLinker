@@ -219,6 +219,15 @@ describe("diffLinks", () => {
     expect(diffLinks([db(2, 20)], [link(2, 20, { heRef2: "x  y" })]).rows.map((r) => [r.kind, r.equivalent ?? false])).toEqual([["same", false]]);
   });
 
+  // V7 §1.7: records are paired by their lines and books, never by text that looks alike
+  it("two records with the same text but other lines or another book are never paired", () => {
+    const words = { heRef2: "המאיר לארץ, סימן יא", ref1: "Genesis 1:1", ref2: "Rashi on Genesis 1:1:1" };
+    const d = diffLinks([link(1, 10, words)], [link(2, 30, words), link(1, 10, words, YEHUDA)]);
+    expect(d.rows.map((r) => r.kind).sort()).toEqual(["added", "added", "removed"]);
+    const m = mergeLinkSets([{ name: "a", links: [link(1, 10, words)] }, { name: "b", links: [link(2, 30, words), link(1, 10, words, YEHUDA)] }], 0);
+    expect([m.entries.length, m.conflicts.length, m.duplicates]).toEqual([3, 0, 0]);
+  });
+
   it("the type is compared as the generator parses it, not as a lower-cased string", () => {
     for (const [x, y] of [["COMMENTARY", "commentary"], [" Commentary ", "commentary"], ["quotation_auto", "quotation"], ["Super Commentary", "super_commentary"], ["footnote", "footnotes"]] as const) {
       const d = diffLinks([link(1, 10, { declaredType: x })], [link(1, 10, { declaredType: y })]);
