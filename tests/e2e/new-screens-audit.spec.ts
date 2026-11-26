@@ -104,7 +104,7 @@ for (const size of SIZES) {
       await page.goto(distUrl);
       await audit(page, "home");
       await page.locator('.task-card[data-path="auto"]').click();
-      await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "קישור ספרים" })).toBeVisible();
       await audit(page, "home: the path's choice");
       await page.keyboard.press("Escape");
       expect(seen.errors).toEqual([]);

@@ -87,12 +87,12 @@ test("keyboard only: the guided flow from the home card to the download", async 
   const main = page.locator("main.guided");
 
   // every Tab stop on the way shows where focus is (tabTo checks it)
-  await tabTo(page, /^קישור אוטומטי/);
+  await tabTo(page, /^קישור ספרים/);
   await page.keyboard.press("Enter");
   // the sheet asks which task: the radio group (arrows move and choose), then "המשך"
   await tabTo(page, /^ספר ופירוש/, { role: "radio" });
-  for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("radio", { name: /^תיקייה מול אוצריא/ })).toBeChecked();
+  for (let i = 0; i < 2; i++) await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("radio", { name: /^כמה ספרים או תיקייה/ })).toBeChecked();
   await tabTo(page, /^המשך$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/files$/);
@@ -239,9 +239,9 @@ test("dialogs and menus keep focus inside, close with Esc and give focus back", 
   };
 
   // a path's first question (the choice of task), opened from its card
-  const card = await tabTo(page, /^קישור אוטומטי/);
+  const card = await tabTo(page, /^קישור ספרים/);
   await page.keyboard.press("Enter");
-  const sheet = page.getByRole("dialog", { name: "קישור אוטומטי" });
+  const sheet = page.getByRole("dialog", { name: "קישור ספרים" });
   await expect(sheet).toBeVisible();
   expect(await focused(page)).toMatchObject({ inDialog: true });
   await trapped();
@@ -291,7 +291,7 @@ test("every control has a name, and text has AA contrast, on each main screen", 
 
   // the first question of a path (issue 20): every choice named, readable in both themes
   await page.locator('.task-card[data-path="auto"]').click();
-  await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "קישור ספרים" })).toBeVisible();
   await screenOk(page, "home: the path's choice");
   await page.keyboard.press("Escape");
   await chooseTask(page, "auto", "folder-otzaria");

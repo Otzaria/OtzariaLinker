@@ -551,6 +551,7 @@ dialog.help-dialog .dlg { height: 100%; }
 @media (max-width: 760px) { .help-layout { grid-template-columns: 1fr; } .help-nav { display: none; } .help-content { padding: 4px 14px 20px; } }
 /* a guided workflow: the sources it needs, step by step */
 dialog.start-task { width: min(620px, calc(100vw - 32px)); }
+.variant-choice { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .steps > li { display: flex; gap: 12px; align-items: start; padding: 12px; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface); }
 .steps > li.done { border-color: var(--tertiary); }

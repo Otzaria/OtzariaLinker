@@ -203,7 +203,7 @@ test("guided flow: the books already hold their bases — no database step; a wa
   await page.setViewportSize({ width: 1280, height: 860 });
   const dir = folder("עם בסיס", { "ספר דוגמה": BOOKS["ספר דוגמה"], "הערות לספר דוגמה": BOOKS["הערות לספר דוגמה"] });
   await page.goto(distUrl);
-  await chooseTask(page, "auto", "several");
+  await chooseTask(page, "auto", "folder-otzaria");
   const main = page.locator("main.guided");
   const chooser = page.waitForEvent("filechooser");
   await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
