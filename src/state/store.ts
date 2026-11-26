@@ -128,7 +128,18 @@ export class AppStore {
   readonly guided: GuidedFlowState;
 
   readonly screen = signal<Screen>("home");
-  readonly sources = signal<OpenedSource[]>([]);
+  /** every source this window opened, with all its books */
+  private readonly opened = signal<OpenedSource[]>([]);
+  /**
+   * The open sources as the screens see them: without the books the user removed from the tool (F-035,
+   * `LinkState.removedBooks`, undoable). A source with no removed book is the same object.
+   */
+  readonly sources = computed<OpenedSource[]>(() => {
+    const gone = this.linkState.value.removedBooks;
+    const all = this.opened.value;
+    if (!gone.size) return all;
+    return all.map((s) => (s.books.some((b) => gone.has(b.key)) ? { ...s, books: s.books.filter((b) => !gone.has(b.key)) } : s));
+  });
   readonly linkState = signal<LinkState>(emptyLinkState());
   readonly view = { source: signal<string | null>(null), target: signal<string | null>(null) };
   readonly pick = { source: signal<Pick | null>(null), target: signal<Pick | null>(null) };
@@ -320,12 +331,18 @@ export class AppStore {
     const orphans = (res.reused ?? []).filter((r) => !openIds.has(r.info.id));
     const fresh = [...res.sources, ...orphans];
     this.lastOpen = { added: fresh.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
+    // picking the file again asks for its books: one the user removed from the tool comes back (F-035), as an action undo takes back
+    const back = [...this.linkState.peek().removedBooks].filter((k) => reused.some((r) => sourceIdOfBookKey(k) === r.info.id));
+    if (back.length) {
+      const title = (k: string) => this.opened.peek().flatMap((s) => s.books).find((b) => b.key === k)?.title ?? k;
+      this.linkState.value = commit(this.linkState.peek(), back.length === 1 ? `החזרת הספר "${title(back[0]!)}"` : `החזרת ${booksCount(back.length)}`, [], Date.now(), [], [], {}, { restore: back });
+    }
     if (reused.length) {
       const names = reused.map((r) => (r.as ? `"${r.as}" (זהה בתוכנו ל"${r.info.label}")` : `"${r.info.label}"`)).join(", ");
       this.notify("info", reused.length === 1 ? `${names} כבר פתוח, ולכן לא נטען שוב. ממשיכים עם הספרים הפתוחים.` : `${names} כבר פתוחים, ולכן לא נטענו שוב. ממשיכים עם הספרים הפתוחים.`);
     }
     batch(() => {
-      this.sources.value = [...this.sources.value, ...fresh];
+      this.opened.value = [...this.opened.value, ...fresh];
       for (const s of fresh) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
     if (fresh.length) this.attachLinks();
@@ -428,7 +445,7 @@ export class AppStore {
     await this.service.close(id);
     this.dbLinks.forgetSummary();
     batch(() => {
-      this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
+      this.opened.value = this.opened.value.filter((x) => x.info.id !== id);
       // the links keep their books by title, as after a worker restart: a key of the closed source names
       // nothing now — the reader would not show them on the same book opened again (its key is new), and
       // the check would take the book for open. attachLinks binds them to the book when it opens again.
@@ -446,6 +463,110 @@ export class AppStore {
     return true;
   }
 
+  /** A task reads the open books: a book or a source must not go from under it. True (with a notice) when one runs. */
+  private busyWith(what: string): boolean {
+    if (this.running.length === 0 && !this.maxLink.running.peek()) return false;
+    this.notify("warning", `${what} בשימוש עכשיו: עבודה רצה על הספרים הפתוחים. חכו שתסתיים (או בטלו אותה) ונסו שוב.`);
+    return true;
+  }
+
+  /**
+   * Version 3's "הסרת ספר" (F-035): one open book leaves the tool together with the project links that touch it,
+   * in ONE action that undo brings back (`LinkState.removedBooks`). The file on the disk and the rest of its source
+   * are untouched. What goes with it: the user's links on it, and its own library links file (forgotten with all its
+   * records, so the export does not write that file — nothing is deleted in the library) and its alt_toc. What
+   * stays: records of ANOTHER book's library file that point at it — removing them would delete them from the
+   * library when that file is exported. Returns whether it was removed.
+   */
+  removeBook(bookKey: string): boolean {
+    const book = this.books.peek().get(bookKey);
+    if (!book || this.busyWith(`"${book.title}"`)) return false;
+    const s = this.linkState.peek();
+    // another open copy of the title keeps what is the title's (its library file and alt_toc)
+    const twin = (this.booksByTitle.peek().get(book.title) ?? []).some((b) => b.key !== bookKey);
+    const ownFile = !twin && s.files.has(book.title);
+    const changes: Change[] = [];
+    let kept = 0;
+    for (const l of s.links.values()) {
+      if (l.provenance === "db" || !(this.sameBook(l.source.book, bookKey) || this.sameBook(l.target.book, bookKey))) continue;
+      if (l.provenance === "file" && !(ownFile && l.source.book.title === book.title)) {
+        if (l.status !== "deleted") kept++;
+        continue;
+      }
+      changes.push({ id: l.id, before: l });
+    }
+    const removed = changes.filter((c) => c.before!.status !== "deleted").length;
+    const files = ownFile ? [fileChange(s, book.title, null)] : [];
+    const alt = !twin && s.altToc.has(book.title) ? [altTocChange(s, book.title, null)] : [];
+    const editing = this.editing.peek();
+    batch(() => {
+      this.linkState.value = commit(s, `הסרת הספר "${book.title}"`, changes, Date.now(), alt, files, {}, { remove: [bookKey] });
+      for (const side of ["source", "target"] as const) {
+        if (this.view[side].peek() === bookKey) this.view[side].value = null;
+        if (this.pick[side].peek()?.bookKey === bookKey) this.pick[side].value = null;
+      }
+      if (editing && changes.some((c) => c.id === editing)) this.clearPicks();
+    });
+    this.find.source.close();
+    this.find.target.close();
+    const at = this.linkState.peek().revision;
+    this.notify(
+      "info",
+      `"${book.title}" הוסר מהכלי${removed ? ` יחד עם ${linksCount(removed)} שנגעו בו` : ""}${ownFile ? " ועם קובץ הקישורים שלו מהספרייה" : ""}. הקובץ במחשב לא השתנה.${kept ? ` ${kept === 1 ? "קישור אחד מקובץ הקישורים של ספר אחר נשאר" : `${linksCount(kept)} מקובצי הקישורים של ספרים אחרים נשארו`} בפרויקט, כי ${kept === 1 ? "הוא חלק" : "הם חלק"} מהקובץ ההוא ומחיקה הייתה מוחקת ${kept === 1 ? "אותו" : "אותם"} מהספרייה.` : ""} כדי להחזיר: "ביטול".`,
+      undefined,
+      // only while nothing else was done since: an undo later would take back another action
+      { label: "ביטול", run: () => void (this.linkState.peek().revision === at && this.undo()) },
+    );
+    return true;
+  }
+
+  /**
+   * Version 3's "איפוס מלא" (F-028): every source closed, every link, alt_toc, rejection and the history gone, the
+   * home screen. Never loses work silently: with `save` the project is saved to a file first; work that was not
+   * saved goes to the browser's recovery queue (when the autosave runs) and a notice can bring it back. The
+   * Sefaria titles list, the database mappings and the settings stay, as in version 3. Returns whether it reset.
+   */
+  async resetAll(opts: { save?: boolean } = {}): Promise<boolean> {
+    if (this.busyWith("הקבצים והמסדים הפתוחים")) return false;
+    if (opts.save) this.saveProject();
+    const ls0 = this.linkState.peek();
+    const unsaved = this.dirty.peek() && (ls0.links.size > 0 || ls0.altToc.size > 0 || ls0.rejected.size > 0) ? this.projectText() : null;
+    for (const s of this.opened.peek()) await this.service.close(s.info.id);
+    batch(() => {
+      this.opened.value = [];
+      this.linkState.value = emptyLinkState();
+      this.savedRevision.value = 0;
+      for (const side of ["source", "target"] as const) this.view[side].value = null;
+      this.clearPicks();
+      this.suggestions.run.value = null;
+      this.suggestions.current.value = null;
+      this.projectSources.value = [];
+      this.projectBookLines.value = new Map();
+      this.projectLibraryChoices.value = [];
+      this.pendingDbs.value = [];
+      this.relink.value = null;
+      this.revealedLink.value = null;
+      this.screen.value = "home";
+    });
+    this.find.source.close();
+    this.find.target.close();
+    this.lines.forgetAll();
+    this.dbLinks.forgetSummary();
+    this.changedNoticed.clear();
+    this.log.info("reset", "all", { links: ls0.links.size, saved: !!opts.save, kept: !!unsaved });
+    if (!unsaved) return void this.notify("success", "הכלי אופס: כל הקבצים, המסדים והקישורים נסגרו. הקבצים במחשב לא השתנו."), true;
+    const kept = this.recoveryQueue;
+    if (kept)
+      void kept.add(unsaved).then((ok) => {
+        if (!ok) this.notify("warning", "לא הצלחתי לשמור בדפדפן את העבודה שאופסה. היא זמינה עדיין בכפתור \"החזרת העבודה\" עד שתסגרו את החלון — כדי לא לאבד אותה, החזירו אותה ושמרו אותה לקובץ.");
+      });
+    this.notify("warning", `הכלי אופס. העבודה שלא נשמרה (${recoverableCount(unsaved).toLocaleString("he")} קישורים והחלטות) נשמרה בצד: אפשר להחזיר אותה בכפתור כאן${kept ? ", והיא תוצע שוב גם בפתיחה הבאה של הכלי" : " (השמירה האוטומטית בדפדפן אינה פעילה, ולכן אחרי סגירת החלון היא לא תהיה)"}.`, undefined, {
+      label: "החזרת העבודה",
+      run: () => (void this.recoveryQueue?.take(unsaved), this.openProject("העבודה שאופסה", unsaved)),
+    }, true);
+    return true;
+  }
+
   /**
    * The worker that held the open sources had to be restarted (it crashed, or stayed busy after a
    * cancel). Its sources are gone; the project's links are not.
@@ -456,7 +577,7 @@ export class AppStore {
     // sources, and attachLinks binds them again to the books opened next (review C2)
     const unbind = unboundRef;
     batch(() => {
-      this.sources.value = [];
+      this.opened.value = [];
       this.view.source.value = null;
       this.view.target.value = null;
       this.clearPicks();
@@ -843,7 +964,7 @@ export class AppStore {
     batch(() => {
       this.pendingDbs.value = this.pendingDbs.value.filter((x) => x.token !== p.token);
       this.dbMappings.value = new Map(this.dbMappings.value).set(p.preview.fingerprint, { fingerprint: p.preview.fingerprint, label: p.label, mapping });
-      this.sources.value = [...this.sources.value, src];
+      this.opened.value = [...this.opened.value, src];
       for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
     });
     this.attachLinks();
