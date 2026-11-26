@@ -166,6 +166,11 @@ const PENALTY = {
   pagesSplit: 0.15,
   /** "שם" more than six lines (up to fifteen) after the citation it completes, with no heading between */
   ibidFar: 0.05,
+  /**
+   * "ברכות יג: ד"ה והא" with no commentator's name (issue #41 B7): the ד"ה is some commentary's words on the daf; the daf itself is
+   * linked, a coarse target — at most "possible", like a unit cited by name
+   */
+  diburNoCommentator: 0.16,
 } as const;
 
 export interface Pending {
@@ -698,6 +703,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
   if (t.otherWork) s -= PENALTY.otherWork;
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
+  if (c.rule === "dibur-no-commentator") s -= PENALTY.diburNoCommentator;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
@@ -778,6 +784,7 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
+  "dibur-no-commentator": "אחרי המקום כתוב ד\"ה בלי שם של מפרש: המילים הן של פירוש כלשהו על הדף, ולא כתוב איזה. הקישור הוא לדף עצמו, ולכן הוא גס (לכל היותר \"אפשרית\"); אם תדעו מי המפרש, קשרו לפירוש שלו",
   "responsa-named": "שם המחבר ומילה לתשובות (\"בתשו'\", \"שו\"ת\") לפני הסימן: ספר התשובות שלו בספרייה",
   "responsa-author": "שם המחבר לפני הסימן, וספר התשובות הוא החיבור היחיד שלו בספרייה",
   "implicit-previous": "נכתב מקום בסוגריים בלי שם ספר, ולכן הוא נקרא בספר של ההפניה שלפניו (כמו \"שם\")",

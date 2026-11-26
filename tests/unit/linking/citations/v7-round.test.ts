@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AliasIndex, citationGate, citationHintStrength } from "../../../../src/linking/automatic/citations";
-import { LIB } from "./v7-fixture";
+import { B, heRefOf, LIB, run } from "./v7-fixture";
 
 /*
  * The V7 round of the citations engine (spec §2.9, §2.10; issue #23; review findings #41 B6–B9, #42 C17–C21). Each block
@@ -25,5 +25,25 @@ describe("B6 — a book that cites only as 'ברכות יג:' opens the gate", (
     const g = citationGate(knows);
     const open = ["פתיחה לספר", "כמו שאמרו ברכות יג: ושם", "ועיין שבת לא. ושם", "ועוד בביצה יב: ושם"].map((l) => g.add(l));
     expect(open).toEqual([false, true, true, true]);
+  });
+});
+
+describe("B7 — a ד\"ה with no commentator's name still links the daf", () => {
+  // the words of a ד"ה are some commentary's on that daf, which one is not written: the daf itself is the nearest sure place,
+  // and a coarse one — "possible" (before: dropped as dibur-without-commentator, nothing linked and nothing listed)
+  it.each(['ועיין ברכות יג: ד"ה והא ושם', 'ועיין (ברכות יג: ד"ה והא) ושם'])("%s", (text) => {
+    const r = run(text);
+    expect(r.suggestions).toHaveLength(1);
+    const s = r.suggestions[0]!;
+    expect(s.target.book.key).toBe(B.ber.key);
+    expect(heRefOf(B.ber, s.target.line)).toBe("ברכות, יג:, א");
+    expect(s.confidence).toBe("possible");
+    expect(s.rules).toContain("citations.dibur-no-commentator");
+    expect(s.reasons.map((x) => x.text).join(" ")).toContain('ד"ה');
+  });
+
+  it("with the commentator's name it is still his words (control)", () => {
+    const s = run('ועיין תוס\' ברכות יג: ד"ה והא ושם').suggestions[0]!;
+    expect(s.target.book.key).toBe(B.tosBer.key);
   });
 });

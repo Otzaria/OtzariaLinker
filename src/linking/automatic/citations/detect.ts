@@ -1577,8 +1577,10 @@ export class CitationScanner {
         rule = rule ?? "commentator-named";
         if (dh) diburWords = diburWordsAt(toks, c.to);
       } else if (dh && !named) {
-        this.drop("dibur-without-commentator");
-        return c.to;
+        // "ברכות יג: ד"ה והא": the words of SOME commentary on the daf, which one is not written. The daf itself is the nearest
+        // place that is sure, and a coarse one: linked at "possible" (engine.ts PENALTY.diburNoCommentator; issue #41 B7 —
+        // before, the citation was dropped, and nothing was linked or listed)
+        rule = "dibur-no-commentator";
       } else if (!who && this.glossary && candidates.some((x) => this.glossary!.on.includes(x.collection))) {
         // a glossary of a commentator's words ("אוצר לעזי רש"י"): "(חולין פד:)" is where HE wrote it. Only the
         // collections he wrote on are moved — "חולין" is also the Mishna's name, which has no Rashi; a daf finds

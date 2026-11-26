@@ -110,8 +110,11 @@ describe("citations: detection", () => {
     expect(books(one("בתוס' (ברכות יז.) והשיטה"))).toEqual(["tos-ber"]);
     // the library has no Ramban on Berachot here: the citation is dropped, not given to the Gemara
     expect(scan(['כתב הרמב"ן (ברכות יז.) ש'])).toHaveLength(0);
-    // "ד"ה" right after a Talmud location points into a commentary that was not named
-    expect(scan(['עיין ברכות יז. ד"ה אמר'])).toHaveLength(0);
+    // "ד"ה" right after a Talmud location points into a commentary that was not named: no commentary is guessed — the daf
+    // itself is cited, as a coarse place (issue #41 B7: it was dropped before; engine.ts scores it "possible")
+    const dh = scan(['עיין ברכות יז. ד"ה אמר']);
+    // (the Mishna of the same name is a candidate of the detection; the daf resolves only in the Bavli)
+    expect(dh.map((c) => [books(c), c.rule, c.commentator])).toEqual([[["ber", "m-ber"], "dibur-no-commentator", undefined]]);
   });
 
   it("לעיל / לקמן: a daf of the book a commentary is on", () => {
