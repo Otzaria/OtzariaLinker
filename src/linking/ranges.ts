@@ -293,7 +293,8 @@ export function cancelContinuationEdit(l: Link): Link | null | undefined {
  *                 is the same whichever way it is approved.
  * The sides are the run's BOOKS, not the record's direction: "source" is the book the run links from (the commentary; dibur-hamatchil
  * may write the record base → commentary). No range is set on a book the library treats as Sefaria's (sefaria-owned.ts): the weekly sync
- * remaps only a record's start. A line filter of the run then trims a range over an excluded line (source-filter.ts LineGate.rangeEnd).
+ * remaps only a record's start. With a line filter, only the suggestions it keeps count as matches, and it then trims a range over an
+ * excluded line (source-filter.ts LineGate.keeps, LineGate.rangeEnd).
  */
 export type RunRangeMode = "engine" | "line" | "next-match";
 export interface RunRangeOptions {
@@ -330,11 +331,15 @@ const ROLE_TEXT = { source: "בספר המקשר", target: "בספר שאליו 
 /**
  * The run's suggestions with the range of each side set by `options` (see RunRangeMode). Pure; the input is not changed, a suggestion
  * that does not change is the same object, and the notes say what was done (none when nothing was asked).
+ * `kept`: which suggestions will survive the run's line filter (index.ts engineSteps, LineGate.guard). Only they are "the next match": a
+ * suggestion the guard drops later must not end the range of the one before it, on either side (V7 round 2 review, finding 10). Every
+ * suggestion still gets its range — a dropped one is dropped anyway.
  */
 export function applyRunRanges<S extends RangedSuggestion>(
   suggestions: readonly S[],
   books: { readonly source: RunRangeBook; readonly target: RunRangeBook },
   options: RunRangeOptions,
+  kept: (s: S) => boolean = () => true,
 ): { suggestions: S[]; notes: { code: string; text: string }[] } {
   const modes = { source: options.sourceRange ?? "engine", target: options.targetRange ?? "engine" } as const;
   if (modes.source === "engine" && modes.target === "engine") return { suggestions: [...suggestions], notes: [] };
@@ -347,6 +352,7 @@ export function applyRunRanges<S extends RangedSuggestion>(
   const markersOf = (role: "source" | "target"): number[] => {
     const set = new Set<number>(books[role].headings);
     for (const s of suggestions) {
+      if (!kept(s)) continue;
       const side = sideIn(s, role);
       if (side) set.add(s[side].line);
     }
