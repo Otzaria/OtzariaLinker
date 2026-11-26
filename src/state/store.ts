@@ -1262,7 +1262,11 @@ export class AppStore {
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
-    this.saver.save(`${safeFileTitle(t, "פרויקט")}.otzlinker.json`, this.projectText(), "application/json");
+    // the local date and time in the name (#42 C28): saving again made "(1)", "(2)", and the newest was not to be told
+    const d = new Date();
+    const p2 = (x: number) => String(x).padStart(2, "0");
+    const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}-${p2(d.getMinutes())}`;
+    this.saver.save(`${safeFileTitle(t, "פרויקט")} ${stamp}.otzlinker.json`, this.projectText(), "application/json");
     this.savedRevision.value = this.linkState.value.revision;
     this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
   }
