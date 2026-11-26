@@ -158,3 +158,66 @@ test("alt_toc: the dialog explains what a structure is for, when it is needed an
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * #25 / V7 §3.18: reorder a node, add one right after another, move a node with its children one level in or out — from one
+ * toolbar on the focused node, and Alt+arrows — and no node is lost: closing (Escape or "ביטול") with changes asks first, and the
+ * book cannot be switched under unsaved changes.
+ */
+test("alt_toc: add after, reorder and re-level nodes; closing with unsaved changes asks first", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  await (await chooser).setFiles([{ name: "חומש שלי.txt", mimeType: "text/plain", buffer: Buffer.from(BOOK) }]);
+  await expect(page.locator(".source-row")).toHaveCount(1, { timeout: 30_000 });
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  await page.getByRole("button", { name: /^מבני כותרות/ }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel("מפתח המבנה החדש (באנגלית)").fill("Parasha");
+  await dlg.getByRole("button", { name: "מבנה חדש" }).click();
+  await dlg.getByRole("button", { name: "מילוי מכותרות הספר" }).click();
+  await expect(dlg.getByLabel("כותרת צומת 5")).toHaveValue("x");
+  await expect(dlg.getByLabel("הספר")).toBeDisabled();
+  const title = (i: number) => dlg.getByLabel(`כותרת צומת ${i}`);
+  const tools = dlg.getByRole("toolbar");
+
+  // add right after node 2, name it
+  await title(2).fill("עליה");
+  await tools.getByRole("button", { name: "צומת חדש אחריו" }).click();
+  await expect(title(3)).toBeFocused();
+  await title(3).fill("חדש");
+  await expect(title(4)).toHaveValue("x");
+  // up, then down by keyboard
+  await tools.getByRole("button", { name: "למעלה" }).click();
+  await expect(title(2)).toHaveValue("חדש");
+  await expect(title(3)).toHaveValue("עליה");
+  await title(2).press("Alt+ArrowDown");
+  await expect(title(3)).toHaveValue("חדש");
+  await expect(title(3)).toBeFocused();
+  // the first heading one level in takes the nodes under it along; out again
+  await title(1).focus();
+  await tools.getByRole("button", { name: "רמה פנימה" }).click();
+  await expect(dlg.getByLabel("רמה של פרשה א")).toHaveValue("1");
+  await expect(dlg.getByLabel("רמה של עליה", { exact: true })).toHaveValue("2");
+  await expect(dlg.getByLabel("רמה של פרשה ב")).toHaveValue("0");
+  await tools.getByRole("button", { name: "רמה החוצה" }).click();
+  await expect(dlg.getByLabel("רמה של פרשה א")).toHaveValue("0");
+
+  // Escape with changes: asks, and "back" keeps every node
+  await page.keyboard.press("Escape");
+  const ask = dlg.getByRole("alert").filter({ hasText: "שינויים שלא נשמרו" });
+  await expect(ask).toBeVisible();
+  await expect(ask.getByRole("button", { name: "חזרה לעריכה" })).toBeFocused();
+  await ask.getByRole("button", { name: "חזרה לעריכה" }).click();
+  await expect(dlg).toBeVisible();
+  await expect(title(6)).toHaveValue("x");
+  await dlg.getByRole("button", { name: "ביטול" }).click();
+  await expect(ask).toBeVisible();
+  await ask.getByRole("button", { name: "סגירה בלי שמירה" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.getByRole("button", { name: "מבני כותרות", exact: true })).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

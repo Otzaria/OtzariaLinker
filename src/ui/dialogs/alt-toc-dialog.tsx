@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { entriesFromHeadings, numberInGematria } from "../../core/alt-toc/edit";
+import { entriesFromHeadings, insertEntryAfter, moveEntry, numberInGematria, shiftLevel } from "../../core/alt-toc/edit";
 import { validateAltToc, type AltTocEntry, type AltTocOrigin, type AltTocStructure, type LibraryAltTocStructure } from "../../core/alt-toc/model";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
@@ -34,8 +34,18 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
   const [base, setBase] = useState("עליה");
   const [shown, setShown] = useState(PAGE);
   const [loading, setLoading] = useState(false);
+  // what the structures were when the book was loaded: closing or switching books with changes asks first (#25: no lost nodes)
+  const loaded = useRef("[]");
+  const [leaving, setLeaving] = useState(false);
+  const [sel, setSel] = useState(-1);
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const load = (x: AltTocStructure[]) => (setStructs(x), (loaded.current = JSON.stringify(x)));
+  const dirty = JSON.stringify(structs) !== loaded.current;
+  const close = () => (dirty ? setLeaving(true) : ref.current?.close());
 
   useEffect(() => ref.current?.showModal(), []);
+  useEffect(() => void (leaving && keepRef.current?.focus()), [leaving]);
 
   const book = title ? store.altToc.bookOf(title) : undefined;
   const inProject = title ? store.altToc.of(title) : undefined;
@@ -48,11 +58,11 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
     setLibrary(null);
     if (!title) return;
     if (inProject) {
-      setStructs([...inProject.structures]);
+      load([...inProject.structures]);
       setOrigin(inProject.origin);
       return;
     }
-    setStructs([]);
+    load([]);
     setOrigin("user");
     if (!book) return;
     setLoading(true);
@@ -60,7 +70,7 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
       if (!live) return;
       setLoading(false);
       if (!lib) return;
-      setStructs(lib.editable.map(({ skipped: _s, ...s }) => s));
+      load(lib.editable.map(({ skipped: _s, ...s }) => s));
       if (lib.editable.length) setOrigin("db");
       setLibrary({ automatic: lib.automatic, skipped: [...lib.editable, ...lib.automatic].reduce((n, s) => n + s.skipped, 0) });
     });
@@ -76,6 +86,20 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
   const patch = (i: number, p: Partial<AltTocStructure>) => setStructs(structs.map((x, j) => (j === i ? { ...x, ...p } : x)));
   const setEntries = (entries: AltTocEntry[]) => s && patch(cur, { entries });
   const patchEntry = (i: number, p: Partial<AltTocEntry>) => s && setEntries(s.entries.map((e, j) => (j === i ? { ...e, ...p } : e)));
+  // the toolbar acts on the node last focused (one toolbar, not five buttons on each of thousands of rows); focus follows the node
+  const act = (f: (es: readonly AltTocEntry[]) => readonly AltTocEntry[], to: number) => {
+    if (!s || sel < 0) return;
+    setEntries([...f(s.entries)]);
+    setSel(to);
+    setShown(Math.max(shown, to + 1));
+    requestAnimationFrame(() => rowsRef.current?.querySelector<HTMLInputElement>(`[aria-label="כותרת צומת ${to + 1}"]`)?.focus());
+  };
+  const onRowKey = (e: KeyboardEvent, i: number) => {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const d = e.key === "ArrowUp" ? -1 : 1;
+    if (s && s.entries[i + d]) act((es) => moveEntry(es, i, d), i + d);
+  };
 
   const addStructure = () => {
     const key = newKey.trim();
@@ -121,7 +145,7 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <dialog ref={ref} onClose={onClose} aria-labelledby="alttoc-title" class="alt-toc" style="width:min(900px, calc(100vw - 32px))">
+    <dialog ref={ref} onClose={onClose} onCancel={(e) => dirty && (e.preventDefault(), setLeaving(true))} aria-labelledby="alttoc-title" class="alt-toc" style="width:min(900px, calc(100vw - 32px))">
       <div class="dlg">
         <header>
           <Icon name="oz_text_bullet_list_tree" size={24} />
@@ -147,7 +171,7 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
           </details>
           <label class="field">
             הספר
-            <select value={title} onChange={(e) => setTitle(e.currentTarget.value)} aria-label="הספר">
+            <select value={title} onChange={(e) => setTitle(e.currentTarget.value)} aria-label="הספר" disabled={dirty} title={dirty ? "יש שינויים שלא נשמרו בספר הזה: שמרו אותם או בטלו לפני שעוברים לספר אחר" : undefined}>
               {titles.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -235,7 +259,14 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
               <p class="muted" style="margin:0">רמה 0 היא הרמה העליונה (פרשה), רמה 1 מה שתחתיה (עליה), וכן הלאה. מספר השורה הוא כמו בקורא: השורה הראשונה היא 1.</p>
-              <div class="alt-rows" role="table" aria-label="צמתי המבנה">
+              <div class="row alt-tools" role="toolbar" aria-label={sel >= 0 && s.entries[sel] ? `פעולות על ${s.entries[sel]!.heTitle || `צומת ${sel + 1}`}` : "פעולות על צומת (בחרו צומת)"}>
+                <button class="btn text small" disabled={sel < 0} onClick={() => act((es) => insertEntryAfter(es, sel), sel + 1)}>צומת חדש אחריו</button>
+                <button class="btn text small" disabled={sel < 1} onClick={() => act((es) => moveEntry(es, sel, -1), sel - 1)} title="Alt+חץ למעלה">למעלה</button>
+                <button class="btn text small" disabled={sel < 0 || sel >= s.entries.length - 1} onClick={() => act((es) => moveEntry(es, sel, 1), sel + 1)} title="Alt+חץ למטה">למטה</button>
+                <button class="btn text small" disabled={sel < 0} onClick={() => act((es) => shiftLevel(es, sel, 1), sel)} title="הצומת והצמתים שתחתיו יורדים רמה">רמה פנימה</button>
+                <button class="btn text small" disabled={sel < 0 || !s.entries[sel]?.level} onClick={() => act((es) => shiftLevel(es, sel, -1), sel)} title="הצומת והצמתים שתחתיו עולים רמה">רמה החוצה</button>
+              </div>
+              <div class="alt-rows" role="table" aria-label="צמתי המבנה" ref={rowsRef}>
                 <div class="alt-head" role="row">
                   <span role="columnheader">רמה</span>
                   <span role="columnheader">כותרת</span>
@@ -247,14 +278,14 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
                   const bad = problems.some((p) => p.structure === cur && p.entry === i && p.severity === "error");
                   const name = e.heTitle || `צומת ${i + 1}`;
                   return (
-                    <div key={i} class={`alt-row${bad ? " bad" : ""}`} role="row">
+                    <div key={i} class={`alt-row${bad ? " bad" : ""}${sel === i ? " sel" : ""}`} role="row" onFocusIn={() => setSel(i)} onKeyDown={(ev) => onRowKey(ev, i)}>
                       <input type="number" min="0" value={e.level} onChange={(ev) => patchEntry(i, { level: Math.max(0, parseInt(ev.currentTarget.value, 10) || 0) })} aria-label={`רמה של ${name}`} title="רמה" />
                       <input type="text" value={e.heTitle} placeholder="כותרת הצומת" onInput={(ev) => patchEntry(i, { heTitle: ev.currentTarget.value })} aria-label={`כותרת צומת ${i + 1}`} style={`margin-inline-start:${Math.min(e.level, 8) * 16}px`} />
                       <input type="number" min="1" value={e.line} onChange={(ev) => patchEntry(i, { line: parseInt(ev.currentTarget.value, 10) || 1 })} aria-label={`שורה של ${name}`} title="שורה" />
                       <button class="icon-btn" disabled={!book} onClick={() => book && store.reveal("source", book.key, e.line - 1)} title="הצגת השורה בקורא" aria-label={`הצגת השורה של ${name}`}>
                         <Icon name="oz_document_text" size={18} />
                       </button>
-                      <button class="icon-btn" onClick={() => setEntries(s.entries.filter((_, j) => j !== i))} title="מחיקת הצומת" aria-label={`מחיקת ${name}`}>
+                      <button class="icon-btn" onClick={() => (setEntries(s.entries.filter((_, j) => j !== i)), setSel(-1))} title="מחיקת הצומת" aria-label={`מחיקת ${name}`}>
                         <Icon name="fl_dismiss" size={18} />
                       </button>
                     </div>
@@ -279,7 +310,14 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
               </summary>
               <ul class="problems" style="margin-top:8px">
                 {problems.slice(0, 100).map((p, i) => (
-                  <li key={i} class={p.severity} style={p.structure !== undefined ? "cursor:pointer" : ""} {...(p.structure !== undefined && activatable(() => (setCur(p.structure!), p.entry !== undefined && setShown(Math.max(shown, p.entry + 1)))))}>
+                  <li key={i} class={p.severity} style={p.structure !== undefined ? "cursor:pointer" : ""} {...(p.structure !== undefined && activatable(() => {
+                    setCur(p.structure!);
+                    if (p.entry === undefined) return;
+                    const at = p.entry;
+                    setShown(Math.max(shown, at + 1));
+                    // to the node itself, not only its structure
+                    requestAnimationFrame(() => rowsRef.current?.querySelector<HTMLInputElement>(`[aria-label="כותרת צומת ${at + 1}"]`)?.focus());
+                  }))}>
                     {p.message}
                   </li>
                 ))}
@@ -293,7 +331,20 @@ export function AltTocDialog({ onClose }: { onClose: () => void }) {
               הסרה מהפרויקט
             </button>
           )}
-          <button class="btn text" onClick={() => ref.current?.close()}>ביטול</button>
+          {leaving && (
+            <div class="alt-leave warn-text" role="alert">
+              <span>יש שינויים שלא נשמרו במבני הכותרות של "{title}". סגירה בלי שמירה מוחקת אותם.</span>
+              <span class="row">
+                <button class="btn text" ref={keepRef} onClick={() => setLeaving(false)}>
+                  חזרה לעריכה
+                </button>
+                <button class="btn outlined danger" onClick={() => ref.current?.close()}>
+                  סגירה בלי שמירה
+                </button>
+              </span>
+            </div>
+          )}
+          <button class="btn text" onClick={close}>ביטול</button>
           <button class="btn filled" onClick={save} disabled={!title}>
             <Icon name="fl_save" size={18} />
             שמירה

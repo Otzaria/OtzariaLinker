@@ -608,6 +608,8 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 .alt-head { position: sticky; top: 0; z-index: 1; padding-block: 8px 4px; background: var(--surface-container-low); border-bottom: 1px solid var(--outline-variant); font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .alt-head .gap { inline-size: 26px; }
 .alt-row.bad input { border-color: var(--error); }
+.alt-row.sel { outline: 2px solid color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: 1px; border-radius: 4px; }
+.alt-leave { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 .alt-toc .problems { max-height: min(9rem, 24vh); overflow: auto; }
 @media (max-width: 600px) {
   /* narrow: the title gets a full line; level and line sit under it */

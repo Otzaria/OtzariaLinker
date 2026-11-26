@@ -38,3 +38,29 @@ export function numberInGematria(entries: readonly AltTocEntry[], base: string):
   });
   return { entries: out, changed };
 }
+
+/** One node one place up (-1) or down (+1); at an edge the same array is returned. */
+export function moveEntry(entries: readonly AltTocEntry[], i: number, delta: -1 | 1): readonly AltTocEntry[] {
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= entries.length) return entries;
+  const out = [...entries];
+  [out[i], out[j]] = [out[j]!, out[i]!];
+  return out;
+}
+
+/** A new empty node right after node `i`, at its level and line (the user then names it). */
+export function insertEntryAfter(entries: readonly AltTocEntry[], i: number): AltTocEntry[] {
+  const at = entries[i];
+  const out = [...entries];
+  out.splice(i + 1, 0, { heTitle: "", line: at?.line ?? 1, level: at?.level ?? 0 });
+  return out;
+}
+
+/** Node `i` and the nodes under it (the deeper ones that follow) one level in (+1) or out (-1); never below 0. */
+export function shiftLevel(entries: readonly AltTocEntry[], i: number, delta: -1 | 1): readonly AltTocEntry[] {
+  const at = entries[i];
+  if (!at || at.level + delta < 0) return entries;
+  let end = i + 1;
+  while (end < entries.length && entries[end]!.level > at.level) end++;
+  return entries.map((e, j) => (j >= i && j < end ? { ...e, level: e.level + delta } : e));
+}
