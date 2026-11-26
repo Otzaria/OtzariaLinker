@@ -179,3 +179,46 @@ describe("C19 — the anchor: the commentator's name is in it, an unmatched brac
     ["ועיין ברכות (דף יג:) ושם", "ברכות (דף יג:)"],
   ])("%s → %s (a bracket in the anchor is closed in it)", (text, want) => expect(anchorOf(text, B.ber.key)).toBe(want));
 });
+
+describe("C20 — a siman of a book in parts of the Shulchan Aruch: the part the context names", () => {
+  // the shape of "משכנות יעקב" in seforim.db (no structured heRef: its headings): a part of יורה דעה whose simanim are written
+  // "<n> שאלה", then glosses on חושן משפט with "סימן מג" — the only heading the headings index reads as siman 43
+  const mish = ref("mish", "משכנות יעקב", "otzaria");
+  const lines = ["<h1>משכנות יעקב</h1>", "<h2>מחלק יורה דעה</h2>", "<h3>סימן מב</h3>", "שאלה", "תשובה", "<h2>הגהות השייכים לחלק חושן משפט</h2>", "<h3>סימן מג</h3>", "הגהה", "הגהה שניה"].map((text, index) => ({ index, text, heading: /^<h(\d)/.exec(text) ? Number(/^<h(\d)/.exec(text)![1]) : null }));
+  const lib: CitationLibrary = { catalog: [{ book: mish }], index: (b) => buildHeadingsIndex(b, lines) };
+  const go = (text: string | string[]) => run(text, {}, lib);
+
+  it("the context is יורה דעה: no link to the siman of חושן משפט, and the reason is listed", () => {
+    const r = go('ועיין ביורה דעה סימן קצו, וראיתי [במשכנות יעקב סי\' מ"ג] שכתב');
+    expect(r.suggestions.filter((s) => s.target.book.key === "mish")).toEqual([]);
+    expect(r.unmatched.flatMap((u) => u.reasons.map((x) => x.code))).toContain("citations/part-mismatch");
+  });
+
+  it("…also when the part was named a few lines before", () => {
+    const r = go(["והנה בהלכות נדה ביו\"ד סימן קצ\"ו כתב", "ועוד שם", 'וראיתי במשכנות יעקב סי\' מ"ג שכתב']);
+    expect(r.suggestions.filter((s) => s.target.book.key === "mish")).toEqual([]);
+  });
+
+  it("the context is חושן משפט: the siman, as before", () => {
+    const s = go('ועיין בחושן משפט סימן ז, וראיתי במשכנות יעקב סי\' מ"ג שכתב').suggestions.find((x) => x.target.book.key === "mish")!;
+    expect(s.target.line).toBeGreaterThanOrEqual(6);
+    expect(s.confidence).not.toBe("possible");
+  });
+
+  it("no part in the context: the siman, at most 'possible' (the book has several parts; which one is meant is not written)", () => {
+    const s = go('וראיתי במשכנות יעקב סי\' מ"ג שכתב').suggestions.find((x) => x.target.book.key === "mish")!;
+    expect(s.confidence).toBe("possible");
+    expect(s.warnings.map((w) => w.code)).toContain("citations/part-undecided");
+  });
+
+  it("the part written after the name decides too: 'משכנות יעקב יו\"ד סי' מ\"ג' is not חושן משפט", () => {
+    expect(go('וראיתי במשכנות יעקב יו"ד סי\' מ"ג שכתב').suggestions.filter((s) => s.target.book.key === "mish")).toEqual([]);
+  });
+
+  it("a book of one part is not touched (control)", () => {
+    const one = lines.filter((l) => l.index < 1 || l.index > 4).map((l, index) => ({ ...l, index }));
+    const solo: CitationLibrary = { catalog: [{ book: mish }], index: (b) => buildHeadingsIndex(b, one) };
+    const s = run('ועיין ביורה דעה, וראיתי במשכנות יעקב סי\' מ"ג שכתב', {}, solo).suggestions.find((x) => x.target.book.key === "mish")!;
+    expect(s.confidence).not.toBe("possible");
+  });
+});

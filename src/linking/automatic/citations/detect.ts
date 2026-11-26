@@ -5,6 +5,7 @@ import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from ".
 import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
 import { CHAPTER_OPENINGS } from "./knowledge";
+import { partNamed } from "./resolve";
 import { StructureTracker, type InternalRef } from "./self";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
@@ -77,6 +78,12 @@ export interface Citation {
   readonly ordinal?: true;
   /** one bare Arabic number and a plain Hebrew word after it ("הוריות 10 סעיפים"): maybe a count, not an address */
   readonly quantityLike?: true;
+  /**
+   * the part of the Shulchan Aruch the context names ("ביו"ד סי' קצ"ו … [משכנות יעקב סי' מ"ג]"): written before the citation in its
+   * line or up to PART_WINDOW lines before, a heading of the citing book, or the part its title is on. A book in parts whose
+   * simanim restart in each is resolved in that part (engine.ts, issue #42 C20).
+   */
+  readonly partContext?: string;
 }
 
 /** A chapter or parsha cited by its name. */
@@ -177,6 +184,12 @@ export class CitationScanner {
   private headingSince = false;
   /** spans that looked like citations but were dropped, by reason (for the notes) */
   readonly dropped = new Map<string, number>();
+  /** the last part of the Shulchan Aruch named: in the text (with its line), or by a heading of the citing book (held until another) */
+  private lastPart: { part: string; line: number; heading: boolean } | null = null;
+  /** the parts named in the line being scanned, by token */
+  private linePart: { at: number; part: string }[] = [];
+  /** the part the citing book's title is on ("פתחי תשובה על שולחן ערוך יורה דעה"), the context's last resort */
+  private readonly titlePart: string | null;
   private readonly ibidOn: boolean;
   private readonly window: number;
   /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן"; per line in a book of partBases */
@@ -206,6 +219,7 @@ export class CitationScanner {
     this.structure = new StructureTracker(sourceTitle);
     this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
     this.glossary = glossaryOf(sourceTitle);
+    this.titlePart = partNamed(sourceTitle.replace(/,/g, " "));
   }
 
   /** the commentator whose words this book is a glossary of ("אוצר לעזי רש"י" → רש"י), or null */
@@ -224,6 +238,8 @@ export class CitationScanner {
       this.headingSince = true;
       this.structure.heading(heading, text);
       this.contextCache = undefined;
+      const part = partNamed(text);
+      if (part) this.lastPart = { part, line, heading: true };
       return;
     }
     this.structure.content(heRef);
@@ -238,12 +254,30 @@ export class CitationScanner {
     this.lastFar = !!this.last && line - this.last.line > this.window;
     this.headingSince = false;
     this.lastLineSeen = line;
+    // the parts of the Shulchan Aruch this line names ("ביו"ד", "בחושן משפט"), for the context of its citations (partContext)
+    this.linePart = [];
+    for (let i = 0; i < toks.length; i++) {
+      const part = partMentionAt(toks, i);
+      if (part) this.linePart.push({ at: i, part });
+    }
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
       const next = this.yalkut(toks, i, line) ?? this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.otherChapter(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line) ?? this.contextDaf(toks, i, line)) : null);
       if (next !== null) i = next - 1;
     }
+    const named = this.linePart.at(-1);
+    if (named) this.lastPart = { part: named.part, line, heading: false };
+  }
+
+  /** The part of the Shulchan Aruch the context of a citation at toks[from] names (Citation.partContext), or undefined. */
+  private partContextAt(from: number, line: number): string | undefined {
+    let here: string | undefined;
+    for (const x of this.linePart) if (x.at < from) here = x.part;
+    if (here) return here;
+    const last = this.lastPart;
+    if (last && (last.heading || line - last.line <= PART_WINDOW)) return last.part;
+    return this.base ? (partNamed(this.base.book.title) ?? this.titlePart ?? undefined) : (this.titlePart ?? undefined);
   }
 
   /**
@@ -1623,6 +1657,7 @@ export class CitationScanner {
     candidates = [...candidates].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
     // the anchor: from the commentator's name (if any) to the end of the place, with no bracket left open or closed alone in it
     const span = balancedSpan(toks, spanFrom, c.to);
+    const partContext = this.partContextAt(c.from, line);
     const first = toks[span.from]!;
     const lastTok = toks[span.to - 1]!;
     const cit: Citation = {
@@ -1648,6 +1683,7 @@ export class CitationScanner {
       ...(c.internal && { internal: c.internal }),
       ...(commentator && diburWords?.length && { dh: diburWords }),
       ...(quantityLike && { quantityLike: true as const }),
+      ...(partContext && { partContext }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -1792,6 +1828,9 @@ const MAX_OTHER_WORKS = 3;
 /** past the ibid window, how far "שם" with a place of its own (or "<book> שם") may still reach, scored lower */
 const FAR_WINDOW = 15;
 
+/** how many lines after a part of the Shulchan Aruch is named in the text it is still the context of a citation (Citation.partContext) */
+const PART_WINDOW = 10;
+
 /** "בבתרא", "דקמא", "במציעא": a tractate by its nickname (the Bavot), right before a place */
 const TRACTATE_NICKNAMES = /^[ובד]{0,2}(?:בתרא|קמא|מציעא)$/;
 
@@ -1841,6 +1880,23 @@ function sectionAt(toks: readonly Tok[], at: number): { part: string; next: numb
   for (const [part, names] of Object.entries(SA_PARTS)) {
     if (two && names.includes(two)) return { part, next: i + 2 };
     if (names.includes(one)) return { part, next: i + 1 };
+  }
+  return null;
+}
+
+/**
+ * A part of the Shulchan Aruch named at toks[i] in running text, for the context of the citations after it ("ביורה דעה", "ובחו"מ",
+ * "לאו"ח"): one or two words, with up to two prefix letters. Wider than sectionAt (which reads the part that FOLLOWS a name).
+ */
+function partMentionAt(toks: readonly Tok[], i: number): string | null {
+  const t = toks[i];
+  if (t?.kind !== "word") return null;
+  const shape = wordShape(t);
+  const next = toks[i + 1]?.kind === "word" ? wordShape(toks[i + 1]!) : "";
+  for (let p = 0; p <= 2 && p < shape.length - 1; p++) {
+    if (p && !/^[ובלמהד]$/.test(shape[p - 1]!)) break;
+    const one = shape.slice(p);
+    for (const [part, names] of Object.entries(SA_PARTS)) if (names.includes(one) || (next && names.includes(`${one} ${next}`))) return part;
   }
   return null;
 }

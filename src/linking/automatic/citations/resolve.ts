@@ -5,7 +5,8 @@ import { analyzeBook, buildUnits } from "../headings/structure";
 import type { PathElement } from "../headings/numbering";
 import type { EngineLine } from "../types";
 import type { AddrElem, Kind } from "./address";
-import { normTitle, type Collection } from "./aliases";
+import { stripTags } from "../../../core/text/html";
+import { normTitle, SA_PARTS, type Collection } from "./aliases";
 import { unitNameKey } from "./named";
 import { strictValue } from "./numbers";
 
@@ -54,6 +55,8 @@ export interface Resolution {
   readonly daf: boolean;
   /** pages: the page is listed more than once (a section printed beside it), so where on it is unsure */
   readonly split?: boolean;
+  /** headings: the part of the Shulchan Aruch ("יורה דעה") the last heading before the unit named, in a book of several (TargetIndex.parts) */
+  readonly part?: string;
 }
 
 export interface TargetIndex {
@@ -61,6 +64,11 @@ export interface TargetIndex {
   readonly via: "heref" | "headings" | "none";
   /** the book is addressed by daf/amud (Bavli, its commentaries) */
   readonly daf: boolean;
+  /**
+   * headings: how many parts of the Shulchan Aruch the book's headings name ("מחלק יורה דעה", "הגהות השייכים לחלק חושן משפט").
+   * Two or more: a book in parts whose simanim restart in each, so a siman alone does not say which part (issue #42 C20)
+   */
+  readonly parts?: number;
   resolve(elems: readonly AddrElem[], collection: Collection, section?: string): Resolution | null;
   /**
    * A first level of the references named `key` (a loose unit key, named.ts: "ויקהל" in "ספר הזהר,
@@ -317,23 +325,53 @@ export function buildHeadingsIndex(book: BookRef, lines: readonly EngineLine[]):
     const n = u.path.at(-1)!.n!;
     pushTo(byLast, n, u);
   }
+  // the parts of the Shulchan Aruch the headings name, where each begins (a heading's part holds until another heading names one)
+  const partFrom: { line: number; part: string }[] = [];
+  for (const l of lines) {
+    if (l.heading === null) continue;
+    const part = partNamed(l.text);
+    if (part && partFrom.at(-1)?.part !== part) partFrom.push({ line: l.index, part });
+  }
+  const parts = new Set(partFrom.map((x) => x.part)).size;
+  const partAt = (line: number): string | undefined => {
+    let found: string | undefined;
+    for (const x of partFrom) {
+      if (x.line > line) break;
+      found = x.part;
+    }
+    return found;
+  };
   return {
     book,
     via: units.length ? "headings" : "none",
     daf: isDaf,
-    resolve(elems) {
+    ...(parts > 1 && { parts }),
+    resolve(elems, _collection, section) {
       const want = expand(elems);
       if (!want) return null;
       const last = want.at(-1)!;
-      const cands = (byLast.get(last.n) ?? []).filter((u) => u.path.length === want.length && u.path.every((e, i) => same(e, want[i]!)));
+      let cands = (byLast.get(last.n) ?? []).filter((u) => u.path.length === want.length && u.path.every((e, i) => same(e, want[i]!)));
+      // "משכנות יעקב יו"ד סי' מ"ג": a part written in the citation picks the units of that part, in a book of several
+      if (section && parts > 1) cands = cands.filter((u) => partAt(u.line) === section);
       const wholeDaf = last.kind === "daf" && last.amud === undefined;
       // "דף ב" with no amud: the one or two sides of that daf under the same parent
       const hits = wholeDaf && cands.length === 2 && cands.every((u) => u.path.at(-1)!.amud !== undefined) ? [{ ...cands[0]!, end: Math.max(cands[0]!.end, cands[1]!.end), line: Math.min(cands[0]!.line, cands[1]!.line), leaf: false }] : cands;
       if (hits.length !== 1) return null; // none, or several units with that path (several חלקים): no guess
       const u = hits[0]!;
-      return { book, line: u.line, end: u.end, leaf: u.leaf, wholeDaf, amudFromBareLetter: false, label: u.label, via: "headings", daf: isDaf };
+      const part = parts > 1 ? partAt(u.line) : undefined;
+      return { book, line: u.line, end: u.end, leaf: u.leaf, wholeDaf, amudFromBareLetter: false, label: u.label, via: "headings", daf: isDaf, ...(part && { part }) };
     },
   };
+}
+
+/** the names of the parts of the Shulchan Aruch in a heading, quote marks as ASCII ("מחלק יורה דעה", "לחלק חו"מ") */
+const PART_IN_HEADING: readonly (readonly [RegExp, string])[] = Object.entries(SA_PARTS).map(([part, names]) => [new RegExp(`(?:^|[\\s(\\[,.:;])[ובלמה]{0,2}(?:${names.join("|")})(?=$|[\\s)\\],.:;])`), part] as const);
+
+/** The one part of the Shulchan Aruch a heading names, or null (none, or more than one). */
+export function partNamed(html: string): string | null {
+  const text = stripTags(html).replace(/[״”]/g, '"');
+  const hits = PART_IN_HEADING.filter(([re]) => re.test(text)).map(([, part]) => part);
+  return hits.length === 1 ? hits[0]! : null;
 }
 
 interface Want {

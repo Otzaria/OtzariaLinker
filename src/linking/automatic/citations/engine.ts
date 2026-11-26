@@ -176,14 +176,22 @@ const PENALTY = {
    * of that word as an address; at most "possible"
    */
   quantityLike: 0.16,
+  /**
+   * a siman of a book in parts of the Shulchan Aruch (by its headings), with no part in the context (issue #42 C20): the simanim
+   * restart in each part, and only one part's was found — at most "possible" (a book by headings already pays 0.1)
+   */
+  partUndecided: 0.06,
 } as const;
 
 export interface Pending {
   readonly citation: Citation;
   /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was; dibur: the ד"ה's line was found */
-  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean }[];
+  /** partUndecided: found in one part of a book in parts of the Shulchan Aruch, and the context names none (issue #42 C20) */
+  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean; partUndecided?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
+  /** the place was found only in another part of the Shulchan Aruch than the context's (issue #42 C20) */
+  partMismatch?: { want: string; found: string };
   /** the numbers' other reading ("פ"ב" as 82) names a place in one of the candidate books */
   altElsewhere?: boolean;
 }
@@ -385,13 +393,25 @@ export class CitationRun {
         // book_acronym is too noisy to trust without the target's own references: a database name
         // located only by headings ("בתרא" → a commentary's headings) is not a reading
         if (res && res.via === "headings" && t.tier === "acronym") continue;
+        // a book in parts of the Shulchan Aruch, by its headings ("משכנות יעקב": יורה דעה, then glosses on חושן משפט): the siman found
+        // is in one part. Another part in the context — not this place (issue #42 C20); no part in it — not sure which (below).
+        // A part written in the citation itself was asked of the index already (t.section)
+        let partUndecided = false;
+        if (res?.part && index.parts && !t.section) {
+          const want = p.citation.partContext;
+          if (want && want !== res.part) {
+            p.partMismatch = { want, found: res.part };
+            continue;
+          }
+          partUndecided = !want;
+        }
         // "תהלים פ"ו", "תה' פ' ב": the numbers have a second reading; it costs only when some book the name may
         // mean has that place too — this one, or another candidate ("בכתובות פ"ב": chapter 2 of the Mishna, or
         // daf 82 of the Bavli). In a midrash rabbah "פי"א" is its parsha 11, the way it is cited.
         const alt = !res?.daf && p.citation.rule !== "midrash-rabbah" ? alternativeReading(p.citation.elems) : null;
         const other = alt ? index.resolve(alt, t.collection, t.section) : null;
         if (other && (!res || other.line !== res.line || other.end !== res.end)) p.altElsewhere = true;
-        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
+        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null, ...(partUndecided && { partUndecided: true }) });
       }
     }
   }
@@ -422,6 +442,13 @@ export class CitationRun {
       // an ibid follows the book its antecedent was linked to
       // (one moved to a commentator — "רש"י שם ד"ה" — is in that commentary, not in the antecedent's book)
       if (c.ibidOf !== undefined && chosenBook.has(c.ibidOf) && !c.commentator) options = options.filter((o) => o.target.book.key === chosenBook.get(c.ibidOf!));
+      if (!options.length && p.partMismatch && !p.resolved.length) {
+        counts.noLocation++;
+        const list = unmatched.get(c.line) ?? [];
+        list.push({ code: "citations/part-mismatch", text: `"${c.text}": בספר ${c.candidates.map((x) => x.book.title).slice(0, 3).join(" / ")} המקום נמצא רק בחלק ${p.partMismatch.found}, וההקשר מדבר על ${p.partMismatch.want}. הספר מחולק לפי חלקי השולחן ערוך והסימנים מתחילים מחדש בכל חלק, ולכן לא קושר. אם זה המקום, קשרו אותו ביד.` });
+        unmatched.set(c.line, list);
+        continue;
+      }
       if (!options.length) {
         const why = p.resolved.length
           ? `"${c.text}": המקום שאליו מפנה ה"שם" לא נמצא בספר של ההפניה הקודמת`
@@ -435,7 +462,7 @@ export class CitationRun {
         unmatched.set(c.line, list);
         continue;
       }
-      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
+      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) - (o.partUndecided ? PENALTY.partUndecided : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
       const best = scored[0]!;
       // the same book reached through two names (a title and an acronym) is not a rival
       const rival = scored.find((o) => o.target.book.key !== best.target.book.key);
@@ -476,6 +503,10 @@ export class CitationRun {
       if (firstRef.reason) {
         reasons.push(firstRef.reason);
         rules.push("citations.first-ref");
+      }
+      if (best.partUndecided && res.part) {
+        rules.push("citations.part-undecided");
+        warnings.push({ code: "citations/part-undecided", text: `הספר מחולק לפי חלקי השולחן ערוך, והסימן נמצא בחלק ${res.part}. ההקשר אינו אומר איזה חלק, ולכן ייתכן שהכוונה לסימן בחלק אחר` });
       }
       if (rival && confidence === "ambiguous") warnings.push({ code: "citations/ambiguous", text: `השם "${c.name}" מתאים גם ל${rival.target.book.title}, ושם המקום קיים גם כן` });
       suggestions.push({
