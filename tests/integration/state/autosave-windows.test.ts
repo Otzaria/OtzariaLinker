@@ -193,3 +193,20 @@ describe("more closed windows than the recovery queue holds (V7 PR1 review, find
     expect([...mem.keys()].filter((k) => k.startsWith("autosave:v1"))).toEqual([]);
   });
 });
+
+describe("the replaced work could not be kept in the browser (V7 PR1 review, finding 5)", () => {
+  it("the user hears it, instead of a promise that it will be offered again", async () => {
+    const { kv } = memKv();
+    const failing: KeyValueStore = { ...kv, set: async (k, v) => (k.endsWith(":recovered") ? Promise.reject(new Error("QuotaExceededError")) : kv.set(k, v)) };
+    const open = new Set(["a"]);
+    const a = newStore();
+    a.startAutosave(failing, 0, windowOf("a", () => open));
+    await a.openFiles([links("פירוש גדול", 4)]);
+    await tick();
+    const p = newStore();
+    await p.openFiles([links("פירוש קטן", 2)]);
+    a.openProject("קטן.otzlinker.json", p.projectText());
+    await tick(30);
+    expect(a.notices.value.some((n) => n.text.includes("לא הצלחתי לשמור בדפדפן את העבודה הקודמת"))).toBe(true);
+  });
+});

@@ -53,10 +53,12 @@ export async function autosaveWindow(locks: LockManagerLike | undefined = (globa
     });
   if (locks) {
     if (!id || !(await hold(id))) {
-      id = newId();
-      await hold(id);
+      // a fresh id; if the browser does not grant its lock either, a few more — a window without its lock looks closed to the
+      // others, which would move its work away while it is open (V7 PR1 review, finding 5)
+      for (let tries = 0; tries < 3; tries++) if (await hold((id = newId()))) break;
     }
-  } else id ??= newId();
+  }
+  id ??= newId();
   try {
     store?.setItem(ID_KEY, id);
   } catch {
@@ -69,6 +71,13 @@ export async function autosaveWindow(locks: LockManagerLike | undefined = (globa
       const q = await locks.query();
       return new Set((q.held ?? []).map((l) => l.name ?? "").filter((n) => n.startsWith(LOCK)).map((n) => n.slice(LOCK.length)));
     },
-    exclusive: <T>(fn: () => Promise<T>) => locks.request(QUEUE_LOCK, () => fn()) as Promise<T>,
+    // a lock request the browser refuses does not stop the work: it runs unlocked rather than not at all (finding 5)
+    exclusive: <T>(fn: () => Promise<T>): Promise<T> => {
+      let ran = false;
+      return (locks.request(QUEUE_LOCK, () => ((ran = true), fn())) as Promise<T>).catch((err: unknown) => {
+        if (ran) throw err;
+        return fn();
+      });
+    },
   };
 }

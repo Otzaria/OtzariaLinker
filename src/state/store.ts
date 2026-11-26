@@ -1314,9 +1314,14 @@ export class AppStore {
     this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים ומסדים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
     if (unsaved) {
-      void this.recoveryQueue?.add(unsaved);
+      // kept in the browser too when the autosave runs; if that write fails, the user hears it (V7 PR1 review, finding 5)
+      const kept = this.recoveryQueue;
+      if (kept)
+        void kept.add(unsaved).then((ok) => {
+          if (!ok) this.notify("warning", "לא הצלחתי לשמור בדפדפן את העבודה הקודמת שהוחלפה. היא זמינה עדיין בכפתור \"החזרת העבודה הקודמת\" עד שתסגרו את החלון — כדי לא לאבד אותה, החזירו אותה ושמרו אותה לקובץ.");
+        });
       const n = recoverableCount(unsaved);
-      this.notify("warning", `העבודה הקודמת לא נשמרה (${n.toLocaleString("he")} קישורים והחלטות), והפרויקט "${path}" נפתח במקומה. היא נשמרה בצד: אפשר להחזיר אותה בכפתור כאן, והיא תוצע שוב גם בפתיחה הבאה של הכלי.`, undefined, {
+      this.notify("warning", `העבודה הקודמת לא נשמרה (${n.toLocaleString("he")} קישורים והחלטות), והפרויקט "${path}" נפתח במקומה. היא נשמרה בצד: אפשר להחזיר אותה בכפתור כאן${kept ? ", והיא תוצע שוב גם בפתיחה הבאה של הכלי" : " (השמירה האוטומטית בדפדפן אינה פעילה, ולכן אחרי סגירת החלון היא לא תהיה)"}.`, undefined, {
         label: "החזרת העבודה הקודמת",
         run: () => (void this.recoveryQueue?.take(unsaved), this.openProject("העבודה הקודמת", unsaved)),
       });
@@ -1330,7 +1335,7 @@ export class AppStore {
   /** The browser autosave, while startAutosave runs: what the last write did (V7 §1.2: the user sees whether the work is kept). */
   readonly autosave = signal<"idle" | "pending" | "saved" | "failed">("idle");
   /** the recovery queue of the running autosave: opening a project over unsaved work puts that work in it (#41 B21) */
-  private recoveryQueue: { add(text: string): Promise<void>; take(text: string): Promise<void> } | null = null;
+  private recoveryQueue: { add(text: string): Promise<boolean>; take(text: string): Promise<boolean> } | null = null;
 
   /**
    * Saves the project to the browser a moment after every change, and offers to restore what a
@@ -1399,15 +1404,22 @@ export class AppStore {
     const spill = async (texts: readonly string[]) => {
       for (const t of texts) await kv.set(`${AUTOSAVE_KEY}:w:spill-${Date.now().toString(36)}-${(spills++).toString(36)}`, t);
     };
-    const update = (change: (list: string[]) => string[]) =>
-      (chain = chain.then(() =>
+    /** true when the change reached the browser's storage (V7 PR1 review, finding 5: a failure was swallowed while the user was told the work is kept) */
+    const update = (change: (list: string[]) => string[]): Promise<boolean> => {
+      const done = chain.then(() =>
         exclusive(async () => {
           const all = change(keptOffers(await kv.get(RECOVERED)));
           const next = all.slice(0, MAX_RECOVERY_OFFERS);
           await spill(all.slice(MAX_RECOVERY_OFFERS));
           await (next.length ? kv.set(RECOVERED, JSON.stringify(next)) : kv.delete(RECOVERED));
-        }).catch(() => {}),
-      ));
+        }).then(
+          () => true,
+          () => false,
+        ),
+      );
+      chain = done.then(() => {});
+      return done;
+    };
     const take = (text: string) => update((list) => list.filter((t) => t !== text));
     const add = (text: string) => update((list) => [text, ...list.filter((t) => t !== text)]);
     this.recoveryQueue = { add, take };
