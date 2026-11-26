@@ -38,17 +38,26 @@ export interface SourceFilter {
 /** How much of a line is looked at: a marker is short, and the rest of a long line must cost nothing. */
 export const PREFIX_WINDOW = 400;
 
-const LEAD = String.raw`(?:\s|&nbsp;|<[^>]{0,60}>){0,8}`;
-const LABEL = String.raw`[א-ת\d"'״׳.]{1,6}`;
+/**
+ * White space a marker may stand among: spaces (NBSP included), and the invisible marks a right-to-left text carries — LRM/RLM, zero-width
+ * spaces and joiners, the embedding and isolate controls, a BOM — as characters or as entities (findings #42 C11: "‏[א]" was no marker).
+ */
+const GAP = String.raw`(?:[\s​-‏‪-‮⁦-⁩﻿]|&(?:nbsp|lrm|rlm|zwnj|zwj);|&#(?:160|820[3-7]|x[aA]0|x200[b-fB-F]);)`;
+const LEAD = String.raw`(?:${GAP}|<[^>]{0,60}>){0,8}`;
+/**
+ * A label of up to six letters or digits, each letter with the nikud and cantillation marks written on it ("[אֿ]", "[בּ]": findings #42
+ * C11). The marks cannot begin a label, so a letter and its marks are read one way only (no ambiguity for the regex engine).
+ */
+const LABEL = String.raw`(?:[א-ת\d"'״׳.][֑-ׇ]{0,4}){1,6}`;
 const PRESET_SOURCE: Readonly<Record<SourceFilterPreset, string>> = {
-  square: String.raw`\[\s*${LABEL}\s*\]`,
-  round: String.raw`\(\s*${LABEL}\s*\)`,
+  square: String.raw`\[${GAP}{0,4}${LABEL}${GAP}{0,4}\]`,
+  round: String.raw`\(${GAP}{0,4}${LABEL}${GAP}{0,4}\)`,
   "close-paren": String.raw`${LABEL}\)`,
   // a bold label that only says "ד"ה", with nothing else inside it; no tag may come before it (the tag IS the marker)
   "bold-dh": String.raw`<(?:b|strong)>\s*[בו]?(?:ד"ה|ד״ה|דה|דיבור המתחיל)\s*[.:]?\s*</(?:b|strong)>`,
 };
 /** after the prefix: closing tags and spaces that belonged to it ("<b>[א]</b> text") */
-const AFTER = /^(?:\s|&nbsp;|<\/[a-zA-Z0-9]{1,10}>){0,10}/;
+const AFTER = new RegExp(String.raw`^(?:${GAP}|<\/[a-zA-Z0-9]{1,10}>){0,10}`);
 
 export interface PrefixMatch {
   /** where the prefix ends */
@@ -72,7 +81,7 @@ const withoutAnchor = (p: string) => (p.startsWith("^") ? p.slice(1) : p);
 
 export function compileSourceFilter(spec: SourceFilter, defaults: { readonly strip?: boolean } = {}): CompileResult {
   let re: RegExp;
-  const lead = "preset" in spec.prefix ? (spec.prefix.preset === "bold-dh" ? String.raw`\s*` : LEAD) : LEAD;
+  const lead = "preset" in spec.prefix ? (spec.prefix.preset === "bold-dh" ? String.raw`${GAP}{0,8}` : LEAD) : LEAD;
   if ("preset" in spec.prefix) {
     if (!SOURCE_FILTER_PRESETS.includes(spec.prefix.preset)) return { ok: false, reason: "הסימן שבחרתם בתחילת השורה אינו מוכר." };
     re = new RegExp(`^${lead}${PRESET_SOURCE[spec.prefix.preset]}`, "u");
