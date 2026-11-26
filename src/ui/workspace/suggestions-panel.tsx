@@ -604,26 +604,33 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
   useEffect(() => {
     if (s) store.suggestions.show(s.id);
   }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // keys act only when no control has focus: Enter on a focused button must press THAT button (UX review #1)
-      if ((e.target as HTMLElement).closest?.("input, textarea, select, button, a, [role=tab], [contenteditable]") || e.ctrlKey || e.metaKey || e.altKey || !s) return;
-      const k = e.key.toLowerCase();
-      if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
-      else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
-      else if (k === "u" || k === "ו") (e.preventDefault(), store.suggestions.reset([s.id]));
-      else if (k === "n" || k === "מ") (e.preventDefault(), go(1, true));
-      else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
-      else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  });
+  /*
+   * The review keys act only when the card ITSELF has the focus (V7 PR3/PR4 review, finding 5), never with a modifier: they were
+   * global, so a letter typed while a <summary>, a dialog or a row of another region had the focus decided the shown suggestion —
+   * and "ו" takes an approval back with its links (B22). A control inside the card keeps its own keys: Enter on a focused button
+   * presses THAT button (UX review #1). Clicking the card's text focuses it (tabIndex).
+   */
+  const onKey = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !s) return;
+    const k = e.key.toLowerCase();
+    if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
+    else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
+    else if (k === "u" || k === "ו") (e.preventDefault(), store.suggestions.reset([s.id]));
+    else if (k === "n" || k === "מ") (e.preventDefault(), go(1, true));
+    else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
+    else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
+  };
+  /** a decision button that the decision disabled or removed would drop the focus to the page, where the keys no longer act: back to the card */
+  const keepFocus = (e: MouseEvent) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    const card = btn.closest<HTMLElement>(".step-card");
+    requestAnimationFrame(() => (!btn.isConnected || btn.disabled) && card?.isConnected && card.focus({ preventScroll: true }));
+  };
   if (!s) return <p class="empty">אין הצעות.</p>;
   const state = st.get(s.id)!;
 
   return (
-    <div class="builder">
+    <div class="builder step-card" tabIndex={0} role="group" aria-label="ההצעה הנוכחית" aria-keyshortcuts="A R U N" onKeyDown={onKey}>
       <div class="row">
         <button class="icon-btn" onClick={() => go(-1)} disabled={idx === 0} aria-label="הקודמת" title="הקודמת (→)">
           <Icon name="fl_chevron_down" size={18} class="rot-left" />
@@ -665,15 +672,15 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
         </details>
       )}
       <div class="row">
-        <button class="btn filled" onClick={() => (store.suggestions.approve([s.id]), go(1, true))} disabled={state === "approved" || state === "exists"}>
+        <button class="btn filled" onClick={(e) => (store.suggestions.approve([s.id]), go(1, true), keepFocus(e))} disabled={state === "approved" || state === "exists"}>
           <Icon name="oz_check" size={18} />
           אישור <kbd>A</kbd>
         </button>
-        <button class="btn outlined" onClick={() => (store.suggestions.reject([s.id]), go(1, true))} disabled={state === "rejected"}>
+        <button class="btn outlined" onClick={(e) => (store.suggestions.reject([s.id]), go(1, true), keepFocus(e))} disabled={state === "rejected"}>
           <Icon name="oz_cross" size={18} />
           דחייה <kbd>R</kbd>
         </button>
-        {(state === "approved" || state === "rejected") && <button class="btn text" onClick={() => store.suggestions.reset([s.id])}>החזרה להמתנה <kbd>U</kbd></button>}
+        {(state === "approved" || state === "rejected") && <button class="btn text" onClick={(e) => (store.suggestions.reset([s.id]), keepFocus(e))}>החזרה להמתנה <kbd>U</kbd></button>}
         <span class="grow" />
         <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה <kbd>N</kbd></button>
       </div>

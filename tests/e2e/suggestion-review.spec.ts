@@ -220,3 +220,46 @@ test("a second press of 'אישור' takes the approval back to pending, not to 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/** A Hebrew letter as the focused element gets it: Playwright has no key for it on its US layout (`press` throws, `type` sends no keydown). */
+const hebrewKey = (page: Page, key: string, mods: { altKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {}) =>
+  page.evaluate(([k, m]) => void (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...m })), [key, mods] as const);
+
+/*
+ * V7 PR3/PR4 review, finding 5: the review keys of the one-at-a-time card (A/R/U, ש/ר/ו) act only when the card itself has the focus —
+ * "ו" takes an approval back (and its links with it, B22), so typing it while a <summary>, another region's row or a modifier is
+ * in play must not touch the shown suggestion.
+ */
+test("the card's review keys act only on the card itself: not from a <summary>, another region, or with a modifier (finding 5)", async ({ page }) => {
+  const seen = watchPage(page);
+  await headingsRun(page);
+  await page.getByRole("radiogroup", { name: "תצוגת ההצעות" }).getByRole("radio", { name: "כרטיס" }).click();
+  const card = page.getByRole("group", { name: "ההצעה הנוכחית" });
+  const status = card.locator(".row").first();
+  await card.getByRole("button", { name: /^אישור/ }).click();
+  await page.getByRole("button", { name: "הקודמת" }).click();
+  await expect(status).toContainText("אושרה");
+
+  // a <summary> of the page has the focus: "ו" (and "u") leave the approval as it is
+  const summary = page.locator("summary").filter({ visible: true }).first();
+  await expect(summary).toHaveCount(1);
+  await summary.focus();
+  await hebrewKey(page, "ו");
+  await page.keyboard.press("u");
+  await expect(status).toContainText("אושרה");
+  // a focusable item of another region (the books list) has the focus
+  const other = page.getByRole("region", { name: "קבצים ומסדים" }).locator("[tabindex='0'], button").first();
+  await other.focus();
+  await hebrewKey(page, "ו");
+  await expect(status).toContainText("אושרה");
+  // on the card, with a modifier: nothing
+  await card.focus();
+  await page.keyboard.press("Shift+U");
+  await hebrewKey(page, "ו", { altKey: true });
+  await expect(status).toContainText("אושרה");
+  // on the card itself: "ו" takes it back to pending
+  await hebrewKey(page, "ו");
+  await expect(status).toContainText("ממתינה");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
