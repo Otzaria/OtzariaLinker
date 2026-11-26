@@ -127,6 +127,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "inherit", label: "שורות בא\"ד / שם יורשות את מקום השורה הקודמת", default: true },
     { kind: "boolean", key: "intermediates", label: "שורה על רש\"י/תוספות מקושרת רק לספר של אותו מפרש", default: true, hint: "שורה שפותחת \"רש\"י ד\"ה\" או \"תוס' ד\"ה\" מפרשת את דברי המפרש, ולא את הגמרא." },
     { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
+    { kind: "boolean", key: "itemRanges", label: "פסקאות ההמשך כטווח אחד בפירוש", default: false, hint: "במקום קישור לכל פסקה: קישור אחד לכל פריט (ס\"ק), עם טווח בפירוש עד הפסקה האחרונה שלו. כמו בקובץ של ארץ יהודה על ארצות החיים." },
     { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
     ...THRESHOLDS,
   ],

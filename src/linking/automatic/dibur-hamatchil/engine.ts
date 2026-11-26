@@ -97,6 +97,14 @@ export interface DhOptions extends SefariaOwnedOption {
    * (default true; the "item" of build_artzot_hachaim_links.py)
    */
   readonly continueItems?: boolean;
+  /**
+   * the item's plain paragraphs (continueItems) are not links of their own: the item's link gets a RANGE on the
+   * commentary side over them — one record per item, `line_index_N_end` on the commentary's side, as
+   * build_artzot_hachaim_links.py writes a ס"ק (issue #43) and as the library holds ארץ יהודה on ארצות החיים
+   * (`ארץ יהודה על ארצות החיים 314–317` ← `ארצות החיים 333`). Default false (a link per paragraph, as before).
+   * Never on a Sefaria commentary: the sync keeps no range on its side (validate.ts sefaria/range-side).
+   */
+  readonly itemRanges?: boolean;
   /** drop or demote what does not fit the order of the whole commentary (default true; see "the order of the whole commentary" in the engine) */
   readonly order?: boolean;
   /**
@@ -1454,6 +1462,35 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     }
   }
 
+  /*
+   * ── item ranges (itemRanges; issue #43) ──────────────────────────────────────────────────
+   * An item paragraph right after its item's lines (the next commentary line, same root, same base place) is folded
+   * into the item's link as the end of a range on the commentary side; anything between them (a heading, a line the
+   * engine did not place, a line of another root) ends the range, so a range never crosses a section.
+   */
+  const cEnd = new Map<number, number>();
+  if (options.itemRanges === true && !sefariaOwned(commentary.book)) {
+    const cNext = new Map<number, number>();
+    commentary.lines.forEach((l, i) => {
+      const n = commentary.lines[i + 1];
+      if (n) cNext.set(l.index, n.index);
+    });
+    let head: Placement | null = null;
+    let last = -1;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      const fold = head !== null && pl.rules[0] === "dh/inherit-item" && meta.get(pl.cLine)?.root === head.cLine && cNext.get(last) === pl.cLine && pl.base === head.base && pl.baseEnd === head.baseEnd;
+      if (fold) {
+        last = pl.cLine;
+        cEnd.set(head!.cLine, last);
+        placements.splice(i--, 1);
+        continue;
+      }
+      head = pl;
+      last = pl.cLine;
+    }
+  }
+
   // ── shape the suggestions ────────────────────────────────────────────────────────────────
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
   const side = (book: BookRef, line: number, end?: number): LinkSide => (end !== undefined && end > line ? { book, line, end } : { book, line });
@@ -1463,13 +1500,17 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     const { target: baseSide, citedSpan, lines: each, reason: firstRef } = baseRanges
       ? { target: side(base.book, p.base, p.baseEnd), citedSpan: undefined, lines: undefined, reason: undefined }
       : withoutRange(side(base.book, p.base, p.baseEnd), block);
-    const cSide = side(commentary.book, p.cLine);
+    const cSide = side(commentary.book, p.cLine, cEnd.get(p.cLine));
     const baseLine = bLines[posOf.get(p.base)!];
     /** the line written: the quote's first, or the first after it that can carry a record (firstRef) */
     const writtenLine = baseSide.line === p.base ? baseLine : bLines[posOf.get(baseSide.line)!];
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    if (cSide.end !== undefined) {
+      rules.push("dh/item-range");
+      reasons.push(r("dh/item-range", `הפסקאות שאחרי הדיבור המתחיל, עד שורה ${cSide.end + 1} בפירוש, שייכות לאותו מקום, ולכן הקישור הוא טווח בפירוש ולא קישור לכל פסקה`));
+    }
     /*
      * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts —
      * unless withoutRange writes it otherwise: a record per line for a short span, or the first line that
