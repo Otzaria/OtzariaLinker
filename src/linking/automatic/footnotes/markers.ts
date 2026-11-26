@@ -459,15 +459,16 @@ export const numeralIsWord = (token: string): boolean => BARE_STOP_WORDS.has(tok
 /**
  * A note line that opens with a bare number and a space — "12 text", "יב text" — the shape in which the v52 personal database writes
  * the notes of אנציקלופדיה תלמודית (#41 B12, issue #14). A CANDIDATE only: prose opens with numbers too ("40 שנה…", "1990"), so the
- * engine accepts it only where it continues the series of the book's notes (footnotes/engine.ts bareSeries). At most three digits (a
- * year is no note number). Hebrew letters only in the canonical spelling of a number and not a common word (`words`: a common word
- * too, for the engine to weigh: numeralIsWord). The span is the number alone, as the generator counts it.
+ * engine accepts it only where it continues the series of the book's notes (footnotes/engine.ts bareSeries). Up to four digits: a
+ * long entry of אנציקלופדיה תלמודית in v52 runs past note 1000 (a year such as "1990" opens no series: bareSeries). Hebrew letters only
+ * in the canonical spelling of a number and not a common word (`words`: a common word too, for the engine to weigh: numeralIsWord).
+ * The span is the number alone, as the generator counts it.
  */
 export function bareLeadingMarker(text: string, opts: DetectOptions = {}, words = false): Marker | null {
   const html = String(text ?? "");
   const map = visibleMap(html);
   const lead = /^\s*/.exec(map.text)![0].length;
-  const m = /^(\d{1,3}|[א-ת]{1,3}(?:["״][א-ת])?['׳]?)(?=\s+[^\s\d])/.exec(map.text.slice(lead));
+  const m = /^(\d{1,4}|[א-ת]{1,3}(?:["״][א-ת])?['׳]?)(?=\s+[^\s\d])/.exec(map.text.slice(lead));
   if (!m) return null;
   const len = m[1]!.length;
   // the number is one run of visible characters, with no tag inside it ("1<b>2</b>" is not "12")

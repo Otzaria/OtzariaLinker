@@ -900,7 +900,7 @@ function bareSeries(known: readonly Occ[], candidates: readonly Occ[], headingBe
     const ok = numeralIsWord(o.marker.token)
       ? p !== undefined && n === p + 1
       : (p !== undefined && (n === p + 1 || n === p + 2 || n === p || (n > p && n <= p + BARE_GAP_MAX && next === n + 1))) ||
-        (fresh && (n <= 2 || next === n + 1)) ||
+        (fresh && (n <= 2 || (n < 1000 && next === n + 1))) ||
         (n === 1 && (next === 1 || next === 2));
     if (ok) {
       accepted.push(o);
