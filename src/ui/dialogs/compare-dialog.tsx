@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { canonicalTypeString, parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { diffGroup, type LinkDiffGroup, type LinkDiffRow } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
-import { DIFF_KIND_LABELS, detailsText, diffGroupLabels } from "../../formats/report/link-diff-report";
+import { DIFF_KIND_LABELS, detailsText, diffGroupLabels, diffRowLabel } from "../../formats/report/link-diff-report";
 import { PROJECT_SET } from "../../state/link-compare";
 import { useStore } from "../context";
 import { pickFiles } from "../files";
@@ -182,7 +182,7 @@ function DiffView() {
         <tbody>
           {rows.slice(0, shown).map((x: LinkDiffRow, i) => (
             <tr key={i} class={`k-${x.kind}`}>
-              <td>{DIFF_KIND_LABELS[x.kind]}</td>
+              <td>{diffRowLabel(x)}</td>
               <Cell l={x.a} advanced={advanced} kind={x.kind} a={x.a} b={x.b} side="a" />
               <Cell l={x.b} advanced={advanced} kind={x.kind} a={x.a} b={x.b} side="b" />
             </tr>

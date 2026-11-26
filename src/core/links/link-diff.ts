@@ -11,7 +11,8 @@ import { storedForm } from "./stored-form";
  * the two sides are paired in rounds, from the strictest relation to the loosest, each link once:
  *
  *   same       identical (when a database is compared: the same stored link and ranges — a database
- *              keeps neither heRef_2 nor the refs, and its anchors are visible offsets)
+ *              keeps neither heRef_2 nor the refs, and its anchors are visible offsets); marked
+ *              `equivalent` when it means the same but is written otherwise (spacing, spelling, key order…)
  *   range      the same stored link, a range end differs
  *   anchor     … the word anchor differs
  *   direction  … the record is written the other way round (source ↔ target, "source" ↔ "commentary")
@@ -38,11 +39,18 @@ export interface LinkDiffRow {
   readonly b?: Link;
   /** "target"/"range": the two ranges still share a line */
   readonly overlap?: boolean;
+  /**
+   * "same" only: the two mean the same but are not written the same (spacing or invisible marks in a reference,
+   * the type's spelling, key order, a pipeline field, the exact text of the record). Never set against a database.
+   */
+  readonly equivalent?: boolean;
 }
 
 export interface LinkDiff {
   readonly rows: readonly LinkDiffRow[];
   readonly counts: Readonly<Record<LinkDiffKind, number>>;
+  /** of the "same" rows, those marked `equivalent` (written differently) */
+  readonly equivalent: number;
   /** a database was one of the sides: anchors and the text fields were not compared */
   readonly loose: boolean;
 }
@@ -117,6 +125,25 @@ const typeKey = (l: Link) => {
   const t = parseConnectionType(l.declaredType);
   return t.known ? t.type : `?${l.declaredType.trim().toLowerCase().replace(/\s+/g, "_")}`;
 };
+/**
+ * How the record is WRITTEN, beyond what it means: the references and the type as spelled, `null` for the type, path_2,
+ * key order, the fields the tool keeps without knowing (passthrough), and the record's own text when the writer would
+ * spell it otherwise (fileText). Only tells "identical" from "equivalent". What is not known is taken as the writer's
+ * own form: a link made in the tool has no file text and no path of its own; it has no key order either, so key orders
+ * are compared only when both records have one (sameWriting).
+ */
+const writtenKey = (l: Link) =>
+  JSON.stringify([
+    l.heRef2,
+    l.ref1 ?? null,
+    l.ref2 ?? null,
+    l.declaredType,
+    l.typeNull === true,
+    l.targetPath ?? `${l.target.book.title}.txt`,
+    l.passthrough && Object.keys(l.passthrough).length ? l.passthrough : null,
+    l.fileText ?? null,
+  ]);
+const sameWriting = (x: Link, y: Link) => writtenKey(x) === writtenKey(y) && (!x.keyOrder || !y.keyOrder || x.keyOrder.join("\u0001") === y.keyOrder.join("\u0001"));
 const overlaps = (x: LinkSide, y: LinkSide) => x.line <= span(y) && y.line <= span(x);
 const id = (o: Oriented) => `${at(o.s)}>${at(o.t)}:${o.type}`;
 const rangeKey = (o: Oriented) => `${span(o.s)}:${span(o.t)}`;
@@ -134,6 +161,7 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
   const rows: LinkDiffRow[] = [];
   const usedA = new Uint8Array(A.length);
   const usedB = new Uint8Array(B.length);
+  let nEquivalent = 0;
 
   // one round: bucket the unpaired B by a key, then pair each unpaired A with the first B of its key
   const round = (key: (o: Oriented) => string, kind: (x: Oriented, y: Oriented) => LinkDiffKind) => {
@@ -156,10 +184,14 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
       usedA[i] = usedB[j] = 1;
       const k = kind(x, y);
       const overlap = (k === "target" && overlaps(x.t, y.t)) || (k === "moved" && overlaps(x.s, y.s));
-      rows.push({ kind: k, a: x.l, b: y.l, ...(overlap && { overlap }) });
+      const equivalent = k === "same" && !loose && !sameWriting(x.l, y.l);
+      if (equivalent) nEquivalent++;
+      rows.push({ kind: k, a: x.l, b: y.l, ...(overlap && { overlap }), ...(equivalent && { equivalent }) });
     });
   };
 
+  // the exact twin first (also as written), so that a record is "equivalent" only when no identical one is there
+  if (!loose) round((o) => `${strict(o)}|${writtenKey(o.l)}`, () => "same");
   round(full, () => "same");
   round(id, (x, y) =>
     rangeKey(x) !== rangeKey(y) ? "range"
@@ -184,7 +216,7 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
   B.forEach((y, j) => usedB[j] || rows.push({ kind: "added", b: y.l }));
   const counts = Object.fromEntries(LINK_DIFF_KINDS.map((k) => [k, 0])) as Record<LinkDiffKind, number>;
   for (const r of rows) counts[r.kind]++;
-  return { rows, counts, loose };
+  return { rows, counts, equivalent: nEquivalent, loose };
 }
 
 /** A source of a merge: one links file (or the project's links of the book), with the name its links keep as their origin. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { detailDifferences, diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { DIFF_KIND_LABELS, diffGroupLabels, linkDiffCsv } from "../../../src/formats/report/link-diff-report";
+import { DIFF_KIND_LABELS, diffGroupLabels, diffRowLabel, linkDiffCsv } from "../../../src/formats/report/link-diff-report";
 
 /*
  * The semantic diff of two link sets and the lossless merge of several links files of one book
@@ -172,6 +172,51 @@ describe("diffLinks", () => {
     // a real difference of words still shows
     const c = diffLinks(a, [link(1, 10, { heRef2: "ספר ג 5", ref1: "Genesis 1:1" })]);
     expect(c.rows.map((r) => r.kind)).toEqual(["details"]);
+  });
+
+  /*
+   * V7 §1.7: "identical" and "the same link, written differently" were one row ("same", "זהה"): a reader could not tell a
+   * record that is byte for byte the other from one whose reference has a doubled space, whose type is "COMMENTARY", whose
+   * keys come in another order or that carries a pipeline field. Both stay "same" (a merge folds them; nothing is a
+   * disagreement), but the second is marked `equivalent`, counted, and labelled apart. Against a database nothing of the
+   * spelling is known, so nothing is marked there.
+   */
+  it("a record written differently that means the same is marked equivalent, apart from an identical one", () => {
+    const a = [
+      link(1, 10),
+      link(2, 20, { heRef2: "ספר ב 5" }),
+      link(3, 30, { declaredType: "commentary" }),
+      link(4, 40, { keyOrder: ["line_index_1", "line_index_2", "heRef_2", "path_2", "Conection Type"] }),
+      link(5, 50),
+      link(6, 60),
+      link(7, 70, { ref1: undefined }),
+    ];
+    const b = [
+      link(1, 10),
+      link(2, 20, { heRef2: "ספר ב  5" }),
+      link(3, 30, { declaredType: "COMMENTARY" }),
+      link(4, 40, { keyOrder: ["path_2", "line_index_1", "line_index_2", "heRef_2", "Conection Type"] }),
+      link(5, 50, { passthrough: { anchor_context: "x" } }),
+      link(6, 60, { fileText: '{"line_index_1": 7.0}' }),
+      link(7, 70, { ref1: "" }),
+    ];
+    const d = diffLinks(a, b);
+    const row = (s: number) => d.rows.find((r) => r.a!.source.line === s)!;
+    expect(d.rows.map((r) => r.kind)).toEqual(Array(7).fill("same"));
+    expect([1, 2, 3, 4, 5, 6, 7].map((s) => row(s).equivalent ?? false)).toEqual([false, true, true, true, true, true, true]);
+    expect(d.equivalent).toBe(6);
+    expect([1, 2].map((s) => diffGroup(row(s)))).toEqual(["identical", "identical"]);
+    expect(diffRowLabel(row(2))).not.toBe(diffRowLabel(row(1)));
+    expect(linkDiffCsv(d, "א", "ב")).toContain(diffRowLabel(row(2)));
+    // the exact twin is paired first, whatever the order
+    const messy = link(2, 20, { heRef2: "ספר ב  5" });
+    const clean = link(2, 20, { heRef2: "ספר ב 5" });
+    expect(diffLinks([clean, messy], [messy, clean]).rows.map((r) => r.equivalent ?? false)).toEqual([false, false]);
+    // a merge folds an equivalent record like an identical one: nothing added, nothing in conflict
+    const m = mergeLinkSets([{ name: "a", links: a }, { name: "b", links: b }], 0);
+    expect([m.entries.length, m.conflicts.length, m.duplicates]).toEqual([7, 0, 7]);
+    // against a database the spelling is not known: nothing is marked
+    expect(diffLinks([db(2, 20)], [link(2, 20, { heRef2: "x  y" })]).rows.map((r) => [r.kind, r.equivalent ?? false])).toEqual([["same", false]]);
   });
 
   it("the type is compared as the generator parses it, not as a lower-cased string", () => {
