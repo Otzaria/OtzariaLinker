@@ -3,7 +3,7 @@ import type { BookRef } from "../core/links/model";
 import { combineFingerprints } from "../core/text/fingerprint";
 import { ENGINES, type EngineId, type Suggestion } from "./automatic";
 import { sanitizeStoredOptions } from "./automatic/option-specs";
-import { compileSourceFilter, parseSourceFilter, type SourceFilter } from "./automatic/source-filter";
+import { compileSourceFilter, parseSourceFilter, runLineFilter, type SourceFilter } from "./automatic/source-filter";
 import type { StepResult } from "./maxlink-report";
 import { PAIR_ENGINES, type MaxLinkPlan, type PairEngineId, type PlanChoices, type PlanStep, type RelationKind, type UserPair } from "./plan";
 
@@ -365,8 +365,19 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
     if (r?.v !== 1 || typeof r.id !== "string" || !Array.isArray(r.books) || !Array.isArray(r.sources)) return null;
     const states: JobState[] = ["running", "paused", "cancelled", "done"];
     const statuses = new Set<JobBookStatus>(["pending", "done", "no-match", "failed", "unchanged", "not-planned"]);
-    const lineFilter = storedLineFilter(r.lineFilter);
+    let lineFilter = storedLineFilter(r.lineFilter);
     if (!lineFilter) return null;
+    let engineOptions = r.engineOptions && typeof r.engineOptions === "object" && !Array.isArray(r.engineOptions) ? storedEngineOptions(r.engineOptions) : undefined;
+    // a job saved before the filter was the run's (#40 A1) kept it under the engine whose form chose it: lifted to the run as a new
+    // job's would be (runLineFilter), so a resumed job filters every engine, and — the run's filter being part of stepsSignature — a book
+    // computed without the run-wide filter no longer matches its fingerprint and runs again (V7 PR2 review, finding 5). Two different
+    // filters are no one statement of the run: the record is dropped, as a damaged filter is
+    if (engineOptions) {
+      const lifted = runLineFilter(engineOptions, lineFilter.lineFilter);
+      if (!lifted.ok) return null;
+      engineOptions = lifted.engineOptions as NonNullable<JobRecord["engineOptions"]>;
+      if (lifted.filter) lineFilter = { lineFilter: lifted.filter };
+    }
     const books = r.books.filter((b): b is JobBook => !!b && typeof b.title === "string" && statuses.has(b.status) && typeof b.engines === "object" && b.engines !== null);
     return {
       v: 1,
@@ -374,7 +385,7 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
       scope: typeof r.scope === "string" ? r.scope : "",
       sources: r.sources.filter((s): s is string => typeof s === "string"),
       ...(Array.isArray(r.engines) && { engines: r.engines.filter((e): e is EngineId => ENGINES.some((x) => x.id === e)) }),
-      ...(r.engineOptions && typeof r.engineOptions === "object" && !Array.isArray(r.engineOptions) && { engineOptions: storedEngineOptions(r.engineOptions) }),
+      ...(engineOptions && { engineOptions }),
       ...lineFilter,
       ...(typeof r.preferBase === "string" && { preferBase: r.preferBase }),
       ...parseChoices(r.choices),

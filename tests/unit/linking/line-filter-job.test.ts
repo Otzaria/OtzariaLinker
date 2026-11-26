@@ -45,6 +45,20 @@ describe("the filter read back from the browser", () => {
     expect(parseJobRecord(job("square"))).toBeNull();
   });
 
+  // V7 PR2 review, finding 5: a job saved before the filter was the run's kept it under the dibur-hamatchil options only
+  it("a job saved before the filter was the run's: the filter under an engine becomes the run's, and its books run again", () => {
+    const old = JSON.stringify({ v: 1, id: "x", scope: "s", sources: ["a"], state: "paused", books: [], startedAt: 1, ms: 1, engineOptions: { "dibur-hamatchil": { sourceFilter: { prefix: { preset: "square" } }, maxDhWords: 8 } } });
+    const job = parseJobRecord(old)!;
+    expect(job.lineFilter).toEqual({ prefix: { preset: "square" } });
+    expect(job.engineOptions).toEqual({ "dibur-hamatchil": { maxDhWords: 8 } });
+    // the fingerprint the old job stored (computed with the filter under dibur-hamatchil, none for the run) no longer matches
+    const stored = bookFingerprint(steps, fps, { "dibur-hamatchil": { sourceFilter: { prefix: { preset: "square" } }, maxDhWords: 8 } }, undefined);
+    expect(bookFingerprint(steps, fps, job.engineOptions, job.lineFilter)).not.toBe(stored);
+    // two different filters under two engines: not one run's statement — the record is dropped, never resumed with one of them
+    const conflict = JSON.stringify({ ...JSON.parse(old), engineOptions: { "dibur-hamatchil": { sourceFilter: { prefix: { preset: "square" } } }, headings: { sourceFilter: { prefix: { preset: "round" } } } } });
+    expect(parseJobRecord(conflict)).toBeNull();
+  });
+
   it("a guided flow likewise", () => {
     const flow = (lineFilter: unknown) => JSON.stringify({ v: 1, step: "plan", sources: [], purpose: "submission", links: 0, done: false, savedAt: 1, ...(lineFilter !== undefined && { lineFilter }) });
     expect(parseGuidedRecord(flow({ prefix: { preset: "round" } }))!.lineFilter).toEqual({ prefix: { preset: "round" } });
