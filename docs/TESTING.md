@@ -41,6 +41,16 @@ npm run check                                       # typecheck + npm test + E2E
 `legacy-baseline.spec.ts` לא רץ ב־Firefox (`testIgnore`). כל מפרט רץ אפוא בשלושה דפדפנים; לדפדפן אחד:
 `--project=chrome`.
 
+**WebKit (Safari) — אופציונלי, כבוי.** פרויקט רביעי, `webkit`, קיים רק כש־`PW_WEBKIT=1`. הדפדפן הוא הורדה נפרדת
+(`npx playwright install --with-deps webkit`), ולא נבדק אם הקובץ היחיד עולה בו מ־`file://` (Worker קלאסי מ־`blob:`,
+WASM מוטמע). ב־CI הוא רץ רק כשמשתנה המאגר `E2E_WEBKIT` הוא `true` (Settings → Secrets and variables → Actions →
+Variables), ב־job שאינו מכשיל את הריצה (`continue-on-error`).
+
+```powershell
+npx playwright install --with-deps webkit   # הורדה; פעם אחת
+$env:PW_WEBKIT = "1"; npx playwright test --project=webkit
+```
+
 כל בדיקת E2E משתמשת ב־`watchPage` (`tests/e2e/helpers.ts`) ונכשלת על **כל** בקשה שאינה `file:`, `data:`
 או `blob:`, ועל כל שגיאה לא מטופלת בדף.
 
@@ -175,7 +185,23 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 
 הקבצים שבטבלה (`*.local.test.ts` תחת `tests/integration/`) רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על
 `seforim.db` (`describe.runIf`). המסד נפתח לקריאה בלבד (`openSync(path, "r")`) ואף פעם לא נכתב. בלי
-המשתנה הם מדולגים, וב־CI הם לא רצים. משתני ההרצה האחרים אופציונליים, חוץ מהמסומן.
+המשתנה הם מדולגים, וב־CI הרגיל הם לא רצים. משתני ההרצה האחרים אופציונליים, חוץ מהמסומן.
+
+**דילוג אינו שקט.** ב־CI, ה־job `tests` כותב דוח JSON לכל סוג (unit, integration, contracts), ו־
+`scripts/ci/skipped-tests.mjs` מדפיס כל קובץ שדולג, כמה בדיקות, ואיזה משתנה חסר לו (גם בסיכום של הריצה ב־Actions).
+הוא **מכשיל** את הצעד כש: קובץ `*.local.test.ts` דולג אף שכל משתני הנתונים שלו מוגדרים (התנאי שלו שבור); קובץ שאינו
+תלוי נתונים דולג בלי `.skip`/`.todo`/`skipIf`/`runIf` בקוד שלו; או דוח חסר. מקומית:
+
+```powershell
+npx vitest run tests/integration --reporter=default --reporter=json --outputFile=reports/integration.json
+node scripts/ci/skipped-tests.mjs reports/integration.json
+```
+
+**הבדיקות הכבדות ב־CI: `.github/workflows/heavy.yml`, ידני בלבד** (Actions → Heavy tests → Run workflow; לא ב־push ולא
+ב־PR). צריך runner שיש בו הנתונים (ברירת המחדל `self-hosted`; ל־runner של GitHub אין מסד), ונתיבים כקלט: `otzaria_db`
+(חובה), `personal_db`, `library`, `extra_dbs`. הקלט `suites`: `local` (קובצי `*.local.test.ts`), `validation`
+(`npm run validate:real`, §4א), `browser` (`npm run validate:browser`; צריך Chrome מותקן ב־runner) או `all`. נתיב שניתן
+ואינו קיים מכשיל מיד; אחרי הריצה אותו דוח דילוגים, והתוצאות (`reports/`, `VALIDATION_OUT`) עולות כ־artifact.
 
 | קובץ | מה הוא מודד | משתני סביבה |
 |---|---|---|
@@ -306,9 +332,12 @@ py -3 -I scripts/fixtures/make_wizard_dbs.py      # Python 3.14+ (zstd ב־compr
 - כל שינוי בהתנהגות מגיע עם בדיקה, באותו commit. שינוי מכוון מעדכן את הבדיקה; לא מוחקים אותה.
 - שמות הבדיקות שהועברו מגרסה 3 נשארים בעברית ובניסוח המקורי, כדי שאפשר יהיה לעקוב שאף אחת לא אבדה.
 - בזמן עבודה מריצים את הבדיקות הקשורות לשינוי; לפני PR את הכול (`npm run check`).
-- CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test` עם `FC_SEED` שנגזר מה־commit, build, E2E ב־Chrome,
-  ב־Edge וב־Firefox (`npx playwright install --with-deps chrome msedge firefox`), ובודק שבנייה חוזרת נותנת
-  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)). ב־job נפרד, `visual`, על
-  `windows-latest`, רצה ההשוואה החזותית מול צילומי הבסיס שבמאגר, והבדל מכשיל את הריצה (§2א); בשחרור היא לא רצה.
+- CI (`.github/workflows/ci.yml`) מחולק ל־jobs לפי סוג בדיקה, כדי שריצה אדומה תגיד מה נכשל: `typecheck`; `security`
+  (`npm audit --omit=dev`, מדווח ולא מכשיל); `tests` (unit, integration ו־contracts כצעדים נפרדים עם `FC_SEED` שנגזר
+  מה־commit, ודוח הדילוגים, §4); `build` (כולל סריקת הרשת ותקציב הגודל); `reproducible` (אותו commit נבנה פעמיים
+  בתיקייה אחת ופעם בעותק שני, וה־SHA-256 זהה); `e2e` (Chrome, Edge ו־Firefox, job לכל דפדפן, על הקובץ ש־`build` בנה;
+  בתוכם גם הנגישות, האופליין ובסיס הרגרסיה של v3); `e2e-webkit` (אופציונלי, §2); ו־`visual` על `windows-latest`, מול
+  צילומי הבסיס שבמאגר, והבדל מכשיל את הריצה (§2א). הפירוט: [`RELEASE_PROCESS.md`](RELEASE_PROCESS.md) §4. בשחרור רץ
+  רצף מקביל ב־job אחד, בלי ההשוואה החזותית. הבדיקות הכבדות: `heavy.yml`, ידני (§4).
 
 </div>

@@ -8,9 +8,17 @@ on:
 permissions:
   contents: read
 
+# One job per kind of check, so a red run says which kind failed (docs/RELEASE_PROCESS.md §4):
+#   typecheck · security · tests (unit, integration, contract + the skipped-tests report) · build (offline scan and
+#   size budget) · reproducible · e2e (Chrome, Edge, Firefox; accessibility, offline and the v3 regression baseline are
+#   E2E files) · e2e-webkit (optional) · visual.
+# The tests that need a large local database are not run here: a hosted runner has none. They skip themselves, the
+# "tests" job lists each of them with the variable it is missing, and they run in heavy.yml (manual).
+
 jobs:
-  check:
+  typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,30 +26,61 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      # Not blocking: a known advisory in a runtime dependency (4 of them, pinned) is reported, and a person decides.
+      - run: npm run typecheck
+
+  # Not blocking: a known advisory in a runtime dependency (4 of them, pinned) is reported, and a person decides.
+  # Its own job, so the result is seen on the run page and not buried in another job's log.
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Audit the runtime dependencies (reported, does not fail the run)
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: true
-      - run: npm run typecheck
-      - name: Unit, integration and contract tests (property tests seeded from the commit)
-        run: FC_SEED=$((16#${GITHUB_SHA:0:7})) npm test
-      - run: npm run build
-      - name: Install browsers for E2E
-        run: npx playwright install --with-deps chrome msedge firefox
-      - run: npx playwright test
-      - name: Upload the E2E traces
-        if: failure()
-        uses: actions/upload-artifact@v4
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: e2e-traces
-          path: test-results/
-          retention-days: 14
-      - name: Build is reproducible
-        run: |
-          sha1=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
-          rm -rf dist && npm run build
-          sha2=$(sha256sum dist/OtzariaLinker.html | cut -d' ' -f1)
-          test "$sha1" = "$sha2"
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # the property tests are seeded from the commit (docs/TESTING.md §3): a failure can be replayed
+      - name: Property-test seed from the commit
+        run: echo "FC_SEED=$((16#${GITHUB_SHA:0:7}))" >> "$GITHUB_ENV"
+      - name: Unit tests
+        run: npx vitest run tests/unit --reporter=default --reporter=json --outputFile=reports/unit.json
+      # each kind runs even when the one before it failed, so one red run shows every failing kind
+      - name: Integration tests
+        if: ${{ !cancelled() }}
+        run: npx vitest run tests/integration --reporter=default --reporter=json --outputFile=reports/integration.json
+      - name: Contract tests
+        if: ${{ !cancelled() }}
+        run: npx vitest run tests/contracts --reporter=default --reporter=json --outputFile=reports/contracts.json
+      # every skipped file and why (a missing OTZARIA_* variable); fails on a skip nothing explains
+      - name: Which tests were skipped, and why
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/skipped-tests.mjs reports/unit.json reports/integration.json reports/contracts.json
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # scripts/package-release.mjs fails the build on any network access in the file and above the size budget
+      - run: npm run build
       - uses: actions/upload-artifact@v4
         with:
           name: OtzariaLinker-html
@@ -49,6 +88,122 @@ jobs:
           path: |
             dist/OtzariaLinker.html
             dist/SHA256SUMS
+      # the very file the E2E jobs test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-dist
+          path: dist/
+          retention-days: 3
+
+  # The build embeds the commit id (GITHUB_SHA) and the commit's date, never "now", so two builds of the SAME commit must
+  # be byte-identical: twice in one folder, and once more in a second checkout at another path.
+  reproducible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: first
+      - uses: actions/checkout@v4
+        with:
+          path: second
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: first/package-lock.json
+      - name: Build twice in the first checkout
+        working-directory: first
+        run: |
+          npm ci
+          npm run build
+          sha256sum dist/OtzariaLinker.html | cut -d' ' -f1 > ../sha-first-1
+          rm -rf dist
+          npm run build
+          sha256sum dist/OtzariaLinker.html | cut -d' ' -f1 > ../sha-first-2
+      - name: Build in the second checkout
+        working-directory: second
+        run: |
+          npm ci
+          npm run build
+          sha256sum dist/OtzariaLinker.html | cut -d' ' -f1 > ../sha-second
+      - name: The three builds are identical
+        run: |
+          cat sha-first-1 sha-first-2 sha-second
+          test "$(cat sha-first-1)" = "$(cat sha-first-2)"
+          test "$(cat sha-first-1)" = "$(cat sha-second)"
+          cmp first/dist/SHA256SUMS second/dist/SHA256SUMS
+
+  # Every E2E file opens the built file from file:// with the network off and fails on any request that is not
+  # file:/data:/blob: (tests/e2e/helpers.ts). accessibility.spec.ts, offline-single-file.spec.ts and the v3 regression
+  # baseline (legacy-baseline.spec.ts, Chrome and Edge) are among them.
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chrome
+            install: chrome
+          - project: edge
+            install: msedge
+          - project: firefox
+            install: firefox
+    name: e2e (${{ matrix.project }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-dist
+          path: dist/
+      - name: Install the browser
+        run: npx playwright install --with-deps ${{ matrix.install }}
+      - run: npx playwright test --project=${{ matrix.project }}
+      - name: Upload the E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-${{ matrix.project }}
+          path: test-results/
+          retention-days: 14
+
+  # Optional: only when the repository variable E2E_WEBKIT is "true" (Settings → Variables), and it never fails the run.
+  # Whether the single file works in WebKit from file:// has not been established (playwright.config.ts).
+  e2e-webkit:
+    if: ${{ vars.E2E_WEBKIT == 'true' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    env:
+      PW_WEBKIT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-dist
+          path: dist/
+      - run: npx playwright install --with-deps webkit
+      - run: npx playwright test --project=webkit
+      - name: Upload the E2E traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-webkit
+          path: test-results/
+          retention-days: 14
 
   # Screenshots of every screen and dialog, light and dark, at three widths, against the committed
   # Windows baselines (tests/visual/__screenshots__/win32/, docs/TESTING.md §2a). On Windows because the

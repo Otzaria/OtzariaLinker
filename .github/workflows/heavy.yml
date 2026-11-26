@@ -1,0 +1,97 @@
+name: Heavy tests
+
+# Manual only (Actions → Heavy tests → Run workflow); never on push or pull request. The tests that need the real
+# Otzaria data and run for minutes to hours (docs/TESTING.md §4, §4א):
+#   local       the *.local.test.ts files (the engines and the readers on the real seforim.db / a personal database)
+#   validation  npm run validate:real (tests/validation: reading, anchors, library files, engines, performance…)
+#   browser     npm run validate:browser (the built file opens the real database in Chrome, offline)
+# A GitHub-hosted runner has none of this data, so the default runner is a self-hosted one that has it; the paths are
+# inputs. Every file is opened read-only (AGENTS.md 2.3). A test that skips is listed with the variable it is missing,
+# and a *.local.test.ts file that skips although its variables are set fails the run (scripts/ci/skipped-tests.mjs).
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner label (a machine that has the data)
+        type: string
+        default: self-hosted
+      suites:
+        description: Which heavy suites to run
+        type: choice
+        options: [local, validation, browser, all]
+        default: local
+      otzaria_db:
+        description: Path of seforim.db on the runner (OTZARIA_DB, required)
+        type: string
+        required: true
+      personal_db:
+        description: Path of a personal database, e.g. v52 (OTZARIA_PERSONAL_DB, optional)
+        type: string
+        default: ""
+      library:
+        description: Path of a clone of Otzaria/otzaria-library (OTZARIA_LIBRARY, optional)
+        type: string
+        default: ""
+      extra_dbs:
+        description: Other database files, separated by ";" (OTZARIA_EXTRA_DBS, optional)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  heavy:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 720
+    env:
+      OTZARIA_DB: ${{ inputs.otzaria_db }}
+      OTZARIA_PERSONAL_DB: ${{ inputs.personal_db }}
+      OTZARIA_LIBRARY: ${{ inputs.library }}
+      OTZARIA_EXTRA_DBS: ${{ inputs.extra_dbs }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      # an empty variable skips its tests (and the list below says so); a path that is given must exist
+      - name: The data is where the inputs say
+        run: |
+          test -f "$OTZARIA_DB" || { echo "::error::OTZARIA_DB is not a file on this runner: $OTZARIA_DB"; exit 1; }
+          if [ -n "$OTZARIA_PERSONAL_DB" ] && [ ! -f "$OTZARIA_PERSONAL_DB" ]; then echo "::error::OTZARIA_PERSONAL_DB is not a file: $OTZARIA_PERSONAL_DB"; exit 1; fi
+          if [ -n "$OTZARIA_LIBRARY" ] && [ ! -d "$OTZARIA_LIBRARY" ]; then echo "::error::OTZARIA_LIBRARY is not a folder: $OTZARIA_LIBRARY"; exit 1; fi
+          # the folder each validation check writes its JSON results to (the `runner` context is not allowed in job env)
+          echo "VALIDATION_OUT=$RUNNER_TEMP/otzaria-validation" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/otzaria-validation"
+      - name: Local-data integration tests (*.local.test.ts)
+        if: ${{ inputs.suites == 'local' || inputs.suites == 'all' }}
+        run: npx vitest run local.test --maxWorkers=2 --testTimeout=3600000 --reporter=default --reporter=json --outputFile=reports/local.json
+      - name: Real-data validation (npm run validate:real)
+        if: ${{ !cancelled() && (inputs.suites == 'validation' || inputs.suites == 'all') }}
+        run: npx vitest run --config vitest.validation.config.ts --reporter=default --reporter=json --outputFile=reports/validation.json
+      - name: Which tests were skipped, and why
+        if: ${{ !cancelled() && inputs.suites != 'browser' }}
+        run: |
+          reports=()
+          for r in reports/local.json reports/validation.json; do [ -f "$r" ] && reports+=("$r"); done
+          node scripts/ci/skipped-tests.mjs "${reports[@]}"
+      # playwright.validation.config.ts uses the INSTALLED Chrome (channel "chrome"): the runner must have it
+      - name: The built file on the real database in Chrome (npm run validate:browser)
+        if: ${{ !cancelled() && (inputs.suites == 'browser' || inputs.suites == 'all') }}
+        run: |
+          npm run build
+          npm run validate:browser
+      - name: Upload the validation results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: heavy-results
+          path: |
+            reports/
+            ${{ runner.temp }}/otzaria-validation/
+          if-no-files-found: ignore
+          retention-days: 30
