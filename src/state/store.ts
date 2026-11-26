@@ -375,6 +375,9 @@ export class AppStore {
     const pair = pairByTitle(opened.map((b) => this.refOf(b.key)), all).find((p) => p.target);
     const notes = opened.find((b) => b.title.startsWith("הערות"));
     const main = notes && opened.find((b) => b !== notes && notes.title.includes(b.title));
+    // the base placed opposite was chosen among editions by a rule (batch.ts resolveBaseKey): the reader is a manual choice, so it
+    // is placed, but the user is told which editions there are, so that what they run on it is their choice (V7 §2.8)
+    if (pair?.target && pair.undecided?.length && pair.note) this.notify("info", pair.note);
     batch(() => {
       if (pair?.target) (this.view.source.value = pair.source.key), (this.view.target.value = pair.target.key);
       else if (notes && main) (this.view.source.value = main.key), (this.view.target.value = notes.key);

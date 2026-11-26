@@ -4,6 +4,7 @@ import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
 import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
 import { capSpanned, compileForEngine, LineGate, runEngineSliced, SOURCE_FILTER_OPTION, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { capConfidence, capUndecided } from "../linking/batch";
 import { titleFit, titleGateAdvice, type TitleFitReport, type TitleGateAdvice } from "../linking/title-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -178,20 +179,6 @@ export async function partByLinks(registry: SourceRegistry, source: EngineBook, 
   return counts[best]! >= PART_MIN && counts[best]! >= PART_SHARE * lines.length ? partSection(source, parts[best]!) : null;
 }
 
-/** Lowers the given confidences to "possible", with a warning that says why. */
-function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reason): EngineResult {
-  return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
-}
-
-/**
- * A step whose base was chosen between books of the same title by a rule (PlanStep.ambiguousBase): nothing it finds is above "possible",
- * each suggestion says why, and the step says so once. The user lifts it by naming the book.
- */
-function ambiguousBaseCap(r: EngineResult, title: string): EngineResult {
-  const why: Reason = { code: "maxlink/ambiguous-base", text: `יש כמה ספרים בשם "${title}", והבסיס נבחר לפי כלל ולא לפי ראיה, ולכן ההצעה הזו לא יכולה להיות מעל "אפשרית". בחרו במפורש את הספר (מקור לספרי הבסיס, או זוג עם הספר עצמו) כדי להסיר את ההגבלה.` };
-  return { ...capConfidence(r, ["certain", "high"], why), notes: [{ code: "maxlink/ambiguous-base", text: why.text }, ...r.notes] };
-}
-
 /**
  * The title gate (issue #21), as an advisor (fix round before the merge of PR 2). The check (linking/title-fit.ts) cannot rule on every pair:
  * it is read through titleGateAdvice. Only a ruling the measurement supports (no titles, or none of them the base's) skips the step — its
@@ -325,7 +312,8 @@ export async function maxlinkJob(
         const skipped = fit && advice && step.titleGate && !step.titleForced && advice.action === "skip" ? titleGateSkip(loaded.source, loaded.target, advice) : null;
         result = skipped ?? (await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks));
         if (!skipped && fit && advice && advice.action !== "run") result = titleAdvice(result, fit, advice, step.titleForced === true, loaded.source.book.title, loaded.target.book.title);
-        if (step.ambiguousBase) result = ambiguousBaseCap(result, step.target.title);
+        // a base chosen between editions by a rule (PlanStep.ambiguousBase): the one rule of every path (linking/batch.ts capUndecided)
+        if (step.ambiguousBase) result = capUndecided(result, step.target.title, "maxlink/ambiguous-base");
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
         result = await guard(step, result, loaded.source);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only

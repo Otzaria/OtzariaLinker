@@ -2,6 +2,7 @@ import { pushTo } from "../core/collections";
 import type { BookRef } from "../core/links/model";
 import { sourceIdOfBookKey } from "../core/books";
 import { baseTitleKey, declaredBaseTitle, looseTitleKey, titleCorpus } from "../core/links/titles";
+import type { Confidence, EngineResult, Reason } from "./automatic/types";
 
 /*
  * Batch linking (stage 8.4): many commentaries at once, each against the base book its title names.
@@ -16,6 +17,11 @@ export interface BatchPair {
   reason?: string;
   /** how an ambiguous or differently spelled base name was resolved (Hebrew) */
   note?: string;
+  /**
+   * The other editions of the base, when the target was chosen among them by a rule (origin, the dependant's own source) and not by
+   * evidence or by the user (BaseResolution.undecided). What the pair finds is then capped at "possible" (capUndecided).
+   */
+  undecided?: readonly BookRef[];
 }
 
 /** Open books by their base-title key, built once and shared by many lookups (the max-link planner pairs thousands). */
@@ -37,7 +43,18 @@ export function titleIndex(bases: readonly BookRef[], prefer?: string): TitleInd
   return { exact, loose, ...(prefer && { prefer }) };
 }
 
-export type BaseResolution = { target: BookRef; note?: string } | { reason: string };
+export type BaseResolution = { target: BookRef; note?: string; undecided?: readonly BookRef[] } | { reason: string };
+
+const ORIGIN_TEXT: Readonly<Record<BookRef["origin"], string>> = { otzaria: "המאגר הרשמי", sefaria: "המאגר הרשמי (ספריא)", personal: "ספר אישי", unknown: "מקור לא ידוע" };
+
+/**
+ * One edition as the user can tell it from the others: its title, where it comes from (origin and source id), and its length
+ * when known (a PlanBook or DiscoveryBook carries lineCount) — two editions of different length are not the same text.
+ */
+export function editionText(b: BookRef): string {
+  const lines = (b as { lineCount?: number }).lineCount;
+  return `"${b.title}" (${ORIGIN_TEXT[b.origin]}, מקור ${sourceIdOfBookKey(b.key)}${lines !== undefined ? `, ${lines.toLocaleString("he")} שורות` : ""})`;
+}
 
 /**
  * The open book a base title names, or why there is none. `k` is the base-title key; `named` is the
@@ -47,6 +64,11 @@ export type BaseResolution = { target: BookRef; note?: string } | { reason: stri
  * from the dependant's own source — a commentary in a folder is written on the base in that folder —
  * else the official library wins over personal copies; each choice is said in the note (product audit
  * F4). More than one candidate left is ambiguous — never a guess.
+ *
+ * The last two are rules, not evidence (V7 §2.8, #41 B4): the book chosen by them is a provisional default, the note names every
+ * edition with its source, and `undecided` lists the editions passed over, so that every path (batch, max-link, discovery, the
+ * guided flow) caps what the pair finds until the user chooses. The source the user chose (index.prefer) and the corpus the title
+ * names decide; so does a single book of the title.
  */
 export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, named?: string): BaseResolution {
   let hits = (index.exact.get(k) ?? []).filter((b) => b.key !== self.key);
@@ -66,20 +88,44 @@ export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, name
       pool = same;
     }
   }
+  const editions = pool;
+  /** the rule that chose among the editions, when one did (not the user, not evidence) */
+  let rule: string | undefined;
   if (pool.length > 1) {
     const from = (src: string) => pool.filter((b) => sourceIdOfBookKey(b.key) === src);
     const chosen = index.prefer ? from(index.prefer) : [];
     const own = from(sourceIdOfBookKey(self.key));
     if (chosen.length === 1) (note = [note, `"${chosen[0]!.title}" פתוח בכמה מקורות; נבחר זה מהמקור שבחרתם לספרי הבסיס.`].filter(Boolean).join(" ")), (pool = chosen);
-    else if (own.length === 1) (note = [note, `"${own[0]!.title}" פתוח בכמה מקורות; נבחר זה שמאותו מקור כמו "${self.title}".`].filter(Boolean).join(" ")), (pool = own);
+    else if (own.length === 1) (rule = `זה שמאותו מקור כמו "${self.title}"`), (pool = own);
   }
   const official = pool.filter((b) => b.origin !== "personal");
-  if (official.length) pool = official;
+  if (official.length && official.length < pool.length) (rule ??= "זה של המאגר הרשמי, ולא העותק האישי"), (pool = official);
   if (pool.length > 1)
     return { reason: `"${pool[0]!.title}" פתוח ב־${new Set(pool.map((b) => sourceIdOfBookKey(b.key))).size > 1 ? `${pool.length} מקורות` : `${pool.length} ספרים באותו שם`}, ולא ברור על איזה מהם הספר כתוב. בחרו למעלה מאיזה מקור לקחת את ספרי הבסיס, או קשרו את הזוג ידנית.` };
   const target = pool[0]!;
+  const undecided = rule ? editions.filter((b) => b.key !== target.key) : [];
+  if (undecided.length)
+    note = [
+      note,
+      `יש כמה מהדורות של "${target.title}": ${editions.map(editionText).join("; ")}. נבחר ${rule}, וזה כלל ולא ראיה שהספר כתוב עליו. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו את המהדורה במפורש: מקור לספרי הבסיס, או זוג עם הספר עצמו.`,
+    ].filter(Boolean).join(" ");
   if (spelled) note = [note, `השם "${named ?? k}" נכתב אחרת מ"${target.title}"; הותאם לפי הכתיב.`].filter(Boolean).join(" ");
-  return { target, ...(note && { note }) };
+  return { target, ...(note && { note }), ...(undecided.length && { undecided }) };
+}
+
+/** Lowers "certain" and "high" to "possible", with a warning on each suggestion that says why. */
+export function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reason): EngineResult {
+  return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
+}
+
+/**
+ * What a pair found against a base chosen among editions by a rule (BatchPair.undecided, PlanStep.ambiguousBase): nothing is above
+ * "possible", each suggestion says why, and the run says so once. The user lifts it by choosing the edition. `code` tells the paths
+ * apart ("batch/undecided-base", "maxlink/ambiguous-base"); the rule and the text are one.
+ */
+export function capUndecided(r: EngineResult, title: string, code: string): EngineResult {
+  const why: Reason = { code, text: `יש כמה ספרים בשם "${title}", והבסיס נבחר לפי כלל ולא לפי ראיה, ולכן ההצעה הזו לא יכולה להיות מעל "אפשרית". בחרו במפורש את הספר (מקור לספרי הבסיס, או זוג עם הספר עצמו) כדי להסיר את ההגבלה.` };
+  return { ...capConfidence(r, ["certain", "high"], why), notes: [{ code, text: why.text }, ...r.notes] };
 }
 
 /** One commentary against an index of open books, by its title. */
@@ -87,10 +133,11 @@ export function pairOne(c: BookRef, index: TitleIndex): BatchPair {
   const named = declaredBaseTitle(c.title);
   if (!named) return { source: c, target: null, reason: 'השם אינו בצורה "… על <ספר>", ולכן לא ידוע על איזה ספר הוא.' };
   const r = resolveBaseKey(baseTitleKey(named), index, c, named);
-  return "target" in r ? { source: c, target: r.target, ...(r.note && { note: r.note }) } : { source: c, target: null, reason: r.reason };
+  return "target" in r ? { source: c, target: r.target, ...(r.note && { note: r.note }), ...(r.undecided && { undecided: r.undecided }) } : { source: c, target: null, reason: r.reason };
 }
 
-export function pairByTitle(commentaries: readonly BookRef[], bases: readonly BookRef[]): BatchPair[] {
-  const index = titleIndex(bases);
+/** `prefer`: the source the user chose for bases open in several sources (TitleIndex.prefer). */
+export function pairByTitle(commentaries: readonly BookRef[], bases: readonly BookRef[], prefer?: string): BatchPair[] {
+  const index = titleIndex(bases, prefer);
   return commentaries.map((c) => pairOne(c, index));
 }
