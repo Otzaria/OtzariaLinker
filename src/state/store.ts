@@ -6,7 +6,7 @@ import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
 import { matchedAfterEdit } from "../core/links/matched";
-import type { BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
+import type { BookOrigin, BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
 import { validateLink, type LineFacts, type Problem, type ValidationContext } from "../core/links/validate";
 import { dropStalePipelineFields } from "../core/links/pipeline-fields";
@@ -85,6 +85,13 @@ export interface Task {
 
 export type Screen = "home" | "workspace" | "guided";
 export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
+
+/**
+ * Whether a book saved with one origin may be the open book of another (#41 B18): a personal book is
+ * only ever a personal one, a library book (otzaria/sefaria) never a personal one; "unknown" (an import by
+ * title, an old project) may be either.
+ */
+const sameOrigin = (saved: BookOrigin, open: BookOrigin): boolean => saved === "unknown" || open === "unknown" || (saved === "personal") === (open === "personal");
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -472,8 +479,9 @@ export class AppStore {
     const memo = new Map<string, BookRef | null>();
     const resolve = (ref: BookRef): BookRef => {
       if (!ref.key.startsWith("unresolved:")) return ref;
-      if (!memo.has(ref.title)) memo.set(ref.title, this.resolveTitle(ref.title));
-      return memo.get(ref.title) ?? ref;
+      const id = `${ref.origin} ${ref.source ?? ""} ${ref.title}`;
+      if (!memo.has(id)) memo.set(id, this.resolveTitle(ref.title, ref.origin, ref.source));
+      return memo.get(id) ?? ref;
     };
     this.linkState.value = rebindLinks(this.linkState.value, (l) => {
       const s = resolve(l.source.book);
@@ -486,20 +494,42 @@ export class AppStore {
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
   bookOf(ref: BookRef): SourceBook | undefined {
-    return this.books.value.get(ref.key) ?? this.booksByTitle.value.get(ref.title)?.[0];
+    return this.books.value.get(ref.key) ?? this.booksByTitle.value.get(ref.title)?.find((b) => sameOrigin(ref.origin, b.origin));
   }
 
   sameBook(ref: BookRef, bookKey: string): boolean {
     if (ref.key === bookKey) return true;
     const b = this.books.value.get(bookKey);
-    return !!b && ref.key.startsWith("unresolved:") && ref.title === b.title;
+    return !!b && ref.key.startsWith("unresolved:") && ref.title === b.title && sameOrigin(ref.origin, b.origin);
   }
 
-  /** The open book a title (or a path_2) names, a non-personal one first; null when none is open. */
-  resolveTitle(title: string): BookRef | null {
+  /** The label of the source a book key belongs to (a project's StoredBook.source). */
+  sourceLabelOf(bookKey: string): string | undefined {
+    const id = sourceIdOfBookKey(bookKey);
+    return this.sources.peek().find((s) => s.info.id === id)?.info.label;
+  }
+
+  /**
+   * The open book a title (or a path_2) names; null when none is open.
+   *
+   * Without a known origin (an import by title, an old project) a non-personal book is preferred, as
+   * before. A saved project knows the origin (and, since V7, the source's label): a personal book binds
+   * only to a personal book and a library book only to a library one (#41 B18) — a same-titled book of
+   * the other kind is a different book, and the link stays unresolved rather than move to it silently.
+   * Several candidates of that origin are told apart by the source label; if it does not decide, the
+   * link stays unresolved too (V7 §1.1: no silent binding to another edition).
+   */
+  resolveTitle(title: string, origin: BookOrigin = "unknown", source?: string): BookRef | null {
     const hits = this.booksByTitle.value.get(title) ?? this.booksByTitle.value.get(titleFromPath2(title));
-    const b = hits?.find((x) => x.origin !== "personal") ?? hits?.[0];
-    return b ? this.refOf(b.key) : null;
+    if (!hits?.length) return null;
+    if (origin === "unknown") {
+      const b = hits.find((x) => x.origin !== "personal") ?? hits[0]!;
+      return this.refOf(b.key);
+    }
+    const kin = hits.filter((x) => sameOrigin(origin, x.origin));
+    if (kin.length <= 1) return kin[0] ? this.refOf(kin[0].key) : null;
+    const labelled = source === undefined ? [] : kin.filter((x) => this.sourceLabelOf(x.key) === source);
+    return labelled.length === 1 ? this.refOf(labelled[0]!.key) : null;
   }
 
   /* ---------------- reading and picking ---------------- */
@@ -1212,6 +1242,7 @@ export class AppStore {
         libraryFiles: [...this.linkState.value.files.values()].filter((f) => f.confirmed !== "none").map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })),
         bookLines: this.bookLinesNow(),
         coverage: this.coverage.snapshot(),
+        sourceOf: (k) => this.sourceLabelOf(k),
       },
       APP_VERSION,
       undefined,
@@ -1233,7 +1264,7 @@ export class AppStore {
   openProject(path: string, text: string): void {
     let p;
     try {
-      p = parseProject(text, (b) => this.resolveTitle(b.title) ?? { key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) });
+      p = parseProject(text, (b) => this.resolveTitle(b.title, b.origin, b.source) ?? { key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.source !== undefined && { source: b.source }) });
     } catch (err) {
       return void this.notify("error", `"${path}": ${(err as Error).message}`);
     }

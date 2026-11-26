@@ -54,10 +54,16 @@ export interface ProjectSource {
   library?: boolean;
 }
 
-interface StoredBook {
+export interface StoredBook {
   title: string;
   origin: BookOrigin;
   isBaseBook?: boolean;
+  /**
+   * Optional (V7, without a version bump: older readers ignore it): the label of the source the book was
+   * read from (a database's file name, a folder's name). With `origin` it tells apart same-titled books of
+   * different sources (#41 B18): a hint only — a renamed file still binds by title and origin.
+   */
+  source?: string;
 }
 interface StoredSide {
   book: StoredBook;
@@ -130,13 +136,18 @@ export interface ProjectData {
   libraryFiles?: ProjectLibraryFile[];
   bookLines?: ProjectBookLines[];
   coverage?: ProjectCoverage[];
+  /** the label of the source a book key belongs to (StoredBook.source); absent: no hint is written */
+  sourceOf?: (bookKey: string) => string | undefined;
 }
 
-const storeSide = (s: LinkSide): StoredSide => ({
-  book: { title: s.book.title, origin: s.book.origin, ...(s.book.isBaseBook !== undefined && { isBaseBook: s.book.isBaseBook }) },
-  line: s.line,
-  ...(s.end !== undefined && { end: s.end }),
-});
+const storeSide = (s: LinkSide, sourceOf?: (bookKey: string) => string | undefined): StoredSide => {
+  const source = s.book.key.startsWith("unresolved:") ? s.book.source : sourceOf?.(s.book.key);
+  return {
+    book: { title: s.book.title, origin: s.book.origin, ...(s.book.isBaseBook !== undefined && { isBaseBook: s.book.isBaseBook }), ...(source && { source }) },
+    line: s.line,
+    ...(s.end !== undefined && { end: s.end }),
+  };
+};
 
 /**
  * The project as JSON text. `cache` (one per session) keeps each link's JSON by the link object: links
@@ -145,7 +156,7 @@ const storeSide = (s: LinkSide): StoredSide => ({
  */
 export function serializeProject(p: ProjectData, app: string, now = new Date(), cache?: WeakMap<Link, string>): string {
   // database links are never part of a project: they are read again from the database
-  const stored = (l: Link): StoredLink => ({ ...l, source: storeSide(l.source), target: storeSide(l.target) });
+  const stored = (l: Link): StoredLink => ({ ...l, source: storeSide(l.source, p.sourceOf), target: storeSide(l.target, p.sourceOf) });
   const kept = p.links.filter((l) => l.provenance !== "db");
   const file: ProjectFile = {
     format: PROJECT_FORMAT,
@@ -321,7 +332,7 @@ const isEntry = (e: Record<string, unknown>): boolean => !!e && typeof e === "ob
 const ORIGINS = new Set<BookOrigin>(["otzaria", "sefaria", "personal", "unknown"]);
 const str = (x: unknown): x is string => typeof x === "string";
 function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | null {
-  const book = (b: StoredBook): StoredBook => ({ title: b.title, origin: ORIGINS.has(b.origin) ? b.origin : "unknown", ...(typeof b.isBaseBook === "boolean" && { isBaseBook: b.isBaseBook }) });
+  const book = (b: StoredBook): StoredBook => ({ title: b.title, origin: ORIGINS.has(b.origin) ? b.origin : "unknown", ...(typeof b.isBaseBook === "boolean" && { isBaseBook: b.isBaseBook }), ...(str(b.source) && b.source.length <= 500 && { source: b.source }) });
   const side = (s: StoredSide) => ({ book: bind(book(s.book)), line: s.line, ...(s.end !== undefined && { end: s.end }) });
   const a = l.anchor as unknown as Record<string, unknown> | undefined;
   if (a !== undefined && (!a || !isInt(a.rawStart) || (a.rawEnd !== undefined && !isInt(a.rawEnd)) || (a.label !== undefined && !str(a.label)))) return null;

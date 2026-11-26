@@ -14,6 +14,11 @@ export interface BookRef {
   readonly origin: BookOrigin;
   /** Sefaria priority-list base book (Tanakh, Bavli…). undefined = not known; affects flip/downgrade. */
   readonly isBaseBook?: boolean;
+  /**
+   * Only on an unresolved book of a saved project: the label of the source it was read from
+   * (StoredBook.source), kept so that the right one of same-titled books binds when it opens (#41 B18).
+   */
+  readonly source?: string;
 }
 
 export interface LinkSide {
