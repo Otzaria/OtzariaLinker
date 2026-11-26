@@ -10,6 +10,7 @@ import { SEFARIA_TITLES_PATH } from "../core/links/sefaria-owned";
 import { parseRecords } from "../formats/records/records";
 import { stripTags } from "../core/text/html";
 import { sharedDictionaries } from "../database/compression/zstd";
+import { sha256Hex } from "../database/compression/sha256";
 import { blobSource } from "../database/sqlite/lazy/byte-source";
 import { safeUnzip } from "./archives/safe-unzip";
 import type { BookSource, LineChunk } from "./book-source";
@@ -50,7 +51,7 @@ export interface OpenResult {
   /** zstd dictionaries opened as files: books compressed with them can now be read (see DictionaryPool) */
   dictionaries?: { path: string; id: number }[];
   /** databases that were already open (the same file picked again): not opened a second time, listed here instead (#22) */
-  reused?: OpenedSource[];
+  reused?: (OpenedSource & { as?: string })[];
 }
 
 const HEAD = 4096;
@@ -110,6 +111,10 @@ export class SourceRegistry {
       // a checkout of the library carries its list of Sefaria titles: its books are the library's (sefaria-titles.ts)
       if (files.some((f) => f.path.replace(/\\/g, "/").endsWith(SEFARIA_TITLES_PATH))) src.info.library = true;
       // decided at open time: a warning added on first read (inside the source) never reached the UI
+      // #42 C29: an empty file used to open as a book with no lines and no word about it
+      const empty = files.filter((f) => f.blob.size === 0 && texts.some((t) => t.path === f.path)).map((f) => f.path);
+      if (empty.length)
+        src.info.warnings.push({ code: "source/empty-file", message: empty.length === 1 ? `הקובץ "${empty[0]}" ריק — אין בו שורות לקשר. בדקו שבחרתם את הקובץ הנכון.` : `${empty.length} קבצים ריקים, בלי שורות לקשר: ${empty.slice(0, 5).join(", ")}${empty.length > 5 ? "…" : ""}. בדקו שבחרתם את הקבצים הנכונים.` });
       if (notUtf8.length)
         src.info.warnings.push({
           code: "source/not-utf8",
@@ -339,7 +344,7 @@ export class SourceRegistry {
           const held = known ? this.sources.get(known) : undefined;
           if (held) {
             const again = result.reused ?? (result.reused = []);
-            if (!again.some((r) => r.info.id === held.info.id)) again.push({ info: held.info, books: await held.books() });
+            if (!again.some((r) => r.info.id === held.info.id)) again.push({ info: held.info, books: await held.books(), ...(nameOf(f.path) !== held.info.label && { as: nameOf(f.path) }) });
             return;
           }
           const fresh = await DbBookSource.open(this.nextId(), nameOf(f.path), blobSource(f.blob));
@@ -471,12 +476,24 @@ export class SourceRegistry {
 
 type ListingContext = { signal?: AbortSignal; progress?: (done: number, total: number) => void };
 
-/** name | size | last-modified (a File has one) | the SQLite header, as hex — see SourceRegistry.byIdentity */
+/**
+ * The identity of a database file by its CONTENT (V7 §1.6, #42 C29) — see SourceRegistry.byIdentity. It used to be the
+ * name, size, last-modified time and header: a byte-identical copy under another name loaded as a second source, and a
+ * file changed only in its middle with the same counter passed as the same one. Now: size | the 100-byte SQLite header
+ * (change counter, pages, schema cookie) | SHA-256 of three 64 KiB samples (start, middle, end). Staged, not a full hash:
+ * a 5 GB database is identified in milliseconds; two files that agree on all of this are copies of one database.
+ */
+const SAMPLE = 64 * 1024;
 async function fileIdentity(f: InputFile): Promise<string> {
+  const size = f.blob.size;
   const head = new Uint8Array(await f.blob.slice(0, 100).arrayBuffer());
   const hex = Array.from(head, (b) => b.toString(16).padStart(2, "0")).join("");
-  const modified = (f.blob as Partial<File>).lastModified;
-  return `${nameOf(f.path)}|${f.blob.size}|${modified ?? ""}|${hex}`;
+  const mid = Math.max(0, Math.floor(size / 2) - SAMPLE / 2);
+  const parts = await Promise.all([f.blob.slice(0, SAMPLE), f.blob.slice(mid, mid + SAMPLE), f.blob.slice(Math.max(0, size - SAMPLE))].map(async (b) => new Uint8Array(await b.arrayBuffer())));
+  const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) joined.set(p, at), (at += p.length);
+  return `${size}|${hex}|${sha256Hex(joined)}`;
 }
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;

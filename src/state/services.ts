@@ -34,7 +34,8 @@ export interface OpenResult {
   /** zstd dictionaries opened as files (books compressed with them become readable) */
   dictionaries?: { path: string; id: number }[];
   /** databases already open: the same file picked again is not opened a second time (#22) */
-  reused?: OpenedSource[];
+  /** already open; `as` = the name the file was picked under, when it is not the open source's (a copy, #42 C29) */
+  reused?: (OpenedSource & { as?: string })[];
 }
 
 export interface CallOptions {

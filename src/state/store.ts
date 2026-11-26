@@ -311,7 +311,7 @@ export class AppStore {
     const fresh = [...res.sources, ...orphans];
     this.lastOpen = { added: fresh.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
     if (reused.length) {
-      const names = reused.map((r) => `"${r.info.label}"`).join(", ");
+      const names = reused.map((r) => (r.as ? `"${r.as}" (זהה בתוכנו ל"${r.info.label}")` : `"${r.info.label}"`)).join(", ");
       this.notify("info", reused.length === 1 ? `${names} כבר פתוח, ולכן לא נטען שוב. ממשיכים עם הספרים הפתוחים.` : `${names} כבר פתוחים, ולכן לא נטענו שוב. ממשיכים עם הספרים הפתוחים.`);
     }
     batch(() => {

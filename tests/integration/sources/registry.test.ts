@@ -81,3 +81,13 @@ describe("a links file with a BOM", () => {
     expect(parseLinksJson(res.documents[0]!.text).issues.map((i) => i.code)).toContain("file/bom");
   });
 });
+
+describe("an empty text file (#42 C29)", () => {
+  it("opens as a book, with a warning at open that it has no lines", async () => {
+    const res = await new SourceRegistry().open([{ path: "empty.txt", blob: new Blob([]) }, { path: "full.txt", blob: new Blob(["שורה"]) }]);
+    const w = res.sources[0]!.info.warnings.filter((x) => x.code === "source/empty-file");
+    expect(w).toHaveLength(1);
+    expect(w[0]!.message).toContain("empty.txt");
+    expect(w[0]!.message).not.toContain("full.txt");
+  });
+});

@@ -34,11 +34,25 @@ describe("SourceRegistry: a file opens once", () => {
     expect(res.reused).toHaveLength(1);
   });
 
-  it("another file name, or another last-modified time, is another database", async () => {
+  // V7 §1.6 / #42 C29: this test said the opposite before — a byte-identical copy under another name (or the same file
+  // touched) was loaded as a second source, every book listed twice. The identity is now the content, not the name.
+  it("a byte-identical copy under another name, or with another last-modified time, is the same database", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open([DB()]);
+    const copy = await r.open([DB("copy.db")]);
+    expect(copy.sources).toEqual([]);
+    expect(copy.reused![0]!.info.id).toBe(first.sources[0]!.info.id);
+    expect(copy.reused![0]!.as).toBe("copy.db");
+    expect((await r.open([DB("seforim.db", 1_800_000_000_000)])).sources).toEqual([]);
+  });
+
+  it("the same name and size with other content is another database, also when only the middle differs", async () => {
     const r = new SourceRegistry();
     await r.open([DB()]);
-    expect((await r.open([DB("copy.db")])).sources).toHaveLength(1);
-    expect((await r.open([DB("seforim.db", 1_800_000_000_000)])).sources).toHaveLength(1);
+    const other = new Uint8Array(BYTES);
+    const mid = Math.floor(other.length / 2);
+    other[mid] = (other[mid]! + 1) & 0xff; // not in the header, not in the first or the last page
+    expect((await r.open([{ path: "seforim.db", blob: new File([other], "seforim.db", { lastModified: 1_700_000_000_000 }) }])).sources).toHaveLength(1);
   });
 
   it("a plain Blob (no last-modified) is identified by name, size and header", async () => {
