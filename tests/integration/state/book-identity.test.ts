@@ -83,3 +83,29 @@ describe("book identity across sources (B18)", () => {
     expect(link.target.book.key).toBe(keyOf(store, "PLACEHOLDER base", "otzaria"));
   });
 });
+
+describe("two editions of one origin that the source label cannot tell apart (V7 PR1 review, finding 2)", () => {
+  it("the link stays unresolved, and no screen or export treats it as either edition", async () => {
+    const X1 = () => text("lib/X.txt", ["<h1>X</h1>", "first edition 1", "first edition 2"]);
+    const X2 = () => text("lib/X.txt", ["<h1>X</h1>", "SECOND edition 1", "SECOND edition 2", "x"]);
+    const B = () => text("lib/B.txt", ["<h1>B</h1>", "b1", "b2"]);
+    const s = newStore();
+    await s.openFiles([X1()]);
+    await s.openFiles([X2(), B()]);
+    const second = [...s.books.value.values()].filter((b) => b.title === "X")[1]!.key;
+    s.pickLine("source", keyOf(s, "B"), 1);
+    s.pickLine("target", second, 2);
+    expect(s.createFromDraft()).not.toBeNull();
+    const t = newStore();
+    await t.openFiles([X1()]);
+    await t.openFiles([X2(), B()]);
+    t.openProject("p", s.projectText());
+    const l = t.allLinks.value.find((x) => x.provenance !== "db")!;
+    expect(l.target.book.key.startsWith("unresolved:")).toBe(true);
+    expect(t.bookOf(l.target.book)).toBeUndefined();
+    for (const b of [...t.books.value.values()].filter((x) => x.title === "X")) {
+      expect(t.sameBook(l.target.book, b.key)).toBe(false);
+      expect(t.linksOfBook(b.key)).toHaveLength(0);
+    }
+  });
+});

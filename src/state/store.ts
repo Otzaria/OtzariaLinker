@@ -494,13 +494,17 @@ export class AppStore {
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
   bookOf(ref: BookRef): SourceBook | undefined {
-    return this.books.value.get(ref.key) ?? this.booksByTitle.value.get(ref.title)?.find((b) => sameOrigin(ref.origin, b.origin));
+    const own = this.books.value.get(ref.key);
+    if (own || !ref.key.startsWith("unresolved:")) return own;
+    // an unresolved book is the open book that resolveTitle would bind — the same rules, so a link that stays unresolved
+    // because two editions match is not shown, edited or exported as one of them (V7 PR1 review, finding 2)
+    const hit = this.resolveTitle(ref.title, ref.origin, ref.source);
+    return hit ? this.books.value.get(hit.key) : undefined;
   }
 
   sameBook(ref: BookRef, bookKey: string): boolean {
     if (ref.key === bookKey) return true;
-    const b = this.books.value.get(bookKey);
-    return !!b && ref.key.startsWith("unresolved:") && ref.title === b.title && sameOrigin(ref.origin, b.origin);
+    return ref.key.startsWith("unresolved:") && this.bookOf(ref)?.key === bookKey;
   }
 
   /** The label of the source a book key belongs to (a project's StoredBook.source). */
