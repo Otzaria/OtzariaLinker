@@ -163,13 +163,24 @@ export function resetLayout(prefs: Preferences, width: number): void {
  * The side panel's width while the suggestions are reviewed (#41 B23): the table of suggestions holds both lines of each
  * suggestion, and at 1366px its share of a four-column layout (1.4 of 6.4) left the texts cut to a few words. While
  * the "הצעות" tab is shown and the user has not set the side panel's width themselves (it is the preset's), the side
- * panel is as wide as a reader (SUGGESTIONS_SIDE; at 1366px about 90px more). A border dragged or moved in that tab
- * keeps the width shown, and from then on it is the user's own.
+ * panel is as wide as a reader: the readers' width and its own are shared equally (at 1366px about 80px more), and the
+ * books list keeps its width. A border dragged or moved in that tab keeps the widths shown, and from then on they are
+ * the user's own. Only while a reader keeps MIN_READER_PX (from about 1366px in four columns).
  */
-export const SUGGESTIONS_SIDE = 2;
-export function effectiveLayout(layout: Layout, sideTab: string): Layout {
+export const MIN_READER_PX = 380;
+export function effectiveLayout(layout: Layout, sideTab: string, width = Infinity): Layout {
   if (sideTab !== "suggestions" || layout.hidden.includes("side") || layout.sizes.side !== PRESETS[layout.preset].sizes.side) return layout;
-  return { ...layout, sizes: { ...layout.sizes, side: Math.max(layout.sizes.side, SUGGESTIONS_SIDE) } };
+  // the readers that have a column of their own ("source above target" puts the target in the source's column)
+  const readers = (["source", "target"] as const).filter((p) => layout.order.includes(p) && !layout.hidden.includes(p));
+  const pool = readers.reduce((n, p) => n + layout.sizes[p], layout.sizes.side);
+  const each = pool / (readers.length + 1);
+  if (each <= layout.sizes.side) return layout;
+  // never at the readers' expense below MIN_READER_PX: at 1280px a reader's title row wrapped
+  const shown = layout.order.filter((p) => !layout.hidden.includes(p)).reduce((n, p) => n + layout.sizes[p], 0);
+  if (readers.length && (width * each) / shown < MIN_READER_PX) return layout;
+  const sizes = { ...layout.sizes, side: each };
+  for (const p of readers) sizes[p] = each;
+  return { ...layout, sizes };
 }
 
 /** "איפוס ההגדרות" (version 3's "איפוס לברירות המחדל", F-131): every setting and the layout back to their defaults. */

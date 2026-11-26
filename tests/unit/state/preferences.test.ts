@@ -69,11 +69,21 @@ describe("the layout follows the window's width (V5 UX audit U14, owner's choice
 describe("the side panel while the suggestions are reviewed (#41 B23)", () => {
   it("as wide as a reader in the suggestions tab, while its width is the preset's; other tabs and a width of the user's unchanged", () => {
     const four = structuredClone(PRESETS.four);
-    expect(effectiveLayout(four, "suggestions").sizes).toEqual({ ...four.sizes, side: 2 });
+    // the side panel and the two readers share their width equally; the books list keeps its own
+    const wide = effectiveLayout(four, "suggestions").sizes;
+    expect(wide.sources).toBe(1);
+    expect([wide.source, wide.target, wide.side].map((x) => +x.toFixed(4))).toEqual([1.8, 1.8, 1.8]);
     expect(effectiveLayout(four, "builder")).toBe(four);
     const mine = { ...four, sizes: { ...four.sizes, side: 1.1 } };
     expect(effectiveLayout(mine, "suggestions")).toBe(mine);
-    expect(effectiveLayout(structuredClone(PRESETS.drawer), "suggestions").sizes.side).toBe(2);
+    const drawer = effectiveLayout(structuredClone(PRESETS.drawer), "suggestions").sizes;
+    expect(drawer.side).toBeCloseTo(drawer.source);
+    // "source above target": one reader column, as wide as the side panel
+    const stack = effectiveLayout(structuredClone(PRESETS.stack), "suggestions").sizes;
+    expect([stack.source, stack.side].map((x) => +x.toFixed(4))).toEqual([2.2, 2.2]);
+    // never when a reader would be narrower than 380px: at 1280px four columns keep their widths, at 1366px they share
+    expect(effectiveLayout(four, "suggestions", 1280)).toBe(four);
+    expect(effectiveLayout(four, "suggestions", 1366).sizes.side).toBeCloseTo(1.8);
     const hidden = { ...four, hidden: ["side" as const] };
     expect(effectiveLayout(hidden, "suggestions")).toBe(hidden);
   });

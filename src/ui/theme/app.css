@@ -765,6 +765,11 @@ dialog.reset-dialog { width: min(560px, calc(100vw - 32px)); }
 .notice-inline { padding: 8px 12px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); }
 .book-list .side-btn.rm { color: var(--on-surface-variant); display: inline-grid; place-items: center; padding: 2px 6px; }
 .book-list .side-btn.rm:hover { color: var(--error); border-color: var(--error); }
+/* with a mouse the ✕ takes no room until the row is pointed at or reached by Tab (the names stay readable in a narrow list);
+   a finger sees it always (the 44px rule below) */
+@media (pointer: fine) {
+  .book-list li:not(:hover):not(:focus-within) .side-btn.rm { inline-size: 0; min-inline-size: 0; padding-inline: 0; border-width: 0; margin-inline-start: -4px; overflow: hidden; }
+}
 
 /* F-134: no motion for those who asked the system for none. The line flash stays a cue, without the fade. */
 @media (prefers-reduced-motion: reduce) {
