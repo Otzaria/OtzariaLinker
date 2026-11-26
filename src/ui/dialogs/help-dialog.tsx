@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import guide from "../../../docs/USER_GUIDE.md?raw";
-import troubleshooting from "../../../docs/TROUBLESHOOTING.md?raw";
+// packed at build time (build/plugins/text-gz.ts): ~150 KB of Markdown costs ~50 KB of the single file (#42 C6)
+import guidePacked from "virtual:text-gz/docs/USER_GUIDE.md";
+import troubleshootingPacked from "virtual:text-gz/docs/TROUBLESHOOTING.md";
+import { unpackText } from "../help/packed-text";
 import { helpText, renderGuide } from "../help/markdown";
 import { Icon } from "../icons/icon";
 
@@ -12,7 +14,7 @@ import { Icon } from "../icons/icon";
 export function HelpDialog({ section, onSection, onClose }: { section?: string | undefined; onSection?: (id: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const rendered = useMemo(() => renderGuide(helpText(guide, troubleshooting)), []);
+  const rendered = useMemo(() => renderGuide(helpText(unpackText(guidePacked), unpackText(troubleshootingPacked))), []);
   const [current, setCurrent] = useState(section ?? rendered.toc[0]?.id ?? "");
 
   /** the section last shown, so a section that comes back through the address (Back) is not scrolled to twice */
