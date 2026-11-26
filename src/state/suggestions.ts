@@ -199,7 +199,7 @@ export class SuggestionsState {
 
   constructor(
     private readonly host: SuggestionsHost,
-    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines">,
+    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines" | "headings">,
   ) {}
 
   /** A new run replaces the one on the screen: it starts in the engine's order (not the sort of the last run), the card on its first suggestion. */
@@ -360,6 +360,30 @@ export class SuggestionsState {
         unread.map((u) => `${u.title}: ${u.why}`),
       );
     return unread.map(({ key, title }) => ({ key, title }));
+  }
+
+  private readonly unrefMemo = new WeakMap<SuggestionRun, Promise<UnreferencedTargets | null>>();
+
+  /**
+   * Version 3's "יעדים בלי הפניה" (F-102) for the run on the screen: the content lines of the target book, between the
+   * first and the last line a suggestion points at, that no suggestion of the run points at — where a commentary's
+   * match may be missing. Only for a pair run of the dibur-hamatchil or headings engine (one target book); null
+   * otherwise. Read once per run (the target's headings come from the worker).
+   */
+  unreferencedTargets(): Promise<UnreferencedTargets | null> {
+    const run = this.run.peek();
+    if (!run || run.batch || run.maxlink || (run.engine !== "dibur-hamatchil" && run.engine !== "headings")) return Promise.resolve(null);
+    const list = run.result.suggestions;
+    const key = list[0]?.target.book.key;
+    if (!key || list.some((s) => s.target.book.key !== key) || !this.host.books.peek().has(key)) return Promise.resolve(null);
+    let memo = this.unrefMemo.get(run);
+    if (!memo) {
+      memo = this.host
+        .runTask("קורא את כותרות הספר…", (opts) => this.service.headings(key, opts))
+        .then((hs) => (hs ? { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) } : null));
+      this.unrefMemo.set(run, memo);
+    }
+    return memo;
   }
 
   /** Reads again the database links that failed for the current run (review C13). True when all were read. */
@@ -588,6 +612,43 @@ export function suggestionFacets(list: readonly Suggestion[], to: (s: Suggestion
     return [...m].sort((a, b) => b[1] - a[1]);
   };
   return { engines: count(enginesOf), books: count((s) => [to(s).book.title]), types: count((s) => [typeOf(s)]) };
+}
+
+/** The target lines of a run that no suggestion points at (F-102): see SuggestionsState.unreferencedTargets. */
+export interface UnreferencedTargets {
+  readonly bookKey: string;
+  readonly title: string;
+  /** 0-based content lines (headings excluded), in order */
+  readonly lines: readonly number[];
+  /** the first and the last line a suggestion points at (0-based); -1 when none */
+  readonly from: number;
+  readonly through: number;
+  /** how many distinct target lines the suggestions point at */
+  readonly referenced: number;
+}
+
+/**
+ * The lines between the first and the last referenced target line that no suggestion points at, without headings.
+ * A suggestion points at its target line, the whole range it stands for (`end`, `citedSpan`) and every record of a
+ * span (`spanLines`): a line inside a range is referenced.
+ */
+export function unreferencedLines(suggestions: readonly Suggestion[], headings: ReadonlySet<number>): Omit<UnreferencedTargets, "bookKey" | "title"> {
+  const used = new Set<number>();
+  const span = (from: number, to: number) => {
+    for (let i = from; i <= Math.max(from, to); i++) used.add(i);
+  };
+  for (const s of suggestions) {
+    span(s.target.line, s.target.end ?? s.target.line);
+    if (s.citedSpan) span(s.citedSpan.line, s.citedSpan.end);
+    for (const r of s.spanLines ?? []) used.add(r.line);
+  }
+  if (!used.size) return { lines: [], from: -1, through: -1, referenced: 0 };
+  let from = Infinity;
+  let through = -Infinity;
+  for (const l of used) (from = Math.min(from, l)), (through = Math.max(through, l));
+  const lines: number[] = [];
+  for (let i = from; i <= through; i++) if (!used.has(i) && !headings.has(i)) lines.push(i);
+  return { lines, from, through, referenced: new Set(suggestions.map((s) => s.target.line)).size };
 }
 
 /** An engine result cut short by a cancel: the engines stop with an "engine/aborted" note and return what they found. */

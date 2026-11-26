@@ -71,6 +71,32 @@ describe("pairByTitle — books that share a base key (LIBRARY_BENCHMARK.md §6.
     // spelling inside the words still meets: "ישעיהו"/"ישעיה", "שולחן"/"שלחן" (above)
     expect(one("פירוש על ישעיה", [ref("d:7", "ישעיהו", "sefaria")]).target?.key).toBe("d:7");
   });
+
+  /*
+   * V7 v52 validation §5, "a finding not fixed": two DIFFERENT books that meet only under the loose key (here two volumes, "… חלק א"
+   * and "… חלק ב", which the loose key folds into the book's name) are not editions of one book. The edition rules (the dependant's
+   * own source, the official library over a personal copy) chose one of them anyway, as if they were. Never a guess: refused.
+   */
+  it("different books that meet only under the loose spelling key are ambiguous: no rule picks one", () => {
+    const volumes = [ref("d:1", 'שו"ת הרשב"א חלק א', "otzaria"), ref("p:2", 'שו"ת הרשב"א חלק ב', "personal")];
+    // the dependant's own source (p) would pick "חלק ב"
+    const own = pairByTitle([ref("p:9", 'מפתחות על שו"ת הרשב"א', "personal")], volumes)[0]!;
+    expect(own.target).toBeNull();
+    expect(own.undecided).toBeUndefined();
+    expect(own.reason).toContain('שו"ת הרשב"א חלק א');
+    expect(own.reason).toContain('שו"ת הרשב"א חלק ב');
+    // the official library over a personal copy would pick "חלק א"
+    const official = pairByTitle([ref("s:3", 'מפתחות על שו"ת הרשב"א', "personal")], volumes)[0]!;
+    expect(official.target).toBeNull();
+    // one book in two spellings and two sources is still editions of one book: the edition rules apply, and the pair is undecided
+    const sa = [ref("d:5", "שולחן ערוך, אורח חיים", "otzaria"), ref("p:6", "שולחן ערוך, אורח חיים", "personal")];
+    const ed = pairByTitle([ref("s:7", "לבושי שרד על שלחן ערוך אורח חיים", "personal")], sa)[0]!;
+    expect(ed.target?.key).toBe("d:5");
+    expect(ed.undecided?.map((b) => b.key)).toEqual(["p:6"]);
+    // a single volume open is the book (the loose key's purpose): paired, with the spelling note
+    const single = pairByTitle([ref("p:9", 'מפתחות על שו"ת הרשב"א', "personal")], volumes.slice(0, 1))[0]!;
+    expect(single.target?.key).toBe("d:1");
+  });
 });
 
 /*

@@ -5,6 +5,7 @@ import { LinkerError } from "../../core/errors";
 import { decodeText } from "../../core/text/decode";
 import { headingLevel, stripTags } from "../../core/text/html";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
+import { isReadFailure, unreadableReason } from "../read-failure";
 
 /*
  * Books from .txt files (one file, many files, a folder, a ZIP's contents). A library book's lines
@@ -92,7 +93,9 @@ export class TextFilesSource implements BookSource {
       bytes = await file.read();
     } catch (err) {
       // Chrome refuses to read a chosen file that was changed or deleted on disk since (NotReadableError)
-      throw new LinkerError("text/unreadable", `אי אפשר לקרוא את הקובץ "${file.path}": ייתכן שהוא השתנה או נמחק אחרי שנבחר. בחרו את התיקייה או הקבצים שוב.`, { path: file.path, cause: (err as Error)?.message });
+      // or Otzaria holds it, or it is in the cloud only (F-012): the same focused reason as at open
+      const message = isReadFailure(err) ? unreadableReason(err, file.path) : `אי אפשר לקרוא את הקובץ "${file.path}": ייתכן שהוא השתנה או נמחק אחרי שנבחר. בחרו את התיקייה או הקבצים שוב.`;
+      throw new LinkerError("text/unreadable", message, { path: file.path, cause: (err as Error)?.message });
     }
     const decoded = decodeText(bytes);
     if (decoded.encoding !== "utf-8")

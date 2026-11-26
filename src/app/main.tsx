@@ -56,6 +56,12 @@ effect(() => {
   stopTheme = applyTheme(store.prefs.theme.value);
 });
 effect(() => document.documentElement.style.setProperty("--font-scale", String(store.prefs.fontScale.value)));
+// the density of the book lines (tokens.css [data-density]; "comfortable" is the default, no attribute)
+effect(() => {
+  const d = store.prefs.density.value;
+  if (d === "comfortable") delete document.documentElement.dataset.density;
+  else document.documentElement.dataset.density = d;
+});
 
 // a self-check the offline E2E test reads: proves the SQLite reader and zstd start in this environment
 void host.call("ping", []).then(

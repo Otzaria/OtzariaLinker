@@ -309,7 +309,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   )}
                   {!list.length && <p class="muted">אין ספרים שמתאימים.</p>}
                 </div>
-                {detail && <BookDetail bookKey={detail} onClose={() => setDetail(null)} onLeave={() => ref.current?.close()} />}
+                {detail && <BookDetail bookKey={detail} onClose={() => setDetail(null)} onLeave={() => ref.current?.close()} onShow={setDetail} />}
               </div>
 
               <h3 class="repo-h">זוגות מוצעים</h3>
@@ -386,7 +386,7 @@ function BookRow({ title, row, checked, current, onPick, onOpen }: { title: stri
 }
 
 /** One book: who it is linked to and from, its types and flags, its coverage and the unlinked ranges, and the way into the reader. */
-function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: () => void; onLeave: () => void }) {
+function BookDetail({ bookKey, onClose, onLeave, onShow }: { bookKey: string; onClose: () => void; onLeave: () => void; onShow: (key: string) => void }) {
   const store = useStore();
   const repo = store.repository;
   const book = store.books.value.get(bookKey);
@@ -476,7 +476,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
               {ok.byBook.length > 10 && <p class="muted small">ועוד {n(ok.byBook.length - 10)} ספרים מקושרים. הרשימה המלאה בלשונית "קישורים מהמסד".</p>}
             </>
           )}
-          <RelationMap bookKey={bookKey} title={book.title} byBook={ok.byBook} />
+          <RelationMap bookKey={bookKey} title={book.title} byBook={ok.byBook} onShow={onShow} />
           {ok.flags && ok.flags.length > 0 && (
             <>
               <h4>סימוני בדיקה</h4>
@@ -548,22 +548,27 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
  * the database's links, a thick line for the project's links, a dashed one for a suggested pair, red where the QA doubts a link. Folded
  * until asked for; nothing is drawn beyond the neighbours.
  */
-function RelationMap({ bookKey, title, byBook }: { bookKey: string; title: string; byBook: DbLinkSummary["byBook"] }) {
+function RelationMap({ bookKey, title, byBook, onShow }: { bookKey: string; title: string; byBook: DbLinkSummary["byBook"]; onShow: (key: string) => void }) {
   const store = useStore();
   const [open, setOpen] = useState(false);
+  const sourceId = store.repository.source.value?.info.id ?? "";
   const rels = useMemo(() => {
     if (!open) return [];
     const doubted = new Set(store.quality.report.value?.issues.filter((i) => i.problem.severity !== "info").map((i) => i.link.id));
     const project = store.linksOfBook(bookKey).map((l) => ({ title: (store.sameBook(l.source.book, bookKey) ? l.target : l.source).book.title, problem: doubted.has(l.id) }));
-    return bookRelations(bookKey, store.repository.source.value?.info.id ?? "", byBook, project, store.repository.suggestions.value?.proposals ?? []);
+    return bookRelations(bookKey, sourceId, byBook, project, store.repository.suggestions.value?.proposals ?? []);
   }, [open, bookKey, byBook]);
   const cut = (t: string) => (t.length > 16 ? `${t.slice(0, 15)}…` : t);
+  // what each neighbour is, in words: the SVG's text alternative and the keyboard's way through the map (V7 §3.14)
+  const whatOf = (r: (typeof rels)[number]) =>
+    [r.out && `${n(r.out)} קישורים אליו`, r.in && `${n(r.in)} קישורים ממנו`, r.project && `${n(r.project)} בפרויקט`, r.problems && `${n(r.problems)} שהבדיקה מפקפקת בהם`, r.suggested && (r.suggested === "base" ? "בסיס מוצע" : "מוצע כמפרש שלו"), r.external && "מחוץ למסד"].filter(Boolean).join(", ");
+  const listId = `repo-map-list-${bookKey.replace(/[^\w-]/g, "_")}`;
   return (
     <details class="repo-map" onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>מפת הקשרים של הספר</summary>
       {open && !rels.length && <p class="muted small">אין לספר קשרים ישירים לספרים אחרים.</p>}
       {open && rels.length > 0 && (
-        <svg viewBox="0 0 400 260" role="img" aria-label={`${title} ו־${many(rels.length, "ספר אחד שקשור אליו", "ספרים שקשורים אליו")}`}>
+        <svg viewBox="0 0 400 260" role="img" aria-label={`${title} ו־${many(rels.length, "ספר אחד שקשור אליו", "ספרים שקשורים אליו")}: מפת הקשרים. הפירוט ברשימה שאחרי המפה.`} aria-describedby={listId}>
           <defs>
             <marker id="repo-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M0 0L8 4L0 8z" class="repo-map-head" />
@@ -574,10 +579,9 @@ function RelationMap({ bookKey, title, byBook }: { bookKey: string; title: strin
             const x = 200 + 150 * Math.cos(a);
             const y = 130 + 95 * Math.sin(a);
             const kind = r.problems ? "bad" : r.project ? "proj" : r.suggested ? "sug" : "db";
-            const what = [r.out && `${n(r.out)} קישורים אליו`, r.in && `${n(r.in)} קישורים ממנו`, r.project && `${n(r.project)} בפרויקט`, r.problems && `${n(r.problems)} בעייתיים`, r.suggested && (r.suggested === "base" ? "בסיס מוצע" : "מוצע כמפרש שלו"), r.external && "מחוץ למסד"].filter(Boolean).join(", ");
             return (
-              <g key={r.title} class={`repo-map-${kind}`}>
-                <title>{`${r.title}: ${what}`}</title>
+              <g key={r.title} class={`repo-map-${kind}`} aria-hidden="true">
+                <title>{`${r.title}: ${whatOf(r)}`}</title>
                 <line x1={200} y1={130} x2={x} y2={y} marker-end={r.out ? "url(#repo-arrow)" : undefined} marker-start={r.in ? "url(#repo-arrow)" : undefined} />
                 <circle cx={x} cy={y} r={5} />
                 <text x={x} y={y + (y < 130 ? -9 : 17)} text-anchor="middle">
@@ -592,7 +596,26 @@ function RelationMap({ bookKey, title, byBook }: { bookKey: string; title: strin
           </text>
         </svg>
       )}
-      {open && rels.length > 0 && <p class="muted small">חץ: קישור במסד, לכיוון שלו. קו עבה: קישורים בפרויקט. מקווקו: זוג מוצע. אדום: קישור שהבדיקה מפקפקת בו.</p>}
+      {open && rels.length > 0 && <p class="muted small">חץ: קישור במסד, לכיוון שלו. קו עבה: קישורים בפרויקט. מקווקו: זוג מוצע. קו עבה אדום: קישור שהבדיקה מפקפקת בו.</p>}
+      {open && rels.length > 0 && (
+        <ul class="repo-rel repo-map-list" id={listId} aria-label="הספרים שבמפה">
+          {rels.map((r) => {
+            const here = !!r.key && !r.external && !!store.books.value.get(r.key);
+            return (
+              <li key={r.title}>
+                <span class="grow">
+                  <b>{r.title}</b> <span class="muted">— {whatOf(r) || "קשור"}</span>
+                </span>
+                {here && (
+                  <button class="btn text small" onClick={() => onShow(r.key!)} aria-label={`מעבר לפרטי הספר ${r.title}`}>
+                    פרטי הספר
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </details>
   );
 }

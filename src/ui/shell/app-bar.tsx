@@ -1,15 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
-import { chooseLayout, PRESETS, resetLayout, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
+import { chooseLayout, DENSITIES, PRESETS, resetLayout, resetPreferences, type Density, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import type { RoleLabels } from "../../state/roles";
 import { elapsedText, remainingText, stageText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
+import { LogDialog } from "./log-dialog";
 import { Menu, MenuGroup, MenuItem } from "./menu";
+import { ResetDialog } from "./reset-dialog";
 
 const presetLabels = (r: RoleLabels): Record<LayoutPreset, string> => ({ four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: `${r.source.short} מעל ${r.target.short}` });
 const panelLabels = (r: RoleLabels): Record<PanelId, string> => ({ sources: "קבצים ומסדים", source: r.source.name, target: r.target.name, side: "החלונית (בונה, קישורים, הצעות)" });
 const THEME_LABELS: Record<ThemeSetting, string> = { system: "לפי המערכת", light: "בהיר", dark: "כהה" };
+const DENSITY_LABELS: Record<Density, string> = { spacious: "מרווחת", comfortable: "רגילה", compact: "צפופה", dense: "צפופה מאוד" };
 
 export function AppBar({ onExport }: { onExport: () => void }) {
   const store = useStore();
@@ -29,8 +32,11 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
   const layout = prefs.layout.value;
   const hidden = layout.hidden;
+  // the settings menu's own dialogs: the diagnostic log and the full reset
+  const [dialog, setDialog] = useState<"log" | "reset" | null>(null);
 
   return (
+    <>
     <header class={`app-bar${inWorkspace ? " ws" : ""}`}>
       <button class="brand" onClick={() => (store.screen.value = "home")} title="למסך הפתיחה" aria-label="מנהל הקישורים — למסך הפתיחה">
         <Icon name="oz_links" size={24} />
@@ -129,11 +135,30 @@ export function AppBar({ onExport }: { onExport: () => void }) {
                 <button class="btn outlined" role="menuitem" tabIndex={-1} onClick={() => (prefs.fontScale.value = Math.min(2, +(prefs.fontScale.value + 0.1).toFixed(2)))} aria-label={`הגדלה (עכשיו ${Math.round(prefs.fontScale.value * 100)}%)`}>א+</button>
               </div>
             </MenuGroup>
+            <MenuGroup label="צפיפות שורות הספר">
+              {DENSITIES.map((d) => (
+                <MenuItem key={d} checked={prefs.density.value === d} onSelect={() => ((prefs.density.value = d), close())}>
+                  {DENSITY_LABELS[d]}
+                </MenuItem>
+              ))}
+            </MenuGroup>
             <MenuGroup label="יצירת קישור">
               <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
               <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
             </MenuGroup>
+            <MenuItem
+              icon="fl_arrow_undo"
+              onSelect={() => {
+                resetPreferences(prefs, innerWidth);
+                store.notify("info", "ההגדרות חזרו לברירת המחדל: ערכת הצבעים, גודל הטקסט, הצפיפות, מצב היצירה והפריסה.");
+                close();
+              }}
+            >
+              איפוס ההגדרות לברירת המחדל
+            </MenuItem>
+            <MenuItem icon="oz_document_text" onSelect={() => (setDialog("log"), close())}>הצגת יומן האבחון</MenuItem>
             <MenuItem icon="fl_arrow_download" onSelect={() => (store.saveDiagnostics(), close())}>שמירת יומן אבחון (לצירוף לדיווח על תקלה)</MenuItem>
+            <MenuItem icon="fl_delete" class="danger" onSelect={() => (setDialog("reset"), close())}>איפוס מלא (סגירת הכול)…</MenuItem>
             <div class="label" dir="ltr" style="text-align:start">OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}</div>
           </>
         )}
@@ -144,7 +169,7 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       {inWorkspace && (
-        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
+        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json (Ctrl+E)" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
           <Icon name="oz_link_download" size={18} />
           <span>
             <span class="lbl">ייצוא</span>
@@ -154,6 +179,9 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
     </header>
+    {dialog === "log" && <LogDialog onClose={() => setDialog(null)} />}
+    {dialog === "reset" && <ResetDialog onClose={() => setDialog(null)} />}
+    </>
   );
 }
 

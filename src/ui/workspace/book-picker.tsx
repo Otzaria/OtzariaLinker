@@ -5,6 +5,7 @@ import { normalize } from "../../core/text/hebrew";
 import type { OpenedSource } from "../../state/services";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
+import { Icon } from "../icons/icon";
 import { badgeOf, SourceBadge } from "./source-badge";
 import { SourceName } from "../shell/file-name";
 
@@ -82,6 +83,12 @@ export function BookList({ query, onPick }: { query: string; onPick?: (side: Sid
             {roles[side].short}
           </button>
         ))}
+        {/* version 3's ✕ (F-035): the book leaves the tool with its links, in one action that "ביטול" brings back; not in a reader's picker */}
+        {!onPick && (
+          <button class="side-btn rm" onClick={() => store.removeBook(b.key)} title={`הסרת "${b.title}" מהכלי, עם הקישורים שנוגעים בו. הקובץ במחשב לא ישתנה, ואפשר לבטל.`} aria-label={`הסרת ${b.title} מהכלי`}>
+            <Icon name="fl_dismiss" size={14} />
+          </button>
+        )}
       </li>
     );
   };

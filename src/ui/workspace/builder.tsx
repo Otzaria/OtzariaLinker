@@ -4,6 +4,8 @@ import { problemText } from "../../core/links/validate";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { storedForm } from "../../core/links/stored-form";
 import { stripTags } from "../../core/text/html";
+import { anchorLabelProblem } from "../../core/text/anchor-label";
+import { linksCount } from "../../state/history";
 import type { Pick, Side } from "../../state/store";
 import { inRole } from "../../state/roles";
 import { TypesHelpButton } from "../dialogs/types-help-dialog";
@@ -24,6 +26,8 @@ import { visibleSlice } from "../../matching/hebrew-tokens";
 export function Builder() {
   const store = useStore();
   const draft = store.draft.value;
+  /** one link per line picked with Ctrl/Cmd (v3 F-061) */
+  const many = store.drafts.value.length;
   const problems = store.draftProblems.value;
   const errors = problems.filter((p) => p.severity === "error");
   const advanced = store.prefs.advanced.value;
@@ -113,7 +117,7 @@ export function Builder() {
       {problems.length > 0 && (
         <ul class="problems" aria-live="polite">
           {problems.map((p) => (
-            <li key={p.code} class={p.severity}>
+            <li key={`${p.code}\n${p.message}`} class={p.severity}>
               <Icon name={p.severity === "error" ? "fl_error_circle" : p.severity === "warning" ? "fl_warning" : "fl_info"} size={16} />
               {/* the file's field names only in advanced mode (audit F14) */}
               <span>{problemText(p, advanced)}</span>
@@ -125,7 +129,7 @@ export function Builder() {
       <div class="row">
         <button class="btn filled" disabled={!draft || errors.length > 0} onClick={() => store.createFromDraft()} title="Ctrl+Enter">
           <Icon name={editing ? "oz_link_edit" : "oz_link_add"} size={18} />
-          {editing ? "שמירת השינויים" : "יצירת קישור"}
+          {editing ? "שמירת השינויים" : many > 1 ? `יצירת ${linksCount(many)}` : "יצירת קישור"}
         </button>
         <kbd>Ctrl+Enter</kbd>
         {editing && (
@@ -146,6 +150,7 @@ export function Builder() {
           אפשרויות מתקדמות
         </button>
       )}
+      <RangeSettings />
 
       <PickedLineLinks />
     </div>
@@ -180,14 +185,16 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
       <div class={`end ${side}`} data-side={side}>
         <span class={`side-badge ${side}`} title={role.hint}>{label}</span>
         <span class="muted">
-          {side === "source" ? `לחצו על שורה ${inRole(role.name)} (Shift לטווח, סימון מילים לעוגן)` : `לחצו על שורה ${inRole(role.name)}, או גררו אליה מספר שורה ${store.roles.value.source.from}`}
+          {side === "source" ? `לחצו על שורה ${inRole(role.name)} (Shift לטווח, Ctrl לכמה שורות, סימון מילים לעוגן)` : `לחצו על שורה ${inRole(role.name)}, או גררו אליה מספר שורה ${store.roles.value.source.from}`}
         </span>
       </div>
     );
   store.lines.tick.value;
   const title = store.refOf(pick.bookKey).title;
   const line = store.lines.peek(pick.bookKey, pick.line);
-  const where = pick.end !== undefined ? `שורות ${pick.line + 1}–${pick.end + 1}` : `שורה ${pick.line + 1}`;
+  const where = pick.lines
+    ? `${pick.lines.length} שורות: ${pick.lines.slice(0, 12).map((i) => i + 1).join(", ")}${pick.lines.length > 12 ? "…" : ""}`
+    : pick.end !== undefined ? `שורות ${pick.line + 1}–${pick.end + 1}` : `שורה ${pick.line + 1}`;
   return (
     <div class={`end ${side} set`} data-side={side}>
       <span class={`side-badge ${side}`} title={role.hint}>{label}</span>
@@ -206,37 +213,138 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
           <button class="adv-link" onClick={() => store.pickLine(side, pick.bookKey, pick.line)}>הסרת העוגן</button>
         </span>
       )}
-      {!pick.anchor && <RangeButtons side={side} pick={pick} />}
-      {!pick.anchor && pick.end === undefined && !store.editing.value && <ContinuePrevious side={side} pick={pick} />}
+      {pick.anchor && side === "source" && <AnchorLabel />}
+      {pick.lines && <span style="grid-column:1/-1" class="muted">מכל שורה ייווצר קישור משלה. Ctrl+לחיצה מוסיפה שורה או מסירה אותה.</span>}
+      {!pick.anchor && !pick.lines && <RangeRow side={side} pick={pick} />}
+      {!pick.anchor && !pick.lines && pick.end === undefined && !store.editing.value && <ContinuePrevious side={side} pick={pick} />}
       {line && <span class="snip">{plainText(line.anchorText)}</span>}
     </div>
   );
 }
 
 /**
- * v3's "until the next" (F-054/F-055): the end that stops one line before the next link or heading of
- * this side (linking/ranges.ts), or the range removed. A line count still unknown gives a notice.
+ * The range of one side (v3 F-054/F-055): the last line typed ("עד שורה"), "until the next" — one line before the next
+ * link or heading of this side, or what the range settings say (rangeEndBasis, F-079) — "until the end of the book",
+ * or no range. An end past the book, or a book whose length is still unknown, gives a notice (AppStore.setRangeEnd/untilNext).
  */
-function RangeButtons({ side, pick }: { side: Side; pick: Pick }) {
+function RangeRow({ side, pick }: { side: Side; pick: Pick }) {
   const store = useStore();
-  const untilNext = async () => {
-    const end = await store.ranges.suggestEnd(pick.bookKey, side, pick.line, store.editing.value ?? undefined);
-    const cur = store.pick[side].value;
-    // the pick may have moved while the headings were read
-    if (!cur || cur.bookKey !== pick.bookKey || cur.line !== pick.line) return;
-    if (end === null) return store.notify("warning", "אורך הספר עדיין לא ידוע, ולכן אי אפשר להציע סוף לטווח.");
-    if (end <= pick.line) return store.notify("info", "השורה הבאה כבר מתחילה קישור או כותרת, ולכן אין טווח להציע.");
-    store.pick[side].value = { bookKey: pick.bookKey, line: pick.line, end };
+  const shown = pick.end !== undefined ? String(pick.end + 1) : "";
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [pick.bookKey, pick.line, pick.end]);
+  const count = store.books.value.get(pick.bookKey)?.lineCount ?? store.lines.count(pick.bookKey);
+  const basis = store.prefs.rangeEndBasis.value;
+  const commit = () => {
+    const n = Number.parseInt(text, 10);
+    if (!text.trim()) store.setRangeEnd(side, null);
+    else if (Number.isFinite(n)) store.setRangeEnd(side, n - 1);
+    // what the pick holds now: a refused or reversed end shows the range as it is
+    const cur = store.pick[side].peek();
+    setText(cur?.end !== undefined ? String(cur.end + 1) : "");
   };
+  const name = inRole(store.roles.value[side].name);
   return (
-    <span style="grid-column:1/-1" class="row">
-      <button class="adv-link" onClick={untilNext} title="הטווח נמשך עד שורה אחת לפני הקישור או הכותרת הבאים בצד הזה">
-        טווח עד הקישור הבא
+    <span style="grid-column:1/-1" class="row range-row">
+      <label class="range-end">
+        עד שורה
+        <input
+          type="number"
+          inputMode="numeric"
+          min={pick.line + 1}
+          max={count}
+          value={text}
+          placeholder="—"
+          aria-label={`סוף הטווח ${name}: מספר השורה האחרונה (ריק: שורה אחת)`}
+          onInput={(e) => setText(e.currentTarget.value)}
+          onChange={commit}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), commit())}
+        />
+      </label>
+      {basis !== "book" && (
+        <button class="adv-link" onClick={() => void store.untilNext(side)} title={basis === "links" ? "הטווח נמשך עד שורה אחת לפני הקישור הבא בצד הזה" : basis === "headings" ? "הטווח נמשך עד שורה אחת לפני הכותרת הבאה" : "הטווח נמשך עד שורה אחת לפני הקישור או הכותרת הבאים בצד הזה"}>
+          {basis === "headings" ? "טווח עד הכותרת הבאה" : "טווח עד הקישור הבא"}
+        </button>
+      )}
+      <button class="adv-link" onClick={() => void store.rangeToEnd(side)} title="הטווח נמשך עד השורה האחרונה בספר">
+        עד סוף הספר
       </button>
       {pick.end !== undefined && (
-        <button class="adv-link" onClick={() => (store.pick[side].value = { bookKey: pick.bookKey, line: pick.line })}>בלי טווח</button>
+        <button class="adv-link" onClick={() => store.setRangeEnd(side, null)}>בלי טווח</button>
       )}
     </span>
+  );
+}
+
+/**
+ * The anchor's label (v3's "סמן" dialog, F-075): the letter Otzaria shows in the text where the words were marked. It is
+ * written as " אות X" at the end of the place name, where the generator reads it; a label it would not read is refused here.
+ */
+function AnchorLabel() {
+  const store = useStore();
+  const label = store.draft.value?.anchor?.label ?? store.pick.source.value?.anchor?.label ?? "";
+  const [text, setText] = useState(label);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => (setText(label), setError(null)), [label]);
+  const commit = () => {
+    const why = anchorLabelProblem(text.trim());
+    setError(why);
+    if (!why) store.setAnchorLabel(text);
+  };
+  return (
+    <label class="field anchor-label" style="grid-column:1/-1">
+      תווית העוגן (האות שאוצריא מציגה במקום שסימנתם)
+      <input
+        type="text"
+        value={text}
+        maxLength={6}
+        placeholder="למשל: ג"
+        aria-label="תווית העוגן"
+        aria-invalid={!!error}
+        aria-describedby="anchor-label-hint"
+        onInput={(e) => setText(e.currentTarget.value)}
+        onChange={commit}
+        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), commit())}
+      />
+      <span id="anchor-label-hint" class={error ? "error-text" : "muted"} role={error ? "alert" : undefined}>
+        {error ?? 'נשמרת בסוף שם המקום, כמו "אות ג". ריק: עוגן בלי תווית.'}
+      </span>
+    </label>
+  );
+}
+
+/** v3's range settings (F-055 rangeAutoEnd, F-079 rangeEndBasis, F-083 rangeTrimPrevious), kept as preferences. */
+function RangeSettings() {
+  const store = useStore();
+  const { rangeEndBasis, rangeAutoEnd, rangeTrimPrevious } = store.prefs;
+  const roles = store.roles.value;
+  const auto = rangeAutoEnd.value;
+  return (
+    <details class="range-settings">
+      <summary>הגדרות טווחים</summary>
+      <div class="body">
+      <label class="field">
+        "טווח עד הקישור הבא" עוצר לפני
+        <select value={rangeEndBasis.value} onChange={(e) => (rangeEndBasis.value = e.currentTarget.value as typeof rangeEndBasis.value)}>
+          <option value="auto">קישור או כותרת (מומלץ)</option>
+          <option value="links">קישור בלבד</option>
+          <option value="headings">כותרת בלבד</option>
+          <option value="book">סוף הספר</option>
+        </select>
+      </label>
+      {(["source", "target"] as const).map((side) => (
+        <label class="check" key={side}>
+          <input type="checkbox" checked={auto[side]} onChange={(e) => (rangeAutoEnd.value = { ...rangeAutoEnd.value, [side]: e.currentTarget.checked })} />
+          <span>טווח אוטומטי {inRole(roles[side].name)}</span>
+          <span class="muted">כל שורה שתבחרו שם תימשך לבד עד השורה שלפני הסימן הבא.</span>
+        </label>
+      ))}
+      <label class="check">
+        <input type="checkbox" checked={rangeTrimPrevious.value} onChange={(e) => (rangeTrimPrevious.value = e.currentTarget.checked)} />
+        <span>קיצור הטווח הקודם</span>
+        <span class="muted">קישור חדש בתוך טווח של קישור קודם מקצר את הטווח ההוא, כדי שלא יבלע אותו (באותו צעד ביטול).</span>
+      </label>
+      </div>
+    </details>
   );
 }
 
@@ -309,8 +417,10 @@ function swap(store: ReturnType<typeof useStore>) {
   const s = store.pick.source.value;
   const t = store.pick.target.value;
   const vs = store.view.source.value;
-  store.pick.source.value = t ? { bookKey: t.bookKey, line: t.line, ...(t.end !== undefined && { end: t.end }) } : null;
-  store.pick.target.value = s ? { bookKey: s.bookKey, line: s.line, ...(s.end !== undefined && { end: s.end }) } : null;
+  // (an anchor stays behind: it belongs to the source line; several Ctrl-picked lines go with their side)
+  const moved = (p: Pick): Pick => ({ bookKey: p.bookKey, line: p.line, ...(p.end !== undefined && { end: p.end }), ...(p.lines && { lines: p.lines }) });
+  store.pick.source.value = t ? moved(t) : null;
+  store.pick.target.value = s ? moved(s) : null;
   store.view.source.value = store.view.target.value;
   store.view.target.value = vs;
   store.draftHeRef.value = null;

@@ -32,6 +32,26 @@ describe("target = line (v3's default, now the preset \"v3\")", () => {
     expect(pairs(run(src, tgt, { ...v3, matches: "all" }))).toEqual(["0>1", "0>2"]);
   });
 
+  /*
+   * v3 `diagnose` (F-102): after a tag or regex run it listed the target lines that got more than one reference, and the target lines (up to
+   * the last one referenced) that got none — in a notes book, a note no reference reached is a reference the pattern missed or a wrong
+   * number. V7 had only the count of the first. The lines are listed now, by number, in the run's notes.
+   */
+  it("lists the target lines referenced more than once, and those up to the last referenced that no reference reached (v3 diagnose)", () => {
+    const notes = ["<h1>יעד</h1>", "הערה 1", "הערה 2", "", "הערה 4", "הערה 5", "<h2>פרק</h2>", "הערה 7", "הערה 8", "הערה 9"];
+    const res = run(["סימן ב", "סימן ב", "סימן ה", "סימן ח"], notes, v3);
+    expect(pairs(res)).toEqual(["0>1", "1>1", "2>4", "3>7"]);
+    const shared = res.notes.find((n) => n.code === "pattern/shared-targets")!;
+    expect(shared.text).toContain("שורות ביעד");
+    expect(shared.text).toContain("שורה 2 (2 הפניות)");
+    const unused = res.notes.find((n) => n.code === "pattern/unreferenced-targets")!;
+    // lines 3, 6 (1-based) are content lines with no reference; 4 is blank and 7 a heading; 9 and 10 are past the last referenced line
+    expect(unused.text).toContain("2 שורות");
+    expect(unused.text).toContain("3, 6");
+    // nothing to say when every line up to the last referenced one has a reference
+    expect(run(["סימן ב", "סימן ג"], notes, v3).notes.some((n) => n.code === "pattern/unreferenced-targets")).toBe(false);
+  });
+
   it("a number past the end, or pointing at a heading line, is reported and not suggested", () => {
     const res = run(["סימן ט", "סימן א"], tgt, v3);
     expect(res.suggestions).toEqual([]);

@@ -130,6 +130,8 @@ describe("the repository screen never changes the open project", () => {
     store.pickLine("source", before.key, 1);
     store.pickLine("target", base.key, 1);
     expect(store.createFromDraft()).toBeTruthy();
+    // the editions of the link's books are read in the background (V7 §1.1) and saved with the project: read before the snapshot
+    await store.editionsSettled();
     store.guided.saved.value = { v: 1, step: "plan", sources: [], purpose: "submission", links: 1, done: false, savedAt: 1 } as never;
     const state = store.linkState.value;
     const saved = store.guided.saved.value;

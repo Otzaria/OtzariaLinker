@@ -285,8 +285,9 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
   // "לקמן ה' ע"ב", "במ"ק כ' ע"ב": an amud written out (ע"א / ע"ב) makes even an everyday word a daf
   // (after a tractate's name, "ב"מ קח." is a daf: the glued side counts there)
-  // (a range of dafim, "שבת לא.-לב:", is no everyday word: both its ends carry an amud)
-  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && e.toAmud === undefined && (e.amud === undefined || (!!e.amudGlued && !dafContext)));
+  // (a range of dafim, "שבת לא.-לב:", is no everyday word: both its ends carry an amud; nor is "שבת לא-לב", two numerals joined by a
+  // hyphen, the second larger — V7 #42 C21)
+  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && e.toAmud === undefined && e.to === undefined && (e.amud === undefined || (!!e.amudGlued && !dafContext)));
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
   // …or at a ";" between the places of a list in brackets ("(ויקרא כו; דברים כח)")
   const closed = (bracketed || !!opts.enclosed) && (isPunct(toks[to], CLOSE) || isPunct(toks[to], ";"));
@@ -298,7 +299,9 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
   // ends the words (punctuation or the line's end after it) — "ב" alone is no word of running text
   const after = toks[to];
   const letterTail = !!opts.dafLetter && elems.length === 2 && elems[0]!.numeral.form === "bare" && elems[1]!.kind === "?" && elems[1]!.n <= 2 && elems[1]!.numeral.form === "bare" && (!after || after.kind === "punct" || (after.kind === "word" && after.gershayim && /^ו?דה$/.test(after.key)));
-  const pair = numerals >= 2 && (separators > 0 || bracketed || !!opts.enclosed || !elems.some((e) => e.numeral.common) || letterTail);
+  // …and two numerals joined by a hyphen, the second larger ("שבת לא-לב": withRange, readDaf) are a range: not running text (V7 C21)
+  const ranged = elems.length === 1 && elems[0]!.to !== undefined;
+  const pair = ranged || (numerals >= 2 && (separators > 0 || bracketed || !!opts.enclosed || !elems.some((e) => e.numeral.common) || letterTail));
   let evidence: Address["evidence"] = strongTok ? "strong" : closed || pair ? "medium" : "weak";
   if (commonOnly && !closed) evidence = "weak";
   // a single bare numeral outside brackets ("שמות ה'", "דברים רבה") is not a location
@@ -411,14 +414,18 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
       }
     }
   }
-  // "שבת לא.-לב:", "דף ב ע"א - ג ע"ב": a range of dafim, each end with its amud (issue #42 C21)
-  let range: { to: number; toAmud: 1 | 2 } | null = null;
-  if (amud !== undefined && isPunct(toks[next], "-")) {
+  // "שבת לא.-לב:", "דף ב ע"א - ג ע"ב": a range of dafim, each end with its amud (issue #42 C21); "שבת לא.-לב", "דף לא-לב": an end with
+  // no amud is the whole daf (resolve.ts: to its last amud), and then the end must be a later daf (V7 round 2, C21)
+  let range: { to: number; toAmud?: 1 | 2 } | null = null;
+  if ((amud !== undefined || marker) && maybeAmud === undefined && isPunct(toks[next], "-")) {
     const end = numeralOf(toks[next + 1]);
     const mark = end && sideMark(end, toks[next + 2], toks[next + 3]) ? ([toks[next + 2]!.text === "." ? 1 : 2, 1] as const) : end ? amudAt(toks, next + 2, true) : null;
-    if (end && mark && (end.n > num.n || (end.n === num.n && mark[0] > amud)) && end.n - num.n <= 50) {
+    if (end && mark && (end.n > num.n || (end.n === num.n && amud !== undefined && mark[0] > amud)) && end.n - num.n <= 50) {
       range = { to: end.n, toAmud: mark[0] };
       next += 2 + mark[1];
+    } else if (end && !mark && end.n > num.n && end.n - num.n <= 50) {
+      range = { to: end.n };
+      next += 2;
     }
   }
   const elem: AddrElem = {
@@ -429,7 +436,7 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
     ...(amud !== undefined && { amud }),
     ...(maybeAmud !== undefined && { maybeAmud }),
     ...(glued && { amudGlued: true }),
-    ...(range && { to: range.to, toAmud: range.toAmud }),
+    ...(range && { to: range.to, ...(range.toAmud !== undefined && { toAmud: range.toAmud }) }),
   };
   return { elem, next };
 }

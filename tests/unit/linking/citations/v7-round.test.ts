@@ -280,6 +280,49 @@ describe("C21 — forms that were missed", () => {
     expect(one("וַיֹּאמֶר בְּרָכוֹת לֹא׃", B.ber.key)).toEqual([]);
   });
 
+  /*
+   * V7 round 2 (C21, the two forms the review listed as still missed): a range of dafim with no amud at one end or at both ("שבת לא-לב"),
+   * and "ושם ע"ב ד"ה" after a daf cited with no commentator. The forms are the review's own (docs/reviews/QA_V7_PR2.md, C21).
+   */
+  it("'שבת לא-לב': a range of whole dafim, from amud א of the first to amud ב of the last; one amud at one end only", () => {
+    const first = lineOf(B.shab, "שבת, לא., א");
+    for (const [text, end] of [
+      ["ועיין שבת לא-לב ושם", "שבת, לב:, ג"],
+      ["ועיין שבת דף לא-לב ושם", "שבת, לב:, ג"],
+      ["ועיין (שבת לא - לב) ושם", "שבת, לב:, ג"],
+      ["ועיין שבת לא.-לב ושם", "שבת, לב:, ג"],
+      ["ועיין שבת לא-לב: ושם", "שבת, לב:, ג"],
+    ] as const) {
+      const [s] = one(text, B.shab.key);
+      expect(s, text).toBeDefined();
+      expect(s!.target.line, text).toBe(first);
+      expect(s!.citedSpan, text).toEqual({ line: first, end: lineOf(B.shab, end) });
+    }
+    const [s] = one("ועיין שבת לא.-לב ושם", B.shab.key);
+    expect(s!.heRef2).toBe("שבת לא.-לב");
+    // a start after amud ב: from that amud
+    const [b] = one("ועיין שבת לא:-לב ושם", B.shab.key);
+    expect(b!.target.line).toBe(lineOf(B.shab, "שבת, לא:, א"));
+  });
+
+  it("two numerals that are everyday words with no hyphen are not a range (control)", () => {
+    expect(one("ועיין שבת לא לב ושם", B.shab.key).filter((s) => s.citedSpan?.end === lineOf(B.shab, "שבת, לב:, ג"))).toEqual([]);
+    // and the hyphen does not join a smaller number, or one too far away
+    expect(one("ועיין שבת לב-לא ושם", B.shab.key).some((s) => s.citedSpan?.end === lineOf(B.shab, "שבת, לב:, ג"))).toBe(false);
+  });
+
+  it("'ושם ע\"ב ד\"ה' after a daf cited with no commentator: the other amud of that daf, 'possible' (like 'ברכות יג: ד\"ה', B7)", () => {
+    const r = run('ועיין ברכות יג. ושם ע"ב ד"ה והא ועוד');
+    const to = r.suggestions.filter((s) => s.target.book.key === B.ber.key).sort((a, b) => a.target.line - b.target.line);
+    expect(to.map((s) => heRefOf(B.ber, s.target.line))).toEqual(["ברכות, יג., א", "ברכות, יג:, א"]);
+    expect(to[0]!.confidence).toBe("certain");
+    expect(to[1]!.confidence).toBe("possible");
+    expect(to[1]!.rules).toContain("citations.dibur-no-commentator");
+    // after a commentator's citation it is still his words on the other amud (control)
+    const tos = run('ועיין תוס\' ברכות יג. ד"ה והא ושם ע"ב ד"ה אלא').suggestions.filter((s) => s.target.book.key === B.tosBer.key);
+    expect(tos.map((s) => heRefOf(B.tosBer, s.target.line)!.split(",")[1]!.trim())).toEqual(["יג.", "יג:"]);
+  });
+
   it("'ברכות<sup>1</sup> יג:': a note's mark between the name and the place", () => {
     const text = "ועיין ברכות<sup>1</sup> יג: ושם";
     const [s] = one(text, B.ber.key);

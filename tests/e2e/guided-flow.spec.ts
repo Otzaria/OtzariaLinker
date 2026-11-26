@@ -615,3 +615,45 @@ test("guided flow: the plan counts the existing links of the chosen books and sa
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+
+/*
+ * #42 C16: the line filter of the guided plan has the same preview as the pair, batch and max-link forms — which lines of a book the
+ * filter lets in, before anything runs, for any of the plan's books.
+ */
+test("guided flow: the plan's line filter shows which lines of a book it lets in, before the run", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]!, "פירוש קצר על בראשית": BOOKS["פירוש קצר על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("2 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+  const pairs = main.locator("details.guided-pairs");
+  await pairs.locator("summary").click();
+  // no filter: no preview
+  await expect(pairs.getByRole("button", { name: "תצוגה מקדימה: אילו שורות ייכנסו" })).toHaveCount(0);
+  await pairs.getByLabel("אילו שורות של הספרים מקושרות").selectOption("round");
+  const look = pairs.getByRole("button", { name: "תצוגה מקדימה: אילו שורות ייכנסו" });
+  await expect(look).toBeVisible();
+  // the plan's books, to choose which one to look at
+  await expect(pairs.getByLabel("הספר לתצוגה המקדימה").locator("option")).toHaveCount(2);
+  await pairs.getByLabel("הספר לתצוגה המקדימה").selectOption({ label: "פירוש קצר על בראשית" });
+  await look.click();
+  // no line of the book starts with "(א)": none comes in, and it says so before the run
+  await expect(pairs.getByRole("status").filter({ hasText: "שורות ייכנסו" })).toContainText("0 מתוך 4 שורות ייכנסו", { timeout: 30_000 });
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

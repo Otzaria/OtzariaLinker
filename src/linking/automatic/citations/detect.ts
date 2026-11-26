@@ -1492,10 +1492,16 @@ export class CitationScanner {
     if (!prev || (last.elems.length !== 1 && !letterAmud) || (!letterAmud && prev.kind !== "daf" && prev.amud === undefined)) return undefined;
     const to = i + 1 + a[1];
     const dh = diburWordsAt(toks, to);
-    if (dh && !last.c.commentator) return this.drop("dibur-without-commentator");
+    /*
+     * A ד"ה with no commentator before it ("ברכות יג. … ושם ע"ב ד"ה והא"): the words of SOME commentary on the other amud, which
+     * one is not written — as "ברכות יג: ד"ה והא" (#41 B7), the amud itself, a coarse place, "possible" at most (engine.ts
+     * PENALTY.diburNoCommentator). Before, it was dropped (V7 #42 C21). The last citation in a commentary's own book ("רש"י על ברכות
+     * יג.") is that commentary's words.
+     */
+    const noCommentator = !!dh && !last.c.commentator && !last.c.candidates.some((x) => / על /.test(x.book.title));
     const elems: AddrElem[] = [{ ...prev, kind: "daf", amud: a[0], explicit: true }];
     const { maybeAmud: _m, amudGlued: _g, ...daf } = elems[0]!;
-    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
+    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: noCommentator ? "dibur-no-commentator" : "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
   }
 
   /**

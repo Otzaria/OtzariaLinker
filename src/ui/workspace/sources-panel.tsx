@@ -3,6 +3,7 @@ import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { AddSources } from "./add-sources";
 import { BookList } from "./book-picker";
+import { HeadingSearchButton } from "./heading-search";
 import { badgeOf, SourceBadge } from "./source-badge";
 import { ReopenSources } from "./reopen-sources";
 import { SourceName } from "../shell/file-name";
@@ -72,6 +73,7 @@ export function SourcesBody() {
         <>
           <div class="book-search">
             <input type="search" placeholder="חיפוש ספר…" title="חיפוש בכל הקבצים והמסדים הפתוחים" value={q} onInput={(e) => setQ(e.currentTarget.value)} aria-label="חיפוש ספר" />
+            <HeadingSearchButton />
           </div>
           <BookList query={q} />
         </>

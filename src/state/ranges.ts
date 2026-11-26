@@ -2,7 +2,7 @@ import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { validateLink, type ValidationContext } from "../core/links/validate";
-import { applyRangeEdit, cancelContinuationEdit, fillRanges, planContinuation, rangeMarkers, suggestEnd, trimBefore, type ContinueMode, type ContinuePlan, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
+import { applyRangeEdit, cancelContinuationEdit, fillRanges, planContinuation, rangeMarkers, suggestEnd, trimBefore, type ContinueMode, type ContinuePlan, type MarkerBasis, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
 import { commit, linksCount, type Change, type LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { BooksService, CallOptions } from "./services";
@@ -61,11 +61,14 @@ export class RangesState {
     return { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount: b.lineCount ?? this.host.lines.count(bookKey) ?? 0, headings };
   }
 
-  /** The builder's "until the next link": the end for a range starting at `start` (null: the book is not open). */
-  async suggestEnd(bookKey: string, side: RangeSide, start: number, editing?: string): Promise<number | null> {
+  /**
+   * The builder's "until the next link": the end for a range starting at `start` (null: the book is not open). `basis`
+   * is v3's rangeEndBasis (F-079): what the range stops before; "book" runs it to the book's last line.
+   */
+  async suggestEnd(bookKey: string, side: RangeSide, start: number, editing?: string, basis: MarkerBasis = "auto"): Promise<number | null> {
     const book = await this.book(bookKey);
     if (!book || book.lineCount <= 0) return null;
-    return suggestEnd(start, rangeMarkers(this.links(), book, side, "auto", editing), book);
+    return suggestEnd(start, rangeMarkers(this.links(), book, side, basis, editing), book);
   }
 
   /**
@@ -91,19 +94,32 @@ export class RangesState {
     return out;
   }
 
-  /** Range completion for one book and side, as one undoable step. Returns the number of links changed (null: not run). */
-  async fill(bookKey: string, side: RangeSide, onlyRanged: boolean): Promise<number | null> {
+  /**
+   * The PREVIEW of range completion (v3 F-105 showed the ranges before applying them): every link it would change, with the end before and
+   * after, and nothing changed. `refused` says why there is none to show: a Sefaria book for a submission, or a book whose length is unknown.
+   * Null: the book is not open. `fill` applies exactly these edits.
+   */
+  async planFill(bookKey: string, side: RangeSide, onlyRanged: boolean): Promise<{ edits: RangeEdit[]; refused?: "sefaria" | "no-text" } | null> {
     const book = await this.book(bookKey);
     if (!book) return null;
     const title = this.host.books.value.get(bookKey)?.title ?? "";
     // a range on a Sefaria side drifts (the sync remaps only its start) and a submission refuses it
     // (validate.ts sefaria/range-side): the completion would only make errors (product audit F1)
-    if (this.host.exportPurpose?.value !== "private" && this.host.isSefariaOwned?.({ title, key: bookKey })) {
+    if (this.host.exportPurpose?.value !== "private" && this.host.isSefariaOwned?.({ title, key: bookKey })) return { edits: [], refused: "sefaria" };
+    const r = fillRanges(this.links(), book, side, { onlyRanged });
+    return r.skippedNoText ? { edits: [], refused: "no-text" } : { edits: r.edits };
+  }
+
+  /** Range completion for one book and side, as one undoable step. Returns the number of links changed (null: not run). */
+  async fill(bookKey: string, side: RangeSide, onlyRanged: boolean): Promise<number | null> {
+    const r = await this.planFill(bookKey, side, onlyRanged);
+    if (!r) return null;
+    const title = this.host.books.value.get(bookKey)?.title ?? "";
+    if (r.refused === "sefaria") {
       this.host.notify("warning", `הטווחים לא הושלמו: "${title}" הוא ספר של ספריא, והספרייה לא מקבלת טווח בצד שלו (סוף הטווח לא מתעדכן איתה). אם הקישורים לשימושכם בלבד, בחרו בחלון הייצוא "שימוש פרטי" ונסו שוב.`);
       return null;
     }
-    const r = fillRanges(this.links(), book, side, { onlyRanged });
-    if (r.skippedNoText) {
+    if (r.refused === "no-text") {
       this.host.notify("warning", `אורך הספר "${title}" עדיין לא ידוע, ולכן הטווחים לא הושלמו. פתחו את הספר בקורא ונסו שוב.`);
       return null;
     }

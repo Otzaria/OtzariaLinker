@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessMapping } from "../../../src/core/db-guess";
+import { analyzeSchema, guessMapping } from "../../../src/core/db-guess";
 import { describeMapping, mappingProblems, parseDbMapping, ROWID, type ColumnPreview, type DbMapping, type SchemaPreview, type TablePreview } from "../../../src/core/db-mapping";
 
 /* Pure rules of the mapping wizard: the guess, the checks, and reading a mapping from untrusted JSON. */
@@ -123,5 +123,22 @@ describe("text units, composite order and chapters/versions (wizard round V5)", 
     expect(d).toContain("line_index ואז verse");
     expect(d).toContain("JSON");
     expect(d).toContain('פרקים מ"chapters"');
+  });
+});
+
+describe("a database that is not the books database says which one it is (V7 parity F-009)", () => {
+  const otzariaHint = /seforim\.db/;
+  it("Otzaria's user data (notes, highlights, bookmarks)", () => {
+    const a = analyzeSchema(preview(table("user_notes", [col("id", "integer"), col("note", "text")]), table("bookmarks", [col("ref", "text")])));
+    expect(a.noBooks).toBe(true);
+    expect(a.summary).toContain("מסד נתוני המשתמש של אוצריא");
+    expect(a.summary).toMatch(otzariaHint);
+  });
+  it("a text-analysis (variants) database, and an index or metadata database", () => {
+    expect(analyzeSchema(preview(table("variant", [col("id", "integer")]), table("processed_lines", [col("txt", "text")]))).summary).toContain("ניתוח טקסט");
+    expect(analyzeSchema(preview(table("db_meta", [col("k", "text"), col("v", "text")]))).summary).toContain("מסד אינדקס");
+  });
+  it("any other database keeps the general reasons", () => {
+    expect(analyzeSchema(preview(table("log", [col("ts", "integer")]))).summary).not.toMatch(otzariaHint);
   });
 });

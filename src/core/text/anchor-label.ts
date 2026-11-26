@@ -24,3 +24,18 @@ export function withAnchorLabel(heRef: string, label: string | null | undefined)
   if (!label || anchorLabelFromHeRef(heRef) != null) return heRef;
   return `${heRef}${MARKER}${label}`;
 }
+
+/**
+ * The heRef with its anchor label set to `label` (empty or null: removed) — the builder's label field (v3 F-075). Only a
+ * tail the generator reads as a label is replaced; a " אות " it ignores (say "אות 12") is part of the reference and stays.
+ */
+export function replaceAnchorLabel(heRef: string, label: string | null | undefined): string {
+  const base = anchorLabelFromHeRef(heRef) != null ? heRef.slice(0, heRef.lastIndexOf(MARKER)) : heRef;
+  return label ? `${base}${MARKER}${label}` : base;
+}
+
+/** Why the generator would not read `label` as an anchor label (null: it would, or it is empty — no label). */
+export function anchorLabelProblem(label: string): string | null {
+  if (!label) return null;
+  return anchorLabelFromHeRef(`x${MARKER}${label}`) === label ? null : "תווית העוגן היא אות אחת עד שש אותיות עבריות (מותר גם גרש או גרשיים), כמו ג או י\"א. אוצריא מתעלמת מתווית אחרת.";
+}

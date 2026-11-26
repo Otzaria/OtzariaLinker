@@ -1,6 +1,6 @@
 import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
-import { storedLinkIdentity } from "../core/links/equality";
+import { identicalLinkKey } from "../core/links/equality";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { storedForm } from "../core/links/stored-form";
@@ -136,7 +136,7 @@ export class LinkFixes {
   }
 
   /**
-   * Links that are ONE link in the database (equality.ts storedLinkIdentity) — the chosen ones among
+   * Links that are ONE link in the database (equality.ts identicalLinkKey, as export/duplicate) — the chosen ones among
    * all the project's links — keep one: the library's record first, then one with an anchor. The rest
    * of the chosen are deleted.
    */
@@ -146,7 +146,7 @@ export class LinkFixes {
     const groups = new Map<string, Link[]>();
     for (const l of s.links.values()) {
       if (l.status === "deleted" || l.provenance === "db") continue;
-      const k = storedLinkIdentity(l);
+      const k = identicalLinkKey(l);
       if (k === null) continue;
       const g = groups.get(k);
       if (g) g.push(l);

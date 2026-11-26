@@ -8,6 +8,7 @@ import { linkMatchIndex, matchList, type LinkMatchList } from "../core/links/equ
 import type { Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
+import { bytesFingerprint } from "../core/text/fingerprint";
 import { SEFARIA_TITLES_PATH } from "../core/links/sefaria-owned";
 import { parseRecords } from "../formats/records/records";
 import { stripTags } from "../core/text/html";
@@ -22,6 +23,7 @@ import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
+import { isReadFailure, unreadableReason } from "./read-failure";
 import { loneCrMessage, TextFilesSource, type TextFile } from "./text/text-source";
 
 /*
@@ -81,6 +83,13 @@ export class SourceRegistry {
    */
   private readonly byIdentity = new Map<string, string>();
   private readonly identityOf = new Map<string, string>();
+  /**
+   * The identity of each open text book (textIdentity: its name, size, last-modified time and first and last bytes) → its
+   * source id, and each text source's identities (to release them on close). V3 added a book once (F-016); a folder or a
+   * .txt picked again opened as another source, every book twice.
+   */
+  private readonly textOpen = new Map<string, string>();
+  private readonly textsOf = new Map<string, string[]>();
   private seq = 0;
   private idPrefix = "s";
   /**
@@ -101,34 +110,83 @@ export class SourceRegistry {
 
   async open(files: readonly InputFile[], signal?: AbortSignal): Promise<OpenResult> {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
-    const texts: TextFile[] = [];
+    const all: IdentifiedText[] = [];
     const notUtf8: string[] = [];
     /** text files with a CR not followed by LF in their first bytes (#41 B10): warned at open, where the store shows warnings */
     const loneCr: string[] = [];
     for (const f of files) {
       signal?.throwIfAborted();
-      const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, texts, notUtf8, signal, loneCr);
+      let head: Uint8Array;
+      try {
+        head = new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer());
+      } catch (err) {
+        // one file the browser cannot read (locked, only in the cloud, gone) is skipped with the reason; the rest of the drop opens (F-012)
+        if (signal?.aborted) throw err;
+        result.skipped.push({ path: f.path, reason: unreadableReason(err) });
+        continue;
+      }
+      await this.route(f, detectKind(head, f.path), result, all, notUtf8, signal, loneCr);
     }
+    // a text book already open (the same file or folder picked again, F-016) is not opened again. From the check to add() the
+    // code is synchronous, so a drop of the same files that overlaps this one sees them taken.
+    const { fresh: texts, held } = this.partitionTexts(all);
+    let opened: Promise<OpenedSource> | undefined;
     if (texts.length) {
+      const fresh = new Set(texts.map((t) => t.path));
       const src = new TextFilesSource(this.nextId(), labelForTexts(texts), texts);
       // a checkout of the library carries its list of Sefaria titles: its books are the library's (sefaria-titles.ts)
       if (files.some((f) => f.path.replace(/\\/g, "/").endsWith(SEFARIA_TITLES_PATH))) src.info.library = true;
+      // the warnings are about the files this source opens, not the ones already open
+      const badEncoding = notUtf8.filter((p) => texts.some((t) => p.startsWith(`${t.path} (`)));
+      const crOnly = loneCr.filter((p) => fresh.has(p));
       // decided at open time: a warning added on first read (inside the source) never reached the UI
       // #42 C29: an empty file used to open as a book with no lines and no word about it
-      const empty = files.filter((f) => f.blob.size === 0 && texts.some((t) => t.path === f.path)).map((f) => f.path);
+      const empty = files.filter((f) => f.blob.size === 0 && fresh.has(f.path)).map((f) => f.path);
       if (empty.length)
         src.info.warnings.push({ code: "source/empty-file", message: empty.length === 1 ? `הקובץ "${empty[0]}" ריק — אין בו שורות לקשר. בדקו שבחרתם את הקובץ הנכון.` : `${empty.length} קבצים ריקים, בלי שורות לקשר: ${empty.slice(0, 5).join(", ")}${empty.length > 5 ? "…" : ""}. בדקו שבחרתם את הקבצים הנכונים.` });
-      if (loneCr.length)
-        src.info.warnings.push(loneCrWarning(loneCr));
-      if (notUtf8.length)
+      if (crOnly.length)
+        src.info.warnings.push(loneCrWarning(crOnly));
+      if (badEncoding.length)
         src.info.warnings.push({
           code: "source/not-utf8",
-          message: `${notUtf8.length} קבצים אינם שמורים ב־UTF-8: ${notUtf8.slice(0, 5).join(", ")}${notUtf8.length > 5 ? "…" : ""}. הכלי מציג אותם נכון, אבל אוצריא קוראת כל ספר כ־UTF-8 — שמרו אותם מחדש ב־UTF-8 לפני שליחה לספרייה.`,
+          message: `${badEncoding.length} קבצים אינם שמורים ב־UTF-8: ${badEncoding.slice(0, 5).join(", ")}${badEncoding.length > 5 ? "…" : ""}. הכלי מציג אותם נכון, אבל אוצריא קוראת כל ספר כ־UTF-8 — שמרו אותם מחדש ב־UTF-8 לפני שליחה לספרייה.`,
         });
-      result.sources.push(await this.add(src));
+      this.claimTexts(src.info.id, texts);
+      opened = this.add(src);
     }
+    await this.reportHeld(held, result);
+    if (opened) result.sources.push(await opened);
     return result;
+  }
+
+  /**
+   * Of the text books of a drop, the ones not open yet; the open sources that hold the others (V3 F-016). Within one drop, a
+   * second file with the same identity (the same name and bytes) is the same book too.
+   */
+  private partitionTexts(texts: readonly IdentifiedText[]): { fresh: IdentifiedText[]; held: Set<string> } {
+    const fresh: IdentifiedText[] = [];
+    const held = new Set<string>();
+    const seen = new Set<string>();
+    for (const t of texts) {
+      const known = this.textOpen.get(t.identity);
+      if (known !== undefined && this.sources.has(known)) held.add(known);
+      else if (!seen.has(t.identity)) (seen.add(t.identity), fresh.push(t));
+    }
+    return { fresh, held };
+  }
+
+  private claimTexts(sourceId: string, texts: readonly IdentifiedText[]): void {
+    for (const t of texts) this.textOpen.set(t.identity, sourceId);
+    this.textsOf.set(sourceId, texts.map((t) => t.identity));
+  }
+
+  /** The open sources a drop picked again, as OpenResult.reused (the store says they are open already). */
+  private async reportHeld(held: ReadonlySet<string>, result: OpenResult): Promise<void> {
+    for (const id of held) {
+      const s = this.sources.get(id);
+      if (!s || result.reused?.some((r) => r.info.id === id)) continue;
+      (result.reused ??= []).push({ info: s.info, books: await s.books() });
+    }
   }
 
   /** Opens a database that needed a mapping (see OpenResult.needsMapping). The token stays valid for a re-map. */
@@ -368,11 +426,13 @@ export class SourceRegistry {
     const identity = this.identityOf.get(sourceId);
     if (identity !== undefined) this.byIdentity.delete(identity);
     this.identityOf.delete(sourceId);
+    for (const t of this.textsOf.get(sourceId) ?? []) if (this.textOpen.get(t) === sourceId) this.textOpen.delete(t);
+    this.textsOf.delete(sourceId);
     this.mappingOf.delete(sourceId);
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
-  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[], signal?: AbortSignal, loneCr: string[] = []): Promise<void> {
+  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: IdentifiedText[], notUtf8: string[], signal?: AbortSignal, loneCr: string[] = []): Promise<void> {
     switch (kind) {
       case "sqlite":
         try {
@@ -415,8 +475,9 @@ export class SourceRegistry {
         return;
       case "text":
         if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
-          texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()) });
           const head = new Uint8Array(await f.blob.slice(0, SNIFF).arrayBuffer());
+          const tail = f.blob.size > SNIFF ? new Uint8Array(await f.blob.slice(Math.max(SNIFF, f.blob.size - TAIL)).arrayBuffer()) : new Uint8Array(0);
+          texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()), identity: textIdentity(f.path, f.blob.size, (f.blob as Partial<File>).lastModified, head, tail) });
           const enc = decodeText(head, { partial: f.blob.size > SNIFF }).encoding;
           if (hasLoneCr(head, f.blob.size > SNIFF)) loneCr.push(f.path);
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
@@ -478,15 +539,24 @@ export class SourceRegistry {
     }
     if (!entries.length)
       return void result.skipped.push({ path: f.path, reason: "בארכיון אין ספרים (‎.txt) או קובצי קישורים — או שהוא פגום." });
-    const texts: TextFile[] = [];
+    const all: IdentifiedText[] = [];
     for (const e of entries) {
       const path = `${nameOf(f.path)}/${e.path}`;
       const kind = detectKind(e.bytes.subarray(0, HEAD), e.path);
       if (kind === "links-json" || kind === "alt-toc-json" || kind === "project") result.documents.push({ path, kind, text: documentText(e.bytes) });
-      else if (kind === "text" && /\.txt$/i.test(e.path)) texts.push({ path: e.path, read: async () => e.bytes });
+      else if (kind === "text" && /\.txt$/i.test(e.path)) all.push({ path: e.path, read: async () => e.bytes, identity: textIdentity(e.path, e.bytes.length, undefined, e.bytes.subarray(0, SNIFF), e.bytes.subarray(Math.max(SNIFF, e.bytes.length - TAIL))) });
       else result.skipped.push({ path, reason: "קובץ בתוך הארכיון שאינו ספר ‎.txt או קובץ קישורים." });
     }
-    if (texts.length) result.sources.push(await this.add(new TextFilesSource(this.nextId(), nameOf(f.path), texts)));
+    // the same ZIP picked again opens nothing new (F-016), as a folder; synchronous from the check to add()
+    const { fresh, held } = this.partitionTexts(all);
+    let opened: Promise<OpenedSource> | undefined;
+    if (fresh.length) {
+      const src = new TextFilesSource(this.nextId(), nameOf(f.path), fresh);
+      this.claimTexts(src.info.id, fresh);
+      opened = this.add(src);
+    }
+    await this.reportHeld(held, result);
+    if (opened) result.sources.push(await opened);
   }
 
   private async add(s: BookSource): Promise<OpenedSource> {
@@ -541,6 +611,21 @@ async function fileIdentity(f: InputFile): Promise<string> {
   return `${size}|${modified ?? ""}|${hex}|${sha256Hex(joined)}`;
 }
 
+/** a text book as it is opened, with its identity (textIdentity) */
+type IdentifiedText = TextFile & { readonly identity: string };
+
+/** the bytes at a text book's end that its identity reads (with the first SNIFF bytes, read anyway for the encoding) */
+const TAIL = 4096;
+
+/**
+ * The identity of a text book (V3 F-016): its file name (the book's title), size, last-modified time, and its first 64 KiB and
+ * last 4 KiB. Not the folder: the same file picked alone or inside its folder is the same book. Cheap on purpose — a library
+ * folder has thousands of books, and the first bytes are read anyway; a book edited since has another time or size.
+ */
+function textIdentity(path: string, size: number, lastModified: number | undefined, head: Uint8Array, tail: Uint8Array): string {
+  return `${nameOf(path)}|${size}|${lastModified ?? ""}|${bytesFingerprint(head)}|${bytesFingerprint(tail)}`;
+}
+
 /** A CR byte not followed by LF (a lone CR, #41 B10); the last byte of a cut head is not judged. */
 function hasLoneCr(bytes: Uint8Array, partial: boolean): boolean {
   const end = partial ? bytes.length - 1 : bytes.length;
@@ -581,5 +666,6 @@ function documentText(bytes: Uint8Array): string {
 }
 
 function reasonOf(err: unknown, fallback: string): string {
+  if (isReadFailure(err)) return unreadableReason(err);
   return err instanceof LinkerError ? err.message : `${fallback} (${err instanceof Error ? err.message : String(err)})`;
 }

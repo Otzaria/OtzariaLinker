@@ -84,6 +84,21 @@ describe("ranges through the store", () => {
     store.undo();
     expect(store.allLinks.value.every((l) => l.source.end === undefined)).toBe(true);
   });
+
+  // v3 F-105 showed the ranges before applying them; V7 applied at once (legacy parity §4.3: "no preview")
+  it("range completion has a preview: the same edits fill applies, and nothing changes until then", async () => {
+    const { store, main, create } = await opened();
+    create(1, 1);
+    create(3, 2);
+    create(6, 3);
+    const revision = store.linkState.value.revision;
+    const plan = await store.ranges.planFill(main.key, "source", false);
+    expect(plan!.edits.map((e) => [e.link.source.line, e.before, e.after])).toEqual([[1, undefined, 2], [3, undefined, 4], [6, undefined, 8]]);
+    expect(store.linkState.value.revision).toBe(revision);
+    expect(store.allLinks.value.every((l) => l.source.end === undefined)).toBe(true);
+    expect(await store.ranges.fill(main.key, "source", false)).toBe(plan!.edits.length);
+    expect(store.allLinks.value.map((l) => [l.source.line, l.source.end]).sort((a, b) => a[0]! - b[0]!)).toEqual(plan!.edits.map((e) => [e.link.source.line, e.after]));
+  });
 });
 
 describe("range completion on a book the library treats as Sefaria's (audit F1)", () => {

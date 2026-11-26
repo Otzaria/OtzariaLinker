@@ -2,8 +2,8 @@
  * Component styles. Colours come only from tokens.css. Layout: an app bar on top, then either the
  * home screen or the workspace grid (columns from the layout state), notices bottom-left.
  */
-@font-face { font-family: "OtzariaFrank"; src: url("./fonts/FrankRuehlCLM-Medium.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: "OtzariaRashi"; src: url("./fonts/NotoRashiHebrew-VariableFont_wght.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "OtzariaFrank"; src: url("./fonts/FrankRuehlCLM-Medium.woff") format("woff"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "OtzariaRashi"; src: url("./fonts/NotoRashiHebrew-VariableFont_wght.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -335,6 +335,9 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .ln.flash { animation: flash 1.2s var(--ease); }
 @keyframes flash { from { background: var(--highlight); } }
 .ln.drop-over { outline: 2px dashed var(--tertiary); outline-offset: -2px; }
+/* the keyboard cursor of Ctrl+arrows (Ctrl+Space adds its line to the picked ones) */
+.ln.cursor { outline: 2px solid var(--primary); outline-offset: -2px; }
+.reader.target .ln.cursor { outline-color: var(--tertiary); }
 .ln .marks { display: flex; gap: 3px; padding-top: 0.55em; user-select: none; }
 .mark { min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-full); font: 600 10px/16px var(--font-ui); text-align: center; }
 .mark.new { background: var(--primary); color: var(--on-primary); }
@@ -367,6 +370,14 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .builder .end .snip { grid-column: 1 / -1; font-family: var(--font-book); font-size: 15px; color: var(--on-surface-variant); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .builder label.field { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .builder .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* v3's "עד שורה" (F-054), the anchor label (F-075) and the range settings (F-055/F-079/F-083) */
+.builder .range-end { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+.builder .range-end input { inline-size: 8ch; }
+.builder .anchor-label input { inline-size: 10ch; }
+.builder .error-text { color: var(--error); }
+.builder .range-settings { font-size: var(--fs-sm); }
+.builder .range-settings > summary { cursor: pointer; color: var(--on-surface-variant); min-height: 24px; }
+.builder .range-settings > .body { display: grid; gap: 8px; padding-block: 6px 4px; }
 .problems { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
 .problems li { display: flex; gap: 6px; align-items: start; padding: 6px 8px; border-radius: var(--radius); }
 .problems li > *, .stored-as > * { min-width: 0; overflow-wrap: anywhere; }
@@ -723,4 +734,65 @@ main.guided .bulk-approve { margin: 0; }
   .guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check { min-height: 44px; align-items: center; }
   .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 44px; display: flex; align-items: center; }
   .variant-choice .chip { min-height: 44px; }
+  .builder :is(.range-end, .anchor-label) input { min-height: 44px; box-sizing: border-box; }
+  .builder .range-settings label.check, .builder .range-settings > summary { min-height: 44px; align-items: center; }
+  .log-dialog .chip, .heading-search .chip { min-height: 44px; }
+}
+
+/* ---------- V7 parity: the log, the full reset, removing a book, heading search (F-137, F-028, F-035, F-139) ---------- */
+dialog.log-dialog { width: min(980px, calc(100vw - 32px)); }
+.log-dialog .filters { padding: 0; }
+.log-dialog .chip, .heading-search .chip { min-height: 24px; }
+.log-list { max-height: min(60vh, 560px); overflow: auto; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-lowest); font-size: var(--fs-sm); }
+.log-list > p { margin: 0; padding: 10px 12px; }
+.log-row { display: grid; grid-template-columns: auto 4.5em 1fr; gap: 2px 10px; padding: 4px 10px; border-block-end: 1px solid var(--outline-variant); }
+.log-row .t { font-family: var(--font-mono); color: var(--on-surface-variant); }
+.log-row .lv { font-weight: 600; }
+.log-row.warn .lv { color: var(--on-warning-container); }
+.log-row.warn { background: color-mix(in srgb, var(--warning-container) 45%, transparent); }
+.log-row.error .lv { color: var(--error); }
+.log-row.error { background: color-mix(in srgb, var(--error-container) 35%, transparent); }
+.log-row.debug { color: var(--on-surface-variant); }
+.log-row .msg { min-width: 0; overflow-wrap: anywhere; }
+.log-row .area { color: var(--on-surface-variant); font-size: 11px; }
+.log-row .data { display: block; color: var(--on-surface-variant); font-size: 11px; overflow-wrap: anywhere; }
+.menu .item.danger { color: var(--error); }
+/* a long menu (the settings, with the density and the reset) scrolls inside itself: at 200% zoom its last items were out of reach */
+.menu-pop { max-block-size: calc(100dvh - 64px); overflow-y: auto; overscroll-behavior: contain; }
+details.unref { margin: 0 6px 6px; font-size: var(--fs-sm); }
+.unref-body { padding: 4px 0; }
+.unref-body > p { margin: 4px 0; }
+.unref-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: 9.5em; overflow: auto; }
+.unref-list .chip { min-height: 24px; min-width: 32px; }
+@media (pointer: coarse) { .unref-list .chip { min-height: 44px; min-width: 44px; } }
+.book-search:has(> .icon-btn) { grid-template-columns: 1fr auto; align-items: center; }
+dialog.heading-search { width: min(820px, calc(100vw - 32px)); }
+.heading-search .filters { padding: 0; }
+.hs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.hs-list li { display: flex; align-items: center; gap: 6px; }
+.hs-list .hs-open { flex: 1; min-width: 0; justify-content: flex-start; white-space: normal; text-align: start; flex-wrap: wrap; gap: 2px 8px; }
+.hs-list .hs-book { font-weight: 600; }
+.hs-list .side-btn { flex: none; font-size: 11px; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); cursor: pointer; min-height: 24px; }
+@media (pointer: coarse) { .hs-list .side-btn { min-height: 44px; min-width: 44px; } }
+dialog.reset-dialog { width: min(560px, calc(100vw - 32px)); }
+.notice-inline { padding: 8px 12px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); }
+.book-list .side-btn.rm { color: var(--on-surface-variant); display: inline-grid; place-items: center; padding: 2px 6px; }
+.book-list .side-btn.rm:hover { color: var(--error); border-color: var(--error); }
+/* with a mouse the ✕ takes no room until the row is pointed at or reached by Tab (the names stay readable in a narrow list);
+   a finger sees it always (the 44px rule below) */
+@media (pointer: fine) {
+  .book-list li:not(:hover):not(:focus-within) .side-btn.rm { inline-size: 0; min-inline-size: 0; padding-inline: 0; border-width: 0; margin-inline-start: -4px; overflow: hidden; }
+}
+
+/* F-134: no motion for those who asked the system for none. The line flash stays a cue, without the fade. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .ln.flash { animation: flash-still 1.2s steps(1, end); }
+}
+@keyframes flash-still { from, to { background: var(--highlight); } }
+
+/* F-134: a printout is the texts, not the controls (as version 3: not a goal, but not broken) */
+@media print {
+  .app-bar, .notices, .drop-veil, .workspace .grip, .reader-tools, .side-panel { display: none !important; }
+  body { background: none; }
 }
