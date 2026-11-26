@@ -34,3 +34,17 @@ describe("Hebrew counts of one (B27)", () => {
     expect(src).not.toMatch(/label: `מראי מקומות: /);
   });
 });
+
+describe("deleting links is not silent (#42 C31)", () => {
+  it("says what was deleted, with an undo action that brings it back", async () => {
+    const store = newStore();
+    await store.openFiles([{ path: "ביאור_links.json", blob: new Blob([JSON.stringify([1, 2, 3].map((i) => ({ line_index_1: i + 1, heRef_2: "x", path_2: "בראשית.txt", line_index_2: i + 2, "Conection Type": "commentary" })))]) }]);
+    const ids = store.allLinks.value.slice(0, 2).map((l) => l.id);
+    store.deleteLinks(ids);
+    const n = store.notices.value.at(-1)!;
+    expect(n.text).toContain("נמחקו 2 קישורים");
+    expect(n.action?.label).toBe("ביטול");
+    n.action!.run();
+    expect(store.allLinks.value.filter((l) => l.status === "deleted")).toHaveLength(0);
+  });
+});

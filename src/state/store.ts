@@ -734,6 +734,15 @@ export class AppStore {
     const changes = ids.map((id) => deleteChange(s, id)).filter((c): c is Change => !!c);
     this.apply(changes.length === 1 ? "מחיקת קישור" : `מחיקת ${linksCount(changes.length)}`, changes);
     if (this.editing.value && ids.includes(this.editing.value)) this.clearPicks();
+    // #42 C31: a delete was silent; it says what it did, and an undo is one tap away (the history keeps it too)
+    if (changes.length) {
+      const at = this.linkState.peek().revision;
+      this.notify("info", changes.length === 1 ? "נמחק קישור אחד." : `נמחקו ${linksCount(changes.length)}.`, undefined, {
+        label: "ביטול",
+        // only while nothing else was done since: an undo later would take back another action
+        run: () => void (this.linkState.peek().revision === at && this.undo()),
+      });
+    }
   }
 
   restoreLinks(ids: readonly string[]): void {
