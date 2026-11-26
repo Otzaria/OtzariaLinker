@@ -174,3 +174,35 @@ test("the side panel at its narrowest keeps every element inside it, even with a
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * V7 §3.9: the order of the panels changes without a mouse — the arrows on a panel's handle move it one place the way they point
+ * (RTL: left is towards the end), the handle keeps the focus, the order is kept after a reload, and "reset" brings the default back.
+ */
+test("a panel moves by keyboard from its handle; the order is kept after a reload and reset restores it", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  const order = () => page.locator("main.workspace > .stack-col > :first-child").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? e.querySelector("[data-panel]")?.getAttribute("data-panel")));
+  const before = await order();
+  expect(before).toEqual(["קבצים ומסדים", "ספר המקור", "ספר היעד", "בונה וקישורים"]);
+  const grip = page.getByRole("button", { name: /^הזזת קבצים ומסדים/ });
+  await grip.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(order).toEqual(["ספר המקור", "קבצים ומסדים", "ספר היעד", "בונה וקישורים"]);
+  await expect(page.getByRole("button", { name: /^הזזת קבצים ומסדים/ })).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(order).toEqual(["ספר המקור", "ספר היעד", "קבצים ומסדים", "בונה וקישורים"]);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(order).toEqual(["ספר המקור", "קבצים ומסדים", "ספר היעד", "בונה וקישורים"]);
+  // kept with the preferences: after a reload and opening the books again, the same order
+  await page.reload();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("otzaria-linker:prefs:v1")!).layout.order)).toEqual(["source", "sources", "target", "side"]);
+  await open(page);
+  await expect.poll(order).toEqual(["ספר המקור", "קבצים ומסדים", "ספר היעד", "בונה וקישורים"]);
+  await layoutMenu(page).click();
+  await page.getByRole("menuitem", { name: /^איפוס הפריסה/ }).click();
+  await expect.poll(order).toEqual(before);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

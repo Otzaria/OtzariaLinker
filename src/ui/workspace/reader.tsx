@@ -17,7 +17,7 @@ import { splitMatched } from "./matched-words";
 import { BookInfo } from "./book-info";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
-import { HideButton } from "./hide-button";
+import { Grip, HideButton } from "./hide-button";
 import { parseDraggedLine } from "./line-drag";
 import { LineLinksPopover, type LineLinksAt } from "./line-links";
 import { plainText } from "./plain-text";
@@ -97,9 +97,7 @@ function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen
   const showSource = !!origin.source && store.sources.value.length > 1;
   return (
     <div class="panel-head" data-panel={side} draggable>
-      <span class="grip" title="גררו כדי להזיז את הפאנל">
-        <Icon name="fl_re_order_dots_vertical" size={16} />
-      </span>
+      <Grip id={side} label={`קורא ה${role.short}`} />
       <span class={`side-badge ${side}`} title={role.hint}>{role.short}</span>
       <h2 class="grow book-title" title={title}>
         {title ? (

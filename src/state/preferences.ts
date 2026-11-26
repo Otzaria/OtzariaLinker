@@ -127,6 +127,15 @@ export function resetLayout(prefs: Preferences, width: number): void {
   });
 }
 
+/** A panel one place towards the start (-1) or the end (+1), swapped with its nearest SHOWN neighbour; at an edge the same layout. */
+export function movePanel(layout: Layout, id: PanelId, delta: -1 | 1): Layout {
+  const shown = layout.order.filter((p) => p === id || !layout.hidden.includes(p));
+  const other = shown[shown.indexOf(id) + delta];
+  if (!shown.includes(id) || !other) return layout;
+  const order = layout.order.map((p) => (p === id ? other : p === other ? id : p));
+  return { ...layout, order };
+}
+
 const PANELS: readonly PanelId[] = ["sources", "source", "target", "side"];
 function isLayout(x: unknown): boolean {
   const l = x as Layout;

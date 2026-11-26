@@ -7,7 +7,7 @@ import { rovingKeys, rovingTabIndex, useFocusOnMount } from "../keyboard";
 import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
-import { HideButton } from "./hide-button";
+import { Grip, HideButton } from "./hide-button";
 import { SourcesBody } from "./sources-panel";
 import { QaPanel } from "./qa-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
@@ -121,9 +121,7 @@ export function Panel({ id, title, icon, children, actions, class: cls }: { id: 
   return (
     <section class={`panel${cls ? ` ${cls}` : ""}`} aria-label={title}>
       <div class="panel-head" draggable>
-        <span class="grip" title="גררו כדי להזיז את הפאנל">
-          <Icon name="fl_re_order_dots_vertical" size={16} />
-        </span>
+        <Grip id={id} label={title} />
         <h2 class="grow">
           <Icon name={icon} size={18} />
           {title}
@@ -152,9 +150,7 @@ function SidePanel() {
   return (
     <section class="panel side-panel" aria-label="בונה וקישורים">
       <div class="tabs">
-        <span class="grip" style="align-self:center;cursor:grab" draggable title="גררו כדי להזיז את הפאנל">
-          <Icon name="fl_re_order_dots_vertical" size={16} />
-        </span>
+        <Grip id="side" label="החלונית" style="align-self:center;cursor:grab" draggable />
         {/* only tabs inside the tab list (the hide button is not a tab); arrows move between them */}
         <div role="tablist" aria-label="החלונית" onKeyDown={rovingKeys}>
           {tabButton("builder", "oz_link_add", "בונה")}
