@@ -1,4 +1,4 @@
-import { parseConnectionType } from "../../core/links/connection-type";
+import { inlineLinkerVersionNote, isDocumentedInlineLinker, parseConnectionType } from "../../core/links/connection-type";
 import { detectLayout, mayBeSpelledOtherwise, type JsonLayout } from "./layout";
 import { CONNECTION_TYPE_KEY, DOUBLE_N_KEY, KNOWN_KEYS, type LinksRecord, type RecordOrigin } from "./record";
 
@@ -159,7 +159,10 @@ function decodeRecord(raw: unknown, rec: Report): LinksRecord | null {
     rec("warning", "record/double-n-type", `שם השדה כתוב "${DOUBLE_N_KEY}" (שני n). אוצריא מתעלמת ממנו והקישור יישמר כ"אחר". השם הנכון הוא "${CONNECTION_TYPE_KEY}".`);
   const connectionType = typeof typeRaw === "string" ? typeRaw : "";
   const t = parseConnectionType(connectionType);
-  if (!t.known) rec("warning", "record/unknown-type", `סוג הקשר "${connectionType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
+  // the tool's own private type (#42 C22): not "unknown", but a type of Otzaria's personal import that depends on the version
+  if (!t.known && isDocumentedInlineLinker(connectionType))
+    rec("warning", "record/inline-linker", `הסוג "${connectionType}" הוא "ציטוט בטקסט", סוג פרטי של הייבוא האישי באוצריא. מחולל הספרייה שומר אותו כ"אחר". ${inlineLinkerVersionNote()}`);
+  else if (!t.known) rec("warning", "record/unknown-type", `סוג הקשר "${connectionType}" אינו מוכר לאוצריא, והקישור יישמר כ"אחר".`);
   if (t.type === "LINKER") rec("warning", "record/linker-skipped", 'רשומות מסוג "linker" אינן מיובאות לאוצריא כלל.');
 
   // defineProperty: a key named "__proto__" is kept as data, not taken as the object's prototype

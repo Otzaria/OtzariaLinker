@@ -30,7 +30,8 @@ export const INLINE_LINKER_LABEL = "ציטוט בטקסט";
 export const INLINE_LINKER_SUPPORT = {
   commit: "6f71470e",
   commitDate: "2026-11-20",
-  checkedOn: "2026-11-22",
+  // V7: checked again on 2026-11-26 with the public releases API — the newest release is still 0.9.98.3+809, without it
+  checkedOn: "2026-11-26",
   latestStable: "0.9.98.3+809",
   latestStableDate: "2026-11-02",
   supportedFrom: null as string | null,
