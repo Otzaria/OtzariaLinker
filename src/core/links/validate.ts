@@ -1,5 +1,5 @@
 import { APP_DEPENDENT_TYPES, canonicalTypeString, inlineLinkerVersionNote, isDocumentedInlineLinker, isInlineLinkerType, parseConnectionType, SOURCE_VIEW_TYPES } from "./connection-type";
-import { storedLinkIdentity, type LinkMatch } from "./equality";
+import { identicalLinkKey, type LinkMatch } from "./equality";
 import { isRange, type BookRef, type Link } from "./model";
 import { storedForm } from "./stored-form";
 import { isMergeableCompanionTitle, normalizeTitle, titleDeclaresDependencyOn, unsafeFileTitle } from "./titles";
@@ -90,10 +90,11 @@ export interface ValidationContext {
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
   /**
-   * The open book has a different number of lines than when the saved project was made (V5 P1-10): its
-   * text changed, and links by line number may now point at other lines. Absent/undefined = not known.
+   * The open book has a different number of lines than when the saved project was made (V5 P1-10) — or the same number and
+   * another edition (`content`, V7 §1.1: a sampled line changed): its text changed, and links by line number may now point at
+   * other lines. By the book's identity, not its title. Absent/undefined = not known.
    */
-  bookChanged?(book: BookRef): { saved: number; now: number } | undefined;
+  bookChanged?(book: BookRef): { saved: number; now: number; content?: true } | undefined;
 }
 
 export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "missing";
@@ -251,13 +252,21 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   if (t.book.origin === "otzaria" && t.book.title !== normalizeTitle(t.book.title))
     add("error", "export/title-not-normalized", `שם הספר "${t.book.title}" כתוב עם מירכאות או רווחים שאוצריא מנרמלת (למשל "→״). במסד הוא נקרא "${normalizeTitle(t.book.title)}", והקישור לא יימצא.`);
 
-  for (const b of s.book.title === t.book.title ? [s.book] : [s.book, t.book]) {
+  // V3 F-087 (legacy validate): a link from a line to the very same line links nothing. By TITLE, as the generator knows a book
+  // (two editions of one title are one book in the database). Another line of the book, or a range that only starts or holds
+  // the line, is a legitimate internal link.
+  const lastOf = (x: Link["source"]) => (isRange(x) ? x.end! : x.line);
+  if (s.book.title === t.book.title && s.line === t.line && lastOf(s) === lastOf(t))
+    add("error", "export/same-line", `הקישור יוצא משורה ${s.line + 1} ב"${s.book.title}" אל אותה שורה בדיוק, ולכן אינו מקשר דבר. בחרו שורה אחרת באחד הצדדים.`);
+
+  // each BOOK once (two editions of one title are two books, V7 §1.1)
+  for (const b of s.book.key === t.book.key ? [s.book] : [s.book, t.book]) {
     const changed = ctx.bookChanged?.(b);
     if (changed)
       add(
         "warning",
         "export/book-changed",
-        `הספר "${b.title}" השתנה מאז שהפרויקט נשמר: היו בו ${changed.saved.toLocaleString("he")} שורות, ועכשיו ${changed.now.toLocaleString("he")}. הקישור נשמר לפי מספר שורה, ולכן ייתכן שהוא מצביע עכשיו על שורה אחרת. אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים ("השוואת מהדורות"); אחרת בדקו את הקישור על הטקסט.`,
+        `הספר "${b.title}" השתנה מאז שהפרויקט נשמר: ${changed.content ? `מספר השורות לא השתנה (${changed.now.toLocaleString("he")}), אבל הטקסט בחלק מהשורות השתנה` : `היו בו ${changed.saved.toLocaleString("he")} שורות, ועכשיו ${changed.now.toLocaleString("he")}`}. הקישור נשמר לפי מספר שורה, ולכן ייתכן שהוא מצביע עכשיו על שורה אחרת. אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים ("השוואת מהדורות"); אחרת בדקו את הקישור על הטקסט.`,
       );
   }
   sideChecks("ספר המקור", link.source, ctx, add);
@@ -476,7 +485,7 @@ const KEPT_AS_IS = "(הרשומה כבר נמצאת בקובץ שבספרייה 
 
 /**
  * Problems of a whole export: per-link problems plus links that collapse into one in the database —
- * by the one equality rule (equality.ts storedLinkIdentity: stored ends by TITLE and stored type), so
+ * by the one equality rule (equality.ts identicalLinkKey: stored ends by TITLE and stored type), so
  * two editions of a book open together (a text file and the database) are one book here too.
  */
 export function validateExport(links: readonly Link[], ctx: ValidationContext): Map<string, Problem[]> {
@@ -488,8 +497,7 @@ export function validateExport(links: readonly Link[], ctx: ValidationContext): 
     const problems = validateLink(l, ctx);
     // An INLINE_LINKER (private use) is stored by the app as its own record per anchor, not as the library's OTHER
     // link of the two lines: its identity here is the stored one plus the anchor (QA), and never that of "other".
-    const base = storedLinkIdentity(l);
-    const key = base !== null && isInlineLinkerType(l.declaredType) ? `${base}|inline|${l.anchor?.rawStart ?? ""}-${l.anchor?.rawEnd ?? ""}` : base;
+    const key = identicalLinkKey(l);
     const first = key === null ? undefined : seen.get(key);
     if (first !== undefined)
       problems.push({ code: "export/duplicate", severity: "warning", message: "קישור זהה (אחרי ההמרה של אוצריא) כבר קיים בייצוא. במסד שניהם יהיו קישור אחד." });

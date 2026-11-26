@@ -96,6 +96,7 @@ export const categoryOf = (code: string): QaCategory => CATEGORY_OF[code] ?? (co
 const FIX_BY_CODE: Readonly<Record<string, string>> = {
   "export/duplicate": "מחקו את ההעתק (\"מחיקת העתקים כפולים\" בלשונית הבדיקה), או קשרו אותו לשורה אחרת.",
   "export/heading-line": "קשרו לשורה שאחרי הכותרת.",
+  "export/same-line": "בחרו בבונה שורה אחרת באחד הצדדים, או מחקו את הקישור.",
   "export/line-not-in-db": "קשרו לשורה שאחרי הכותרת הריקה.",
   "export/range-end-heading": "קצרו את הטווח כך שיסתיים לפני שורת הכותרת.",
   "export/range-ignored": "תקנו בבונה את סוף הטווח כך שיהיה אחרי ההתחלה, או הסירו אותו.",

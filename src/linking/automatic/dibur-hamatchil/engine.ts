@@ -39,7 +39,7 @@ import {
   type Reason,
   type Suggestion,
 } from "../types";
-import { evidenceCap, inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
+import { evidenceCap, inheritedConfidence, matchConfidence, dynamicMinThreshold, shortLocalCap, unorderedShare, type MatchEvidence, type Rung } from "./confidence";
 import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
@@ -216,6 +216,10 @@ interface Placement {
   readonly depth: number;
   /** a tie between places that score alike (tie-break.ts): every tied place, for the order pass to choose again */
   readonly tie?: TieState & { readonly common: MatchParts };
+  /** a line placed by its own words in a LOCAL window (not the whole base): how many words of its ד"ה matched (SHORT_LOCAL) */
+  readonly localWords?: number;
+  /** … and whether that place is before the previous line's (SHORT_LOCAL) */
+  readonly localBackward?: true;
 }
 
 /** Reasons, rule ids and warnings of a placement. */
@@ -1066,6 +1070,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     // #41 B2, #42 C9: what the evidence allows beyond the match itself — a word or two found in the whole base, or a
     // phrase that stands in other lines of the window, is placed by the walk's order, not by the words
     let repeats: number[] = [];
+    const matchedWords = uniqueN || win.run.srcUsed;
     if (confidence === "certain" || confidence === "high") {
       repeats = uniqueN || window.kind !== "book" ? [] : repeatsOf(win, window);
       const words = uniqueN || win.run.srcUsed;
@@ -1103,6 +1108,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       rootScore: score,
       depth: 0,
       ...(tie ? { tie: { ...tie, common } } : {}),
+      ...(window.kind !== "book" ? { localWords: matchedWords, ...(prevIn !== null && win.line < prevIn && { localBackward: true as const }) } : {}),
     };
     const out = withMatch(placed, common, part, tie);
     // the other lines that hold the same words are its alternatives, saying why they were not chosen
@@ -1460,6 +1466,48 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       for (let i = placements.length - 1; i >= 0; i--) if (dropped.has(placements[i]!.cLine)) placements.splice(i, 1);
       unmatched.sort((a, b) => a.line - b.line);
     }
+  }
+
+  /*
+   * ── a short ד"ה in a local window (SHORT_LOCAL, V7 benchmark §7.1) ────────────────────────────────
+   * A short ד"ה in a local window is placed by the walk's order as much as by its words. Two cases where that order is no evidence,
+   * both only at "high": a ד"ה of up to three words found BEFORE the previous line's place (the walk chose an earlier place of common
+   * words), and, in a commentary that itself goes back often — a share of its placements in local windows found before the previous
+   * line's place — every ד"ה of one or two words (the word a note opens with is often its topic rather than a quote: כף החיים "ואם",
+   * "כבד"). Applied after the order passes, so they see the same placements as before; a line that inherits a capped place (בא"ד, שם,
+   * an item paragraph) is capped with it.
+   */
+  {
+    const local = placements.filter((pl) => pl.localWords !== undefined && meta.get(pl.cLine)?.direct);
+    const backward = local.filter((pl) => pl.warnings.some((w) => w.code === "dh/backward")).length;
+    const unordered = unorderedShare(local.length, backward);
+    const cappedRoots = new Map<number, string>();
+    let unorderedCapped = 0;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      const m = meta.get(pl.cLine);
+      if (pl.confidence !== "high" || pl.localWords === undefined || !m?.direct) continue;
+      const cap = shortLocalCap({ words: pl.localWords, local: true, backward: pl.localBackward === true, unordered });
+      if (!cap) continue;
+      if (cap.rule === "dh/short-unordered") unorderedCapped++;
+      cappedRoots.set(pl.cLine, cap.rule);
+      const words = pl.localWords === 1 ? "מילה אחת" : `${pl.localWords} מילים`;
+      const why =
+        cap.rule === "dh/short-backward"
+          ? `הדיבור המתחיל קצר (${words}) ונמצא לפני המקום של השורה הקודמת בספר הבסיס. מילים כאלה נמצאות במקומות רבים, ופירוש שחוזר אחורה עם מילים מעטות טועה לעתים קרובות, ולכן הוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`
+          : `הדיבור המתחיל קצר (${words}), והמקום שלו נבחר גם לפי סדר ההתקדמות של הפירוש. הפירוש הזה חוזר אחורה בספר הבסיס לעתים קרובות, ולכן הסדר אינו ראיה, והוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`;
+      placements[i] = { ...pl, confidence: cap.cap, score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, cap.rule], warnings: [...pl.warnings, r(cap.rule, why)] };
+    }
+    if (cappedRoots.size)
+      for (let i = 0; i < placements.length; i++) {
+        const pl = placements[i]!;
+        const m = meta.get(pl.cLine);
+        const rule = m && !m.direct ? cappedRoots.get(m.root) : undefined;
+        if (!rule || (pl.confidence !== "certain" && pl.confidence !== "high")) continue;
+        placements[i] = { ...pl, confidence: "possible", score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, rule], warnings: [...pl.warnings, r(rule, `השורה יורשת את המקום של שורה ${m!.root + 1} בפירוש, שהוודאות שלה הוגבלה ל"אפשרית" (דיבור המתחיל קצר); לכן גם הוודאות שלה הוגבלה.`)] };
+      }
+    if (unorderedCapped)
+      notes.push(r("dh/short-unordered", `${backward} מתוך ${local.length} השורות שמוקמו בתוך קטע (${Math.round((100 * backward) / local.length)}%) נמצאו לפני המקום של השורה הקודמת: הפירוש אינו הולך לפי סדר ספר הבסיס. לכן ${unorderedCapped} הצעות של דיבור המתחיל בן מילה או שתיים הוגבלו ל"אפשרית"; בדקו אותן לפני האישור.`));
   }
 
   /*

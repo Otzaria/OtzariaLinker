@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link, LinkSide } from "../../../src/core/links/model";
 import { applyRangeEdit, fillRanges, rangeMarkers, suggestEnd, trimBefore, type RangeBook } from "../../../src/linking/ranges";
+import { commit, emptyLinkState, undo, type LinkState } from "../../../src/state/history";
 
 const A: BookRef = { key: "a", title: "ספר", origin: "personal" };
 const B: BookRef = { key: "b", title: "הערות", origin: "personal" };
@@ -74,6 +75,20 @@ describe("trimBefore (v3 F-064)", () => {
 
   it("database links are never changed", () => {
     expect(trimBefore([link(at(A, 2, 9), at(B, 0), { provenance: "db" })], bookOf(A, 20), "source", 5)).toEqual([]);
+  });
+
+  // v3 F-083 (TD-H8): a cut makes an imported link "edited", and undoing the cut gives back the link as it was — "existing", so an
+  // untouched file is written byte-identical again (V7 legacy parity §3.2: "the status after undoing a cut" had no test)
+  it("a cut imported link is 'edited'; undoing the cut makes it 'existing' again, with its range", () => {
+    const imported = link(at(A, 2, 9), at(B, 0), { status: "existing", provenance: "file" });
+    const edits = trimBefore([imported], bookOf(A, 20), "source", 5);
+    const cut = applyRangeEdit(imported, "source", edits[0]!.after);
+    expect([cut.source.end, cut.status]).toEqual([4, "edited"]);
+    let s: LinkState = { ...emptyLinkState(), links: new Map([[imported.id, imported]]) };
+    s = commit(s, "cut", [{ id: imported.id, before: imported, after: cut }]);
+    expect(s.links.get(imported.id)!.status).toBe("edited");
+    s = undo(s);
+    expect(s.links.get(imported.id)).toEqual(imported);
   });
 });
 

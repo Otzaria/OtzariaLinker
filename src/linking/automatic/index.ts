@@ -1,3 +1,5 @@
+import { sefariaOwnedOf } from "../../core/links/sefaria-owned";
+import { applyRunRanges, RUN_RANGE_MODES, type RunRangeBook, type RunRangeMode, type RunRangeOptions } from "../ranges";
 import type { CitationsOptions } from "./citations";
 import { diburHamatchilSteps, type DhOptions } from "./dibur-hamatchil";
 import { runFootnotesEngine, type FootnotesOptions } from "./footnotes";
@@ -102,12 +104,45 @@ export function runEngineSliced(id: EngineId, source: EngineBook, target: Engine
 export function* engineSteps(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): EngineSteps<EngineResult> {
   // the line filter of the run (issue #27, findings #40 A1; source-filter.ts LineGate): which lines of the SOURCE may carry a link, the
   // book as this engine reads it (same indexes, same lengths, so its output refers to the original lines), and the guard on what it proposes
-  const { [SOURCE_FILTER_OPTION]: sourceFilter, ...engineOptions } = options;
-  if (sourceFilter === undefined) return yield* runEngineSteps(id, source, target, options, ctx);
+  // the ranges of the run (linking/ranges.ts applyRunRanges, v3 F-104): set on what the engine proposed, before the guard, so that a
+  // range "until the next match" over a line the filter excludes is trimmed there (LineGate.rangeEnd)
+  const { [SOURCE_FILTER_OPTION]: sourceFilter, sourceRange, targetRange, ...engineOptions } = options;
+  const ranges = runRangeOptions(sourceRange, targetRange);
+  const ranged = (r: EngineResult): EngineResult => {
+    if (!ranges) return r;
+    const owned = sefariaOwnedOf(options["sefariaOwned"] as readonly string[] | undefined);
+    const out = applyRunRanges(r.suggestions, { source: rangeBookOf(source, owned(source.book)), target: rangeBookOf(target, owned(target.book)) }, ranges);
+    return { ...r, suggestions: out.suggestions, notes: [...r.notes, ...out.notes] };
+  };
+  if (sourceFilter === undefined) return ranged(yield* runEngineSteps(id, source, target, engineOptions, ctx));
   const gate = new LineGate(source.book.key, compileForEngine(sourceFilter, id), ENGINES.find((e) => e.id === id)?.evidence !== "structure");
-  const r = yield* runEngineSteps(id, gate.book(source), target, engineOptions, ctx);
+  const r = ranged(yield* runEngineSteps(id, gate.book(source), target, engineOptions, ctx));
   const guarded = gate.guard(r);
   return { ...guarded, notes: [gate.note(), ...guarded.notes] };
+}
+
+/** The run's range options, checked (a value no form can make is an error, never ignored); null when both are the engine's. */
+function runRangeOptions(sourceRange: unknown, targetRange: unknown): RunRangeOptions | null {
+  const check = (v: unknown): RunRangeMode | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v === "string" && (RUN_RANGE_MODES as readonly string[]).includes(v)) return v as RunRangeMode;
+    throw Object.assign(new Error("הגדרת הטווחים של ההרצה אינה מוכרת: בחרו \"כמו שהשיטה מציעה\", \"שורה אחת\" או \"עד ההתאמה הבאה\"."), { code: "engine/invalid-option" });
+  };
+  const s = check(sourceRange);
+  const t = check(targetRange);
+  if ((s ?? "engine") === "engine" && (t ?? "engine") === "engine") return null;
+  return { ...(s && { sourceRange: s }), ...(t && { targetRange: t }) };
+}
+
+/** A book of the run as the range rule reads it: its length (the last line read) and its heading lines. */
+function rangeBookOf(b: EngineBook, sefaria: boolean): RunRangeBook {
+  const headings = new Set<number>();
+  let last = -1;
+  for (const l of b.lines) {
+    if (l.heading !== null) headings.add(l.index);
+    if (l.index > last) last = l.index;
+  }
+  return { key: b.book.key, lineCount: last + 1, headings, sefaria };
 }
 
 function* runEngineSteps(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext): EngineSteps<EngineResult> {

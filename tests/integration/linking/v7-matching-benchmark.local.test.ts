@@ -45,7 +45,7 @@ const path = process.env.OTZARIA_DB;
 const personalPath = PERSONAL ? process.env.OTZARIA_PERSONAL_DB : undefined;
 const OUT = process.env.V7_BENCH_OUT;
 const DIS = process.env.V7_BENCH_DIS;
-const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings" | "yd";
+const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings" | "yd" | "sa";
 const ONLY = process.env.V7_BENCH_ONLY?.split(";").map((s) => s.split(">").map((t) => t.trim()) as [string, string]);
 
 const TUNE: readonly [string, string][] = [
@@ -62,6 +62,78 @@ const UNRELATED_NAMED: readonly [string, string][] = [
   ["תוספות על ברכות", "שבת"],
   ['רמב"ן על בראשית', "ויקרא"],
 ];
+
+/**
+ * Scores per commentary LINE (benchmark document §11). The gold is the database: the base lines it links each commentary line to
+ * (a line without such a link is not judged). Every line takes its BEST suggestion (the highest level; the first at that level), so a
+ * line counts once whatever the number of its alternatives. For each level L, cumulatively ("L or better"):
+ *   predicted — gold lines whose best suggestion is L or better; correct — of those, the ones it agrees with the database on;
+ *   precision = correct / predicted; recall = correct / gold lines; F1; abstention = gold lines with no suggestion at all / gold lines.
+ * `exact` keeps the same counts for that level alone (accuracy by level). Suggestions on lines outside the gold are counted as
+ * "unjudged" (the database says nothing about them: neither right nor wrong).
+ */
+const LEVELS = ["certain", "high", "possible", "ambiguous"] as const;
+interface LineScores {
+  gold: number;
+  /** gold lines with any suggestion */
+  answered: number;
+  unjudged: number;
+  /** level → [predicted, correct] cumulative (that level or better) */
+  atLeast: Record<string, [number, number]>;
+  /** level → [predicted, correct] for that level alone */
+  exact: Record<string, [number, number]>;
+}
+function lineScores(
+  list: readonly Suggestion[],
+  gold: ReadonlyMap<number, ReadonlySet<number>>,
+  ends: (s: Suggestion) => [{ line: number; book: BookRef }, { line: number; book: BookRef }],
+  judge: (s: Suggestion) => boolean | null,
+  baseKey: string,
+): LineScores {
+  const best = new Map<number, Suggestion>();
+  const rank = (s: Suggestion) => LEVELS.indexOf(s.confidence as (typeof LEVELS)[number]);
+  for (const s of list) {
+    const [f, o] = ends(s);
+    if (o.book.key !== baseKey || rank(s) < 0) continue;
+    const had = best.get(f.line);
+    if (!had || rank(s) < rank(had)) best.set(f.line, s);
+  }
+  const out: LineScores = { gold: gold.size, answered: 0, unjudged: 0, atLeast: {}, exact: {} };
+  for (const l of LEVELS) (out.atLeast[l] = [0, 0]), (out.exact[l] = [0, 0]);
+  for (const [line, s] of best) {
+    if (!gold.has(line)) {
+      out.unjudged++;
+      continue;
+    }
+    out.answered++;
+    const ok = judge(s) === true ? 1 : 0;
+    const r = rank(s);
+    out.exact[LEVELS[r]!]![0]++;
+    out.exact[LEVELS[r]!]![1] += ok;
+    for (let i = r; i < LEVELS.length; i++) (out.atLeast[LEVELS[i]!]![0]++, (out.atLeast[LEVELS[i]!]![1] += ok));
+  }
+  return out;
+}
+function addScores(a: LineScores | undefined, b: LineScores): LineScores {
+  if (!a) return JSON.parse(JSON.stringify(b)) as LineScores;
+  a.gold += b.gold;
+  a.answered += b.answered;
+  a.unjudged += b.unjudged;
+  for (const l of LEVELS) for (const k of ["atLeast", "exact"] as const) for (let i = 0; i < 2; i++) a[k][l]![i]! += b[k][l]![i]!;
+  return a;
+}
+const pct = (x: number, n: number) => (n ? `${((100 * x) / n).toFixed(1)}%` : "-");
+function formatScores(m: LineScores): string {
+  const parts = LEVELS.map((l) => {
+    const [p, c] = m.atLeast[l]!;
+    const [pe, ce] = m.exact[l]!;
+    const prec = p ? c / p : 0;
+    const rec = m.gold ? c / m.gold : 0;
+    const f1 = prec + rec ? (2 * prec * rec) / (prec + rec) : 0;
+    return `>=${l}: P ${pct(c, p)} R ${pct(c, m.gold)} F1 ${(100 * f1).toFixed(1)} (${c}/${p}); ${l} alone ${ce}/${pe} = ${pct(ce, pe)}`;
+  });
+  return `gold ${m.gold}, abstain ${m.gold - m.answered} = ${pct(m.gold - m.answered, m.gold)}, unjudged ${m.unjudged} | ${parts.join(" | ")}`;
+}
 
 function fnv1a(s: string): number {
   let h = 0x811c9dc5;
@@ -175,11 +247,19 @@ describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmar
         const yd = books.find((x) => x.title === "שולחן ערוך, יורה דעה" || x.title === "שולחן ערוך יורה דעה");
         pairs = yd ? books.filter((x) => x.bases?.includes(yd.key) && (x.lineCount ?? 0) <= 40000).map((x) => [x.title, yd.title] as [string, string]) : [];
       }
+      else if (SET === "sa") {
+        // every book declared written on the OTHER parts of the Shulchan Aruch (אורח חיים, אבן העזר, חושן משפט): fixed before the
+        // calibration of short ד"ה in a local window (§7.1), which looked only at יורה דעה, and never tuned on
+        const other = books.filter((x) => /^שולחן ערוך, (אורח חיים|אבן העזר|חושן משפט)$/.test(x.title));
+        pairs = other.flatMap((sa) => books.filter((x) => x.bases?.includes(sa.key) && (x.lineCount ?? 0) <= 70000).map((x) => [x.title, sa.title] as [string, string]));
+      }
       else {
         const h = await heldout();
         pairs = [...UNRELATED_NAMED, ...h.map(([c], i) => [c, h[(i + 1) % h.length]![1]] as [string, string]).filter(([c, b]) => !c.endsWith(` על ${b}`))];
       }
       console.log(`set ${SET}: ${pairs.length} pairs`, pairs.map((p) => p.join(" > ")));
+      const totals: Record<string, LineScores> = {};
+      const totalLocal: Tally = {};
 
       for (const [ct, bt] of pairs) {
         const c = byTitle.get(ct);
@@ -240,8 +320,21 @@ describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmar
         };
         const raw: Tally = {};
         for (const it of items) add(raw, `${it.suggestion.engine}|${it.suggestion.confidence}`, judge(it.suggestion));
+        // per commentary LINE (metrics, §11 of the benchmark document): its best suggestion, judged against the gold
+        const lineMetrics = (list: readonly Suggestion[]) => lineScores(list, gold, (s) => ends(s, c.key), judge, b.key);
+        const metrics: Record<string, LineScores> = {
+          merged: lineMetrics(merged.suggestions),
+          // judged by the line(s) WRITTEN only: a range of the headings agrees only when its written line(s) hold the gold line
+          mergedWritten: lineScores(merged.suggestions, gold, (s) => ends(s, c.key), (s) => judge(s, true), b.key),
+        };
+        for (const e of ["headings", "dibur-hamatchil"] as const) {
+          const own = items.map((it) => it.suggestion).filter((s) => s.engine === e);
+          if (own.length) metrics[e] = lineMetrics(own);
+        }
         // the ד"ה suggestions by search window, quoted words and how often the quoted words stand in the base (#41 B2, #42 C9)
         const dhWords: Tally = {};
+        const dhLocal: Tally = {};
+        const local1: { sg: Suggestion; cLine: number; base: number; words: number }[] = [];
         {
           const norm = (t: string) => t.replace(/<[^>]+>/g, " ").replace(/[֑-ׇ]/g, "").replace(/[^א-ת\s]/g, " ").replace(/\s+/g, " ").trim();
           const baseLines = await reg.lines(b.key, 0, Number.MAX_SAFE_INTEGER);
@@ -250,6 +343,19 @@ describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmar
           const count = (phrase: string) => {
             let n = 0;
             for (let i = all.indexOf(` ${phrase} `); i >= 0 && n < 5; i = all.indexOf(` ${phrase} `, i + 1)) n++;
+            return n;
+          };
+          // the section of the base a line stands in: the lines between the headings around it (a siman of the שולחן ערוך, a daf)
+          const pos = new Map(baseLines.map((l, i) => [l.index, i] as const));
+          const normed = baseLines.map((l) => ` ${norm(l.anchorText)} `);
+          const isHead = (i: number) => baseLines[i]!.heading !== null || /^\s*<h[1-6]/i.test(baseLines[i]!.anchorText);
+          /** other lines of the section around base line `at` that hold the phrase as whole words (at most 5) */
+          const inSection = (at: number, phrase: string) => {
+            const p0 = pos.get(at);
+            if (p0 === undefined || !phrase) return 0;
+            let n = 0;
+            for (const dir of [-1, 1])
+              for (let i = p0 + dir; i >= 0 && i < baseLines.length && !isHead(i) && n < 5; i += dir) if (normed[i]!.includes(` ${phrase} `)) n++;
             return n;
           };
           for (const it of items) {
@@ -263,6 +369,44 @@ describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmar
             const win = sg.rules.find((x) => x.startsWith("dh/window-"))?.slice(10) ?? (sg.rules.includes("dh/note-marker") ? "marker" : "inherit");
             const times = phrase ? count(phrase) : 0;
             add(dhWords, `${sg.confidence}|${win}|w${Math.min(words, 6)}|${times > 1 ? "repeated" : times === 1 ? "once" : "unknown"}`, judge(sg));
+            // a short ד"ה inside a LOCAL window (a heading, a numbered line, a page; §7 of the document): how often its words stand in the section
+            if (win !== "book" && win !== "marker" && win !== "inherit" && words > 0) {
+              const local = inSection(sg[baseSide].line, phrase);
+              const w = words >= 4 ? "4+" : String(words);
+              const rep = local === 0 ? "r0" : local === 1 ? "r1" : "r2+";
+              add(dhLocal, `${sg.confidence}|w${w}|${rep}`, judge(sg));
+              add(dhLocal, `${sg.confidence}|w${w}|${rep}|${sg.rules.includes("dh/local-repeat") ? "capped" : "kept"}`, judge(sg));
+              // the walk: found before the previous line's place (dh/backward), after it (dh/order), or the first in its window; rivals in the window
+              const walk = sg.warnings.some((x) => x.code === "dh/backward") ? "back" : sg.rules.includes("dh/order") ? "fwd" : "first";
+              add(dhLocal, `walk|${sg.confidence}|w${w}|${walk}|alts${Math.min(sg.alternatives.length, 2)}`, judge(sg));
+              local1.push({ sg, cLine: ends(sg, c.key)[0].line, base: ends(sg, c.key)[1].line, words });
+            }
+          }
+          // a short ד"ה against the nearest LONG strong ones (3+ words, certain/high) before and after it in the same section of the
+          // commentary: inside their places, outside them, or with no such neighbour on a side ("open")
+          const cHeads = (await reg.lines(c.key, 0, Number.MAX_SAFE_INTEGER)).filter((l) => l.heading !== null).map((l) => l.index);
+          const sectionOf = (line: number) => {
+            let lo = 0;
+            let hi = cHeads.length;
+            while (lo < hi) {
+              const mid = (lo + hi) >> 1;
+              if (cHeads[mid]! <= line) lo = mid + 1;
+              else hi = mid;
+            }
+            return lo;
+          };
+          local1.sort((x, y) => x.cLine - y.cLine);
+          const anchor = (x: (typeof local1)[number]) => x.words >= 3 && (x.sg.confidence === "certain" || x.sg.confidence === "high");
+          for (let i = 0; i < local1.length; i++) {
+            const x = local1[i]!;
+            if (x.words > 3) continue;
+            const sec = sectionOf(x.cLine);
+            let lo: number | null = null;
+            for (let j = i - 1; j >= 0 && sectionOf(local1[j]!.cLine) === sec; j--) if (anchor(local1[j]!)) ((lo = local1[j]!.base), (j = -1));
+            let hi: number | null = null;
+            for (let j = i + 1; j < local1.length && sectionOf(local1[j]!.cLine) === sec; j++) if (anchor(local1[j]!)) ((hi = local1[j]!.base), (j = local1.length));
+            const where = (lo !== null && x.base < lo) || (hi !== null && x.base > hi) ? "out" : lo === null || hi === null ? "open" : "in";
+            add(dhLocal, `bracket|${x.sg.confidence}|w${x.words}|${where}`, judge(x.sg));
           }
         }
         const out: Tally = {};
@@ -299,14 +443,24 @@ describe.runIf(path && OUT && (!PERSONAL || personalPath))("V7 matching benchmar
           }
         }
         const notes = res.items.flatMap((i) => (i.result?.notes ?? []).map((n) => n.code));
+        // why the ד"ה engine left lines unplaced, by the first reason's code (a commentary whose bold words are not quotes leaves many "dh/not-found")
+        const dhUnmatched: Record<string, number> = {};
+        for (const i of res.items as readonly { result?: { suggestions: readonly Suggestion[]; unmatched?: readonly { reasons: readonly { code: string }[] }[] } }[])
+          if (i.result?.suggestions.some((s) => s.engine === "dibur-hamatchil") || (i.result?.unmatched ?? []).some((u) => u.reasons[0]?.code.startsWith("dh/")))
+            for (const u of i.result?.unmatched ?? []) dhUnmatched[u.reasons[0]?.code ?? "?"] = (dhUnmatched[u.reasons[0]?.code ?? "?"] ?? 0) + 1;
         const half = SET === "noheadings" ? (pairs.indexOf(pairs.find(([x, y]) => x === ct && y === bt)!) % 2 === 0 ? "tune" : "heldout") : SET;
         const fit = (res.items as readonly { pairFit?: { verdict: string; metrics: object } }[]).find((i) => i.pairFit)?.pairFit;
-        const row = { set: SET, half, pair: `${ct} > ${bt}`, planned, ms, pairFit: fit && { verdict: fit.verdict, ...fit.metrics }, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], raw, dhWords, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
+        const row = { set: SET, half, pair: `${ct} > ${bt}`, planned, ms, pairFit: fit && { verdict: fit.verdict, ...fit.metrics }, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], dhUnmatched, raw, dhWords, dhLocal, metrics, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
         appendFileSync(OUT!, `${JSON.stringify(row)}\n`);
+        for (const [k, m] of Object.entries(metrics)) totals[k] = addScores(totals[k], m);
+        for (const [k, v] of Object.entries(dhLocal)) for (let i = 0; i < 3; i++) (totalLocal[k] ??= [0, 0, 0])[i]! += v[i]!;
         if (DIS) for (const d of dis) appendFileSync(DIS, `${JSON.stringify(d)}\n`);
         const lv = (t: Tally, k: string) => (t[k] ? `${t[k]![0]}/${t[k]![0] + t[k]![1]}` : "-");
         console.log(`${ct} > ${bt} (${ms}ms, planned ${planned}): ${CONFIDENCE_ORDER.map((l) => `${l} ${lv(out, l)}`).join(", ")}; b1 ${JSON.stringify(b1)}`);
       }
+      // the set's totals: per commentary line, by level (precision, recall, F1, abstention; §11 of the document)
+      for (const [k, m] of Object.entries(totals)) console.log(`TOTAL ${SET} ${k}: ${formatScores(m)}`);
+      appendFileSync(OUT!, `${JSON.stringify({ set: SET, total: totals, dhLocal: totalLocal })}\n`);
       expect(pairs.length).toBeGreaterThan(0);
     } finally {
       closeSync(fd);

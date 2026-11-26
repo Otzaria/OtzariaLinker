@@ -26,6 +26,25 @@ describe("validateLink — generator gates", () => {
   it("an empty heading line does not exist in the database", () => expect(codes(link({ target: { book: B, line: 5 } }))).toContain("error:export/line-not-in-db"));
   it("legacy: שורה מחוץ לתחום נחסמת בייצוא", () => expect(codes(link({ target: { book: B, line: 10 } }))).toContain("error:export/line-out-of-range"));
   it("an unloaded line is reported as not verified, not guessed", () => expect(codes(link({ target: { book: B, line: 9 } }))).toEqual(["info:export/line-not-verified"]));
+  // V3 F-087 (legacy validate, OtzariaLinker-v3.html:3045): a link from a line to the very same line was an error. The generator
+  // knows a book by its title, so two editions of one title (a text file and the database) are the same book here too.
+  it("legacy F-087: a link from a line to the very same line is an error; internal links of a book are not", () => {
+    const same = link({ source: { book: A, line: 3 }, target: { book: A, line: 3 } });
+    expect(codes(same)).toContain("error:export/same-line");
+    const p = validateLink(same, ctx).find((x) => x.code === "export/same-line")!;
+    expect(p.message).toContain("שורה 4");
+    expect(p.message).not.toMatch(TECH_WORDS);
+    // another edition of the same title is the same book for Otzaria
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: { ...A, key: "other-edition" }, line: 3 } }))).toContain("error:export/same-line");
+    // legitimate internal links: another line of the same book, a range that starts on the line, a range that holds it
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: A, line: 4 } }))).not.toContain("error:export/same-line");
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: A, line: 3, end: 6 } }))).not.toContain("error:export/same-line");
+    expect(codes(link({ source: { book: A, line: 2, end: 6 }, target: { book: A, line: 3 } }))).not.toContain("error:export/same-line");
+    // the same line number in another book is an ordinary link
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: B, line: 3 } }))).not.toContain("error:export/same-line");
+    // the very same range on both sides is the very same lines
+    expect(codes(link({ source: { book: A, line: 3, end: 6 }, target: { book: A, line: 3, end: 6 } }))).toContain("error:export/same-line");
+  });
   it("linker is never imported; an unknown type becomes OTHER", () => {
     expect(codes(link({ declaredType: "linker" }))).toContain("error:export/linker");
     expect(codes(link({ declaredType: "sifrei mitsvot" }))).toContain("warning:export/unknown-type");
