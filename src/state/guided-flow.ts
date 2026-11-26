@@ -70,7 +70,11 @@ export function stepReady(step: GuidedStep, f: FlowFacts): boolean {
   return f.books > 0;
 }
 
-export const stepSkipped = (step: GuidedStep, f: FlowFacts): boolean => step === "db" && !dbStepNeeded(f);
+/**
+ * Skipped only once the books are open and say so: before that (a reload, a continued flow waiting for its books) nobody knows
+ * whether a base is missing, and the stepper must not call the database "not needed" (#42 C31).
+ */
+export const stepSkipped = (step: GuidedStep, f: FlowFacts): boolean => step === "db" && f.books > 0 && !dbStepNeeded(f);
 
 /** The step "הבא" leads to, skipping what is not needed; null when the next one is not ready. */
 export function nextStep(step: GuidedStep, f: FlowFacts): GuidedStep | null {

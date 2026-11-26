@@ -133,6 +133,8 @@ test("guided flow: folder → books → database → plan → run → approve �
   await page.reload();
   await expect(page).toHaveURL(/#\/guided\/files$/);
   await expect(main.locator(".guided-card.warn")).toContainText('הגעתם לשלב "התוכנית"');
+  // the books are not open yet, so nothing says the database is "not needed" (#42 C31): this flow needed it
+  await expect(main.getByRole("list", { name: "השלבים" })).not.toContainText("לא נדרש");
   await main.getByRole("button", { name: "המשך מאיפה שהפסקתי" }).click();
   const again = page.waitForEvent("filechooser");
   await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
