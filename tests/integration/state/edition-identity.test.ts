@@ -221,6 +221,41 @@ describe("a renamed or copied database: the edition decides (items 2, 5)", () =>
     }
   });
 
+  it("text books too: two folders of one name, each with a book of that title, and a single .txt picked from each (item 6)", async () => {
+    const txt = (path: string, second: string) => ({ path, blob: new Blob([strToU8(["<h1>ספר</h1>", "שורה ראשונה", second, "שורה רביעית"].join("\n"))]) });
+    const one = () => txt("ספרים/ספר.txt", "שורה שנייה");
+    const two = () => txt("ספרים/ספר.txt", "שורה שנייה, מהדורה אחרת");
+    const { store: a } = newStore();
+    await a.openFiles([one()]);
+    await a.openFiles([two()]);
+    await a.openFiles([BIUR()]);
+    const [k1, k2] = a.sources.value.filter((s) => s.info.label === "ספרים").map((s) => s.books[0]!.key);
+    for (const [line, key, target] of [[1, k1, 1], [2, k2, 3]] as const) {
+      a.pickLine("source", keyOf(a, "ביאור"), line);
+      a.pickLine("target", key!, target);
+      expect(a.createFromDraft()).not.toBeNull();
+    }
+    await settle(a);
+    const project = a.projectText();
+    for (const order of [[two, one], [one, two]]) {
+      const { store } = newStore();
+      await store.openFiles([BIUR()]);
+      store.openProject("p", project);
+      await store.openFiles([order[0]!()]);
+      // only the other edition is open: the link of the first does not move to it
+      const firstOpen = store.sources.value.find((s) => s.info.label === "ספרים")!.books[0]!.key;
+      const waiting = order[0] === two ? toA(store) : toB(store);
+      expect(store.bookOf(waiting.target.book)?.key).toBeUndefined();
+      expect(store.bookOf((order[0] === two ? toB : toA)(store).target.book)?.key).toBe(firstOpen);
+      await store.openFiles([order[1]!()]);
+      await settle(store);
+      const keys = store.sources.value.filter((s) => s.info.label === "ספרים").map((s) => s.books[0]!.key);
+      const [ofOne, ofTwo] = order[0] === one ? keys : [keys[1], keys[0]];
+      expect(store.bookOf(toA(store).target.book)?.key).toBe(ofOne);
+      expect(store.bookOf(toB(store).target.book)?.key).toBe(ofTwo);
+    }
+  });
+
   it("a project without editions (saved before V7) is not bound to a renamed file silently: the user is asked", async () => {
     const { project } = await worked();
     const old = JSON.parse(project);
