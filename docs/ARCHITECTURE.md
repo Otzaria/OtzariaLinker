@@ -53,6 +53,7 @@
 | `app` | הכול | — |
 | `ai` | `core`, `linking` | כן |
 | `headless` | `core`, `matching`, `linking`, `formats` | כן |
+| `cli` | הכול חוץ מ־`ui` (מ־`app` רק `books-service.ts`) | — |
 
 שלוש השלכות חשובות:
 - `state` **לא** מכיר את `sources`, `database` ו־`workers`. מה שהוא צריך מהעולם מוגדר כממשקים ב־
@@ -83,7 +84,8 @@
 | `ui` | המסכים: מסך פתיחה (חמש דרכים; שלוש מהן שואלות קודם איזו משימה, ודף המשימה מבקש את מקורותיה שלב אחרי שלב; `state/task-paths.ts`), סרגל עליון, סביבת עבודה (הוספת מקורות: תיקייה, קבצים, מסד, ZIP, פרויקט ואזור גרירה; ספרים מקובצים לפי מקור עם תג סוג ובידול בין ספרים באותו שם), קוראים, חיפוש בקורא, בונה, רשימות, הצעות (כולל הגדרות המנועים במצב מתקדם), בדיקה, רשימת היסטוריה, חלונות ייצוא, אשף מיפוי למסד במבנה אחר, ייבוא רשומות עם מיפוי שדות, מבני `alt_toc`, מעבר מהדורה (עם השוואת השורות, `dialogs/edition-diff.tsx`) ועזרה; ערכת נושא ואייקונים | `app.tsx`, `screens/home.tsx`, `workspace/*.tsx` (`add-sources.tsx`, `source-badge.tsx`, `book-picker.tsx`), `dialogs/*.tsx`, `shell/` (`file-name.tsx`: שם קובץ כיחידה משמאל לימין בטקסט עברי), `help/`, `theme/`, `icons/` |
 | `app` | נקודת ההרכבה: יוצר את ה־Worker ומחליף אותו כשהוא קורס או נתקע, מתאים אותו ל־`BooksService`, `Saver` של הורדות, אחסון IndexedDB לשמירה האוטומטית, מפעיל את הנתב על `location.hash`, ומרנדר | `main.tsx`, `books-service.ts` (המיפוי היחיד `BooksService` ← `SourcesApi`), `idb-store.ts`, `hash-location.ts` (שורת הכתובת של הנתב) |
 | `ai` | תשתית לבדיקה אופציונלית של הצעות המנועים בעזרת מודל שפה, **מחוץ לתוצר**: ממשק ספק (`AiProvider`), הגדרות עם מגבלות ותקציב ובלי מפתח, שער הסכמה, בקשה דטרמיניסטית, והבודק הדטרמיניסטי שמשאיר רק החלטות על הצעות שנשלחו ועל מקומות שהמנוע עצמו הציע; ספק מדומה לבדיקות. אין בה ספק אמיתי ואין קריאת רשת ([`AI_INTEGRATION.md`](AI_INTEGRATION.md)) | `types.ts`, `config.ts`, `request.ts`, `validate.ts`, `runner.ts`, `mock-provider.ts` |
-| `headless` | הליבה בלי ממשק (V7 §4.15): API מתועד מעל המנועים, האישור והייצוא (`core.ts`), הנמלים של `linking/adapters.ts` מעל `Otzaria.call` של תוספי אוצריא (`otzaria-host.ts`), והכניסה של חבילת התוסף (`plugin-entry.ts`, נבנית ב־`vite.plugin.config.ts` ל־`dist-plugin/`, לא ל־HTML). שום קובץ אחר ב־`src/` אינו מייבא אותה | `core.ts`, `otzaria-host.ts`, `plugin-entry.ts` ([`PLUGIN_READINESS.md`](PLUGIN_READINESS.md)) |
+| `headless` | הליבה בלי ממשק (V7 §4.15): API מתועד מעל המנועים, האישור והייצוא (`core.ts`), הנמלים של `linking/adapters.ts` מעל `Otzaria.call` של תוספי אוצריא (`otzaria-host.ts`), והכניסה של חבילת התוסף (`plugin-entry.ts`, נבנית ב־`vite.plugin.config.ts` ל־`dist-plugin/`, לא ל־HTML). שום קובץ אחר ב־`src/` אינו מייבא אותה | `core.ts`, `otzaria-host.ts`, `plugin-entry.ts`, `repo-layout.ts` (זיהוי מאגר ספרים בתיקיות מרשימת הקבצים בלבד) ([`PLUGIN_READINESS.md`](PLUGIN_READINESS.md)) |
+| `cli` | המריץ למאגרי ספרים בתיקיות ב־Node (V7 §4.16): מריץ את **אותו** `AppStore` ואת הזרימה המודרכת עם הרישום וה־jobs של ה־Worker בתוך התהליך (כמו בדיקות האינטגרציה), קורא את המאגר ואת המסד לקריאה בלבד (`fs.openAsBlob`), וכותב רק לתיקיית פלט ריקה (`wx`). נבנה ב־`vite.cli.config.ts` ל־`dist-cli/linker.mjs`, לא ל־HTML. הסיבה שהוא רשאי לייבא את `state` ואת `workers`: הוא הממשק השני של אותה אפליקציה, ושכפול של הזרימה היה מתפצל ממנה; `tests/unit/architecture.test.ts` מוודא שהוא לא מגיע ל־`ui` ולא לשום `.tsx` | `main.ts`, `run.ts`, `node-files.ts`, `bin.ts` ([`HEADLESS.md`](HEADLESS.md)) |
 
 ## 4. זרימת הנתונים
 

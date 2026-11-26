@@ -24,6 +24,9 @@ const ALLOWED: Record<string, readonly string[]> = {
   ai: ["core", "linking"],
   // the headless core and the Otzaria plugin host (docs/PLUGIN_READINESS.md): pure, like the layers it wraps
   headless: ["core", "matching", "linking", "formats"],
+  // the folder-repository runner for Node (docs/HEADLESS.md): the app's own state and worker code without a page, never `ui`
+  // (`app` for books-service.ts only: "the plugin entry and the cli layer" below holds that, and that nothing it reaches is ui)
+  cli: ["core", "matching", "linking", "formats", "database", "sources", "workers", "state", "projects", "diagnostics", "headless", "app"],
 };
 const PURE = new Set(["core", "matching", "linking", "formats", "ai", "headless"]);
 const FRAMEWORK = /^(preact|@preact\/)/;
@@ -153,6 +156,13 @@ describe("the plugin entry and the cli layer", () => {
     const layers = new Set([...reach(resolve(SRC, "headless", "plugin-entry.ts"))].map(layerOf));
     expect([...layers].filter((l) => !["core", "matching", "linking", "formats", "headless"].includes(l))).toEqual([]);
     expect(layers.has("headless") && layers.has("linking")).toBe(true);
+  });
+
+  it("cli/main.ts reaches no ui and no .tsx; of app only books-service.ts", () => {
+    const seen = [...reach(resolve(SRC, "cli", "main.ts"))];
+    expect(seen.length).toBeGreaterThan(100); // it does read the store, the registry and the engines
+    expect(seen.filter((f) => /\.tsx$/.test(f) || layerOf(f) === "ui").map((f) => relative(SRC, f))).toEqual([]);
+    expect(seen.filter((f) => layerOf(f) === "app").map((f) => relative(SRC, f).split(sep).join("/"))).toEqual(["app/books-service.ts"]);
   });
 
   it("nothing outside them imports headless or cli", () => {
