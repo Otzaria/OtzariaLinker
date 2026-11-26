@@ -32,7 +32,7 @@
 | מזהה | נושא | PR | סטטוס | ראיה / הערה |
 |---|---|---|---|---|
 | A1 | מסנן השורות לא חל על כל השיטות | 2 | TODO | |
-| A2 | שם הספר בכותרת הקורא | 3 | TODO | |
+| A2 | שם הספר בכותרת הקורא | 3 | FIXED | `tests/e2e/reader-title.spec.ts`: לפני, ב־Chrome: 10.4px ב־1280, ‏37.9px ב־1440, ‏3.1px ב־1024. אחרי: `18 passed` (‏6 רוחבים × 3 דפדפנים), ו־`9 passed` ב־360–1920. ה־visual לא השתנה |
 
 ## 2. ממצאי #41 (B)
 
@@ -51,20 +51,20 @@
 | B11 | ביטול מראי מקומות שקט, ו־0/0 | 3 | TODO | |
 | B12 | הערות "1 טקסט" | 2 | TODO | |
 | B13 | ניתוב שו"ע למפרש | 2 | TODO | |
-| B14 | כיסוי לא סופר הצעות ממתינות | 3 | TODO | |
-| B15 | ZIP bomb מנפח זיכרון | 1 | IN_PROGRESS | סוכן משנה |
-| B16 | ReDoS בכמתים צרים | 1 | IN_PROGRESS | סוכן משנה |
+| B14 | כיסוי לא סופר הצעות ממתינות | 3 | FIXED | `tests/unit/ui/coverage-summary.test.ts`: על הלוגיקה הישנה `2 failed \| 2 passed`, אחרי `4 passed` |
+| B15 | ZIP bomb מנפח זיכרון | 1 | FIXED | `safe-unzip*.test.ts`: לפני `10 failed \| 19 passed` (פצצה של 128MiB עברה כולה בחתיכה אחת), אחרי `29 passed`. החתיכות של 16KiB, ונוספו נתיבים כפולים או חריגים וביטול. מגבלה: אחרי שהחילוץ התחיל הוא סינכרוני, ולכן ביטול נבדק רק בין חתיכות |
+| B16 | ReDoS בכמתים צרים | 1 | FIXED | `regex-cost.ts`: חסם עלות של backtracking (`MAX_BACKTRACKING_COST`). ‏`safe-regex.test.ts`: לפני `3 failed \| 6 passed`, אחרי `9 passed`. ‏`regex-cost.test.ts`: `12 passed`, וכל ביטוי שמתקבל רץ בפחות מ־2 שניות על 20,000 תווים |
 | B17 | מפתח Autosave אחד לכל החלונות | 1 | VERIFIED | `autosave-windows.test.ts`: לפני `5 failed \| 2 passed`, אחרי `7 passed`. ‏E2E אמיתי עם שני טאבים, ‏`tests/e2e/autosave-tabs.spec.ts`: על ה־build הישן `Expected [4,5] Received []`, ועכשיו `15 passed` (repeat-each=5, שלושה דפדפנים) |
 | B18 | ספר אישי נקשר לספר רשמי באותו שם | 1 | FIXED | `book-identity.test.ts`: לפני `5 failed \| 2 passed`, אחרי `7 passed`. ארבעה סדרי פתיחה, ושמירה ופתיחה חוזרת |
 | B19 | מילון zstd מושאל לפי dictID | 1 | FIXED | `zstd.test.ts`: לפני `7 failed \| 12 passed`, אחרי `19 passed`. ‏`dictionary-identity-real-db.local.test.ts` מול `seforim.db`: `1 passed`. טביעת האצבע הרשמית: `7b08b7c3…a396`. ‏v52 לא זמין, ולכן הבדיקה מול v52 לא הורצה |
-| B20 | `user_link` נקרא בשקט כאפס | 1 | IN_PROGRESS | סוכן משנה; הסכמה נלקחה מקוד אוצריא `a6be90800` |
+| B20 | `user_link` נקרא בשקט כאפס | 1 | FIXED | `user-links.test.ts`: לפני `8 failed`, אחרי `8 passed`. ‏`user-links-state.test.ts`: לפני `2 failed \| 1 passed`, אחרי `3 passed`. הסכמה לפי אוצריא `a6be90800`, ומתועדת ב־LINK_SCHEMA_MATRIX §6.1. המגבלות ב־QA_V7_PR1 |
 | B21 | פתיחת פרויקט מעל עבודה שלא נשמרה | 1 | FIXED | `autosave-windows.test.ts` (B21): העבודה נשמרת בתור השחזור, ויש הודעה עם פעולת שחזור. הכרעה: אין דיאלוג חוסם (משתמש שגרר פרויקט התכוון לפתוח אותו), אלא שמירה בצד ושחזור |
 | B22 | לחיצה שנייה על "אישור" דוחה | 3 | TODO | |
 | B23 | טבלת הצעות צרה | 3 | TODO | |
 | B24 | הודעות כשל בפתיחה | 3 | TODO | |
 | B25 | ניתוח מאגר "0 מתוך" | 3 | TODO | |
 | B26 | כפתור כיסוי מוביל ללשונית בדיקה | 3 | TODO | |
-| B27 | ריבוי והטיות בעברית | 3 | TODO | |
+| B27 | ריבוי והטיות בעברית | 3 | FIXED | `hebrew-counts.test.ts`: לפני `2 failed \| 1 passed`, אחרי עובר. ה־visual לא השתנה |
 | B28 | עזרה אופליין מפנה למסמכים חסרים | 3 | TODO | |
 
 ## 3. ממצאי #42 (C)
@@ -84,7 +84,7 @@
 | C11 | ניקוד וכיווניות בסימן | 2 | TODO | |
 | C12 | `sharesTitle` מדויק בלבד | 2 | TODO | |
 | C13 | פרק מיותר בספר הערות | 2 | TODO | |
-| C14 | "נקראו הקישורים מהמסד: אין" לספר טקסט | 3 | TODO | |
+| C14 | "נקראו הקישורים מהמסד: אין" לספר טקסט | 3 | FIXED | `coverage-links-reading.test.ts`: לפני `1 failed \| 6 passed`. נוסף מצב קריאה `no-database` |
 | C15 | "גבוהה" בטווח רחב בכותרות | 2 | TODO | |
 | C16 | תצוגה מקדימה למסנן רק ב"זוג" | 3 | TODO | |
 | C17 | טווח יעד בציטוט | 2 | TODO | |
@@ -92,12 +92,12 @@
 | C19 | עוגן לא עקבי | 2 | TODO | |
 | C20 | חלק שגוי (חו"מ במקום יו"ד) | 2 | TODO | |
 | C21 | החמצות בזיהוי מראי מקומות | 2 | TODO | |
-| C22 | אזהרה מטעה על `INLINE_LINKER` | 1 | TODO | |
+| C22 | אזהרה מטעה על `INLINE_LINKER` | 1 | FIXED | `links-json.test.ts`: לפני `1 failed \| 19 passed`. נוסף הקוד `record/inline-linker`. התמיכה נמדדה שוב: הגרסה האחרונה היא עדיין 0.9.98.3+809 |
 | C23 | CSV אישי ושדה רב־שורתי | 1 | FIXED | `personal-csv.test.ts`: כלל חדש `csv/line-break`. ה־CSV של ספריא לא שונה, כי הוא חוזה בתים עם גרסה 3 (`csv-injection.test.ts`). אחרי: `348 passed` |
-| C24 | `saveExport` חוזר בשקט | 1 | TODO | |
+| C24 | `saveExport` חוזר בשקט | 1 | FIXED | `alt-toc-export.test.ts`: לפני `1 failed` |
 | C25 | CSV ספריא ונוסחאות | 1 | ALREADY_IMPLEMENTED | בכוונה: חוזה בתים עם גרסה 3, ונבדק ב־`csv-injection.test.ts` |
-| C26 | ARIA במפרידים | 3 | TODO | |
-| C27 | מטרות מגע | 3 | TODO | |
+| C26 | ARIA במפרידים | 3 | FIXED | `tests/e2e/splitter-aria.spec.ts`: לפני `Expected "0" Received ""`, אחרי, יחד עם accessibility ו־layout: `30 passed` ב־3 דפדפנים |
+| C27 | מטרות מגע | 3 | FIXED | `tests/e2e/touch-targets.spec.ts` (‏360×740, מגע): לפני, 22 פקדים קטנים מ־43.5px. אחרי: `2 passed` (‏Chrome, ‏Edge). ‏Firefox לא תומך באמולציית מגע |
 | C28 | שם קובץ פרויקט בלי תאריך | 3 | TODO | |
 | C29 | מקרי קצה בפתיחת מקורות | 1 | PARTIAL | עותק זהה בשם אחר, וקובץ ריק: תוקנו (`open-twice.test.ts`: לפני `2 failed \| 8 passed`, אחרי `10 passed`; ‏`registry.test.ts`: לפני `1 failed`, אחרי עובר). נשארו: הקובץ "B" בדיאלוג ההשוואה, ו־Esc באשף המיפוי (PR3) |
 | C30 | IndexedDB: הבטחה דחויה במטמון, `onblocked` | 1 | FIXED | `tests/unit/app/idb-store.test.ts`: לפני `3 failed`, אחרי `3 passed` |
@@ -111,8 +111,8 @@
 | §1.1 | זהות ספר יציבה | 1 | PARTIAL | origin ותווית מקור (B18). טביעת אצבע של מהדורה: לא |
 | §1.2 | שמירה, Dirty State, ריבוי טאבים | 1 | FIXED | B17, B21, C30. נוסף `store.autosave` עם הסטטוסים idle/pending/saved/failed, והודעה אחת על כשל. החיווי בממשק: PR3 |
 | §1.6 | כפילות מקורות | 1 | FIXED | C29 |
-| §1.7 | השוואה ומיזוג (#15) | 1 | TODO | |
-| §1.9 | תוצאת ייצוא לכל קישור | 1 | TODO | |
+| §1.7 | השוואה ומיזוג (#15) | 1 | FIXED | שקילות סמנטית, ‏ref מול תצוגה, סתירה (כפילות שנכנסה למיזוג), ורשומה שלא נקראה. round-trip כ־property עם 200 ריצות. הפירוט ב־QA_V7_PR1 |
+| §1.9 | תוצאת ייצוא לכל קישור | 1 | FIXED | `exportOutcomes` (נכתב, לא שונה, מוזג, נחסם, צריך תיקון, לא נתמך): property עם 400 ריצות. נוספו ספירה לפני ואחרי לקובץ שמוחלף, ייצוא כפול שנותן בתים זהים, ותיקון של ספירה כפולה ב־CSV של ספריא |
 | #43 | סקריפט ארצות החיים | 2 | TODO | |
 | #44 | ירושת קישור לקטע המשך | 2 | TODO | |
 | #45 | העדפת ספר ראשי | 2 | TODO | |
