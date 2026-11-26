@@ -129,11 +129,14 @@ test("the link type picker is grouped into commentary types and link types", asy
   await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
   const select = page.locator(".builder").getByRole("combobox", { name: /^סוג הקשר/ });
   const groups = await select.locator("optgroup").evaluateAll((els) => els.map((g) => ({ label: g.getAttribute("label"), options: [...g.querySelectorAll("option")].map((o) => o.value) })));
-  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו", "אי אפשר לכתוב בקובץ קישורים"]);
   expect(groups[0]!.options).toEqual(expect.arrayContaining(["commentary", "targum", "footnotes"]));
   expect(groups[1]!.options).toEqual(expect.arrayContaining(["reference", "quotation", "other"]));
   expect(groups[1]!.options).not.toContain("commentary");
   expect(groups[2]!.options).toEqual(["source"]);
+  // V7 §3.6: the types a links file cannot carry are listed, disabled, each with its reason
+  expect(groups[3]!.options).toEqual(["linker", "INLINE_LINKER"]);
+  await expect(select.locator('option[value="linker"]')).toBeDisabled();
   await select.selectOption("quotation");
   await expect(select).toHaveValue("quotation");
   await select.selectOption("footnotes");

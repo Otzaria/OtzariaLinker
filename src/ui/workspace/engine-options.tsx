@@ -1,5 +1,7 @@
 import { customKey, ENGINE_OPTION_SPECS, isEssential, isShown, MARKER_CHOICES, type FormValues, type OptionsCheck, type OptionSpec } from "../../linking/automatic/option-specs";
 import type { EngineId } from "../../linking/automatic";
+import { TypesHelpButton } from "../dialogs/types-help-dialog";
+import { UnsupportedTypes } from "./type-options";
 
 /*
  * The engine's settings, rendered from ENGINE_OPTION_SPECS. The form holds plain values; RunForm
@@ -53,6 +55,22 @@ export function EngineOptions({ engine, values, check, onChange, onReset }: {
   );
 }
 
+/** A select's choices under their headings (V7 §3.6: a link type is a commentary or a link); a choice in no group comes first. */
+function GroupedChoices({ choices, groups }: { choices: readonly (readonly [string, string])[]; groups: readonly (readonly [string, readonly string[]])[] }) {
+  const label = new Map(choices);
+  const grouped = new Set(groups.flatMap(([, v]) => v));
+  return (
+    <>
+      {choices.filter(([v]) => !grouped.has(v)).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      {groups.map(([g, values]) => (
+        <optgroup key={g} label={g}>
+          {values.map((v) => <option key={v} value={v}>{label.get(v) ?? v}</option>)}
+        </optgroup>
+      ))}
+    </>
+  );
+}
+
 function Field({ spec, values, error, onChange }: { spec: OptionSpec; values: FormValues; error: string | undefined; onChange: OnChange }) {
   const id = `opt-${spec.key.replace(/\W/g, "-")}`;
   const help = spec.hintOf?.(values) ?? spec.hint;
@@ -79,11 +97,11 @@ function Field({ spec, values, error, onChange }: { spec: OptionSpec; values: Fo
         <label class="field" for={id}>
           {spec.label}
           <select id={id} value={String(values[spec.key] ?? spec.default)} aria-invalid={!!error} onChange={(e) => onChange(spec.key, e.currentTarget.value)}>
-            {spec.choices.map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
+            {spec.groups ? <GroupedChoices choices={spec.choices} groups={spec.groups} /> : spec.choices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            {spec.key === "declaredType" && <UnsupportedTypes />}
           </select>
           {hint}
+          {spec.key === "declaredType" && <TypesHelpButton />}
         </label>
       );
     case "regex":

@@ -72,6 +72,40 @@ test("engine settings (advanced): a custom marker tag is passed to the worker; a
   expect(seen.errors).toEqual([]);
 });
 
+/*
+ * V7 §3.6, issue #26: the method's link type is grouped by what it means in Otzaria — commentaries or links — like the builder's
+ * picker; a type a links file cannot carry is in the list, disabled, with the reason; and "מה כל סוג אומר?" is next to it.
+ */
+test("engine settings (advanced): the link type is grouped by meaning, with the unsupported types and their reason", async ({ page }) => {
+  const seen = watchPage(page);
+  await open(page, [
+    { name: "ספר דוגמה.txt", buffer: Buffer.from(["<h1>ספר דוגמה</h1>", "<h2>פרק א</h2>", "שורה (1)."].join("\n")) },
+    { name: "הערות לספר דוגמה.txt", buffer: Buffer.from(["<h1>הערות לספר דוגמה</h1>", "<h2>פרק א</h2>", "(1) הערה."].join("\n")) },
+  ]);
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  for (const engine of ["לפי דיבור המתחיל", "הערות שוליים"]) {
+    await page.getByRole("combobox", { name: /^שיטה/ }).selectOption({ label: engine });
+    if (engine === "לפי דיבור המתחיל") await page.getByRole("button", { name: "הגדרות השיטה (מצב מתקדם)" }).click();
+    const details = page.locator("details.engine-options");
+    if (!(await details.getAttribute("open"))) await details.locator("summary").click();
+    const type = details.getByLabel("סוג הקישור");
+    await expect(type.locator("optgroup")).toHaveCount(4);
+    expect(await type.locator("optgroup").evaluateAll((g) => g.map((x) => x.getAttribute("label")))).toEqual([
+      "סוגי מפרש — יופיעו בפאנל המפרשים באוצריא",
+      "סוגי קישור — יופיעו בפאנל הקישורים באוצריא",
+      "כיוון — מפירוש אל ספר הבסיס שלו",
+      "אי אפשר לכתוב בקובץ קישורים",
+    ]);
+    await expect(type.locator('optgroup:first-of-type option[value="commentary"]')).toHaveText("פירוש");
+    await expect(type.locator('option[value="linker"]')).toBeDisabled();
+    await expect(type.locator('option[value="linker"]')).toContainText("אוצריא יוצרת קישורים כאלה בעצמה");
+    await type.selectOption("reference");
+    await expect(type).toHaveValue("reference");
+    await expect(details.getByRole("button", { name: "מה כל סוג אומר?" })).toBeVisible();
+  }
+  expect(seen.errors).toEqual([]);
+});
+
 test("dibur hamatchil: Rashi on Bereshit against Bereshit from the real database slice", async ({ page }) => {
   const seen = watchPage(page);
   await open(page, [{ name: "seforim.db", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) }]);
