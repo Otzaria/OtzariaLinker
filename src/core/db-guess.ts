@@ -108,7 +108,21 @@ export function analyzeSchema(p: SchemaPreview): DbAnalysis {
 
 const tablePages = (p: SchemaPreview, name: string) => p.tables.find((t) => t.name === name)?.pages ?? 0;
 
+/*
+ * Other databases of Otzaria that users pick by mistake (version 3's diagnoseWrongDb, F-009): the table names
+ * that give each away, and where the books database is. Checked only when no books were found.
+ */
+const OTZARIA_BOOKS_DB = 'מסד הספרים הוא בדרך כלל הקובץ "seforim.db" בתיקיית הספרייה של אוצריא (otzaria-library). בחרו אותו במקום הקובץ הזה.';
+const WRONG_DBS: readonly { tables: readonly string[]; what: string }[] = [
+  { tables: ["user_notes", "user_highlights", "user_bookmarks", "bookmarks"], what: "זהו כנראה מסד נתוני המשתמש של אוצריא (הערות, סימונים וסימניות), ולא מסד הספרים." },
+  { tables: ["surface", "variant", "processed_lines", "variant_judgment"], what: "זהו כנראה מסד ניתוח טקסט (נוסחים) של אוצריא, ולא מסד הספרים." },
+  { tables: ["hebrew_books", "otzar_hachochma", "db_meta"], what: "זהו כנראה מסד אינדקס או נתוני רקע, ולא מסד הספרים." },
+];
+
 function noBooksSummary(p: SchemaPreview, candidates: TextCandidate[]): string {
+  const names = new Set(p.tables.map((t) => lower(t.name)));
+  const wrong = WRONG_DBS.find((w) => w.tables.some((t) => names.has(t)));
+  if (wrong) return `לא נמצאו ספרים במסד הזה. ${wrong.what} ${OTZARIA_BOOKS_DB}`;
   if (!p.tables.length) return "לא נמצאו ספרים במסד הזה: אין בו טבלאות שהכלי יכול לקרוא.";
   if (p.tables.every((t) => !t.samples.length)) return "לא נמצאו ספרים במסד הזה: כל הטבלאות בו ריקות.";
   if (!candidates.length) return "לא נמצאו ספרים במסד הזה: אין בו עמודות טקסט (רק מספרים, נתונים בינאריים או עמודות ריקות).";
