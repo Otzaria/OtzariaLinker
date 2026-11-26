@@ -138,7 +138,8 @@ export function AppBar({ onExport }: { onExport: () => void }) {
           <Icon name="oz_link_download" size={18} />
           <span>
             <span class="lbl">ייצוא</span>
-            {count ? ` (${count.toLocaleString("he")})` : ""}
+            {/* the count: in brackets after the word, a badge of its own when the word is hidden (#42 C31: "(30)" alone at 360px) */}
+            {count ? <span class="cnt">{count.toLocaleString("he")}</span> : ""}
           </span>
         </button>
       )}

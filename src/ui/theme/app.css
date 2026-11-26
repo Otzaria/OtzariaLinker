@@ -560,12 +560,16 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
 /* the app bar on a phone: one row. The advanced switch moves into the settings menu, the brand keeps its icon in
    the workspace, and a running task gets a row of its own */
 .narrow-only { display: none !important; }
+.app-bar .export .cnt::before { content: " ("; }
+.app-bar .export .cnt::after { content: ")"; }
 @media (max-width: 600px) {
   .app-bar { padding: 4px 8px; gap: 2px; }
   .app-bar .sep, .app-bar > .switch { display: none; }
   .app-bar.ws .brand-name, .app-bar .export .lbl { display: none; }
   .app-bar .brand { margin-inline-end: 2px; }
   .app-bar .export { padding-inline: 10px; }
+  .app-bar .export .cnt::before, .app-bar .export .cnt::after { content: none; }
+  .app-bar .export .cnt { margin-inline-start: 4px; padding: 0 6px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--on-primary) 22%, transparent); font-size: var(--fs-sm); }
   .app-bar .task { order: 99; flex-basis: 100%; margin: 0; }
   .narrow-only { display: flex !important; }
 }
