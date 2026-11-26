@@ -239,8 +239,8 @@ export class AppStore {
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (base) {
       const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
-      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ציון ספריא הישן של המקור ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
-      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ציון ספריא הישן של היעד ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_2" });
+      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `השורה בספר המקשר השתנתה, ולכן ציון ספריא הישן שלה ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
+      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `השורה בספר המקושר השתנתה, ולכן ציון ספריא הישן שלה ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_2" });
       const fields = dropped.filter((x) => x.startsWith("anchor_"));
       if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: "פרטים שהסנכרון השבועי של הספרייה רשם על העוגן יוסרו מהקישור, כי העוגן או השורה השתנו.", detail: fields.join(", ") });
     }

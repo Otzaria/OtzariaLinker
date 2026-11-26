@@ -29,10 +29,10 @@ test("links from a JSON file in another layout: guess, fix one field, preview, i
   await expect(dlg).toBeVisible({ timeout: 30_000 });
   await expect(dlg).toContainText("2 רשומות");
   // "book" is not a known name for the target: the dialog says what is missing
-  await expect(dlg.getByRole("status")).toContainText("ספר היעד");
+  await expect(dlg.getByRole("status")).toContainText("הספר המקושר");
   await expect(dlg.getByRole("button", { name: /ייבוא 2 רשומות/ })).toBeDisabled();
-  await dlg.getByLabel("ספר היעד (שם)").selectOption("book");
-  await dlg.getByLabel(/^ספר המקור/).selectOption({ label: "השדה from" });
+  await dlg.getByLabel("הספר המקושר (שם)").selectOption("book");
+  await dlg.getByLabel(/^הספר המקשר/).selectOption({ label: "השדה from" });
 
   // 0-based in the file → 1-based in the preview
   const rows = dlg.getByRole("table", { name: "תצוגה מקדימה" }).locator("tbody tr");

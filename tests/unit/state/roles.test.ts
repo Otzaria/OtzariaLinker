@@ -29,8 +29,11 @@ describe("role names per job", () => {
 
   it("no job (the manual builder), a pattern, or an unknown engine: the neutral pair, with the long wording as the hint", () => {
     for (const e of [undefined, null, "pattern", "no-such-engine"] as unknown as (EngineId | undefined | null)[]) expect(roleKindOf(e)).toBe("generic");
-    expect(ROLE_LABELS.generic.source).toMatchObject({ name: "ספר המקור", short: "מקור", hint: "ספר שממנו יוצא הקישור" });
-    expect(ROLE_LABELS.generic.target).toMatchObject({ name: "ספר היעד", short: "יעד", hint: "הספר שאליו מפנים" });
+    // V7 §3.5 (#19): "מקור" is a file or a database ("מקור נתונים"), never the side of a link
+    expect(ROLE_LABELS.generic.source).toMatchObject({ name: "הספר המקשר", short: "מקשר", hint: "הספר שממנו יוצא הקישור", from: "מהספר המקשר" });
+    expect(ROLE_LABELS.generic.target).toMatchObject({ name: "הספר המקושר", short: "מקושר", hint: "הספר שאליו הקישור מפנה", from: "מהספר המקושר" });
+    for (const kind of Object.keys(ROLE_LABELS) as (keyof typeof ROLE_LABELS)[])
+      for (const r of [ROLE_LABELS[kind].source, ROLE_LABELS[kind].target]) expect(`${r.name} ${r.short} ${r.from}`, kind).not.toMatch(/מקור|יעד/);
   });
 
   it("agrees with the engines' own role text: the source of a commentary engine is the commentary on both screens", () => {
@@ -41,7 +44,7 @@ describe("role names per job", () => {
   });
 
   it("'in the …' for a role name drops the article of the name", () => {
-    expect(inRole("ספר המקור")).toBe("בספר המקור");
+    expect(inRole("הספר המקשר")).toBe("בספר המקשר");
     expect(inRole("הספר המפנה")).toBe("בספר המפנה");
     expect(inRole("גוף הספר")).toBe("בגוף הספר");
     expect(inRole("ספר ההערות")).toBe("בספר ההערות");

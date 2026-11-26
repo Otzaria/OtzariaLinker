@@ -436,7 +436,7 @@ function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpe
   const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}${unlinked ? " unlinked" : ""}`;
   return (
     <div class={cls} data-i={l.index} title={l.heading !== null ? "שורת כותרת — אוצריא לא יוצרת קישור אל כותרת או ממנה" : undefined}>
-      <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר היעד" : undefined}>{l.index + 1}</span>
+      <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר המקושר" : undefined}>{l.index + 1}</span>
       <span class="tx" dangerouslySetInnerHTML={{ __html: html }} />
       <span class="marks">
         {/* the counts open the line's links (line-links.tsx); only the picked line's is a Tab stop */}

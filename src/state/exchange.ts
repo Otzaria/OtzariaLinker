@@ -87,7 +87,7 @@ export class ExchangeState {
   importLinksFile(path: string, text: string): void {
     const { host } = this;
     const sourceTitle = sourceTitleFromLinksFileName(path);
-    if (!sourceTitle) return void host.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו ספר המקור.`);
+    if (!sourceTitle) return void host.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו הספר המקשר.`);
     const parsed = parseLinksJson(text);
     const fatal = parsed.issues.find((i) => i.index < 0 && i.level === "error" && (i.code === "file/not-json" || i.code === "file/not-array"));
     if (fatal)
@@ -140,7 +140,7 @@ export class ExchangeState {
         : host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".${later}`);
       if (early && typeof id === "number") this.earlyNotices.push(id);
     }
-    if (sourceRef.origin === "unknown" && !early) host.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
+    if (sourceRef.origin === "unknown" && !early) host.notify("info", `הספר המקשר "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
   }
 
   /** titles that links files loaded before any book named: reported once books open (booksOpened) */

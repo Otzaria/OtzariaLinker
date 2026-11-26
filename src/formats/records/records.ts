@@ -201,11 +201,11 @@ export function guessRecordsMapping(table: RecordsTable): RecordsMapping {
 /** What still has to be chosen before importing. */
 export function mappingGaps(m: RecordsMapping): string[] {
   const gaps: string[] = [];
-  if (!m.sourceLine) gaps.push("שורה בספר המקור");
-  if (!m.targetLine) gaps.push("שורה בספר היעד");
-  if (!m.targetTitle && !m.targetPath) gaps.push("ספר היעד (שם או נתיב)");
-  if ("field" in m.source && !m.source.field) gaps.push("ספר המקור");
-  if ("fixed" in m.source && !m.source.fixed.trim()) gaps.push("שם ספר המקור");
+  if (!m.sourceLine) gaps.push("שורה בספר המקשר");
+  if (!m.targetLine) gaps.push("שורה בספר המקושר");
+  if (!m.targetTitle && !m.targetPath) gaps.push("הספר המקושר (שם או נתיב)");
+  if ("field" in m.source && !m.source.field) gaps.push("הספר המקשר");
+  if ("fixed" in m.source && !m.source.fixed.trim()) gaps.push("שם הספר המקשר");
   if ("field" in m.type && !m.type.field) gaps.push("סוג הקשר");
   return gaps;
 }
@@ -233,17 +233,17 @@ export function recordsToLinksFiles(table: RecordsTable, m: RecordsMapping, file
   table.rows.forEach((row, i) => {
     const r = i + 1;
     const source = "fromFileName" in m.source ? fromName : "fixed" in m.source ? m.source.fixed.trim() : (row[m.source.field] ?? "");
-    if (!source) return void problems.push(`רשומה ${r}: ספר המקור ריק.`);
-    const l1 = line(row, m.sourceLine, r, "שורת המקור");
-    const l2 = line(row, m.targetLine, r, "שורת היעד");
+    if (!source) return void problems.push(`רשומה ${r}: הספר המקשר ריק.`);
+    const l1 = line(row, m.sourceLine, r, "השורה בספר המקשר");
+    const l2 = line(row, m.targetLine, r, "השורה בספר המקושר");
     if (l1 === undefined || l2 === undefined) {
       // an invalid number was already reported by line(); an empty one is reported here
-      for (const [v, f, what] of [[l1, m.sourceLine, "שורת המקור"], [l2, m.targetLine, "שורת היעד"]] as const) if (v === undefined && !row[f]) problems.push(`רשומה ${r}: חסרה ${what}.`);
+      for (const [v, f, what] of [[l1, m.sourceLine, "השורה בספר המקשר"], [l2, m.targetLine, "השורה בספר המקושר"]] as const) if (v === undefined && !row[f]) problems.push(`רשומה ${r}: חסרה ${what}.`);
       return;
     }
     const title = (m.targetTitle && row[m.targetTitle]) || "";
     const path = (m.targetPath && row[m.targetPath]) || (title ? `${title.replace(/\.txt$/i, "")}.txt` : "");
-    if (!path) return void problems.push(`רשומה ${r}: ספר היעד ריק.`);
+    if (!path) return void problems.push(`רשומה ${r}: הספר המקושר ריק.`);
     const type = "fixed" in m.type ? m.type.fixed : (row[m.type.field] ?? "");
     const rec: Record<string, unknown> = { line_index_1: l1 };
     const l1e = line(row, m.sourceLineEnd, r, "סוף טווח המקור");

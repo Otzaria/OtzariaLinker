@@ -39,8 +39,8 @@ export const ROLE_LABELS: Readonly<Record<RoleKind, RoleLabels>> = {
     target: { name: "הספר המצוטט", short: "מצוטט", hint: "הספר שאליו מפנים", from: "מהספר המצוטט" },
   },
   generic: {
-    source: { name: "ספר המקור", short: "מקור", hint: "ספר שממנו יוצא הקישור", from: "מהמקור" },
-    target: { name: "ספר היעד", short: "יעד", hint: "הספר שאליו מפנים", from: "מהיעד" },
+    source: { name: "הספר המקשר", short: "מקשר", hint: "הספר שממנו יוצא הקישור", from: "מהספר המקשר" },
+    target: { name: "הספר המקושר", short: "מקושר", hint: "הספר שאליו הקישור מפנה", from: "מהספר המקושר" },
   },
 };
 
@@ -56,5 +56,5 @@ export const roleKindOf = (engine: EngineId | null | undefined): RoleKind => (en
 
 export const roleLabels = (engine: EngineId | null | undefined): RoleLabels => ROLE_LABELS[roleKindOf(engine)];
 
-/** "in the …" for a role name: "ספר המקור" → "בספר המקור", "הספר המפנה" → "בספר המפנה", "גוף הספר" → "בגוף הספר". */
+/** "in the …" for a role name: "הספר המקשר" → "בספר המקשר", "הספר המפנה" → "בספר המפנה", "גוף הספר" → "בגוף הספר". */
 export const inRole = (name: string): string => `ב${name.startsWith("ה") ? name.slice(1) : name}`;

@@ -60,7 +60,7 @@ export class LinkFixes {
     const book = this.host.resolveTitle(t) ?? { key: `unresolved:${t}`, title: t, origin: "unknown" as const };
     const list = this.editable(ids);
     const n = this.apply(
-      (k) => `החלפת ספר היעד של ${linksCount(k)} ל"${t}"`,
+      (k) => `החלפת הספר המקושר של ${linksCount(k)} ל"${t}"`,
       list
         .filter((l) => l.target.book.title !== t)
         .map((l) => {
@@ -68,7 +68,7 @@ export class LinkFixes {
           return [l.id, { target: { ...l.target, book }, targetPath: undefined, ...(l.heRef2.startsWith(old) && { heRef2: t + l.heRef2.slice(old.length) }) }];
         }),
     );
-    this.told(n, list.length, "ספר היעד הוחלף");
+    this.told(n, list.length, "הספר המקושר הוחלף");
     if (n && !this.host.resolveTitle(t)) this.host.notify("warning", `אין ספר פתוח בשם "${t}". אוצריא מדלגת על קישור לספר שאינו בספרייה בשם הזה בדיוק.`);
     return n;
   }

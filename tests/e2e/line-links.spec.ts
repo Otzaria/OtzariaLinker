@@ -62,7 +62,7 @@ test("the count next to a line opens its links; choosing one shows and marks bot
 test("by keyboard: Enter on the picked line opens its links, arrows move, Escape returns to the count, Enter chooses", async ({ page }) => {
   const seen = watchPage(page);
   await open(page);
-  const lines = page.getByRole("region", { name: /שורות ספר המקור/ });
+  const lines = page.getByRole("region", { name: /שורות הספר המקשר/ });
   await lines.focus();
   // the first arrow picks the first line in view; down to line 2 (index 1)
   await page.keyboard.press("ArrowDown");

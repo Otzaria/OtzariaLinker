@@ -157,16 +157,16 @@ test("keyboard only: pick lines and link them, approve and reject suggestions, e
   await expect.poll(async () => (await focused(page))?.name).toBe("סביבת העבודה");
 
   // the book buttons say which book
-  await tabTo(page, /^מקור: ביאור על בראשית$/);
+  await tabTo(page, /^מקשר: ביאור על בראשית$/);
   await page.keyboard.press("Enter");
-  await tabTo(page, /^יעד: בראשית$/);
+  await tabTo(page, /^מקושר: בראשית$/);
   await page.keyboard.press("Enter");
   await expect(page.locator(".reader.target .panel-head h2")).toHaveText("בראשית");
   // the arrows pick lines; the picked line is said in the reader's live region
-  await tabTo(page, /^שורות ספר המקור/);
+  await tabTo(page, /^שורות הספר המקשר/);
   for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowDown");
   await expect(page.locator(".reader.source [role=status]")).toContainText(/^נבחרה שורה \d+: /);
-  await tabTo(page, /^שורות ספר היעד/);
+  await tabTo(page, /^שורות הספר המקושר/);
   for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Control+Enter");
   await expect(page.locator(".reader.source .mark.new")).toHaveCount(1);
