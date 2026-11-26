@@ -96,6 +96,31 @@ export const isSuspicious = (r: RepoRow): boolean => {
 /** The share of a book's content lines that no link touches, when its coverage was counted. */
 export const unlinkedShare = (r: RepoRow): number | null => (r.coverage && r.coverage.suitable > 0 ? r.coverage.unlinked / r.coverage.suitable : null);
 
+export type RepoFilter = "all" | "no-links" | "flagged" | "suspicious" | "unlinked";
+
+/** The books of the list: those the query and the filter keep, in the order asked for. */
+export function repoList(books: readonly SourceBook[], rows: ReadonlyMap<string, RepoRow>, o: { query: string; filter: RepoFilter; sort: RepoSort }): SourceBook[] {
+  const q = o.query.trim();
+  const out = books.filter((b) => {
+    if (q && !b.title.includes(q)) return false;
+    const r = rows.get(b.key);
+    if (o.filter === "all") return true;
+    if (!r || r.unavailable) return false;
+    if (o.filter === "no-links") return r.total === 0;
+    if (o.filter === "flagged") return r.flags.length > 0;
+    if (o.filter === "suspicious") return isSuspicious(r);
+    return (unlinkedShare(r) ?? 0) >= 0.5;
+  });
+  const byName = new Intl.Collator("he");
+  if (o.sort === "title") out.sort((a, b) => byName.compare(a.title, b.title));
+  const total = (k: string) => rows.get(k)?.total;
+  const share = (k: string) => (rows.get(k) ? unlinkedShare(rows.get(k)!) : null);
+  if (o.sort === "links-asc") out.sort((a, b) => (total(a.key) ?? Infinity) - (total(b.key) ?? Infinity));
+  else if (o.sort === "links-desc") out.sort((a, b) => (total(b.key) ?? -1) - (total(a.key) ?? -1));
+  else if (o.sort === "unlinked-share") out.sort((a, b) => (share(b.key) ?? -1) - (share(a.key) ?? -1));
+  return out;
+}
+
 export class RepositoryState {
   /** the source being analyzed (an open database); null = the first one */
   readonly sourceId = signal<string | null>(null);

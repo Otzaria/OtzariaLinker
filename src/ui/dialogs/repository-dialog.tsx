@@ -4,7 +4,7 @@ import { TYPE_LABELS } from "../../core/links/connection-type";
 import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
 import type { PairConfidence, PairProposal } from "../../linking/discovery";
-import { isSuspicious, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoRow, type RepoSort } from "../../state/repository";
+import { isSuspicious, repoList, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoFilter, type RepoRow, type RepoSort } from "../../state/repository";
 import { linksReadingText } from "../../linking/coverage";
 import { coverageTrust } from "../workspace/coverage-compute";
 import { useStore } from "../context";
@@ -31,7 +31,7 @@ const FILTERS = {
   suspicious: "ספרים חשודים",
   unlinked: "שורות רבות בלי קישור (אחרי חישוב כיסוי)",
 } as const;
-type Filter = keyof typeof FILTERS;
+type Filter = RepoFilter;
 const SORTS: Record<RepoSort, string> = {
   title: "לפי שם",
   "links-asc": "מעט קישורים תחילה",
@@ -69,27 +69,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
   }, [repo.books.value]);
 
   // the list: filtered and sorted from the small rows; only a page of it is in the page
-  const list = useMemo(() => {
-    const q = query.trim();
-    const out = repo.books.value.filter((b) => {
-      if (q && !b.title.includes(q)) return false;
-      const r = rows.get(b.key);
-      if (filter === "all") return true;
-      if (!r || r.unavailable) return false;
-      if (filter === "no-links") return r.total === 0;
-      if (filter === "flagged") return r.flags.length > 0;
-      if (filter === "suspicious") return isSuspicious(r);
-      return (unlinkedShare(r) ?? 0) >= 0.5;
-    });
-    const byName = new Intl.Collator("he");
-    if (sort === "title") out.sort((a, b) => byName.compare(a.title, b.title));
-    const total = (k: string) => rows.get(k)?.total;
-    const share = (k: string) => (rows.get(k) ? unlinkedShare(rows.get(k)!) : null);
-    if (sort === "links-asc") out.sort((a, b) => (total(a.key) ?? Infinity) - (total(b.key) ?? Infinity));
-    else if (sort === "links-desc") out.sort((a, b) => (total(b.key) ?? -1) - (total(a.key) ?? -1));
-    else if (sort === "unlinked-share") out.sort((a, b) => (share(b.key) ?? -1) - (share(a.key) ?? -1));
-    return out;
-  }, [repo.books.value, rows, query, sort, filter]);
+  const list = useMemo(() => repoList(repo.books.value, rows, { query, filter, sort }), [repo.books.value, rows, query, sort, filter]);
   useEffect(() => setShown(PAGE), [query, sort, filter, source?.info.id]);
 
   const picked = repo.pickedBooks.value;
