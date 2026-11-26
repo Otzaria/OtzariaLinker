@@ -163,6 +163,8 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
                         <span class="grow"><FileName name={f.name} /></span>
                         <span class="muted">
                           {f.records === 1 ? "רשומה אחת" : `${f.records.toLocaleString("he")} רשומות`}
+                          {/* before → after: the file this one replaces, as it was loaded (V7 §1.9) */}
+                          {f.before !== undefined && ` (בקובץ שנטען: ${f.before.toLocaleString("he")})`}
                           {f.movedIn && (f.records === 1 ? `, של "${f.movedIn[0]!.from}" כפירוש` : `, מהן ${f.movedIn.map((m) => `${m.records.toLocaleString("he")} של "${m.from}"`).join(", ")} כפירוש`)}
                         </span>
                         {f.isNewFile && !onlyMoved(f) && <span class="status edited">קובץ חדש</span>}

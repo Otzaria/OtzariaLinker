@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { buildExportReport } from "../../../src/formats/report/export-report";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
@@ -89,6 +90,9 @@ describe("comparing a book's links: database, files, project", () => {
     const file = exp.files.find((f) => f.name === FILE_NAME)!;
     expect(file.text.startsWith(V1.slice(0, -2))).toBe(true);
     expect(JSON.parse(file.text)).toEqual([LIB_1, ...DB_ROWS, expect.objectContaining({ line_index_1: 500, line_index_2: 2000 })]);
+    // V7 §1.9: before → after for the file it replaces, in the plan and in the report
+    expect([file.before, file.records, file.isNewFile]).toEqual([6, 7, false]);
+    expect(buildExportReport({ date: "d", app: "t", format: "json", links: exp, altToc: exp.altToc })).toContain(`links/${FILE_NAME}  (7 רשומות; בקובץ שנטען היו 6)`);
 
     // one undo takes the whole merge back, the file record too
     store.undo();

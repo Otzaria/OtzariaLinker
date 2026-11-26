@@ -98,7 +98,7 @@ export function buildExportReport(r: ReportInput): string {
   if (r.format === "json") {
     for (const f of links.files) {
       const moved = f.movedIn?.reduce((n, m) => n + m.records, 0) ?? 0;
-      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : !f.isNewFile ? "  [מחליף את הקובץ של הספר בספרייה, שנטען לכלי]" : ""}`);
+      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות${f.before !== undefined ? `; בקובץ שנטען היו ${f.before.toLocaleString("he")}` : ""})${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : !f.isNewFile ? "  [מחליף את הקובץ של הספר בספרייה, שנטען לכלי]" : ""}`);
       for (const m of f.movedIn ?? [])
         L.push(`      מהן ${m.records.toLocaleString("he")} קישורים של "${m.from}" אל הספר הזה, מסוג "מקור", שנכתבים כאן כפירוש: כך באוצריא שלכם (ייבוא אישי) "${m.from}" יופיע בפאנל המפרשים של "${f.sourceTitle}"${r.technical ? ' ("Conection Type": "commentary")' : ""}`);
     }

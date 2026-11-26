@@ -265,7 +265,7 @@ export class ExchangeState {
     if (host.exportPurpose.value === "submission") this.fillSefariaRefs();
     await host.altToc.loadLines();
     const files = host.linkState.value.files;
-    return { ...planExport(host.allLinks.value, host.validation(), { layouts: (t) => files.get(t)?.layout, loadedFile: (t) => files.get(t)?.verified === true }), altToc: host.altToc.plan() };
+    return { ...planExport(host.allLinks.value, host.validation(), { layouts: (t) => files.get(t)?.layout, loadedFile: (t) => files.get(t)?.verified === true, recordsBefore: (t) => files.get(t)?.records }), altToc: host.altToc.plan() };
   }
 
   /**

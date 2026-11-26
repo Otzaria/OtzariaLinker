@@ -29,6 +29,8 @@ export interface ExportFile {
   records: number;
   /** true when no links file was imported for this book — the library may already have one */
   isNewFile: boolean;
+  /** the records of the book's links file as it was loaded, which this file replaces (absent: none loaded) — "before → after" */
+  before?: number;
   /**
    * Private use: records of OTHER books' links written into this book's file (a commentary's "source"
    * link, written here as "commentary" — validate.ts PRIVATE_TO_BASE), by the book whose link they are
@@ -59,6 +61,8 @@ export interface ExportOptions {
   layouts?: (sourceTitle: string) => JsonLayout | undefined;
   /** the book's library file was loaded (it may hold no records): its file is not "new" */
   loadedFile?: (sourceTitle: string) => boolean;
+  /** how many records the book's loaded links file had (ExportFile.before) */
+  recordsBefore?: (sourceTitle: string) => number | undefined;
 }
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
@@ -98,12 +102,14 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     .map(([title, list]) => {
       const ordered = [...list].sort(fileOrder);
       const from = movedIn.get(title);
+      const before = opts.recordsBefore?.(title);
       return {
         name: `${title}_links.json`,
         sourceTitle: title,
         text: serializeLinksJson(ordered.map(linkToRecord), opts.layouts?.(title)),
         records: ordered.length,
         isNewFile: !importedTitles.has(title) && !opts.loadedFile?.(title),
+        ...(before !== undefined && { before }),
         ...(from && { movedIn: [...from].sort(([a], [b]) => cmp(a, b)).map(([t, records]) => ({ from: t, records })) }),
       };
     });
