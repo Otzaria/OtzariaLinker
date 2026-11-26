@@ -212,5 +212,22 @@ function Splitter({ left, right, grid }: { left: PanelId; right: PanelId; grid: 
     const b = Math.max(0.3, l.sizes[right] - step);
     chooseLayout(store.prefs, { ...l, sizes: { ...l.sizes, [left]: a, [right]: b } });
   };
-  return <div class="splitter" role="separator" aria-orientation="vertical" tabIndex={0} aria-label="שינוי רוחב הפאנלים" onPointerDown={onDown} onKeyDown={onKey} />;
+  // a focusable separator is a widget: ARIA requires its value (#42 C26, axe aria-required-attr) — the earlier panel's share of the pair, in percent
+  const sizes = store.prefs.layout.value.sizes;
+  const share = Math.round((100 * sizes[left]) / (sizes[left] + sizes[right] || 1));
+  return (
+    <div
+      class="splitter"
+      role="separator"
+      aria-orientation="vertical"
+      tabIndex={0}
+      aria-label="שינוי רוחב הפאנלים"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={share}
+      aria-valuetext={`${share}% לפאנל הראשון`}
+      onPointerDown={onDown}
+      onKeyDown={onKey}
+    />
+  );
 }
