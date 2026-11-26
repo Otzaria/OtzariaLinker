@@ -226,3 +226,12 @@ describe("dictID is not identity: a dictionary is bound to its source and finger
     }
   });
 });
+
+describe("a codec that refuses its database leaves nothing in the pool (#41 C3, V7 merge review)", () => {
+  it("two dictionaries with one id: the conflict is thrown before any of them is offered to the pool", () => {
+    const pool = new DictionaryPool();
+    expect(codeOf(() => new LineContentCodec([dict, dict], pool, "פגום.db"))).toBe("db/dictionary-conflict");
+    expect(pool.lend(32768)).toBeUndefined();
+    expect(pool.unlendableOrigins(32768)).toEqual([]);
+  });
+});

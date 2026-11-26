@@ -209,8 +209,9 @@ export class LineContentCodec {
       if (this.dictionaries.has(id))
         throw new LinkerError("db/dictionary-conflict", `במסד יש שני מילוני דחיסה עם אותו מזהה (${id}). המסד פגום או שנבנה בצורה לא תקינה.`, { dictId: id });
       this.dictionaries.set(id, d);
-      if (origin) pool.add(d, origin, this);
     }
+    // offered only once all of them were accepted: a conflict above leaves nothing in the pool (C3 — the codec is never returned, so nothing could release it)
+    if (origin) for (const d of this.dictionaries.values()) pool.add(d, origin, this);
   }
 
   /** The database this codec belongs to closed: its dictionaries leave the pool. */
