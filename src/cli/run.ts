@@ -123,7 +123,9 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
   });
 
   // the books' existing links files: loaded into the project (so "exists" and the merged file are the app's), unless the official
-  // format cannot read all of their records — those are kept aside and appended to, so no record of them is ever lost
+  // format cannot read all of their records — those are kept aside and appended to, so no record of them is ever lost. So is a file
+  // named like a book file whose name the title rules change ("אמרי נועם  על הגדה של פסח", two spaces; Otzarya-Unofficial-Books has 8):
+  // loaded, its records would name a book no source has, and its links would not be known (V7 round 2, item 8)
   const imports: InputFile[] = [];
   const keptAside = new Map<string, { path: string; text: string; records: number }>();
   for (const title of titles) {
@@ -131,9 +133,13 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
     if (!f.exists) continue;
     const text = await repo.text(f.path);
     const parsed = parseLinksJson(text);
-    if (parsed.generatorRejectsFile) keptAside.set(title, { path: f.path, text, records: countRecords(text) });
+    const named = f.path.slice(f.path.lastIndexOf("/") + 1, -"_links.json".length);
+    if (parsed.generatorRejectsFile || named !== title) keptAside.set(title, { path: f.path, text, records: countRecords(text) });
     else imports.push(await repo.input(f.path));
   }
+  // a book's name as its FILE gives it: Otzarya-Unofficial-Books' build takes the title from the file name as it is
+  // (build_personal_db.py), and skips a links.csv row whose ספר_מקור is not one of them
+  const fileName = new Map(selected.map((b) => [b.title, b.path.slice(b.path.lastIndexOf("/") + 1).replace(/\.txt$/i, "")] as const));
   // what the records kept aside already link: never loaded, so the run compares its approved links with them here
   const recorded: RecordedLinks = { pairs: new Set(), officialRefs: new Set() };
   for (const [title, aside] of keptAside) recordedLinks(title, aside.text, recorded);
@@ -189,7 +195,7 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
       const path = `${layout.csvRoot}/${folder}/links.csv`;
       if (repo.paths.includes(path)) for (const r of parsePersonalLinksCsv(await repo.text(path)).rows) listed.add(personalRowKey(r));
     }
-    const csv = await store.personalCsv.prepare({ only: new Set(external.map((l) => l.id)), listed });
+    const csv = await store.personalCsv.prepare({ only: new Set(external.map((l) => l.id)), listed, sourceName: (t) => fileName.get(t) ?? t });
     if (csv) {
       const folders = nextCsvFolders(layout.csvFolders ?? [], csv.files.map((f) => f.folder));
       csv.files.forEach((f, i) => files.push({ path: `${layout.csvRoot}/${folders[i]}/${f.name}`, action: "new", kind: "links-csv", records: f.rows, text: f.text }));
@@ -364,7 +370,7 @@ export function reportText(r: RunReport): string {
   L.push(`מסד אוצריא: ${r.db ?? "— (רק קישורים בתוך המאגר)"}`);
   L.push(`ספרים: ${r.books.selected} נבחרו מתוך ${r.books.total}. קובצי קישורים קיימים במאגר: ${r.existingLinksFiles}.`);
   if (r.duplicateTitles.length) L.push(`לא קושרו, כי כמה קבצים יוצרים אותו שם ספר: ${r.duplicateTitles.map((d) => `"${d.title}" (${d.paths.join(", ")})`).join("; ")}.`);
-  if (r.appendedOnly.length) L.push(`קבצים שיש בהם רשומות שהפורמט הרשמי אינו קורא (target_library, book_2): הרשומות החדשות נוספות אחרי הקיימות, שנשארות כמו שהן: ${r.appendedOnly.join(", ")}.`);
+  if (r.appendedOnly.length) L.push(`קבצים שלא נטענו (יש בהם רשומות שהפורמט הרשמי אינו קורא, target_library או book_2, או ששמם כשם הקובץ של הספר ולא כשם הספר): הרשומות החדשות נוספות אחרי הקיימות, שנשארות כמו שהן: ${r.appendedOnly.join(", ")}.`);
   if (r.appendedOnly.length || r.alreadyInRepository) L.push(`קישורים שאושרו ולא נכתבו, כי הם כבר כתובים ברשומות של המאגר: ${r.alreadyInRepository} (אותן שתי שורות בכל כיוון ובכל סוג, או אותה שורה רשמית לפי heRef_2).`);
   L.push(`תוכנית: ${r.plan.steps} שלבים (${Object.entries(r.plan.perEngine).map(([e, n]) => `${e}: ${n}`).join(", ") || "—"}).`);
   L.push(`הצעות: ${r.suggestions.total}; אושרו ${r.suggestions.approved} (מרמת "${CONF_TEXT[r.suggestions.minConfidence]}" ומעלה).`);

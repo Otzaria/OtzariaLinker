@@ -119,6 +119,12 @@ export function detectRepoLayout(paths: readonly string[]): RepoLayout {
   const linksFiles = all.filter((p) => p.endsWith(LINKS_SUFFIX) && nameOf(p).length > LINKS_SUFFIX.length && linksPlace(p)).map((p) => ({ path: p, title: nameOf(p).slice(0, -LINKS_SUFFIX.length) }));
   const existing = new Map<string, string>();
   for (const f of linksFiles) if (!existing.has(f.title)) existing.set(f.title, f.path);
+  // a links file named like its book's FILE ("אמרי נועם  על הגדה של פסח", two spaces) is found by the book's title too, which the title
+  // rules normalize (otzariaBookTitle); Otzarya-Unofficial-Books' build matches the two with the spaces squashed (V7 round 2, item 8)
+  for (const f of linksFiles) {
+    const t = otzariaBookTitle(f.title);
+    if (!existing.has(t)) existing.set(t, f.path);
+  }
   const bookOf = new Map(books.map((b) => [b.title, b]));
   const central = kind === "zmanenu" ? ZMANENU_LINKS : kind === "folder" && linksFiles.some((f) => dirOf(f.path) === "links") ? "links" : null;
 

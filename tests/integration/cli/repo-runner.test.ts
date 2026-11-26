@@ -110,6 +110,39 @@ describe("the runner on a repository shaped like Otzarya-Unofficial-Books", { ti
     expect(rep.external.skipped).toEqual([]);
   });
 
+  // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): 8 books have a file name the title rules change (two
+  // spaces: "אמרי נועם  על הגדה של פסח"), and the build takes a book's title from its file name AS IS (build_personal_db.py) — so a
+  // links.csv row under the normalized title is silently dropped there, and the book's links file (named like the file) did not
+  // belong to the normalized title the run gives the book.
+  it("a book whose file name has two spaces: its links file is found and kept, and links.csv names the book as its file does", async () => {
+    const root = fresh("spaces");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const dir = join(repo, "ספרים/משנה/מפרשים");
+    const odd = "ביאור  ישן על ספר בסיס לדוגמה";
+    writeFileSync(join(dir, `${odd}.txt`), readFileSync(join(dir, "ביאור ישן על ספר בסיס לדוגמה.txt")));
+    rmSync(join(dir, "ביאור ישן על ספר בסיס לדוגמה.txt"));
+    writeFileSync(join(dir, "links", `${odd}_links.json`), readFileSync(join(dir, "links/ביאור ישן על ספר בסיס לדוגמה_links.json")));
+    rmSync(join(dir, "links/ביאור ישן על ספר בסיס לדוגמה_links.json"));
+    const tanakh = join(repo, "ספרים/תנ״ך/מפרשים");
+    writeFileSync(join(tanakh, "ביאור  חדש על בראשית.txt"), readFileSync(join(tanakh, "ביאור חדש על בראשית.txt")));
+    rmSync(join(tanakh, "ביאור חדש על בראשית.txt"));
+
+    const out = fresh("spaces-out");
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--out", out, ...HIGH]);
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(readFileSync(join(out, REPORT_JSON), "utf8")) as RunReport;
+    // no second links file under the normalized title
+    expect(rep.files.map((f) => f.path).filter((p) => p.includes("ביאור ישן"))).toEqual([]);
+    // the base's new file: the existing pair is still known (3 ↔ 3 not written again)
+    const base = parseLinksJson(readFileSync(join(out, "ספרים/משנה/links/ספר בסיס לדוגמה_links.json"), "utf8"));
+    expect(base.records).toHaveLength(59);
+    // links.csv names the book as its file does
+    const csv = readFileSync(join(out, "ספרים/קבצי קישורים וסדר הדורות/קישורים/02/links.csv"), "utf8");
+    expect(csv).toMatch(/,ביאור {2}חדש על בראשית,כן,בראשית,/);
+    expect(csv).not.toMatch(/,ביאור חדש על בראשית,/);
+  });
+
   // V7 round 2, items 8-9 on Otzarya-Unofficial-Books: the repository's links.csv files (17 folders, ~25 MB of rows) are imported into
   // the personal database, not into seforim.db, so neither the suggestions' "already exists" nor the export knew them — a run wrote
   // their rows again into the next folder. A row they already have (the same line, book, target and place; any type) is not written.

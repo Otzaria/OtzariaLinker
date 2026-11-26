@@ -105,6 +105,15 @@ describe("detectRepoLayout", () => {
     expect(l.linksFileFor("ביאור על ספר לדוגמה")).toEqual({ path: "source/links/ביאור על ספר לדוגמה_links.json", exists: true });
   });
 
+  // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): 8 of its 3,368 books have a file name the title rules
+  // change ("אמרי נועם  על הגדה של פסח", two spaces; "חידושי הגרי''ז ענינים"), and their links files are named like the file. The
+  // book's title is the normalized one, so its existing links file was not found: a run would have written a second file beside it.
+  it("an existing links file named like its book's file (two spaces, '') is that book's file", () => {
+    const l = detectRepoLayout(["ספרים/א/אמרי נועם  על הגדה של פסח.txt", "ספרים/א/links/אמרי נועם  על הגדה של פסח_links.json", "ספרים/א/חידושי הגרי''ז ענינים.txt"]);
+    expect(l.books.map((b) => b.title).sort()).toEqual(["אמרי נועם על הגדה של פסח", "חידושי הגרי״ז ענינים"]);
+    expect(l.linksFileFor("אמרי נועם על הגדה של פסח")).toEqual({ path: "ספרים/א/links/אמרי נועם  על הגדה של פסח_links.json", exists: true });
+  });
+
   it("a links file whose name is not a book of the tree is still listed (it may serve the official library)", () => {
     const l = detectRepoLayout([...ZMANENU, "source/links/בראשית_links.json"]);
     expect(l.linksFiles.map((f) => f.title)).toContain("בראשית");

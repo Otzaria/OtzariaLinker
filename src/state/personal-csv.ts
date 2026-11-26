@@ -37,6 +37,11 @@ export interface PrepareOptions {
   only?: ReadonlySet<string>;
   /** personalRowKey of the rows the existing links.csv files hold: such a row is not written again */
   listed?: ReadonlySet<string>;
+  /**
+   * The name a row gives its personal book, from the book's title (default: the title). A build that names books by their file
+   * names as they are (Otzarya-Unofficial-Books) needs the file name where the title rules changed it ("א  ב" → "א ב").
+   */
+  sourceName?: (title: string) => string;
 }
 
 export class PersonalCsvState {
@@ -47,7 +52,7 @@ export class PersonalCsvState {
   ) {}
 
   /** The files for the project's links between personal books and the official library; null when cancelled or there is nothing to say. */
-  async prepare({ only, listed }: PrepareOptions = {}): Promise<PersonalCsvBundle | null> {
+  async prepare({ only, listed, sourceName }: PrepareOptions = {}): Promise<PersonalCsvBundle | null> {
     const links = this.host.allLinks.value.filter((l) => l.provenance !== "db" && (!only || only.has(l.id)));
     const personal = (b: BookRef) => {
       const sb = this.host.bookOf(b);
@@ -115,7 +120,8 @@ export class PersonalCsvState {
         return found;
       },
     });
-    const rows = listed ? made.filter((r) => !listed.has(personalRowKey(r))) : made;
+    const named = sourceName ? made.map((r) => ({ ...r, sourceBook: sourceName(r.sourceBook) })) : made;
+    const rows = listed ? named.filter((r) => !listed.has(personalRowKey(r))) : named;
     const headingTexts = new Map<string, Set<string>>();
     for (const b of [...this.host.allLinks.value.flatMap((l) => [l.source.book, l.target.book])]) {
       const hs = targets.get(b.key);
