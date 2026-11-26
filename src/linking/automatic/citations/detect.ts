@@ -2115,6 +2115,8 @@ function nameStart(toks: readonly Tok[], from: number, at: number, words: number
 const CLOSER: Readonly<Record<string, string>> = { "(": ")", "[": "]", "{": "}" };
 /** how many tokens past the place an anchor may reach for the bracket the place opened */
 const MAX_BRACKET_REACH = 4;
+/** the words an anchor may reach over for its bracket's close: "see there", "and there" */
+const SEE_THERE: ReadonlySet<string> = new Set(['ע"ש', 'עיי"ש', 'עי"ש', 'וע"ש', 'וש"נ', "ושם", "שם", "וכו'", "וגו'", 'ע"כ', 'עכ"ל']);
 
 /**
  * The anchor's tokens with every bracket in them closed in them (issue #42 C19): "ברכות (יג:" — the place opened a bracket and the
@@ -2151,6 +2153,9 @@ function balancedSpan(toks: readonly Tok[], from: number, to: number): { from: n
         break;
       }
       if (t.kind === "punct" && CLOSER[t.text]) break;
+      // only words that say "see there" may lie in the way ("(דף יג: ע"ש)"): "(י"א: ובכורות ג'.)" holds a second citation,
+      // which an anchor reaching for the bracket would swallow (and the scan would skip)
+      if (t.kind !== "punct" && !SEE_THERE.has(wordShape(t))) break;
     }
     if (close >= 0 && !open.length) end = close + 1;
     else end = o;

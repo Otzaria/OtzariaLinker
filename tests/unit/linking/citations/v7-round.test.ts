@@ -178,6 +178,15 @@ describe("C19 — the anchor: the commentator's name is in it, an unmatched brac
     ["ועיין ברכות [יג: ושם ועוד הרבה מאד מאד", "ברכות"],
     ["ועיין ברכות (דף יג:) ושם", "ברכות (דף יג:)"],
   ])("%s → %s (a bracket in the anchor is closed in it)", (text, want) => expect(anchorOf(text, B.ber.key)).toBe(want));
+
+  it("an anchor never reaches over a second citation in the same bracket (found by the real-DB benchmark: 'במנחות (י\"א: ובכורות ג'.)')", () => {
+    for (const text of ['הביא בשבת (י"א: וברכות ג\'.) מחלוקת', 'ומייתי לה בשבת (פרק ח\' דף י"ב ב\' וברכות ד\' י"ג) הכל']) {
+      const r = run(text, { citationType: "inline-linker" });
+      expect(r.suggestions.map((s) => s.target.book.key).sort(), text).toEqual([B.ber.key, B.shab.key]);
+      const first = r.suggestions.find((s) => s.target.book.key === B.shab.key)!;
+      expect(text.slice(first.anchor!.rawStart, first.anchor!.rawEnd)).toBe("בשבת");
+    }
+  });
 });
 
 describe("C20 — a siman of a book in parts of the Shulchan Aruch: the part the context names", () => {
