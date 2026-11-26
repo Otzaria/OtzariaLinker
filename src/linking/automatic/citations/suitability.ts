@@ -103,11 +103,15 @@ const AMUD = new RegExp(`${EDGE_BEFORE}ע${Q}[אב]${EDGE_AFTER}`);
 /** פ"ג, פ"יב: a chapter in the abbreviation */
 const CHAPTER_ABBR = new RegExp(`${EDGE_BEFORE}[ובכלמהש]{0,2}פ${Q}[א-ת]{1,2}${EDGE_AFTER}`);
 
+/** the amud mark glued to a daf ("יג." / "יג:", sof pasuq "יג׃" as a colon), then the end of the word */
+const DAF_MARK = /^[.:׃](?:$|[\s)\],;\-])/;
+
 export type CitationHint = "none" | "weak" | "strong";
 
 /** none: no sign; weak: hasCitationHint; strong: a place word and a number, an amud, a chapter abbreviation, or an open book's name and a number. */
 export function citationHintStrength(html: string, knowsName?: (key: string) => boolean): CitationHint {
-  const text = stripNikud(stripTags(html));
+  // sof pasuq (U+05C3) is in the nikud range, but some books write it for the colon of an amud ("ברכות יג׃")
+  const text = stripNikud(stripTags(html).replace(/׃/g, ":"));
   if (AMUD.test(text) || CHAPTER_ABBR.test(text)) return "strong";
   STRONG.lastIndex = 0;
   for (let m = STRONG.exec(text); m; m = STRONG.exec(text)) {
@@ -119,10 +123,18 @@ export function citationHintStrength(html: string, knowsName?: (key: string) => 
     // begins the title of a book and a single letter follow each other all the time in prose (measured: the one-number form passed 98% of lines)
     const tokens = hebrewTokens(text);
     const num = (k: string | undefined) => k !== undefined && (/^\d+$/.test(k) || (k.length <= 3 && isNumeral(k)));
-    for (let i = 0; i < tokens.length - 2; i++) {
+    const named = (k: string) => knowsName(k) || (k.length > 3 && knowsName(k.slice(1))) || (k.length > 4 && knowsName(k.slice(2)));
+    for (let i = 0; i < tokens.length - 1; i++) {
       const k = tokens[i]!.key;
-      if (!(knowsName(k) || (k.length > 3 && knowsName(k.slice(1))) || (k.length > 4 && knowsName(k.slice(2))))) continue;
-      if (num(tokens[i + 1]!.key) && num(tokens[i + 2]!.key)) return "strong";
+      if (!named(k)) continue;
+      if (i < tokens.length - 2 && num(tokens[i + 1]!.key) && num(tokens[i + 2]!.key)) return "strong";
+      // …or ONE number in letters with an amud mark glued to it — "ברכות יג:", "(שבת לא.)", "בבא בתרא קכא." (issue #41 B6, the first form of
+      // issue #23): the mark is what prose does not write after a book's name and a letter. The name may be two words ("בבא בתרא").
+      for (const j of [i + 1, i + 2]) {
+        const t = tokens[j];
+        if (!t || (j === i + 2 && /^\d/.test(tokens[i + 1]!.key))) break;
+        if (t.key.length <= 3 && isNumeral(t.key) && DAF_MARK.test(text.slice(t.rawEnd, t.rawEnd + 2))) return "strong";
+      }
     }
   }
   return hasCitationHint(html, knowsName) ? "weak" : "none";
