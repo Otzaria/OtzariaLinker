@@ -38,8 +38,8 @@
 
 | מזהה | נושא | PR | סטטוס | ראיה / הערה |
 |---|---|---|---|---|
-| B1 | האיחוד מעלה דיבור המתחיל חלש ל"גבוהה" | 2 | TODO | |
-| B2 | מילה אחת בלי כותרות ב"גבוהה" | 2 | TODO | |
+| B1 | האיחוד מעלה דיבור המתחיל חלש ל"גבוהה" | 2 | FIXED | `merge-evidence.test.ts`: לפני `7 failed | 1 passed (8)`, אחרי `8 passed`. הכלה מעלה רק על ראיה בלתי תלויה (חיפוש בכל הבסיס, טווח עד 20 שורות), הטווח נשאר חלופה, `MergedSuggestion.evidence`. ‏V7_MATCHING_BENCHMARK §2: "גבוהה" במבחן 95.3% ← 96.2%, ביורה דעה 98.0% ← 98.9%. 924/846 של הממצא לא שוחזר (410/3 במשנה ברורה) |
+| B2 | מילה אחת בלי כותרות ב"גבוהה" | 2 | FIXED | `evidence-caps.test.ts`: לפני `3 failed | 2 passed (5)`, אחרי `5 passed`. בחיפוש בכל הבסיס: מילה אחת "אפשרית", שתיים "גבוהה" לכל היותר. המחיר במחצית הבדיקה: 672 נשפטות ב־99.1% ירדו ל"אפשרית" (V7_MATCHING_BENCHMARK §3) |
 | B3 | סימן בתוך `<b>` מפיל את השורה | 2 | FIXED | `blankMarker` שומר על התגיות ועל האופסטים. ‏`source-filter-markers.test.ts`: לפני `4 failed \| 1 passed`, אחרי `5 passed` (עם property של אופסטים) |
 | B4 | אצווה בוחרת בשקט ספר רשמי | 2 | FIXED | כלל אחד לכל המסלולים (`resolveBaseKey`, ‏`capUndecided`). לפני `6 failed \| 9 passed`, אחרי `15 passed`. מול v52 והרשמי: ‏36 כותרות משותפות, ומקרה אחד מסומן עכשיו כעמום |
 | B5 | אין בחירת סוג קשר בדיבור המתחיל | 3 | TODO | |
@@ -79,13 +79,13 @@
 | C6 | תקציב גודל | 4 | TODO | |
 | C7 | כיסוי 200 ספרים בחוט הראשי | 4 | TODO | |
 | C8 | `existingLinks` גדול | 4 | TODO | |
-| C9 | ביטוי חוזר בבסיס | 2 | TODO | |
-| C10 | שער זוגות לדיבור המתחיל | 2 | TODO | |
+| C9 | ביטוי חוזר בבסיס | 2 | FIXED | עם B2 (`repeatsOf`, `dh/repeated-phrase`, `dh/alt-repeat`): "ודאית" של ביטוי חוזר 115 ← 29 |
+| C10 | שער זוגות לדיבור המתחיל | 2 | FIXED | `pair-fit.test.ts`: לפני `4 failed (4)`, אחרי `4 passed`. `linking/pair-fit.ts`, ב־`maxlinkJob`; `StepResult.pairFit`, `MaxLinkJobOptions.forcedPairs`. 16 זוגות לא קשורים: 908 ← 0 "ודאית"/"גבוהה"; 37 זוגות אמיתיים `suitable`. הממשק: לא |
 | C11 | ניקוד וכיווניות בסימן | 2 | FIXED | `source-filter-bidi.test.ts`: לפני `10 failed \| 1 passed`, אחרי `11 passed` |
 | C12 | `sharesTitle` מדויק בלבד | 2 | FIXED | `editionKey` משמש רק לזיהוי עמימות. לפני `3 failed \| 16 passed`, אחרי `19 passed` |
 | C13 | פרק מיותר בספר הערות | 2 | FIXED | לפני `2 failed \| 140 passed`, אחרי `142 passed` |
 | C14 | "נקראו הקישורים מהמסד: אין" לספר טקסט | 3 | FIXED | `coverage-links-reading.test.ts`: לפני `1 failed \| 6 passed`. נוסף מצב קריאה `no-database` |
-| C15 | "גבוהה" בטווח רחב בכותרות | 2 | TODO | |
+| C15 | "גבוהה" בטווח רחב בכותרות | 2 | FIXED | `range-width.test.ts`: לפני `2 failed (2)`, אחרי `2 passed`; `title-fit.test.ts`: `2 failed | 11 passed (13)` ← `13 passed`. `RANGE_WIDTH`: מעל 5 "גבוהה", מעל 20 "אפשרית" |
 | C16 | תצוגה מקדימה למסנן רק ב"זוג" | 3 | TODO | |
 | C17 | טווח יעד בציטוט | 2 | FIXED | נשמר ב־`INLINE_LINKER`, ובייצוא פרטי. ‏1,490 טווחים ב־v52 |
 | C18 | הצעות לשורת כותרת | 2 | FIXED | `contentStart`. ב־heldout2 ירד מ־178 ל־133 |
