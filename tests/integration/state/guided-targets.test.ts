@@ -30,7 +30,7 @@ async function ready() {
   g.start();
   await g.addBooks([commentary(A), commentary(B)]);
   await g.addBases([DB]);
-  return { g };
+  return { g, store };
 }
 /** every book a pair step of the commentary runs against */
 const targetsOf = (g: Awaited<ReturnType<typeof ready>>["g"], dep: string) =>
@@ -76,6 +76,46 @@ describe("guided flow — several target books for one commentary (V7 §3.7)", (
     expect(g.extraTargets.value[A]).toBeUndefined();
     expect(g.targets.value[A]).toBeUndefined();
     expect(JSON.stringify(g.plan.value!.steps.map((s) => s.id))).toBe(before);
+  });
+
+  it("a target book open in two sources: the copy the user ticked is the one planned, also in a continued flow", async () => {
+    const onkelosCopy = { path: `${ONKELOS}.txt`, blob: new Blob([strToU8(`<h1>${ONKELOS}</h1>\n<h2>פרק א</h2>\nפסוק א`)]) };
+    const { g, store } = await ready();
+    await g.addBases([onkelosCopy]);
+    const copies = store.booksByTitle.value.get(ONKELOS)!;
+    expect(copies).toHaveLength(2);
+    const second = copies[1]!;
+    const label = store.sources.value.find((s) => s.books.some((b) => b.key === second.key))!.info.label;
+    g.setExtraTargets(A, [ONKELOS], { [ONKELOS]: second.key });
+    const baseKeys = (gg: typeof g) => gg.plan.value!.steps.flatMap((s) => (s.kind === "pair" && s.relation.dependant.title === A && s.relation.base.title === ONKELOS ? [s.relation.base.key] : []));
+    expect(baseKeys(g)).toEqual([second.key]);
+    expect(g.targetsOf(A).find((t) => t.title === ONKELOS)?.key).toBe(second.key);
+    expect(g.addedTargetKey(A, ONKELOS)).toBe(second.key);
+    // removing another added target keeps the chosen copy
+    g.setExtraTargets(A, [ONKELOS, RASHI]);
+    g.removeTarget(A, RASHI);
+    expect(baseKeys(g)).toEqual([second.key]);
+
+    // the saved flow names the copy by its source (session keys do not outlive the session); a continued flow binds it again
+    const rec = parseGuidedRecord(JSON.stringify(g.record()))!;
+    expect(rec.extraTargets).toEqual({ [A]: [ONKELOS] });
+    expect(rec.extraTargetSources).toEqual({ [A]: { [ONKELOS]: label } });
+    const store2 = new AppStore(registryService(new SourceRegistry()), { save: () => undefined }, loadPreferences(null));
+    const g2 = store2.guided;
+    g2.saved.value = rec;
+    g2.continueSaved();
+    await g2.addBooks([commentary(A), commentary(B)]);
+    await g2.addBases([DB]);
+    await g2.addBases([onkelosCopy]);
+    const copy2 = store2.sources.value.find((s) => s.info.label === label)!.books.find((b) => b.title === ONKELOS)!;
+    expect(store2.booksByTitle.value.get(ONKELOS)![0]!.key).not.toBe(copy2.key);
+    expect(baseKeys(g2)).toEqual([copy2.key]);
+
+    // an older record (titles only) still parses, and binds by title
+    const old = parseGuidedRecord(JSON.stringify({ ...rec, extraTargetSources: undefined }))!;
+    expect(old.extraTargets).toEqual({ [A]: [ONKELOS] });
+    expect(old.extraTargetSources).toBeUndefined();
+    expect(parseGuidedRecord(JSON.stringify({ ...rec, extraTargetSources: { [A]: { [ONKELOS]: 3 }, __proto__x: 1 } }))!.extraTargetSources).toBeUndefined();
   });
 
   it("is kept in the saved flow and comes back clean", async () => {

@@ -59,6 +59,8 @@ function DependantTargets({ dep }: { dep: string }) {
   };
   const titles = list.map((t) => t.title);
   const depKey = keyOf(dep);
+  // the added books as ticked: the copy chosen for each title, else (bound by title) its first copy
+  const selected = added.flatMap((t) => g.addedTargetKey(dep, t) ?? keyOf(t) ?? []);
   return (
     <li class="pair-row" data-dependant={dep}>
       <div class="pair-names">
@@ -105,8 +107,17 @@ function DependantTargets({ dep }: { dep: string }) {
         <summary>הוספת ספר{added.length > 0 && ` · נוספו ${added.length.toLocaleString("he")}`}</summary>
         <BookChecklist
           label={`ספרים נוספים ש"${dep}" כתוב עליהם`}
-          selected={added.flatMap((t) => keyOf(t) ?? [])}
-          onChange={(keys) => g.setExtraTargets(dep, keys.flatMap((k) => store.books.value.get(k)?.title ?? []))}
+          selected={selected}
+          onChange={(keys) => {
+            // the very copy ticked: a title open in two sources is bound to that book, not to its first copy (review finding 4).
+            // One copy per title (the plan has one pair per commentary and title): a copy ticked now replaces the one ticked before.
+            const chosen = new Map<string, string>();
+            for (const k of keys) {
+              const t = store.books.value.get(k)?.title;
+              if (t && (!chosen.has(t) || !selected.includes(k))) chosen.set(t, k);
+            }
+            g.setExtraTargets(dep, [...chosen.keys()], Object.fromEntries(chosen));
+          }}
           exclude={[depKey, ...list.filter((t) => !t.added).map((t) => t.key)]}
           ordered
         />

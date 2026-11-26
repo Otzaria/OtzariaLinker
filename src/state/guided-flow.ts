@@ -409,6 +409,11 @@ export interface GuidedRecord {
   lineFilter?: SourceFilter;
   /** the target books added to commentaries, and the target hierarchies (V7 §3.7), by the commentary's title; absent in older records */
   extraTargets?: Record<string, string[]>;
+  /**
+   * Which copy of an added target book was chosen, when its title is open in more than one source: the source's label, by the
+   * commentary's title and the target's title (session keys do not outlive the session). Absent in older records: bound by title.
+   */
+  extraTargetSources?: Record<string, Record<string, string>>;
   targets?: Record<string, TargetHierarchy>;
   links: number;
   /** the result was downloaded: nothing to continue */
@@ -457,6 +462,16 @@ function cleanExtraTargets(raw: object): Record<string, string[]> {
   }
   return out;
 }
+function cleanExtraTargetSources(raw: object): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = Object.create(null);
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === "__proto__" || !v || typeof v !== "object" || Array.isArray(v)) continue;
+    const m: Record<string, string> = Object.create(null);
+    for (const [t, label] of Object.entries(v as object)) if (t !== "__proto__" && t && typeof label === "string" && label) m[t] = label;
+    if (Object.keys(m).length) out[k] = m;
+  }
+  return out;
+}
 function cleanTargets(raw: object): Record<string, TargetHierarchy> {
   const out: Record<string, TargetHierarchy> = Object.create(null);
   for (const [k, v] of Object.entries(raw)) {
@@ -490,6 +505,7 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
       ...(r.pairControls && typeof r.pairControls === "object" && Object.keys(cleanPairControls(r.pairControls)).length > 0 && { pairControls: cleanPairControls(r.pairControls) }),
       ...(lineFilter && { lineFilter }),
       ...(r.extraTargets && typeof r.extraTargets === "object" && Object.keys(cleanExtraTargets(r.extraTargets)).length > 0 && { extraTargets: { ...cleanExtraTargets(r.extraTargets) } }),
+      ...(r.extraTargetSources && typeof r.extraTargetSources === "object" && Object.keys(cleanExtraTargetSources(r.extraTargetSources)).length > 0 && { extraTargetSources: { ...cleanExtraTargetSources(r.extraTargetSources) } }),
       ...(r.targets && typeof r.targets === "object" && Object.keys(cleanTargets(r.targets)).length > 0 && { targets: { ...cleanTargets(r.targets) } }),
       links: Number(r.links) || 0,
       done: r.done === true,
@@ -558,6 +574,13 @@ export class GuidedFlowState {
    * automatic bases stay, and these are added as pairs of the user (PlanChoices.pairs). Kept in the saved flow.
    */
   readonly extraTargets = signal<Readonly<Record<string, readonly string[]>>>({});
+  /**
+   * The very book the user ticked for an added target, by the commentary's title and the target's title (session keys): a title open
+   * in more than one source would otherwise bind its FIRST copy (V7 PR3/PR4 review, finding 4). None: bound by title.
+   */
+  private readonly extraTargetKeys = signal<Readonly<Record<string, Readonly<Record<string, string>>>>>({});
+  /** the same choice in a continued flow, by the source's label (GuidedRecord.extraTargetSources), until that source is open again */
+  private extraTargetLabels: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
   /** the user's target hierarchy of a commentary with several targets, by its title (PlanChoices.targets, #45); none = inferred or equals */
   readonly targets = signal<Readonly<Record<string, TargetHierarchy>>>({});
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
@@ -610,8 +633,15 @@ export class GuidedFlowState {
       if (!named.has(k)) (named.add(k), pairs.push(p));
     };
     for (const [dep, titles] of extras) {
-      for (const r of wholeTargets(auto, dep)) add({ dependant: dep, base: r.base.title, dependantKey: r.dependant.key, baseKey: r.base.key });
-      for (const t of titles) if (t !== dep) add({ dependant: dep, base: t });
+      const whole = wholeTargets(auto, dep);
+      for (const r of whole) add({ dependant: dep, base: r.base.title, dependantKey: r.dependant.key, baseKey: r.base.key });
+      // the copy the user ticked, and the commentary the plan already uses (not the first book of each title)
+      const depKey = whole[0]?.dependant.key;
+      for (const t of titles) {
+        if (t === dep) continue;
+        const baseKey = this.addedTargetKey(dep, t);
+        add({ dependant: dep, base: t, ...(depKey && { dependantKey: depKey }), ...(baseKey && { baseKey }) });
+      }
     }
     return planWith(pairs);
   });
@@ -677,6 +707,8 @@ export class GuidedFlowState {
       this.pairControls.value = {};
       this.lineFilter.value = null;
       this.extraTargets.value = {};
+      this.extraTargetKeys.value = {};
+      this.extraTargetLabels = {};
       this.targets.value = {};
       this.resumeTo.value = null;
       this.saved.value = null;
@@ -724,6 +756,8 @@ export class GuidedFlowState {
       this.pairControls.value = r.pairControls ?? {};
       this.lineFilter.value = r.lineFilter ?? null;
       this.extraTargets.value = r.extraTargets ?? {};
+      this.extraTargetKeys.value = {};
+      this.extraTargetLabels = r.extraTargetSources ?? {};
       this.targets.value = r.targets ?? {};
       this.repoScope.value = null;
       this.bookSources.value = [];
@@ -810,16 +844,50 @@ export class GuidedFlowState {
     return null;
   }
 
-  /** The target books added to a commentary (by titles, in priority order); none takes it back to the automatic plan. */
-  setExtraTargets(dependantTitle: string, titles: readonly string[]): void {
+  /**
+   * The target books added to a commentary (by titles, in priority order); none takes it back to the automatic plan. `keys`: the very
+   * book ticked for a title (session keys); a title not in it keeps the book chosen before, if any, else it is bound by title.
+   */
+  setExtraTargets(dependantTitle: string, titles: readonly string[], keys?: Readonly<Record<string, string>>): void {
     const next = { ...this.extraTargets.peek() };
     const list = [...new Set(titles.filter((t) => t && t !== dependantTitle))];
-    if (list.length) next[dependantTitle] = list;
-    else {
-      delete next[dependantTitle];
-      this.setTargetHierarchy(dependantTitle, null);
+    const before = this.extraTargetKeys.peek()[dependantTitle] ?? {};
+    const chosen: Record<string, string> = {};
+    for (const t of list) {
+      const k = (keys && Object.hasOwn(keys, t) ? keys[t] : undefined) ?? (Object.hasOwn(before, t) ? before[t] : undefined);
+      if (k) chosen[t] = k;
     }
-    this.extraTargets.value = next;
+    const nextKeys = { ...this.extraTargetKeys.peek() };
+    if (Object.keys(chosen).length) nextKeys[dependantTitle] = chosen;
+    else delete nextKeys[dependantTitle];
+    batch(() => {
+      if (list.length) next[dependantTitle] = list;
+      else {
+        delete next[dependantTitle];
+        this.setTargetHierarchy(dependantTitle, null);
+      }
+      this.extraTargetKeys.value = nextKeys;
+      this.extraTargets.value = next;
+    });
+  }
+
+  /**
+   * The book an added target of a commentary is bound to: the copy the user ticked while it is open, else (a continued flow) the book
+   * of that title in the source the record names; undefined — bound by title (the plan takes its first copy and says so).
+   */
+  addedTargetKey(dependantTitle: string, title: string): string | undefined {
+    const keys = this.extraTargetKeys.value[dependantTitle];
+    const key = keys && Object.hasOwn(keys, title) ? keys[title] : undefined;
+    if (key && this.host.books.value.has(key)) return key;
+    const labels = this.extraTargetLabels[dependantTitle];
+    const label = labels && Object.hasOwn(labels, title) ? labels[title] : undefined;
+    if (!label) return undefined;
+    for (const s of this.host.sources.value) {
+      if (s.info.label !== label) continue;
+      const b = s.books.find((x) => x.title === title);
+      if (b) return b.key;
+    }
+    return undefined;
   }
 
   /** Which target of a commentary is primary, the order of the others, and the fallback (#45); null: the plan decides. */
@@ -974,6 +1042,17 @@ export class GuidedFlowState {
     const prefer = this.preferSource.value ? this.host.sources.value.find((s) => s.info.id === this.preferSource.value)?.info.label : this.preferLabel;
     // a flow waiting for its books again keeps the step it had reached
     const waiting = open.length ? undefined : (this.resumeTo.value ?? prev?.step);
+    // the copy of each added target, by its source (a key would not mean that book in another session)
+    const extraSources: Record<string, Record<string, string>> = {};
+    for (const [dep, titles] of Object.entries(this.extraTargets.value)) {
+      const m: Record<string, string> = {};
+      for (const t of titles) {
+        const key = this.addedTargetKey(dep, t);
+        const label = key ? this.host.sources.value.find((s) => s.books.some((b) => b.key === key))?.info.label : this.extraTargetLabels[dep]?.[t];
+        if (label) m[t] = label;
+      }
+      if (Object.keys(m).length) extraSources[dep] = m;
+    }
     return {
       v: 1,
       step: waiting ?? this.step.value,
@@ -985,6 +1064,7 @@ export class GuidedFlowState {
       ...(Object.keys(this.pairControls.value).length && { pairControls: { ...this.pairControls.value } }),
       ...(this.lineFilter.value && { lineFilter: this.lineFilter.value }),
       ...(Object.keys(this.extraTargets.value).length && { extraTargets: Object.fromEntries(Object.entries(this.extraTargets.value).map(([k, v]) => [k, [...v]])) }),
+      ...(Object.keys(extraSources).length && { extraTargetSources: extraSources }),
       ...(Object.keys(this.targets.value).length && { targets: { ...this.targets.value } }),
       links: this.facts.value.links,
       done: this.downloaded.value !== null,
