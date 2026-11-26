@@ -609,7 +609,7 @@ export class AppStore {
       const where = (b: SourceBook) => this.sourceLabelOf(b.key) ?? "";
       this.notify(
         "warning",
-        `${offers.length === 1 ? `הקישורים של "${offers[0]!.title}" נשמרו על הספר מ"${offers[0]!.source}", והספר בשם הזה שפתוח עכשיו הוא מ"${where(offers[0]!.to)}".` : `הקישורים של ${offers.length.toLocaleString("he")} ספרים נשמרו על ספרים ממקור אחר מזה שפתוח עכשיו.`} הכלי לא קשר אותם אליו, כי ייתכן שזו מהדורה אחרת ומספרי השורות שונים. אם זה אותו ספר, לחצו "קשרו לספר הפתוח": הבדיקה תסמן אם מספר השורות או הטקסט השתנו. אחרת פתחו את המקור המקורי.`,
+        `${offers.length === 1 ? `הקישורים של "${offers[0]!.title}" נשמרו על הספר מ"${offers[0]!.source}", והספר בשם הזה שפתוח עכשיו הוא ${where(offers[0]!.to) === offers[0]!.source ? `מקובץ אחר באותו שם ("${offers[0]!.source}"), ותוכנו שונה` : `מ"${where(offers[0]!.to)}"`}.` : `הקישורים של ${offers.length.toLocaleString("he")} ספרים נשמרו על ספרים ממקור אחר מזה שפתוח עכשיו.`} הכלי לא קשר אותם אליו, כי ייתכן שזו מהדורה אחרת ומספרי השורות שונים. אם זה אותו ספר, לחצו "קשרו לספר הפתוח": הבדיקה תסמן אם מספר השורות או הטקסט השתנו. אחרת פתחו את המקור המקורי.`,
         offers.length > 1 ? offers.map((o) => `"${o.title}": נשמר מ"${o.source}", פתוח מ"${where(o.to)}"`) : undefined,
         { label: "קשרו לספר הפתוח", run: () => this.chooseEditions(offers.map((o) => [o.id, o.to.key] as const)) },
       );
