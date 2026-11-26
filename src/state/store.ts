@@ -259,12 +259,17 @@ export class AppStore {
     const target: LinkSide = { book: this.refOf(t.bookKey), line: t.line, ...(t.end !== undefined && t.end > t.line && { end: t.end }) };
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
     const { anchor: _a, ref1: _r1, ref2: _r2, matched: _m, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
+    // several lines picked on one side (drafts): a value typed for that side names ONE place, and copied to every link it
+    // would put them all there — the weekly sync places a link by ref_2/ref_1 (B2). Each link gets its own line's place and
+    // ref, and the builder disables those fields while several lines are picked (V7 round-2 review, finding 1)
+    const manySource = !base && !!this.pick.source.value?.lines;
+    const manyTarget = !base && !!this.pick.target.value?.lines;
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
-    const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
-    const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
+    const ref1 = (manySource ? "" : this.draftRef1.value.trim()) || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
+    const ref2 = (manyTarget ? "" : this.draftRef2.value.trim()) || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
     // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3); the automatic one carries
     // the label the user gave the anchor (v3 F-075; a typed one was rewritten by setAnchorLabel)
-    const typed = this.draftHeRef.value?.trim() ? this.draftHeRef.value : null;
+    const typed = !manyTarget && this.draftHeRef.value?.trim() ? this.draftHeRef.value : null;
     const heRef2 = typed ?? (s.anchor?.label ? replaceAnchorLabel(this.autoHeRef(t), s.anchor.label) : this.autoHeRef(t));
     // the anchor's label is what the generator will read from heRef_2 (Generator.kt:2425) — never one the file does not carry
     const label = s.anchor ? anchorLabelFromHeRef(heRef2) : null;

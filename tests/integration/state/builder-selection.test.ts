@@ -100,6 +100,50 @@ describe("several lines picked with Ctrl/Cmd (v3 F-046, F-061)", () => {
     expect(store.allLinks.value.map((l) => [l.source.line, l.target.line]).sort()).toEqual([[2, 1], [2, 3]]);
   });
 
+  it("several target lines: a typed place (heRef_2) or ref_2 is not copied to every link; each gets its own line's (V7 round-2 review, finding 1)", async () => {
+    const { store, main, notes } = await opened();
+    store.pickLine("source", main.key, 2);
+    // the place each line gets by itself
+    const own = [1, 2, 3].map((i) => {
+      store.pickLine("target", notes.key, i);
+      return store.draft.value!.heRef2;
+    });
+    expect(new Set(own).size).toBe(3);
+    store.pickLine("target", notes.key, 1);
+    store.toggleLine("target", notes.key, 2);
+    store.toggleLine("target", notes.key, 3);
+    // typed while the three lines are picked (the builder showed the first line's place)
+    store.draftHeRef.value = "מקום שהוקלד";
+    store.draftRef2.value = "Typed 1:2";
+    expect(store.drafts.value.map((d) => [d.target.line, d.heRef2, d.ref2])).toEqual([
+      [1, own[0], undefined],
+      [2, own[1], undefined],
+      [3, own[2], undefined],
+    ]);
+    expect(store.draftProblems.value.filter((p) => p.severity === "error")).toEqual([]);
+    expect(store.createFromDraft()).not.toBeNull();
+    const made = store.allLinks.value.sort((a, b) => a.target.line - b.target.line);
+    expect(made.map((l) => [l.target.line, l.heRef2, l.ref2])).toEqual([
+      [1, own[0], undefined],
+      [2, own[1], undefined],
+      [3, own[2], undefined],
+    ]);
+  });
+
+  it("several source lines: a typed ref_1 is not copied to every link; the one target's typed place is kept (finding 1)", async () => {
+    const { store, main, notes } = await opened();
+    store.pickLine("source", main.key, 1);
+    store.pickLine("target", notes.key, 2);
+    store.toggleLine("source", main.key, 3);
+    store.draftRef1.value = "Typed 1:1";
+    store.draftRef2.value = "Target 1:2";
+    store.draftHeRef.value = "מקום שהוקלד";
+    expect(store.drafts.value.map((d) => [d.source.line, d.ref1, d.ref2, d.heRef2])).toEqual([
+      [1, undefined, "Target 1:2", "מקום שהוקלד"],
+      [3, undefined, "Target 1:2", "מקום שהוקלד"],
+    ]);
+  });
+
   it("several lines on BOTH sides are refused, and the builder says why", async () => {
     const { store, main, notes } = await opened();
     store.pickLine("source", main.key, 1);
