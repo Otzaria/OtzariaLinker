@@ -24,7 +24,7 @@
 
 סביבה: Windows 11, ‏Node 24.19.0, ‏npm 11.17.0, ‏Playwright 1.65.0, ‏Git 2.52. בכונן Z פנויים 1.8TB, ובכונן C פנויים 44GB. זיכרון: 32GB, מהם כ־9GB פנויים.
 אוצריא מותקנת ב־`C:\Program Files\otzaria`. המסד הרשמי: `C:\ProgramData\otzaria\books\seforim.db` (4.77GB, קריאה בלבד).
-**מסד v52 אינו נמצא במחשב:** לא בתיקיית ההורדות ולא בתיקיות הפיתוח.
+**מסד v52:** לא נמצא בהתחלה. הבעלים מסר אותו במהלך העבודה (`C:UsersUserDocumentsDEVotzarya-unofficial-books-52.db`, ‏1.74GB), והוא נקרא לקריאה בלבד.
 **`gh` אינו מחובר** (ה־token פג), לכן פתיחת PRs דרכו חסומה. ‏`git push` עובד דרך Credential Manager, וקריאת Issues נעשית דרך ה־API הציבורי.
 
 ## 1. ממצאי #40 (A)
@@ -56,7 +56,7 @@
 | B16 | ReDoS בכמתים צרים | 1 | FIXED | `regex-cost.ts`: חסם עלות של backtracking (`MAX_BACKTRACKING_COST`). ‏`safe-regex.test.ts`: לפני `3 failed \| 6 passed`, אחרי `9 passed`. ‏`regex-cost.test.ts`: `12 passed`, וכל ביטוי שמתקבל רץ בפחות מ־2 שניות על 20,000 תווים |
 | B17 | מפתח Autosave אחד לכל החלונות | 1 | VERIFIED | `autosave-windows.test.ts`: לפני `5 failed \| 2 passed`, אחרי `7 passed`. ‏E2E אמיתי עם שני טאבים, ‏`tests/e2e/autosave-tabs.spec.ts`: על ה־build הישן `Expected [4,5] Received []`, ועכשיו `15 passed` (repeat-each=5, שלושה דפדפנים) |
 | B18 | ספר אישי נקשר לספר רשמי באותו שם | 1 | FIXED | `book-identity.test.ts`: לפני `5 failed \| 2 passed`, אחרי `7 passed`. ארבעה סדרי פתיחה, ושמירה ופתיחה חוזרת |
-| B19 | מילון zstd מושאל לפי dictID | 1 | FIXED | `zstd.test.ts`: לפני `7 failed \| 12 passed`, אחרי `19 passed`. ‏`dictionary-identity-real-db.local.test.ts` מול `seforim.db`: `1 passed`. טביעת האצבע הרשמית: `7b08b7c3…a396`. ‏v52 לא זמין, ולכן הבדיקה מול v52 לא הורצה |
+| B19 | מילון zstd מושאל לפי dictID | 1 | VERIFIED | `zstd.test.ts`: לפני `7 failed \| 12 passed`, אחרי `19 passed`. ‏`dictionary-identity-real-db.local.test.ts` מול `seforim.db`: `1 passed`. טביעת האצבע הרשמית: `7b08b7c3…a396`. מול v52: `dictionary-collision-real-db.local.test.ts` עבר בשני סדרי הפתיחה |
 | B20 | `user_link` נקרא בשקט כאפס | 1 | FIXED | `user-links.test.ts`: לפני `8 failed`, אחרי `8 passed`. ‏`user-links-state.test.ts`: לפני `2 failed \| 1 passed`, אחרי `3 passed`. הסכמה לפי אוצריא `a6be90800`, ומתועדת ב־LINK_SCHEMA_MATRIX §6.1. המגבלות ב־QA_V7_PR1 |
 | B21 | פתיחת פרויקט מעל עבודה שלא נשמרה | 1 | FIXED | `autosave-windows.test.ts` (B21): העבודה נשמרת בתור השחזור, ויש הודעה עם פעולת שחזור. הכרעה: אין דיאלוג חוסם (משתמש שגרר פרויקט התכוון לפתוח אותו), אלא שמירה בצד ושחזור |
 | B22 | לחיצה שנייה על "אישור" דוחה | 3 | TODO | |
