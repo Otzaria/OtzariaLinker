@@ -24,19 +24,23 @@ const COVERAGE_AT_ONCE = 200;
 const n = (x: number) => x.toLocaleString("he");
 /** "ספר אחד" / "5 ספרים": the Hebrew count, never "1 ספרים". */
 const many = (x: number, one: string, other: string) => (x === 1 ? one : `${n(x)} ${other}`);
-const FILTERS = {
+const FILTERS: Record<RepoFilter, string> = {
   all: "כל הספרים",
   "no-links": "בלי קישורים",
+  partial: "מקושרים חלקית (אחרי חישוב כיסוי)",
   flagged: "עם סימוני בדיקה",
   suspicious: "ספרים חשודים",
   unlinked: "שורות רבות בלי קישור (אחרי חישוב כיסוי)",
-} as const;
+  unreadable: "שהקישורים שלהם לא נקראו",
+};
 type Filter = RepoFilter;
 const SORTS: Record<RepoSort, string> = {
   title: "לפי שם",
   "links-asc": "מעט קישורים תחילה",
   "links-desc": "הרבה קישורים תחילה",
   "unlinked-share": "הכי פחות מכוסים תחילה (אחרי חישוב כיסוי)",
+  problems: "הכי הרבה סימוני בדיקה תחילה",
+  related: "הכי הרבה ספרים מקושרים תחילה",
 };
 const CONFIDENCE: Record<PairConfidence, string> = { high: "ביטחון גבוה", medium: "ביטחון בינוני", low: "ביטחון נמוך" };
 const ENDS_LABEL = {
@@ -123,6 +127,11 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
               <p class="muted" style="margin:0">
                 הניתוח קורא את הקישורים של כל ספר במסד, אחד אחד, ומראה איפה חסרים קישורים. הוא רק קורא: שום דבר לא נכתב למסד, ושום דבר לא רץ בלי שתפעילו אותו: "השלמת קישורים" רק פותחת את התהליך המודרך עם הספרים שבחרתם, והוא מתחיל לרוץ כשתלחצו שם על "הפעלה".
               </p>
+              {repo.repositories.value.length < 2 && (
+                <p class="small" style="margin:0">
+                  המסד: <b>{source.info.label}</b>
+                </p>
+              )}
               {repo.repositories.value.length > 1 && (
                 <label class="field">
                   המסד
@@ -146,9 +155,15 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                         </button>
                       )}
                       {totals.counted > 0 && (
-                        <button class="btn text" onClick={() => void repo.analyze(true)}>
-                          ניתוח מחדש מההתחלה
-                        </button>
+                        <>
+                          <button class="btn text" onClick={() => void repo.analyze(true)}>
+                            ניתוח מחדש מההתחלה
+                          </button>
+                          <button class="btn text" onClick={() => repo.saveReport()} title="קובץ CSV עם שורה לכל ספר: הקישורים, הסימונים והכיסוי. ספר שלא נקרא נשאר ריק, לא 0">
+                            <Icon name="fl_save" size={18} />
+                            שמירת דוח
+                          </button>
+                        </>
                       )}
                     </>
                   ) : (
@@ -192,6 +207,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 <Stat v={totals.counted ? n(totals.noLinks) : "—"} label="ספרים בלי קישורים" />
                 <Stat v={totals.counted ? n(totals.flaggedBooks) : "—"} label="ספרים עם סימוני בדיקה" />
                 <Stat v={totals.counted ? n(totals.suspicious) : "—"} label="ספרים חשודים" bad={totals.suspicious > 0} />
+                {totals.unavailable > 0 && <Stat v={n(totals.unavailable)} label="ספרים שהקישורים שלהם לא נקראו (לא נספרו)" bad />}
               </div>
               {totals.counted > 0 && (
                 <details class="repo-more">
@@ -272,6 +288,9 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 </button>
                 <button class="btn text small" onClick={() => void repo.countCoverage(list.slice(0, COVERAGE_AT_ONCE).map((b) => b.key))} disabled={busy || !totals.counted || !list.length} title="סופר כמה שורות בכל ספר כבר מקושרות. נעשה לספרים שברשימה, עד 200 בכל פעם">
                   חישוב כיסוי לספרים שברשימה
+                </button>
+                <button class="btn text small" onClick={() => void repo.countCoverage([...picked])} disabled={busy || !totals.counted || !picked.size}>
+                  חישוב כיסוי לנבחרים
                 </button>
               </div>
               <div class="repo-grid">

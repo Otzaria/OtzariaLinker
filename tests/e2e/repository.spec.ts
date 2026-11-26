@@ -337,3 +337,51 @@ test("repository: a failed or missing read of a book's links is never shown as '
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+/*
+ * V7 §3.13: the source is named; a book whose links could not be read is counted apart and is "unknown", never first among the
+ * books with fewest links; the list filters the partly linked and the unread ones and sorts by problems; the analysis is saved as a
+ * report, where an unread book has empty counts, not zeros.
+ */
+test("repository: the source is named, an unread book is unknown (not 0) in the list, the stats and the saved report", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await expect(dlg).toContainText("המסד: seforim-v7-mini.db");
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  // one book's read fails (as a database whose link table is damaged would): the row the analysis writes for it
+  const unread = await page.evaluate(() => {
+    const repo = (globalThis as unknown as { __linker: { repository: { rows: { value: Map<string, { title: string; total: number; unavailable?: string }> } } } }).__linker.repository;
+    const rows = new Map(repo.rows.value);
+    const [key, row] = [...rows].find(([, r]) => r.total > 0)!;
+    rows.set(key, { ...row, total: 0, out: 0, in: 0, top: [], flags: [], unavailable: "קריאת הקישורים נכשלה: הדיסק נעלם" } as typeof row);
+    repo.rows.value = rows;
+    return row.title;
+  });
+  const stats = dlg.getByRole("group", { name: "סיכום המאגר" });
+  await expect(stats).toContainText("ספרים שהקישורים שלהם לא נקראו");
+  const books = dlg.getByRole("list", { name: "הספרים" }).locator(".repo-book");
+  await dlg.getByLabel("סדר הרשימה").selectOption("links-asc");
+  await expect(books.first()).not.toContainText(unread);
+  await dlg.getByLabel("אילו ספרים להציג").selectOption("unreadable");
+  await expect(books).toHaveCount(1);
+  await expect(books.first()).toContainText(unread);
+  await expect(books.first()).toContainText("אי אפשר לקרוא");
+  await dlg.getByLabel("אילו ספרים להציג").selectOption("partial");
+  await dlg.getByLabel("סדר הרשימה").selectOption("problems");
+
+  const download = page.waitForEvent("download");
+  await dlg.getByRole("button", { name: "שמירת דוח" }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toMatch(/^ניתוח-מאגר-\d{4}-\d\d-\d\d\.csv$/);
+  const rows = readFileSync((await file.path())!, "utf8").replace(/^﻿/, "").split("\r\n");
+  expect(rows[0]).toContain('"ספר","שורות","קישורים"');
+  const line = rows.find((r) => r.includes(`"${unread}"`))!;
+  expect(line).toContain('"לא נקרא: קריאת הקישורים נכשלה: הדיסק נעלם"');
+  expect(line).not.toMatch(/"0"/);
+  expect(rows.length).toBe(Number((await stats.locator(".stat").first().locator("b").innerText()).replace(/,/g, "")) + 1);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});

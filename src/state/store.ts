@@ -269,7 +269,7 @@ export class AppStore {
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
     this.personalCsv = new PersonalCsvState(this, service, saver);
-    this.repository = new RepositoryState(this, service);
+    this.repository = new RepositoryState(this, service, saver);
     this.guided = new GuidedFlowState(this);
   }
 
