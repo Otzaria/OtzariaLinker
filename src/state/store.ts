@@ -331,21 +331,22 @@ export class AppStore {
     if (fresh.length) this.attachLinks();
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
-    const each = (kind: string, run: (path: string, text: string) => void) => {
+    // a big links file is imported in slices (exchange.importLinksFile, #42 C5): waited for, so the documents keep their order
+    const each = async (kind: string, run: (path: string, text: string) => void | Promise<void>) => {
       for (const d of res.documents)
         if (d.kind === kind)
           try {
-            run(d.path, d.text);
+            await run(d.path, d.text);
           } catch (err) {
             this.log.error("open", "document failed", { kind, error: String((err as Error)?.name ?? err) });
             this.notify("error", `"${d.path}" לא נטען: ${(err as Error)?.message ?? String(err)}. שאר הקבצים נטענו.`);
           }
     };
-    each("links-json", (p, t) => this.exchange.importLinksFile(p, t));
-    each("links-csv", (p, t) => this.exchange.importLinksCsv(p, t));
-    each("records", (p, t) => this.exchange.offerRecords(p, t));
-    each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
-    each("project", (p, t) => this.openProject(p, t));
+    await each("links-json", (p, t) => this.exchange.importLinksFile(p, t));
+    await each("links-csv", (p, t) => this.exchange.importLinksCsv(p, t));
+    await each("records", (p, t) => this.exchange.offerRecords(p, t));
+    await each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
+    await each("project", (p, t) => this.openProject(p, t));
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);

@@ -236,12 +236,25 @@ export function fileChange(s: LinkState, title: string, after: LibraryFile | nul
  * comparing the records themselves (store.exchange.importLinksFile).
  */
 export function fileFingerprint(text: string): string {
+  const steps = fileFingerprintSteps(text);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** fileFingerprint, yielding after every few million characters (a 40 MB file is imported in slices, #42 C5). */
+export function* fileFingerprintSteps(text: string, charsPerStep = 2_000_000): Generator<void, string, void> {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
+  for (let from = 0; from < text.length; from += charsPerStep) {
+    if (from) yield;
+    const to = Math.min(text.length, from + charsPerStep);
+    for (let i = from; i < to; i++) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
   }
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);

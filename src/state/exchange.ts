@@ -8,7 +8,8 @@ import type { AltTocExportPlan } from "../formats/alt-toc/export";
 import { linkToRecord, recordToLink } from "../formats/links-json/convert";
 import { assertSafeExportPaths, planExport, zipBundle, type ExportPlan } from "../formats/links-json/export";
 import { detectLayout } from "../formats/links-json/layout";
-import { parseLinksJson } from "../formats/links-json/parse";
+import { parseLinksJson, parseLinksJsonSteps } from "../formats/links-json/parse";
+import { runSliced, runToEnd } from "../linking/automatic/steps";
 import { recordToObject } from "../formats/links-json/serialize";
 import { parseLinksCsv } from "../formats/links-csv/parse";
 import { guessRecordsMapping, parseRecords, recordsToLinksFiles, type RecordsMapping, type RecordsTable } from "../formats/records/records";
@@ -16,7 +17,7 @@ import { buildExportReport, REPORT_FILE_NAME } from "../formats/report/export-re
 import { nextSteps, type NextStepsRoute } from "../formats/report/next-steps";
 import { planSefariaCsv, sefariaCsvOmissions, type SefariaCsvFile } from "../formats/sefaria-csv/write";
 import type { AltTocState } from "./alt-toc";
-import { addChanges, booksCount, commit, fileChange, fileFingerprint, filesCount, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
+import { addChanges, booksCount, commit, fileChange, fileFingerprintSteps, filesCount, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { BooksService, CallOptions, Saver } from "./services";
 import type { NoticeKind } from "./store";
@@ -58,6 +59,9 @@ export interface ExportBundle extends ExportPlan {
   altToc: AltTocExportPlan;
 }
 
+/** A links file at least this long (UTF-16 units, ~1 MB) is imported in slices (importLinksFile, #42 C5). */
+export const SLICED_IMPORT_CHARS = 1_000_000;
+
 export class ExchangeState {
   /** files waiting for the field-mapping dialog, first one shown */
   readonly pendingRecords = signal<{ path: string; table: RecordsTable; mapping: RecordsMapping }[]>([]);
@@ -84,23 +88,44 @@ export class ExchangeState {
    * different file replaces the project's copy when the user changed nothing in it; otherwise nothing
    * changes and the user is told why (the tool never merges two versions of a file silently).
    */
-  importLinksFile(path: string, text: string): void {
+  importLinksFile(path: string, text: string): void | Promise<void> {
+    const steps = this.importSteps(path, text);
+    // a small file is imported at once, as before; a big one in slices that give the page back between them (#42 C5: a file of
+    // 235,000 records blocked the page for 1.5–2.6 s). Either way the links change in ONE commit at the end.
+    if (text.length < SLICED_IMPORT_CHARS) return void runToEnd(steps);
+    return runSliced(steps);
+  }
+
+  private *importSteps(path: string, text: string): Generator<void, void, void> {
     const { host } = this;
     const sourceTitle = sourceTitleFromLinksFileName(path);
     if (!sourceTitle) return void host.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו הספר המקשר.`);
-    const parsed = parseLinksJson(text);
+    const parsed = yield* parseLinksJsonSteps(text);
     const fatal = parsed.issues.find((i) => i.index < 0 && i.level === "error" && (i.code === "file/not-json" || i.code === "file/not-array"));
     if (fatal)
       return void host.notify("error", `"${path}" לא נטען: ${fatal.message} קובץ הקישורים של "${sourceTitle}" לא נחשב טעון, ולכן ייצוא שלו עדיין מחכה לקובץ תקין מהספרייה.`, fatal.detail ? [fatal.detail] : undefined);
     const sourceRef = host.resolveTitle(sourceTitle) ?? { key: `unresolved:${sourceTitle}`, title: sourceTitle, origin: "unknown" as const };
     const fileKey = `${sourceTitle}#${this.importSeq++}`;
     const issues = [...parsed.issues];
-    const links = parsed.records.map((r, i) => {
-      const { link, issues: more } = recordToLink(r, i, sourceRef, (t) => host.resolveTitle(t), `file:${fileKey}:${i}`);
-      issues.push(...more);
-      return link;
-    });
-    const file: LibraryFile = { title: sourceTitle, records: parsed.records.length, hash: fileFingerprint(text), verified: true, layout: detectLayout(text) };
+    // a file names a few target books over and over: each title is resolved once per import
+    const resolved = new Map<string, BookRef | null>();
+    const resolve = (t: string) => {
+      let ref = resolved.get(t);
+      if (ref === undefined) resolved.set(t, (ref = host.resolveTitle(t)));
+      return ref;
+    };
+    const links: Link[] = [];
+    for (let i = 0; i < parsed.records.length; i++) {
+      if (i && i % 2_000 === 0) yield;
+      const { link, issues: more } = recordToLink(parsed.records[i]!, i, sourceRef, resolve, `file:${fileKey}:${i}`);
+      if (more.length) issues.push(...more);
+      links.push(link);
+    }
+    const hash = yield* fileFingerprintSteps(text);
+    // the parse already read the file's layout (each record's origin shares it): not scanned a second time
+    const file: LibraryFile = { title: sourceTitle, records: parsed.records.length, hash, verified: true, layout: parsed.records[0]?.origin?.layout() ?? detectLayout(text) };
+    yield;
+    // the project as it is NOW (a sliced import may have let the user change it meanwhile)
     const s = host.linkState.value;
     const prev = s.files.get(sourceTitle);
     const held = [...s.links.values()].filter((l) => l.provenance === "file" && l.source.book.title === sourceTitle);
