@@ -147,6 +147,8 @@ export class AppStore {
   /** id of the link being edited in the builder, or null when creating */
   readonly editing = signal<string | null>(null);
   readonly notices = signal<Notice[]>([]);
+  /** a request to open the coverage section of the "בדיקה" tab and bring it into view (#41 B26): bumped by "כיסוי הספר" */
+  readonly coverageFocus = signal(0);
   /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");

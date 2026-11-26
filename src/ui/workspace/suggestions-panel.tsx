@@ -58,7 +58,7 @@ export function SuggestionsPanel() {
             {run.maxlink && <MaxLinkSummary open={report} onToggle={() => setReport(!report)} />}
           </div>
         </div>
-        <button class="btn text" onClick={() => (store.sideTab.value = "qa")} title="בלשונית הבדיקה: אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן">
+        <button class="btn text" onClick={() => ((store.sideTab.value = "qa"), store.coverageFocus.value++)} title="בלשונית הבדיקה: אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן">
           <Icon name="oz_link_check" size={16} />
           כיסוי הספר
         </button>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { coverageSummary } from "./coverage-summary";
 import type { CoverageSummary, LineCoverage, LineRange } from "../../linking/coverage";
 import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage";
@@ -84,6 +84,17 @@ export function CoveragePanel() {
     for (const r of current.ranges.slice(0, shown)) void store.lines.load(bookKey, r.start, r.start).catch(() => {});
   }, [current, shown, bookKey]);
 
+  // "כיסוי הספר" in the suggestions panel asks for this section: open it and bring it into view (#41 B26 — it came folded, out of view)
+  const section = useRef<HTMLDetailsElement>(null);
+  const asked = store.coverageFocus.value;
+  useEffect(() => {
+    const el = section.current;
+    if (!asked || !el) return;
+    el.open = true;
+    el.scrollIntoView({ block: "start" });
+    el.querySelector("summary")?.focus({ preventScroll: true });
+  }, [asked]);
+
   const show = (r: LineRange) => bookKey && store.reveal(side, bookKey, r.start);
   const byHand = (r: LineRange) => {
     if (!bookKey) return;
@@ -94,7 +105,7 @@ export function CoveragePanel() {
   };
 
   return (
-    <details class="coverage">
+    <details class="coverage" ref={section}>
       <summary>כיסוי הספר — אילו שורות עדיין בלי קישור</summary>
       <div class="cov-body">
         <div class="row">
