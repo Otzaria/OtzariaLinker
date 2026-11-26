@@ -122,7 +122,7 @@
 | טבלה | `zstd_dict(id INTEGER PRIMARY KEY NOT NULL, dict BLOB NOT NULL)` | `CompressLineContentCli.kt:177-190` |
 | מספר מילונים ברשמי | **אחד בדיוק**. ה־CI נכשל על 2 שורות או על מילון אחר | `test_ci_workflows.py:510-514` |
 | `zstd_dict.id` ברשמי | **= dictID של המילון** = 32768 | `CompressLineContentCli.kt:178` (`Zstd.getDictIdFromDict`) |
-| המילון | 2,097,152 בתים, magic `37 A4 30 EC`, dictID 32768 (LE בבתים 4-7), SHA-256 `7b08b7c3…a396` | `LineContentCompression.kt:28`; נמדד על המסד |
+| המילון | 2,097,152 בתים, magic `37 A4 30 EC`, dictID 32768 (LE בבתים 4-7), SHA-256 `7b08b7c3534c9f9cd0e8f18414b4326aeeb64cfd574cc0f12d83b6f92bd6a396` (`OFFICIAL_DICTIONARY_SHA256`) | `LineContentCompression.kt:28`; נמדד על המסד (2026-11-26, `node:sqlite` עם `readOnly`) |
 | מקור המילון | משאב קבוע `generator/common/src/jvmMain/resources/zstd/line_content.zdict`. "קפוא": החלפתו מחייבת full-rebase ומספר סכמה חדש | `LineContentCompression.kt:11-18, 25-36` |
 | רמה | 19 (zstd-jni) | `LineContentCompression.kt:21` |
 | פרמטרי מסגרת | בלי checksum, content size קיים, dictID כתוב בכותרת, single-segment | `:68-74`; אומת בבתים |
@@ -183,8 +183,13 @@
   המילון נשמר **ב־id של השורה הרשמית** (`builder.dart:421`), ובמקרה זה הערך זהה ל־dictID.
   **נמדד על `otzarya-unofficial-books` v52** ([`PERSONAL_DB_V52_AUDIT.md`](../research/PERSONAL_DB_V52_AUDIT.md)): ב־`zstd_dict`
   מילון משלו של 112,640 בתים, **באותו dictID 32768** של המילון הרשמי (2,097,152 בתים). שני מילונים שונים באותו
-  מזהה, ולכן כל מסד נקרא עם המילון **שלו** (נבדק בפועל על שני המסדים הפתוחים יחד: `dictionary-collision-real-db.local.test.ts`) (`LineContentCodec`: מילוני המסד גוברים על ה־`DictionaryPool`); מסד שלישי
-  בלי מילון משלו יקבל מה"בריכה" רק אם המזהה אינו מסומן "התנגשות".
+  מזהה, ולכן כל מסד נקרא עם המילון **שלו** (נבדק בפועל על שני המסדים הפתוחים יחד: `dictionary-collision-real-db.local.test.ts`) (`LineContentCodec`: מילוני המסד גוברים על ה־`DictionaryPool`).
+  **dictID אינו זהות (B19, issue #41):** 400 מסגרות אמיתיות של הרשמי שפוענחו במילון של v52 נתנו 2 זהות, 2 טקסט **שונה בלי
+  שגיאה** ו־396 כשלים. לכן ה־`DictionaryPool` שומר כל מילון עם טביעת האצבע שלו (SHA-256) ועם המסד שהביא אותו, ומסד בלי
+  מילון משלו **שואל** רק את המילון הרשמי (לפי `OFFICIAL_DICTIONARY_SHA256`) או קובץ מילון שהמשתמש פתח (שיוך מפורש), ורק
+  כשיש בדיוק אחד כזה. המילון של מסד אחר עם אותו מזהה לעולם לא נשאל (השגיאה `db/compressed-unknown-dictionary` מציינת אותו).
+  כשל פענוח במילון שאול הוא `db/dictionary-mismatch`, וגם טקסט שאינו UTF-8 תקין ממנו; כשל במילון של המסד עצמו הוא
+  `db/compressed-corrupt` (וכך גם checksum שגוי, כשלמסגרת יש). מילון שאול משמש רק כל עוד המסד שהביא אותו פתוח.
 - אין אימון מילון ואין משאב מילון מצורף לתוכנה.
 - **רמה 19** (`zstd.dart:129`).
 - **מתי דוחסים:** כשיש לפחות 3MB טקסט או `forceCompress` (`builder.dart:390-394`). אז **כל** שורות
@@ -262,8 +267,9 @@
    - PDC / מצורף: schema_meta.library_id (+library_name, author) ו/או טבלת external_link.
    - user_books: יש user_link / user_import_file / book.isPersonal, ואין schema_meta.
 7. דחיסה: יש zstd_dict → טוענים את כל השורות, ומציעים אותם גם ל**מאגר המילונים של ה־Worker** (`DictionaryPool`):
-   מסד בלי המילון, או קובץ מילון שנפתח (זיהוי לפי magic), משתמשים במילון שהגיע מכל מקור. מילון המסד עצמו
-   קודם; שני מילונים שונים עם אותו dictID פוסלים את ה־id מהמאגר (לא מנחשים). ממפים dictID→מילון לפי **כותרת המילון** (magic
+   מסד בלי המילון שואל ממנו רק את המילון הרשמי (SHA-256, `OFFICIAL_DICTIONARY_SHA256`) או קובץ מילון שהמשתמש פתח
+   (זיהוי לפי magic), לא מילון אחר שרק המזהה שלו זהה (§3.4). מילון המסד עצמו תמיד קודם; שני מילונים שונים שמותר
+   לשאול עם אותו dictID פוסלים את ה־id (לא מנחשים). ממפים dictID→מילון לפי **כותרת המילון** (magic
    EC30A437 LE, ואז dictID ב־u32 LE בבתים 4-7), לא לפי zstd_dict.id. מפענחים **לכל ערך בנפרד**:
    - TEXT → כמו שהוא.
    - BLOB עם magic 28B52FFD → zstd.

@@ -180,6 +180,8 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | קובץ | מה הוא מודד | משתני סביבה |
 |---|---|---|
 | `tests/integration/database/real-db.local.test.ts` | הקורא העצל ו־`OtzariaDbReader` מול המסד המלא | `OTZARIA_DB` |
+| `tests/integration/database/dictionary-identity-real-db.local.test.ts` | מילון הדחיסה הרשמי: טביעת האצבע הקבועה (`OFFICIAL_DICTIONARY_SHA256`), ו־400 מסגרות אמיתיות שמפוענחות במילון של המסד ובמילון שאול כמו libzstd של Node; מילון אחר עם אותו dictID לא נשאל (B19) | `OTZARIA_DB` |
+| `tests/integration/database/dictionary-collision-real-db.local.test.ts` | הרשמי ו־v52 פתוחים יחד (אותו dictID 32768, מילונים שונים), בשני הסדרים: כל מסד נקרא במילון שלו, ורק הרשמי מותר לשאילה | `OTZARIA_DB` ו־`OTZARIA_PERSONAL_DB` |
 | `tests/integration/database/alt-toc-real-db.local.test.ts` | מבני `alt_toc` של ספרים שאינם של ספריא (ספר העיטור, תרגום ותפסיר רס"ג) במסד האמיתי | `OTZARIA_DB` |
 | `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; והשחזור של רשומות הספרייה מהמסד | `OTZARIA_DB`; הבלוק השני רק עם `OTZARIA_LIBRARY` |
 | `tests/integration/database/fix-round-measure.local.test.ts` | מדידות סבב התיקון לפני מיזוג (PR1): עלות חלוקה לטווחים ב־`external_link`, זיכרון, ביטול סריקה משותפת, מיפוי של מסד גדול, וצעד של 200 שורות על הספר הגדול של הספרייה. מדפיס מספרים מצטברים בלבד; `MEASURE_OUT=<קובץ>` מוסיף אותם גם לקובץ | `OTZARIA_PERSONAL_DB` ו־`OTZARIA_DB` |

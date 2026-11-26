@@ -19,6 +19,7 @@ export type ErrorCode =
   | "db/book-too-large"
   | "db/compressed-unknown-dictionary"
   | "db/dictionary-conflict"
+  | "db/dictionary-mismatch"
   | "db/dictionary-too-large"
   | "db/not-sqlite"
   | "db/wal"

@@ -47,7 +47,7 @@ export class DbBookSource implements BookSource {
   private titleToId: Map<string, number> | null = null;
 
   static async open(id: string, label: string, src: ByteSource): Promise<DbBookSource> {
-    const reader = await OtzariaDbReader.open(src);
+    const reader = await OtzariaDbReader.open(src, label);
     // the reader holds the database's dictionaries in the worker's pool: a failure past this point must release them,
     // or they stay there (and can make a dictionary id conflicted) for the rest of the session (Issue #41 C3)
     try {

@@ -1,11 +1,20 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { zstdCompressSync } from "node:zlib";
+import { createHash } from "node:crypto";
+import { constants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import initSqlJs from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LinkerError } from "../../../src/core/errors";
 import { stripNikud } from "../../../src/core/text/hebrew";
-import { DictionaryPool, LineContentCodec, dictionaryId, frameHeader, isZstdFrame } from "../../../src/database/compression/zstd";
+import {
+  DictionaryPool,
+  LineContentCodec,
+  OFFICIAL_DICTIONARY_SHA256,
+  dictionaryFingerprint,
+  dictionaryId,
+  frameHeader,
+  isZstdFrame,
+} from "../../../src/database/compression/zstd";
 import { detectKind } from "../../../src/sources/detect";
 import { SourceRegistry } from "../../../src/sources/registry";
 
@@ -114,5 +123,106 @@ describe("zstd dictionaries shared across open databases and files", () => {
     const res = await new SourceRegistry().open([{ path: "otzaria.dict", blob: new Blob([new Uint8Array(dict)]) }]);
     expect(res.dictionaries).toEqual([{ path: "otzaria.dict", id: 32768 }]);
     expect(res.skipped).toEqual([]);
+  });
+});
+
+describe("dictID is not identity: a dictionary is bound to its source and fingerprint (B19, issue #41)", () => {
+  const enc = new TextEncoder();
+  const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+  /* A second dictionary with the SAME dictID 32768 and different content, like the personal database v52 next to
+     seforim.db (docs/research/PERSONAL_DB_V52_AUDIT.md §7). It is the official one with its raw-content tail changed
+     (the part frames copy matches from): a valid dictionary that decodes most real frames to wrong text, silently. */
+  const sameIdOther = () => {
+    const o = dict.slice();
+    for (let i = o.length - 200_000; i < o.length; i++) o[i] = o[i]! ^ 0x5a;
+    return o;
+  };
+  const blobs = () => rows.map((r) => r.content).filter((c): c is Uint8Array => c instanceof Uint8Array);
+  const reference = (frame: Uint8Array) => zstdDecompressSync(frame, { dictionary: dict } as never).toString("utf8");
+
+  it("the official dictionary's fingerprint is pinned, and the worker's SHA-256 agrees with Node's", () => {
+    expect(sha(dict)).toBe(OFFICIAL_DICTIONARY_SHA256);
+    expect(dictionaryFingerprint(dict)).toBe(sha(dict));
+    const other = sameIdOther();
+    expect(dictionaryId(other)).toBe(32768);
+    expect(dictionaryFingerprint(other)).toBe(sha(other));
+  });
+
+  it("a database without its own dictionary never borrows a different dictionary that only shares the dictID", () => {
+    const pool = new DictionaryPool();
+    new LineContentCodec([sameIdOther()], pool, "v52.db"); // only the other database is open
+    const personal = new LineContentCodec([], pool);
+    const outcomes = new Set(blobs().map((b) => codeOf(() => personal.decode(b))));
+    expect([...outcomes]).toEqual(["db/compressed-unknown-dictionary"]);
+    expect(() => personal.decode(blobs()[0]!)).toThrow(/v52\.db/); // names the open database whose dictionary differs
+  });
+
+  it("it borrows the official dictionary even when another database brought a different one with the same id", () => {
+    const pool = new DictionaryPool();
+    new LineContentCodec([sameIdOther()], pool, "v52.db");
+    new LineContentCodec([dict], pool, "seforim.db");
+    const personal = new LineContentCodec([], pool);
+    for (const b of blobs()) expect(personal.decode(b)).toBe(reference(b));
+  });
+
+  it("a database with its own dictionary always uses its own, whatever the pool holds", () => {
+    const pool = new DictionaryPool();
+    new LineContentCodec([dict], pool, "seforim.db");
+    const other = sameIdOther();
+    const v52 = new LineContentCodec([other], pool, "v52.db");
+    const text = blobs().slice(0, 50).map(reference).join("\n");
+    expect(v52.decode(new Uint8Array(zstdCompressSync(enc.encode(text), { dictionary: other } as never)))).toBe(text);
+    const official = new LineContentCodec([dict], pool);
+    for (const b of blobs().slice(0, 50)) expect(official.decode(b)).toBe(reference(b));
+  });
+
+  it("a dictionary file the user opened may be borrowed; when it is the wrong one, a line is a coded error, never wrong text", () => {
+    const pool = new DictionaryPool();
+    pool.add(sameIdOther(), "wrong.dict"); // a file: an explicit association by the user
+    const personal = new LineContentCodec([], pool);
+    let mismatches = 0;
+    for (const b of blobs()) {
+      const outcome = codeOf(() => personal.decode(b));
+      if (outcome === "none") expect(personal.decode(b)).toBe(reference(b)); // frames that never reach the changed part
+      else {
+        expect(outcome).toBe("db/dictionary-mismatch");
+        mismatches++;
+      }
+    }
+    expect(mismatches).toBeGreaterThan(0);
+  });
+
+  it("a frame with a content checksum decoded with the wrong dictionary is a coded error", () => {
+    const other = sameIdOther();
+    const v52 = new LineContentCodec([other], new DictionaryPool());
+    // a real line that the other dictionary decodes to different text when the frame has no checksum
+    const text = blobs().map(reference).find((t) => {
+      const plain = zstdCompressSync(enc.encode(t), { dictionary: dict } as never);
+      return zstdDecompressSync(plain, { dictionary: other } as never).toString("utf8") !== t;
+    })!;
+    const checked = new Uint8Array(zstdCompressSync(enc.encode(text), { dictionary: dict, params: { [constants.ZSTD_c_checksumFlag]: 1 } } as never));
+    expect(checked[4]! & 4).toBe(4); // Content_Checksum_flag
+    expect(codeOf(() => v52.decode(checked))).toBe("db/compressed-corrupt");
+  });
+
+  it("garbled compressed data is a coded error, not a raw decoder failure", () => {
+    const own = new LineContentCodec([dict], new DictionaryPool());
+    const bad = blobs().reduce((a, b) => (b.length > a.length ? b : a)).slice(); // the longest real frame
+    expect(bad.length).toBeGreaterThan(100);
+    for (let i = 12; i < bad.length; i++) bad[i] = bad[i]! ^ 0x33; // the header (dictID, size) stays intact
+    expect(codeOf(() => own.decode(bad))).toBe("db/compressed-corrupt");
+  });
+
+  it("opening and closing the official database again and again: its dictionary is lent only while it is open", () => {
+    const pool = new DictionaryPool();
+    const personal = new LineContentCodec([], pool);
+    const b = blobs()[3]!;
+    for (let i = 0; i < 3; i++) {
+      const official = new LineContentCodec([dict], pool, "seforim.db");
+      expect(personal.decode(b)).toBe(reference(b));
+      official.release();
+      expect(pool.get(32768)).toBeUndefined();
+      expect(codeOf(() => personal.decode(b))).toBe("db/compressed-unknown-dictionary");
+    }
   });
 });
