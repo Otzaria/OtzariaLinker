@@ -2,8 +2,8 @@
  * Component styles. Colours come only from tokens.css. Layout: an app bar on top, then either the
  * home screen or the workspace grid (columns from the layout state), notices bottom-left.
  */
-@font-face { font-family: "OtzariaFrank"; src: url("./fonts/FrankRuehlCLM-Medium.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: "OtzariaRashi"; src: url("./fonts/NotoRashiHebrew-VariableFont_wght.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "OtzariaFrank"; src: url("./fonts/FrankRuehlCLM-Medium.woff") format("woff"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "OtzariaRashi"; src: url("./fonts/NotoRashiHebrew-VariableFont_wght.woff") format("woff"); font-weight: 100 900; font-display: swap; }
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
