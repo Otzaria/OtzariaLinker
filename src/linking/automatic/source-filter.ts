@@ -254,17 +254,17 @@ export class LineGate {
     return this.permitted.has(line) || (this.filter.mode === "exclude" && !this.seen.has(line));
   }
 
-  /** The line of a suggestion in the filtered book (the record may run the other way: dibur-hamatchil writes base → commentary); null when neither side is it. */
-  lineOf(s: Suggestion): number | null {
-    return s.source.book.key === this.bookKey ? s.source.line : s.target.book.key === this.bookKey ? s.target.line : null;
+  /**
+   * The lines of a suggestion in the filtered book (the record may run the other way: dibur-hamatchil writes base → commentary); both
+   * when both sides are in it — an internal reference, "לעיל" or "לקמן" (V7 PR2 review, finding 6) — and none when neither side is.
+   */
+  linesOf(s: Suggestion): number[] {
+    return [s.source, s.target].filter((side) => side.book.key === this.bookKey).map((side) => side.line);
   }
 
   /** Stage 5: drops every suggestion (and unmatched line) of a line the filter does not permit, and says how many. */
   guard(r: EngineResult): EngineResult {
-    const kept = r.suggestions.filter((s) => {
-      const line = this.lineOf(s);
-      return line === null || this.allows(line);
-    });
+    const kept = r.suggestions.filter((s) => this.linesOf(s).every((line) => this.allows(line)));
     const dropped = r.suggestions.length - kept.length;
     const unmatched = r.unmatched.filter((u) => this.allows(u.line));
     if (!dropped && unmatched.length === r.unmatched.length) return r;

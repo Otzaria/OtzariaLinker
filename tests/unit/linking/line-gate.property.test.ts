@@ -145,6 +145,13 @@ describe("LineGate — the guard alone", () => {
     expect(r.notes[0]!.text).toContain("3");
   });
 
+  // V7 PR2 review, finding 6: an internal reference ("לעיל", "לקמן") has both sides in the filtered book; each side is a line of it
+  it("a suggestion with both sides in the filtered book is kept only when both lines are permitted", () => {
+    const internal = (from: number, to: number): Suggestion => ({ ...sug(from), id: `i${from}>${to}`, target: { book: COMM, line: to } });
+    const r = gate().guard({ suggestions: [internal(4, 1), internal(4, 2), internal(1, 2), internal(2, 4)], notes: [], unmatched: [] });
+    expect(r.suggestions.map((s) => `${s.source.line}>${s.target.line}`)).toEqual(["4>1"]);
+  });
+
   it("a suggestion of another book is not the gate's to judge", () => {
     const other = { ...sug(2), source: { book: NOTES, line: 2 } };
     expect(gate().guard({ suggestions: [other], notes: [], unmatched: [] }).suggestions).toHaveLength(1);
