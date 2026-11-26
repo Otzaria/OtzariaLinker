@@ -415,3 +415,40 @@ test("repository: the source is named, an unread book is unknown (not 0) in the 
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
+
+
+/*
+ * V7 §3.14, accessible and useful: the map has a text alternative — a list of the same neighbours with what ties each to the
+ * book — that a screen reader is pointed to, and the keyboard's way through the map: a neighbour in the same database opens
+ * its own details.
+ */
+test("repository: the relation map in words, by keyboard, and a neighbour's details from it", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
+  await expect(dlg.getByText(/זוגות הוצעו מתוך/)).toBeVisible();
+  await dlg.getByLabel("חיפוש ספר").fill("ארצות החיים");
+  await dlg.locator(".repo-book", { hasText: "6 קישורים" }).first().getByRole("button", { name: /^פרטי הספר/ }).click();
+  const detail = dlg.getByRole("region", { name: /^פרטי הספר ארצות החיים/ });
+  await expect(detail).toContainText("6", { timeout: 30_000 });
+  // opened from the keyboard
+  await detail.getByText("מפת הקשרים של הספר").focus();
+  await page.keyboard.press("Enter");
+  const map = detail.getByRole("img", { name: /^ארצות החיים ו/ });
+  await expect(map).toBeVisible();
+  const list = detail.getByRole("list", { name: "הספרים שבמפה" });
+  // the same neighbours as the drawing, each in words; the drawing points to the list
+  await expect(list.getByRole("listitem")).toHaveCount(await map.locator("g").count());
+  expect(await map.getAttribute("aria-describedby")).toBe(await list.getAttribute("id"));
+  await expect(list.getByRole("listitem").filter({ hasText: "המאיר לארץ על ארצות החיים" })).toContainText("מוצע כמפרש שלו");
+  const go = list.getByRole("button", { name: "מעבר לפרטי הספר המאיר לארץ על ארצות החיים" });
+  await go.focus();
+  await page.keyboard.press("Enter");
+  await expect(dlg.getByRole("region", { name: /^פרטי הספר המאיר לארץ על ארצות החיים/ })).toBeVisible();
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
