@@ -395,3 +395,33 @@ describe("the library's link-file list is a hint (a warning), not a hold", () =>
     expect(validateLink(link(), { ...snap, libraryMayHaveFile: () => true }).map((x) => x.code)).not.toContain("export/library-file-snapshot");
   });
 });
+
+/*
+ * V7 live test 17 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md, finding א): in Otzaria 0.9.98.3 a links file whose target book is
+ * not in the user's library is refused WHOLE (importFiles is atomic) — the valid links of the file too. The tool cannot know
+ * the user's personal folder, so a private export says it once per target book that is the user's own text book.
+ */
+describe("private use: a target that is the user's own text book (live test 17)", () => {
+  const MINE = book("ספר שלי");
+  const OTHER = book("ספר אחר שלי");
+  const priv: ValidationContext = { ...ctx, purpose: "private", personalImportSide: (b) => (b === MINE || b === OTHER ? "personal" : "other") };
+  const codes = (ls: Link[], c: ValidationContext = priv) => [...validateExport(ls, c).values()].flat().map((p) => `${p.severity}:${p.code}`);
+  it("is warned: the whole file is refused if the book is not in the personal folder", () => {
+    const l = link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" });
+    expect(codes([l])).toContain("warning:export/private-target-must-exist");
+    const p = validateLink(l, priv).find((x) => x.code === "export/private-target-must-exist")!;
+    expect(p.message).toContain("ספר אחר שלי");
+    expect(p.message).toContain("כל קובץ הקישורים");
+  });
+  it("not for a library target, and not for the library purpose", () => {
+    expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: SEF, line: 2 }, declaredType: "commentary", ref2: "Genesis 1:2" })])).not.toContain("warning:export/private-target-must-exist");
+    expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" })], { ...ctx, personalImportSide: priv.personalImportSide })).not.toContain("warning:export/private-target-must-exist");
+  });
+});
+
+describe("the INLINE_LINKER note says the whole file is refused by a version without it (live test 16)", () => {
+  it("names the whole links file", async () => {
+    const { inlineLinkerVersionNote } = await import("../../../src/core/links/connection-type");
+    expect(inlineLinkerVersionNote()).toContain("כל קובץ הקישורים");
+  });
+});

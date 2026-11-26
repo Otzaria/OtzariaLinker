@@ -224,6 +224,11 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
       else if (where === "other")
         add("warning", "export/private-title-in-library", `בספרייה הרשמית של אוצריא יש ספר בשם "${side.book.title}", ו"${side.book.title}" שפתחתם הוא ספר ממסד אישי. ייבוא אישי באוצריא מחפש קודם בספרייה, ולכן הקישור יתחבר לספר שבספרייה, במספרי השורות של הספר שלכם. תנו לספר במסד שלכם שם אחר.`, "user_content_importer.dart: personal and official books before attached databases");
     }
+  // V7 live test 17 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md, finding א, Otzaria 0.9.98.3): a target book the user's library
+  // does not have makes the personal import refuse the WHOLE links file (importFiles is atomic). The tool cannot see the user's
+  // personal folder, so the user's own text book as a target is named once per link, with the consequence.
+  if (ctx.purpose === "private" && t.book.title !== s.book.title && ctx.personalImportSide?.(t.book) === "personal")
+    add("warning", "export/private-target-must-exist", `הספר "${t.book.title}" הוא ספר שלכם. בייבוא האישי של אוצריא הוא חייב להיות כבר בתיקיית הספרים האישיים — אחרת אוצריא דוחה את כל קובץ הקישורים של "${s.book.title}", גם את הקישורים התקינים שבו. ייבאו קודם את "${t.book.title}" לאוצריא.`);
   if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
 
   // The generator accepts an empty heRef_2, but the library's weekly sync rejects a blank one
