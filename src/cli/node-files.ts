@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, openAsBlob, readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, openAsBlob, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { LinkerError } from "../core/errors";
 import { safeUnzip } from "../sources/archives/safe-unzip";
@@ -18,6 +18,47 @@ export interface RepoFiles {
   paths: string[];
   input(path: string): Promise<InputFile>;
   text(path: string): Promise<string>;
+}
+
+/**
+ * A file as a Blob read lazily through a descriptor opened "r" (readSync at each slice), like the File the browser gives the app.
+ * NOT fs.openAsBlob for the database: in Node 24 on Windows it reports the size of a file over 4 GiB modulo 2^32 and every slice
+ * past that is empty — the official seforim.db (4,769,005,568 bytes) came out as 474,038,272 bytes and "damaged" (V7 round 2,
+ * item 8: found on the first run against the real database; the same bug tests/validation/env.ts fileBlob works around).
+ * `close` releases the descriptor; reading after it fails.
+ */
+export function fileBlob(path: string): { blob: Blob; close: () => void } {
+  const fd = openSync(path, "r");
+  const size = fstatSync(fd).size;
+  const part = (from: number, to: number): Blob => {
+    const read = (): Uint8Array<ArrayBuffer> => {
+      const buf = new Uint8Array(to - from);
+      let done = 0;
+      while (done < buf.length) {
+        const n = readSync(fd, buf, done, buf.length - done, from + done);
+        if (!n) break;
+        done += n;
+      }
+      return done === buf.length ? buf : buf.slice(0, done);
+    };
+    const blob = {
+      size: to - from,
+      type: "",
+      arrayBuffer: async () => read().buffer,
+      bytes: async () => read(),
+      text: async () => new TextDecoder().decode(read()),
+      stream: () => new Blob([read()]).stream(),
+      // Blob.slice semantics: negative positions count from the end, and the range is clamped
+      slice: (start = 0, end = to - from) => {
+        const len = to - from;
+        const at = (v: number) => Math.max(0, Math.min(len, v < 0 ? len + v : v));
+        const s = at(start);
+        return part(from + s, from + Math.max(s, at(end)));
+      },
+    };
+    return blob as unknown as Blob;
+  };
+  return { blob: part(0, size), close: () => closeSync(fd) };
 }
 
 const SKIP_DIR = (name: string) => name.startsWith(".") || name === "node_modules";

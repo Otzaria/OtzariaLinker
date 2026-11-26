@@ -261,6 +261,21 @@ describe("the runner refuses what would overwrite or write into the repository",
     expect(r.err).toMatch(/המאגר נמצא בתוכה/);
   });
 
+  // found on the real clone of zmanenu-library (V7 round 2, item 8): the report said "one file was not opened" and not which or why —
+  // the notice's details (the file and the reason) were dropped
+  it("a notice's details reach the report: which file was not opened, and why", async () => {
+    const dir = fresh("notdb");
+    const bad = join(dir, "seforim.db");
+    writeFileSync(bad, "not a database at all");
+    const r = await cli(["--repo", ZMANENU, "--db", bad, "--dry-run", "--json"]);
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(r.out) as RunReport;
+    const n = rep.notices.find((x) => /לא נפתח/.test(x.text));
+    expect(n?.details?.join(" ")).toMatch(/seforim\.db/);
+    const text = await cli(["--repo", ZMANENU, "--db", bad, "--dry-run"]);
+    expect(text.out).toMatch(/seforim\.db: /);
+  });
+
   it("wrong arguments exit with 2 and the usage", async () => {
     expect((await cli([])).code).toBe(2);
     expect((await cli(["--repo", ZMANENU])).code).toBe(2); // neither --out nor --dry-run

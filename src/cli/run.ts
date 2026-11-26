@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, openAsBlob, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { booksService } from "../app/books-service";
 import { sourceIdOfBookKey } from "../core/books";
@@ -14,7 +14,7 @@ import { loadPreferences } from "../state/preferences";
 import type { InputFile } from "../state/services";
 import { AppStore } from "../state/store";
 import { inProcessCall, sourcesHandlers } from "../workers/sources-handlers";
-import { openRepo } from "./node-files";
+import { fileBlob, openRepo } from "./node-files";
 
 /*
  * The folder-repository runner (V7 §4.16, #46; docs/HEADLESS.md). It drives the SAME code the app runs — the store, the guided
@@ -24,7 +24,8 @@ import { openRepo } from "./node-files";
  * produced file goes in it (headless/repo-layout.ts), and writes into --out.
  *
  * Safety, enforced here and asserted by tests/integration/cli/:
- *   • read only: the repository and the database are opened with fs.openAsBlob (the lazy reader reads the database by slices);
+ *   • read only: the repository is opened with fs.openAsBlob, the database through a descriptor opened "r" (node-files.ts fileBlob;
+ *     the lazy reader reads it by slices);
  *   • nothing is written outside --out, and --out may not be the repository or inside it;
  *   • nothing is overwritten: --out must be empty or new, and every file is created with the "wx" flag;
  *   • a dry run writes only the report.
@@ -85,13 +86,23 @@ export interface RunReport {
   /** the repository's links files the run would write back exactly as they are (not written) */
   unchanged: string[];
   /** what the store told the user on the way (warnings and errors) */
-  notices: { kind: string; text: string }[];
+  notices: { kind: string; text: string; details?: string[] }[];
 }
 
 export const REPORT_JSON = "linker-report.json";
 export const REPORT_TXT = "linker-report.txt";
 
 export async function runRepository(o: RunOptions): Promise<{ report: RunReport; files: OutputFile[] }> {
+  // the database through a descriptor, never fs.openAsBlob (node-files.ts fileBlob: a file over 4 GiB came out "damaged"); closed at the end
+  const db = o.db && existsSync(o.db) && statSync(o.db).isFile() ? fileBlob(resolve(o.db)) : null;
+  try {
+    return await run(o, db?.blob ?? null);
+  } finally {
+    db?.close();
+  }
+}
+
+async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunReport; files: OutputFile[] }> {
   const out = o.out ? checkOut(o.repo, o.out) : null;
   if (!out && !o.dryRun) throw new LinkerError("repo/bad-args", "חסר --out: תיקייה ריקה שאליה ייכתבו הקבצים. הכלי לעולם אינו כותב לתוך המאגר. להרצה בלי כתיבה, הוסיפו --dry-run.");
   if (o.db && !existsSync(o.db)) throw new LinkerError("repo/not-found", `מסד הספרים "${o.db}" לא נמצא. תנו את הנתיב ל־seforim.db של אוצריא.`, { path: o.db });
@@ -107,7 +118,7 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
   const notices: RunReport["notices"] = [];
   const seenNotice = new Set<number>();
   store.notices.subscribe((list) => {
-    for (const n of list) if (!seenNotice.has(n.id)) (seenNotice.add(n.id), n.kind !== "success" && n.kind !== "info" && notices.push({ kind: n.kind, text: n.text }));
+    for (const n of list) if (!seenNotice.has(n.id)) (seenNotice.add(n.id), n.kind !== "success" && n.kind !== "info" && notices.push({ kind: n.kind, text: n.text, ...(n.details?.length && { details: [...n.details] }) }));
   });
 
   // the books' existing links files: loaded into the project (so "exists" and the merged file are the app's), unless the official
@@ -129,7 +140,7 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
   const g = store.guided;
   g.start();
   if (selected.length) await g.addBooks([...(await Promise.all(selected.map((b) => repo.input(b.path)))), ...imports]);
-  if (o.db) await g.addBases([{ path: o.db.split(/[\\/]/).at(-1)!, blob: await openAsBlob(resolve(o.db)) }]);
+  if (o.db && dbBlob) await g.addBases([{ path: o.db.split(/[\\/]/).at(-1)!, blob: dbBlob }]);
   if (o.methods?.length) g.setMethods(new Set(o.methods));
   const repoSources = new Set(g.bookSources.value);
   const plan = g.plan.value;
@@ -349,7 +360,11 @@ export function reportText(r: RunReport): string {
   if (r.notices.length) {
     L.push("");
     L.push("הודעות:");
-    for (const n of r.notices.slice(0, 100)) L.push(`  [${n.kind}] ${n.text}`);
+    for (const n of r.notices.slice(0, 100)) {
+      L.push(`  [${n.kind}] ${n.text}`);
+      for (const d of (n.details ?? []).slice(0, 20)) L.push(`    ${d}`);
+      if ((n.details?.length ?? 0) > 20) L.push(`    … ועוד ${n.details!.length - 20} (בדוח ה־JSON)`);
+    }
   }
   L.push("");
   L.push("המאגר לא שונה. כדי להחיל: העתיקו את הקבצים מתיקיית הפלט אל אותם נתיבים במאגר, ובדקו את ה־diff לפני commit.");
