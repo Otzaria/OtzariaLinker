@@ -34,16 +34,24 @@ describe("SourceRegistry: a file opens once", () => {
     expect(res.reused).toHaveLength(1);
   });
 
-  // V7 §1.6 / #42 C29: this test said the opposite before — a byte-identical copy under another name (or the same file
-  // touched) was loaded as a second source, every book listed twice. The identity is now the content, not the name.
-  it("a byte-identical copy under another name, or with another last-modified time, is the same database", async () => {
+  // V7 §1.6 / #42 C29: this test said the opposite before — a byte-identical copy under another name was loaded as a second
+  // source, every book listed twice. The identity is now the content and the last-modified time, not the name (a copy made in
+  // the file manager keeps the time).
+  it("a byte-identical copy under another name is the same database", async () => {
     const r = new SourceRegistry();
     const first = await r.open([DB()]);
     const copy = await r.open([DB("copy.db")]);
     expect(copy.sources).toEqual([]);
     expect(copy.reused![0]!.info.id).toBe(first.sources[0]!.info.id);
     expect(copy.reused![0]!.as).toBe("copy.db");
-    expect((await r.open([DB("seforim.db", 1_800_000_000_000)])).sources).toEqual([]);
+  });
+
+  // V7 PR1 review, finding 6: in WAL mode SQLite does not bump the header's change counter on every commit, so a database
+  // changed in place (same size, the change outside the samples) looked "already open" without the last-modified time
+  it("the same bytes with another last-modified time are another state of the file: opened again", async () => {
+    const r = new SourceRegistry();
+    await r.open([DB()]);
+    expect((await r.open([DB("seforim.db", 1_800_000_000_000)])).sources).toHaveLength(1);
   });
 
   it("the same name and size with other content is another database, also when only the middle differs", async () => {

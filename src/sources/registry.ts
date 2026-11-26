@@ -506,7 +506,10 @@ async function fileIdentity(f: InputFile): Promise<string> {
   const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) joined.set(p, at), (at += p.length);
-  return `${size}|${hex}|${sha256Hex(joined)}`;
+  // the last-modified time too (V7 PR1 review, finding 6): a WAL database changed in place may keep its size, header and samples;
+  // a copy made in the file manager keeps the time, so it is still recognised
+  const modified = (f.blob as Partial<File>).lastModified;
+  return `${size}|${modified ?? ""}|${hex}|${sha256Hex(joined)}`;
 }
 
 /** A CR byte not followed by LF (a lone CR, #41 B10); the last byte of a cut head is not judged. */
