@@ -42,3 +42,36 @@ describe("planMaxLink — a base chosen between books of the same title", () => 
     expect(stepsSignature(named)).not.toContain("amb");
   });
 });
+
+/*
+ * #42 C12: sharesTitle compared exact titles only, so the official "ברכות" and a personal "מסכת ברכות" — the same tractate under an
+ * equivalent name — gave no flag; and a source the user chose turned the flag off even when that source holds no edition of the base
+ * and so decided nothing. Equivalent names count only for telling that there are several editions: the base is still written to
+ * the file under its own exact title (AGENTS.md §3).
+ */
+describe("planMaxLink — editions under equivalent titles (#42 C12)", () => {
+  const eq = [book("s1:103", "ברכות", "otzaria", { lineCount: 2875 }), book("s2:9386", "מסכת ברכות", "personal", { lineCount: 2779 }), book("s3:1", "ספר נר על ברכות", "personal", { lineCount: 639 })];
+
+  it("official 'ברכות' and personal 'מסכת ברכות' are two editions: flagged", () => {
+    const p = planMaxLink({ selected: ["s3:1"], library: eq, singleEngines: [] });
+    expect(pairs(p).length).toBeGreaterThan(0);
+    expect(pairs(p).every((s) => s.kind === "pair" && s.ambiguousBase === true && s.target.title === "ברכות")).toBe(true);
+    expect(p.books[0]!.decisions.join(" ")).toContain("מסכת ברכות");
+  });
+
+  it("a chosen source that holds no edition of the base decides nothing: still flagged", () => {
+    const p = planMaxLink({ selected: ["s3:1"], library: eq, singleEngines: [], preferSource: "s9" });
+    expect(pairs(p).every((s) => s.kind === "pair" && s.ambiguousBase === true)).toBe(true);
+  });
+
+  it("a chosen source that holds the edition decides: no flag, and that edition is the base", () => {
+    const p = planMaxLink({ selected: ["s3:1"], library: eq, singleEngines: [], preferSource: "s2" });
+    expect(pairs(p).every((s) => s.kind === "pair" && s.ambiguousBase === undefined && s.target.key === "s2:9386")).toBe(true);
+  });
+
+  it("another corpus under the same key ('משנה ברכות') is another book, not an edition: no flag", () => {
+    const lib2 = [book("s1:103", "ברכות", "otzaria"), book("s1:200", "משנה ברכות", "otzaria"), book("s3:1", "ספר נר על ברכות", "personal")];
+    const p = planMaxLink({ selected: ["s3:1"], library: lib2, singleEngines: [] });
+    expect(pairs(p).every((s) => s.kind === "pair" && s.ambiguousBase === undefined)).toBe(true);
+  });
+});

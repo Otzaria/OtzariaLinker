@@ -1,6 +1,6 @@
 import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
-import { pairOne, resolveBaseKey, titleIndex } from "./batch";
+import { editionKey, pairOne, resolveBaseKey, titleIndex } from "./batch";
 import { notesBaseTitle } from "./plan";
 
 /*
@@ -146,9 +146,10 @@ export function discoverPairs(books: readonly DiscoveryBook[], options: Discover
         byLinks = true;
       }
     }
-    // another book with the base's very title: a name alone cannot say which one the commentary is on (v52: "ברכות" is a personal book and
-    // an official one; the book's 556 links reach lines the personal book does not have)
-    const sameTitle = books.filter((x) => x.key !== base.key && x.key !== dep.key && x.title.trim() === base.title.trim());
+    // another book with the base's very title, or an equivalent one ("מסכת ברכות"; #42 C12): a name alone cannot say which one the
+    // commentary is on (v52: "ברכות" is a personal book and an official one; the book's 556 links reach lines the personal book does not have)
+    const edition = editionKey(base.title);
+    const sameTitle = books.filter((x) => x.key !== base.key && x.key !== dep.key && editionKey(x.title) === edition);
     const toBase = dep.linkedKeys?.[base.key] ?? dep.linkedTo?.[base.title];
     const keyConfirmed = (dep.linkedKeys?.[base.key] ?? 0) > 0;
     const titleOnly = sameTitle.length > 0 && !keyConfirmed;

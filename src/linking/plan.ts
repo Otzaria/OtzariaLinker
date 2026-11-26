@@ -5,7 +5,7 @@ import type { BookRef } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle, isMergeableCompanionTitle, normalizeTitle, titleCorpus, titleDeclaresDependencyOn } from "../core/links/titles";
 import { parseConnectionType } from "../core/links/connection-type";
 import { ENGINES, type EngineId } from "./automatic";
-import { pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
+import { editionKey, editionText, pairOne, resolveBaseKey, titleIndex, type TitleIndex } from "./batch";
 import { commentatorOfTitle } from "./automatic/dibur-hamatchil/addressee";
 
 /*
@@ -1053,10 +1053,18 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (touching.length) relations.set(b.key, touching);
   }
 
-  // a base whose exact title another open book has too, chosen by a rule and not by the user (a pair with its key, or the source for the bases)
-  const titleCopies = new Map<string, number>();
-  for (const b of input.library) titleCopies.set(b.title.trim(), (titleCopies.get(b.title.trim()) ?? 0) + 1);
-  const sharesTitle = (rel: Relation): boolean => rel.via !== "user" && !input.preferSource && (titleCopies.get(rel.base.title.trim()) ?? 0) > 1;
+  // a base another open book is an edition of too (the same title, or an equivalent one: "ברכות" / "מסכת ברכות"; #42 C12), chosen by
+  // a rule and not by the user. The user decides with a pair with its key, or with the source for the bases — but only when that source
+  // holds exactly this one edition: a chosen source without an edition of the base decides nothing.
+  const editions = new Map<string, PlanBook[]>();
+  for (const b of input.library) pushTo(editions, editionKey(b.title), b);
+  const sharesTitle = (rel: Relation): boolean => {
+    if (rel.via === "user") return false;
+    const all = editions.get(editionKey(rel.base.title)) ?? [];
+    if (all.length < 2) return false;
+    const inPreferred = input.preferSource ? all.filter((b) => sourceIdOfBookKey(b.key) === input.preferSource) : [];
+    return !(inPreferred.length === 1 && inPreferred[0]!.key === rel.base.key);
+  };
   const steps: PlanStep[] = [];
   const unsuitable: PlanUnsuitable[] = [];
   const unsuitableSeen = new Set<string>();
@@ -1152,8 +1160,12 @@ export function planMaxLink(input: PlanInput): MaxLinkPlan {
     if (comm.length) decisions.push(comm.length === 1 ? `פירוש פתוח אחד כתוב עליו: ${quote(comm[0]!.dependant.title)}.` : `${comm.length} פירושים פתוחים כתובים עליו.`);
     if (notes.length) decisions.push(notes.length === 1 ? `יש לו ספר הערות פתוח: ${quote(notes[0]!.dependant.title)}.` : `יש לו ${notes.length} ספרי הערות פתוחים.`);
     for (const r of onIt) if (r.kind === "mishnah-in-talmud") decisions.push(`המשנה ${quote(r.dependant.title)} מובאת בו, וקישוריה נבדקים לפי דיבור המתחיל.`);
-    const shared = [...new Set(steps.filter((st) => st.kind === "pair" && st.ambiguousBase && st.source.key === k).map((st) => (st.kind === "pair" ? st.target.title : "")))];
-    for (const t of shared) decisions.push(`יש עוד ספר בשם ${quote(t)}, והבסיס נבחר לפי כלל (המקור של הספר, או המאגר הרשמי) ולא לפי ראיה. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו במפורש את הספר (בחירת מקור לספרי הבסיס, או זוג עם הספר עצמו).`);
+    const shared = new Map<string, BookRef>();
+    for (const st of steps) if (st.kind === "pair" && st.ambiguousBase && st.source.key === k) shared.set(st.target.key, st.target);
+    for (const t of shared.values()) {
+      const others = (editions.get(editionKey(t.title)) ?? []).filter((x) => x.key !== t.key);
+      decisions.push(`יש עוד ספר בשם ${quote(t.title)} או בשם שקול (${others.map(editionText).join("; ")}), והבסיס נבחר לפי כלל (המקור של הספר, או המאגר הרשמי) ולא לפי ראיה. ההצעות מולו לא יהיו מעל "אפשרית" עד שתבחרו במפורש את הספר (בחירת מקור לספרי הבסיס, או זוג עם הספר עצמו).`);
+    }
     if (own && own.kind === "commentary" && (isTargum(b) || owns.some((r) => r.dependence === "targum")) && enabled("dibur-hamatchil")) decisions.push("זה תרגום: שורותיו אינן נפתחות בדיבור המתחיל, ולכן רק שיטת הכותרות רצה עליו.");
     // a pair the user asked for that could not be made, said even when the book's other pairs were made
     const missed = unmade.get(k);

@@ -45,6 +45,13 @@ export function titleIndex(bases: readonly BookRef[], prefer?: string): TitleInd
 
 export type BaseResolution = { target: BookRef; note?: string; undecided?: readonly BookRef[] } | { reason: string };
 
+/**
+ * Two titles that name the same book in the library's naming ("ברכות", "מסכת ברכות", "תלמוד בבלי ברכות"; but not "משנה ברכות"):
+ * the base-title key and the corpus. ONLY for telling that a base is open in several editions (#42 C12): book names are still
+ * matched and written exactly for the generator (AGENTS.md §3).
+ */
+export const editionKey = (title: string): string => `${titleCorpus(title)}|${baseTitleKey(title)}`;
+
 const ORIGIN_TEXT: Readonly<Record<BookRef["origin"], string>> = { otzaria: "המאגר הרשמי", sefaria: "המאגר הרשמי (ספריא)", personal: "ספר אישי", unknown: "מקור לא ידוע" };
 
 /**
