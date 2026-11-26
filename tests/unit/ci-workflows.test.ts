@@ -116,7 +116,7 @@ describe("scripts/ci/skipped-tests.mjs", () => {
     return p;
   };
   const run = (reports: string[], env: Record<string, string | undefined> = {}) => {
-    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(OTZARIA_|V52_|GITHUB_STEP_SUMMARY$)/.test(k)));
+    const clean = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(OTZARIA_|V52_|V7_|TITLE_FIT_|SOME_FLAG$|GITHUB_STEP_SUMMARY$)/.test(k)));
     return spawnSync(process.execPath, ["scripts/ci/skipped-tests.mjs", ...reports], { encoding: "utf8", env: { ...clean, ...env } });
   };
   const LOCAL = "tests/integration/database/real-db.local.test.ts";
@@ -132,7 +132,7 @@ describe("scripts/ci/skipped-tests.mjs", () => {
   it("fails when a local-data file skipped although its variable is set", () => {
     const r = run([report({ [LOCAL]: ["skipped"] })], { OTZARIA_DB: "/some/seforim.db" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain(`${LOCAL}: 1 test(s) skipped although its data variables are set`);
+    expect(r.stderr).toContain(`${LOCAL}: 1 test(s) skipped although its gate variables are set`);
   });
 
   it("fails on a skip in a file with no data gate and no explicit skip", () => {
@@ -145,6 +145,46 @@ describe("scripts/ci/skipped-tests.mjs", () => {
     const r = run([report({ "tests/validation/library-texts.test.ts": ["skipped"] })], { OTZARIA_DB: "/x.db" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("needs local data: OTZARIA_LIBRARY not set (set: OTZARIA_DB)");
+  });
+
+  // V7 PR4 review, finding 1: a local test can also wait for a variable that is not a data path (V7_PERF, TITLE_FIT_SAMPLE,
+  // V7_BENCH_OUT). Its skip is expected while that variable is missing, and must still fail once every gate variable is set.
+  it("a skip is expected while any variable of the file's gates is missing, not only the OTZARIA_* ones", () => {
+    const env = { OTZARIA_DB: "/x.db" };
+    const perfDb = run([report({ "tests/integration/database/v7-perf-db.local.test.ts": ["skipped", "skipped"] })], env);
+    expect(perfDb.status, perfDb.stderr).toBe(0);
+    expect(perfDb.stdout).toContain("needs local data: V7_PERF not set (set: OTZARIA_DB)");
+    const titleFit = run([report({ "tests/integration/linking/title-fit.local.test.ts": ["passed", "skipped"] })], env);
+    expect(titleFit.status, titleFit.stderr).toBe(0);
+    expect(titleFit.stdout).toContain("TITLE_FIT_SAMPLE not set");
+    const bench = run([report({ "tests/integration/linking/v7-matching-benchmark.local.test.ts": ["skipped"] })], env);
+    expect(bench.status, bench.stderr).toBe(0);
+    expect(bench.stdout).toContain("V7_BENCH_OUT");
+  });
+
+  it("fails when every gate variable is set and the file still skipped, also for a gate with no OTZARIA_* variable", () => {
+    const perfDb = run([report({ "tests/integration/database/v7-perf-db.local.test.ts": ["skipped"] })], { OTZARIA_DB: "/x.db", V7_PERF: "1" });
+    expect(perfDb.status).toBe(1);
+    expect(perfDb.stderr).toContain("v7-perf-db.local.test.ts: 1 test(s) skipped although its gate variables are set");
+    const perf = run([report({ "tests/integration/state/v7-perf-measure.local.test.ts": ["skipped"] })], { V7_PERF: "1" });
+    expect(perf.status).toBe(1);
+    expect(perf.stderr).toContain("v7-perf-measure.local.test.ts: 1 test(s) skipped although its gate variables are set");
+  });
+
+  it("a variable the file only reads (not in a runIf/skipIf gate) does not excuse a skip", () => {
+    // v52-encyclopedia reads V52_LETTERS for its sample, but runs on OTZARIA_PERSONAL_DB alone
+    const r = run([report({ "tests/integration/linking/footnotes/v52-encyclopedia.local.test.ts": ["skipped"] })], { OTZARIA_PERSONAL_DB: "/v52.db" });
+    expect(r.status).toBe(1);
+  });
+
+  it("reads an explicit `// gated-by:` comment as the file's gate variables", () => {
+    const src = join(dir, "explicit.local.test.ts");
+    writeFileSync(src, `// gated-by: OTZARIA_DB SOME_FLAG\nconst on = check();\ndescribe.runIf(on)("x", () => {});\n`);
+    const missing = run([report({ [src]: ["skipped"] })], { OTZARIA_DB: "/x.db" });
+    expect(missing.status, missing.stderr).toBe(0);
+    expect(missing.stdout).toContain("SOME_FLAG not set (set: OTZARIA_DB)");
+    const all = run([report({ [src]: ["skipped"] })], { OTZARIA_DB: "/x.db", SOME_FLAG: "1" });
+    expect(all.status).toBe(1);
   });
 
   it("fails when a report is missing (the test step did not run)", () => {

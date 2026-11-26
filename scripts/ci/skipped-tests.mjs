@@ -4,10 +4,10 @@
 //   node scripts/ci/skipped-tests.mjs reports/unit.json [reports/integration.json ...]
 //
 // Why (V7 §4.19): the tests that need a large local database (*.local.test.ts, tests/validation/) skip themselves when
-// their OTZARIA_* variable is not set (describe.runIf). That is right on a CI runner that has no database, but a skip must
-// never hide a failure, so:
-//   - each skipped file is listed with the data variables it reads and which of them are not set (log + job summary);
-//   - a *.local.test.ts file that was skipped although ALL its data variables are set fails the step (its gate is broken);
+// their OTZARIA_* variable is not set (describe.runIf), and some also wait for a switch (V7_PERF, TITLE_FIT_SAMPLE,
+// V7_BENCH_OUT). That is right on a CI runner that has no database, but a skip must never hide a failure, so:
+//   - each skipped file is listed with its gate variables (gateVars) and which of them are not set (log + job summary);
+//   - a *.local.test.ts file that was skipped although ALL its gate variables are set fails the step (its gate is broken);
 //     a tests/validation file in that state is a warning (some also wait for VALIDATION_OUT or a cache folder);
 //   - a skipped file that is not data-gated and has no explicit skip in its source (.skip, .todo, skipIf, runIf) fails.
 // The script reads only the JSON reports and the test sources; it changes nothing.
@@ -24,16 +24,50 @@ const SKIPPED = new Set(["skipped", "pending", "todo", "disabled"]);
 const rel = (p) => relative(process.cwd(), p).split(sep).join("/");
 const isLocal = (file) => /\.local\.test\.ts$/.test(file);
 const isValidation = (file) => /(^|\/)tests\/validation\//.test(file);
-const DATA_VAR = /process\.env\.((?:OTZARIA|V52)_[A-Z0-9_]+)/g;
+const ENV_VAR = /process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\])/g;
 // tests/validation/env.ts reads the variables once and exports them under these names
 const ENV_HELPER = { DB: "OTZARIA_DB", LIBRARY: "OTZARIA_LIBRARY", EXTRA_DBS: "OTZARIA_EXTRA_DBS" };
 const EXPLICIT_SKIP = /\.(skip|todo|skipIf|runIf)\s*\(/;
+// a file whose gate the reading below cannot follow names its variables itself: `// gated-by: OTZARIA_DB V7_PERF`
+const GATED_BY = /\/\/\s*gated-by:\s*([A-Za-z0-9_ \t]+)/g;
+const IDENT = /[A-Za-z_$][\w$]*/g;
 
-/** The data variables a test file reads, directly or through tests/validation/env.ts. */
-function dataVars(source) {
-  const vars = new Set([...source.matchAll(DATA_VAR)].map((m) => m[1]));
+/** The argument text of every `.runIf(...)` / `.skipIf(...)` call (balanced parentheses; strings are not special-cased). */
+function gateConditions(source) {
+  const out = [];
+  for (const m of source.matchAll(/\.(?:runIf|skipIf)\s*\(/g)) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const start = i;
+    for (; i < source.length && depth > 0; i++) depth += source[i] === "(" ? 1 : source[i] === ")" ? -1 : 0;
+    out.push(source.slice(start, i - 1));
+  }
+  return out;
+}
+
+/**
+ * The environment variables that gate a test file (V7 PR4 review, finding 1): every variable a runIf/skipIf condition
+ * reads, directly (`process.env.X`), through a top-level `const name = ...` (followed to any depth, e.g.
+ * `const on = !!process.env.V7_PERF && !!path`), or through a name of tests/validation/env.ts. A variable the file only
+ * reads elsewhere (a sample size, an output file) is not a gate. An explicit `// gated-by:` comment replaces the reading.
+ */
+function gateVars(source) {
+  const explicit = [...source.matchAll(GATED_BY)].flatMap((m) => m[1].trim().split(/\s+/)).filter(Boolean);
+  if (explicit.length) return [...new Set(explicit)].sort();
+  const consts = new Map();
+  for (const m of source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*([^;\n]+)/g)) if (!consts.has(m[1])) consts.set(m[1], m[2]);
   const helper = /import\s*\{([^}]*)\}\s*from\s*["']\.\/env["']/.exec(source);
-  if (helper) for (const name of helper[1].split(",").map((s) => s.trim())) if (ENV_HELPER[name]) vars.add(ENV_HELPER[name]);
+  const helperNames = new Set(helper ? helper[1].split(",").map((s) => s.trim()) : []);
+  const vars = new Set();
+  const seen = new Set();
+  const follow = (expr) => {
+    for (const m of expr.matchAll(ENV_VAR)) vars.add(m[1] ?? m[2]);
+    for (const [name] of expr.replace(ENV_VAR, " ").matchAll(IDENT)) {
+      if (helperNames.has(name) && ENV_HELPER[name]) vars.add(ENV_HELPER[name]);
+      else if (consts.has(name) && !seen.has(name)) seen.add(name), follow(consts.get(name));
+    }
+  };
+  for (const condition of gateConditions(source)) follow(condition);
   return [...vars].sort();
 }
 
@@ -59,15 +93,16 @@ for (const report of reports) {
     skippedTests += skipped;
     const file = rel(resolve(f.name));
     const source = existsSync(f.name) ? readFileSync(f.name, "utf8") : "";
-    const vars = dataVars(source);
+    const vars = gateVars(source);
     const missing = vars.filter((v) => !process.env[v]);
     let reason;
+    // the skip is expected while ANY gate variable is missing (a file can have several gates: runIf(path), runIf(path && library))
     if ((isLocal(file) || isValidation(file)) && vars.length) {
       const set = vars.filter((v) => !missing.includes(v));
       reason = missing.length
         ? `needs local data: ${missing.join(", ")} not set${set.length ? ` (set: ${set.join(", ")})` : ""}`
         : `skipped although ${vars.join(", ")} ${vars.length > 1 ? "are" : "is"} set`;
-      const problem = `${file}: ${skipped} test(s) skipped although its data variables are set — its gate does not match its data`;
+      const problem = `${file}: ${skipped} test(s) skipped although its gate variables are set — its gate does not match its data`;
       if (!missing.length) (isLocal(file) ? errors : warnings).push(problem);
     } else if (EXPLICIT_SKIP.test(source)) {
       reason = "skipped by the test itself (.skip / .todo / skipIf / runIf in the file)";
