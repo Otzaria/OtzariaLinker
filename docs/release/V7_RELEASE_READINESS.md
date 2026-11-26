@@ -89,6 +89,7 @@
 | בדיקה | תוצאה |
 |---|---|
 | `npm run typecheck` | עבר |
+| **הסופי, על `5d6f098`** | typecheck עבר. ‏vitest: `Tests 3103 passed | 88 skipped (3191)`. ‏E2E: `409 passed`, ו־10 שנכשלו בעומס עברו בהרצה חוזרת (`10 passed`). ‏visual: `79 passed`. ‏legacy: `2 passed`. בניה: 2,029,765 בתים. הפירוט: [`QA_V7_PR4.md`](../reviews/QA_V7_PR4.md) §2. השורות שלמטה הן מהרצות מוקדמות |
 | `npx vitest run --maxWorkers=4` (‏unit, ‏integration, ‏contract) על `6ceb564` | `Tests 1 failed \| 2708 passed \| 76 skipped (2785)`. הכשל: יחס הזמנים ב־`quadratic.test.ts` ("citation tokens of a line of '&'", ‏9.6 מול 8) בזמן עומס. לבדה: `3 passed` |
 | `tests/unit/ui/offline-download.test.ts` | לפני התיקון `3 failed`, אחריו, עם `release-asset-name` ו־`architecture`: `12 passed` |
 | `tests/unit/license-notice.test.ts` | לפני `1 failed` (חסר `@preact/signals-core`), אחרי `1 passed` |
@@ -140,19 +141,12 @@
 |---|---|---|
 | PR1 | `v7/01-data-integrity-security` | `main` |
 | PR2 | `v7/02-linking-correctness` | PR1 |
-| PR3 | `v7/03-…` (היום `v7/03-wip`) | PR2 |
-| PR4 | הענף של המסמך הזה | PR3 |
+| PR3 | `v7/03-ux-workflows` | PR2 |
+| PR4 | `v7/04-validation-release-readiness` | PR3 |
 
-**המצב היום (2026-11-26), שצריך לסדר לפני פתיחת ה־PRs:** `v7/03-wip` ו־PR4 יוצאים מ־`ae88360`, שהוא ראש PR1 **לפני** סבב
-הסקירה שלו. הם עוד לא בנויים על `v7/02-linking-correctness` (‏`bf327d3`), ולא כוללים את שבעת ה־commits של סבב הסקירה של PR1
-(‏`f84b30d`–`109df08`). מסדרים כך (מראש PR3 ואחריו PR4, כל ענף על הקודם):
-
-```
-git rebase --onto v7/02-linking-correctness ae88360 v7/03-wip
-git rebase --onto v7/03-wip e9bdad1 <ענף PR4>
-```
-
-ואז מריצים שוב `npm run check`.
+**המצב בסוף העבודה (26.11.2026):** כל ענף בנוי על ראש הענף שלפניו (נבדק ב־`git merge-base --is-ancestor`): ‏PR1 ‏`109df08`
+(40 commits מעל `main`), ‏PR2 ‏`a675e84` (עוד 49), ‏PR3 ‏`188d104` (עוד 50), ו־PR4 (עוד 37 ומעלה). ה־diff של כל PR מול
+הבסיס שלו הוא רק השינויים שלו.
 
 ### 4.2 מיזוג רגיל (Merge commit)
 
