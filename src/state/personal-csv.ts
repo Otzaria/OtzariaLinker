@@ -2,7 +2,7 @@ import { sourceIdOfBookKey, type BookHeading, type SourceBook } from "../core/bo
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
 import { zipBundle } from "../formats/links-json/export";
-import { personalLinkRows, validatePersonalRows, writePersonalLinksCsv, type PersonalCsvFile, type PersonalCsvProblem, type PersonalSkip } from "../formats/personal-csv";
+import { personalLinkRows, personalRowKey, validatePersonalRows, writePersonalLinksCsv, type PersonalCsvFile, type PersonalCsvProblem, type PersonalSkip } from "../formats/personal-csv";
 import type { BooksService, CallOptions, Saver } from "./services";
 import type { NoticeKind } from "./store";
 
@@ -28,6 +28,15 @@ export interface PersonalCsvBundle {
   skipped: PersonalSkip[];
   /** problems the import would refuse the file for (empty when the files are clean) */
   problems: PersonalCsvProblem[];
+  /** rows left out because a links.csv the caller already has holds them (PrepareOptions.listed) */
+  listed?: number;
+}
+
+export interface PrepareOptions {
+  /** these links' ids, not the whole project (the folder-repository runner writes only the links its run made: src/cli/run.ts) */
+  only?: ReadonlySet<string>;
+  /** personalRowKey of the rows the existing links.csv files hold: such a row is not written again */
+  listed?: ReadonlySet<string>;
 }
 
 export class PersonalCsvState {
@@ -38,8 +47,7 @@ export class PersonalCsvState {
   ) {}
 
   /** The files for the project's links between personal books and the official library; null when cancelled or there is nothing to say. */
-  async prepare(only?: ReadonlySet<string>): Promise<PersonalCsvBundle | null> {
-    // `only`: these links' ids, not the whole project (the folder-repository runner writes only the links its run made: src/cli/run.ts)
+  async prepare({ only, listed }: PrepareOptions = {}): Promise<PersonalCsvBundle | null> {
     const links = this.host.allLinks.value.filter((l) => l.provenance !== "db" && (!only || only.has(l.id)));
     const personal = (b: BookRef) => {
       const sb = this.host.bookOf(b);
@@ -80,7 +88,7 @@ export class PersonalCsvState {
       return list;
     };
     const placed = new Map<string, string | null>();
-    const { rows, skipped } = personalLinkRows(links, {
+    const { rows: made, skipped } = personalLinkRows(links, {
       isPersonal: personal,
       isOfficial: official,
       contentLine: (b, line) => content.get(b.key)?.has(line) ?? false,
@@ -107,13 +115,14 @@ export class PersonalCsvState {
         return found;
       },
     });
+    const rows = listed ? made.filter((r) => !listed.has(personalRowKey(r))) : made;
     const headingTexts = new Map<string, Set<string>>();
     for (const b of [...this.host.allLinks.value.flatMap((l) => [l.source.book, l.target.book])]) {
       const hs = targets.get(b.key);
       if (hs && !headingTexts.has(b.title)) headingTexts.set(b.title, new Set(hs.map((h) => stripTags(h.text).trim())));
     }
     const problems = validatePersonalRows(rows, { targetExists: (t) => headingTexts.has(t), positionExists: (t, p) => headingTexts.get(t)?.has(p) ?? false });
-    return { files: writePersonalLinksCsv(rows).files, rows: rows.length, skipped, problems };
+    return { files: writePersonalLinksCsv(rows).files, rows: rows.length, skipped, problems, ...(listed && { listed: made.length - rows.length }) };
   }
 
   /** Saves the files: one links.csv as it is, several as one ZIP with the folders the personal-database build expects. */

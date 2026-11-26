@@ -110,6 +110,27 @@ describe("the runner on a repository shaped like Otzarya-Unofficial-Books", { ti
     expect(rep.external.skipped).toEqual([]);
   });
 
+  // V7 round 2, items 8-9 on Otzarya-Unofficial-Books: the repository's links.csv files (17 folders, ~25 MB of rows) are imported into
+  // the personal database, not into seforim.db, so neither the suggestions' "already exists" nor the export knew them — a run wrote
+  // their rows again into the next folder. A row they already have (the same line, book, target and place; any type) is not written.
+  it("a links.csv row the repository already has is not written again into the new folder", async () => {
+    const root = fresh("csv-dup");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const csv01 = join(repo, "ספרים/קבצי קישורים וסדר הדורות/קישורים/01/links.csv");
+    writeFileSync(csv01, `${readFileSync(csv01, "utf8")}4,ביאור חדש על בראשית,כן,בראשית,פרק א,תרגום,לא,\r\n`);
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--dry-run", "--json", ...HIGH]);
+    const rep = JSON.parse(r.out) as RunReport;
+    expect(rep.links.external).toBe(10);
+    expect(rep.external.written).toBe(9);
+    expect(rep.alreadyInRepository).toBe(1);
+    const out = fresh("csv-dup-out");
+    await untouched(repo, ["--repo", repo, "--db", DB, "--out", out, ...HIGH]);
+    const text = readFileSync(join(out, "ספרים/קבצי קישורים וסדר הדורות/קישורים/02/links.csv"), "utf8");
+    expect(text.split("\r\n").filter((l) => l.startsWith("4,ביאור חדש על בראשית,"))).toEqual([]);
+    expect(text.split("\r\n").filter((l) => /^\d+,ביאור חדש על בראשית,/.test(l))).toHaveLength(9);
+  });
+
   // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): its links files of "X על אבות" link to the official
   // "משנה אבות" by path_2. The runner loaded the repository's files before it opened the database, so every such record was reported
   // "the book was not found by its exact name; Otzaria will skip such a link" — 14 notices, 6,014 lines, all wrong.

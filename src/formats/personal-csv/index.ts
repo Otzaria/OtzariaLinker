@@ -2,6 +2,7 @@ export {
   parsePersonalLinksCsv,
   PERSONAL_LINKS_HEADER,
   personalLinkRows,
+  personalRowKey,
   personalRowLine,
   validatePersonalRows,
   writePersonalLinksCsv,

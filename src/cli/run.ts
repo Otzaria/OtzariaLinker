@@ -7,6 +7,7 @@ import { linePairIdentity } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import { appendRecords, externalRecords, officialRefKey, recordedLinks, type RecordedLinks } from "../formats/links-json/external";
 import { parseLinksJson } from "../formats/links-json/parse";
+import { parsePersonalLinksCsv, personalRowKey } from "../formats/personal-csv";
 import { detectRepoLayout, filterBooks, nextCsvFolders, type RepoLayout } from "../headless/repo-layout";
 import type { Confidence, EngineId } from "../linking/automatic";
 import { SourceRegistry } from "../sources/registry";
@@ -181,11 +182,19 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
   if (external.length && layout.external === "links-csv") {
     // only the links this run made to the official library: the project also holds the repository's own links (its files, the new
     // internal ones), which are not links.csv rows and are not "not written" there
-    const csv = await store.personalCsv.prepare(new Set(external.map((l) => l.id)));
+    // and not a row the repository's links.csv files already hold: they are imported into the personal database, not seforim.db, so
+    // nothing else knows them (V7 round 2, items 8-9)
+    const listed = new Set<string>();
+    for (const folder of layout.csvFolders ?? []) {
+      const path = `${layout.csvRoot}/${folder}/links.csv`;
+      if (repo.paths.includes(path)) for (const r of parsePersonalLinksCsv(await repo.text(path)).rows) listed.add(personalRowKey(r));
+    }
+    const csv = await store.personalCsv.prepare({ only: new Set(external.map((l) => l.id)), listed });
     if (csv) {
       const folders = nextCsvFolders(layout.csvFolders ?? [], csv.files.map((f) => f.folder));
       csv.files.forEach((f, i) => files.push({ path: `${layout.csvRoot}/${folders[i]}/${f.name}`, action: "new", kind: "links-csv", records: f.rows, text: f.text }));
       extReport.written = csv.rows;
+      alreadyInRepository += csv.listed ?? 0;
       extReport.skipped = tally(csv.skipped.map((s) => s.text));
     }
   } else if (external.length && layout.external === "target-library") {

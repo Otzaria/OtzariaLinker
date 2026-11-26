@@ -149,6 +149,12 @@ const KOVETZ_ROOT = "קישורים - קבצי קובץ (גדולים)";
 const isKovetz = (title: string) => title.startsWith("קובץ");
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/**
+ * What makes two rows the same link: the personal line, its book, the official book and the place — not the type (the one rule of
+ * core/links/equality.ts, at its "same lines" level: a row that says the same place as פירוש and as תרגום links the same lines).
+ */
+export const personalRowKey = (r: Pick<PersonalLinkRow, "sourceLine" | "sourceBook" | "targetBook" | "position">): string => JSON.stringify([r.sourceBook, r.sourceLine, r.targetBook, r.position]);
+
 export function personalRowLine(r: PersonalLinkRow): string {
   return [r.sourceLine, r.sourceBook, "כן", r.targetBook, r.position, r.type, "לא", r.sourceCategory ?? ""].map(csvField).join(",");
 }
