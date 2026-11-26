@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import guide from "../../../docs/USER_GUIDE.md?raw";
-import { renderGuide } from "../help/markdown";
+import troubleshooting from "../../../docs/TROUBLESHOOTING.md?raw";
+import { helpText, renderGuide } from "../help/markdown";
 import { Icon } from "../icons/icon";
 
 /*
@@ -11,7 +12,7 @@ import { Icon } from "../icons/icon";
 export function HelpDialog({ section, onSection, onClose }: { section?: string | undefined; onSection?: (id: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const rendered = useMemo(() => renderGuide(guide), []);
+  const rendered = useMemo(() => renderGuide(helpText(guide, troubleshooting)), []);
   const [current, setCurrent] = useState(section ?? rendered.toc[0]?.id ?? "");
 
   /** the section last shown, so a section that comes back through the address (Back) is not scrolled to twice */

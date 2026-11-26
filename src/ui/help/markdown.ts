@@ -34,6 +34,24 @@ export const DOCS_BASE = `https://github.com/Otzaria/OtzariaLinker/blob/${VERSIO
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** The heading the troubleshooting guide gets inside the help (helpText). */
+export const TROUBLESHOOTING_HEADING = "פתרון תקלות";
+
+/**
+ * The help's text: the user guide, and the troubleshooting guide after it as one more chapter (#41 B28, V7 §3.21): the user
+ * has the single HTML file, not the repository, and "common problems" must be there offline. The guide's links to
+ * TROUBLESHOOTING.md become links inside the help; its own headings go one level down under the new chapter.
+ */
+export function helpText(guide: string, troubleshooting: string): string {
+  const ts = troubleshooting
+    .replace(/\r\n?/g, "\n")
+    .replace(/^<\/?div[^>]*>\s*$/gm, "")
+    .replace(/^# .*$/m, "")
+    .replace(/^(#{2,5}) /gm, "#$1 ");
+  const inside = guide.replace(/\]\((?:\.\/)?TROUBLESHOOTING\.md\)/g, `](#${slug(TROUBLESHOOTING_HEADING)})`);
+  return `${inside.replace(/\n*(<\/div>\s*)?$/, "\n")}\n## ${TROUBLESHOOTING_HEADING}\n${ts}\n`;
+}
+
 /** GitHub's heading anchors: lower case, punctuation removed, spaces → "-" */
 export function slug(text: string): string {
   return text
@@ -170,7 +188,8 @@ function inline(src: string, anchors: string[]): string {
     let url: string | null = null;
     if (/^https:\/\//i.test(href)) url = href;
     else if (/^[\w./-]+\.md(#.*)?$/i.test(href) && !href.includes("..")) url = DOCS_BASE + href.replace(/^\.\//, "");
-    return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${text}</a>` : text;
+    // a document that is not inside the file is on GitHub: the tool is used offline, so the link says it needs the network (#41 B28)
+    return url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${text} (באתר GitHub, דורש רשת)</a>` : text;
   });
   return s.replace(/\u0000(\d+)\u0000/g, (_, n: string) => `<code>${esc(codes[Number(n)]!)}</code>`);
 }
