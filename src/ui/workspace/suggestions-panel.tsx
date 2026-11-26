@@ -233,7 +233,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         <>
           <div class={`end source${s ? " set" : ""}`}>
             <span class="side-badge source">{info.sourceRole}</span>
-            <span>{s ? store.refOf(s).title : "בחרו ספר בחלונית המקור"}</span>
+            <span>{s ? store.refOf(s).title : `בחרו ספר בחלונית "${store.roles.value.source.name}"`}</span>
           </div>
           {single ? (
             <div class="end target set">
@@ -243,14 +243,14 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
           ) : (
             <div class={`end target${t ? " set" : ""}`}>
               <span class="side-badge target">{info.targetRole}</span>
-              <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
+              <span>{t ? store.refOf(t).title : `בחרו ספר בחלונית "${store.roles.value.target.name}"`}</span>
             </div>
           )}
           {multiEligible && (
             <>
               <details class="held more-targets">
-                <summary>עוד ספרי יעד לאותו ספר (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
-                <BookChecklist label="עוד ספרי יעד" selected={live} onChange={setExtra} exclude={[s, t]} />
+                <summary>עוד ספרים שהספר מקושר אליהם (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
+                <BookChecklist label="עוד ספרים מקושרים" selected={live} onChange={setExtra} exclude={[s, t]} />
               </details>
               <div class="filters" style="padding:0" role="radiogroup" aria-label="כמה שיטות" onKeyDown={rovingKeys}>
                 {(["one", "several", "auto"] as const).map((m) => (
@@ -437,7 +437,7 @@ function TableView() {
       {(facets.engines.length > 1 || facets.books.length > 1 || facets.types.length > 1) && (
         <div class="filters sug-facets" style="padding-top:0">
           <Facet label="שיטה" all="כל השיטות" value={filter.engine} pairs={facets.engines} name={(e) => ENGINES.find((x) => x.id === e)?.title ?? e} onChange={(v) => narrow("engine", v)} />
-          <Facet label="ספר היעד" all="כל ספרי היעד" value={filter.book} pairs={facets.books} name={(b) => b} onChange={(v) => narrow("book", v)} />
+          <Facet label={store.roles.value.target.name} all="כל הספרים" value={filter.book} pairs={facets.books} name={(b) => b} onChange={(v) => narrow("book", v)} />
           <Facet label="סוג הקשר" all="כל הסוגים" value={filter.type} pairs={facets.types} name={(t) => typeShown(parseConnectionType(t).type)} onChange={(v) => narrow("type", v)} />
         </div>
       )}

@@ -381,7 +381,7 @@ for (const [width, viewport] of WIDTHS) {
       await page.getByRole("tab", { name: /הצעות/ }).click();
       const more = page.locator("details.more-targets");
       await more.locator("summary").click();
-      await more.getByRole("group", { name: "עוד ספרי יעד" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
+      await more.getByRole("group", { name: "עוד ספרים מקושרים" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
       await page.getByRole("radio", { name: /כל השיטות שמתאימות/ }).click();
       await snap(page, "pair-targets");
     });

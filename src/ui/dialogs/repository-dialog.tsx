@@ -446,7 +446,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
       {ok && (
         <>
           <p style="margin:0">
-            <b>{n(ok.total)}</b> קישורים: {n(ok.out)} שהספר הוא צד המקור שלהם, {n(ok.in)} שהוא צד היעד.
+            <b>{n(ok.total)}</b> קישורים: {n(ok.out)} שיוצאים מהספר, {n(ok.in)} שמגיעים אליו.
           </p>
           {ok.total === 0 && <p class="muted">לספר אין קישורים במסד: מועמד להשלמת קישורים.</p>}
           {ok.byType.length > 0 && (

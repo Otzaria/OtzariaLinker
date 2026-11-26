@@ -306,7 +306,7 @@ test("pair mode: one book against several targets, all methods merged into one r
   const more = page.locator("details.more-targets");
   await expect(more).not.toHaveAttribute("open", "");
   await more.locator("summary").click();
-  await more.getByRole("group", { name: "עוד ספרי יעד" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
+  await more.getByRole("group", { name: "עוד ספרים מקושרים" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
   await page.getByRole("radio", { name: /כל השיטות שמתאימות, מאוחדות/ }).click();
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
   await expect(page.locator(".sug-table tbody tr").first()).toBeVisible({ timeout: 60_000 });

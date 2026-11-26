@@ -90,8 +90,8 @@ export function Builder() {
 
       <label class="field">
         {/* the file's field names only in advanced mode (audit F14) */}
-        {advanced ? "שם המקום ביעד (heRef_2)" : "שם המקום ביעד"}
-        <input type="text" value={draft?.heRef2 ?? ""} placeholder="ייקבע לפי שורת היעד" onInput={(e) => (store.draftHeRef.value = e.currentTarget.value)} disabled={!t} />
+        {advanced ? `שם המקום ${inRole(store.roles.value.target.name)} (heRef_2)` : `שם המקום ${inRole(store.roles.value.target.name)}`}
+        <input type="text" value={draft?.heRef2 ?? ""} placeholder={`ייקבע לפי השורה ${inRole(store.roles.value.target.name)}`} onInput={(e) => (store.draftHeRef.value = e.currentTarget.value)} disabled={!t} />
         {store.draftHeRef.value !== null && t && (
           <button class="adv-link" onClick={() => (store.draftHeRef.value = null)}>חזרה לשם האוטומטי</button>
         )}

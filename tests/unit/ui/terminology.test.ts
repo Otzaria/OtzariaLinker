@@ -11,12 +11,7 @@ import { describe, expect, it } from "vitest";
  * NOT_YET: files another change is rewriting at the same time; each is listed with what is left there, so it is not lost.
  */
 const ROOTS = ["src/ui", "src/state", "src/core/errors.ts"];
-const NOT_YET: Record<string, string> = {
-  "src/ui/workspace/suggestions-panel.tsx": '"בחרו ספר בחלונית המקור", "עוד ספרי יעד" (the pane names)',
-  "src/ui/workspace/builder.tsx": "the builder's own hints",
-  "src/ui/dialogs/repository-dialog.tsx": "one hint",
-  "src/ui/workspace/maxlink-panel.tsx": "",
-};
+const NOT_YET: Record<string, string> = {};
 // a role word is followed by no Hebrew letter ("מקורי", "מקורות", "ייעדרו" are other words); JavaScript's \b knows only ASCII
 const ROLE_WORDS = /(?:ספר|ספרי|צד|שורת|חלונית) ה?(?:מקור|יעד)(?![א-ת])|(?:^|[^א-ת])(?:ב|מה)(?:מקור|יעד)(?![א-ת])|ספר ושורת (?:מקור|יעד)|החלפת יעד|יעד חדש/;
 

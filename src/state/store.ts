@@ -671,7 +671,9 @@ export class AppStore {
       // the duplicate check of the draft leaves out the link being edited: a copy on the same lines would be that link twice
       const same = (a: Link["source"], b: Link["source"]) => a.book.title === b.book.title && a.line === b.line && (a.end ?? a.line) === (b.end ?? b.line);
       if (same(d.source, edited.source) && same(d.target, edited.target)) {
-        this.notify("warning", "העותק זהה לקישור שנערך. בחרו שורת יעד (או מקור) אחרת, ואז שמרו כקישור נוסף.");
+        // the side names by the task (roles.ts, V7 §3.5) — not "מקור"/"יעד"
+        const r = this.roles.peek();
+        this.notify("warning", `העותק זהה לקישור שנערך. בחרו שורה אחרת ב${r.target.name.replace(/^ה/, "")} (או ב${r.source.name.replace(/^ה/, "")}), ואז שמרו כקישור נוסף.`);
         return null;
       }
       this.editing.value = null;
