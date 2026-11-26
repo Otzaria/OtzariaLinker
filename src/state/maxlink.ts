@@ -612,7 +612,10 @@ export class MaxLinkState {
       this.job.value = { ...j, state, ms: j.ms + (Date.now() - t0) };
     });
     this.saveNow();
-    const shown = this.publish();
+    // the worker was replaced: the finished books' results name its sources, which are gone (AppStore.workerLost cleared the run so
+    // that no suggestion of them can be approved — a link to a key no source will have again). They are kept, bound to the books by
+    // title when the job resumes over the books opened again (ensurePlan), and shown then.
+    const shown = lost ? false : this.publish();
     const t = jobTotals(this.job.peek()!);
     const failed = t.byStatus.failed;
     if (state !== "done")
