@@ -147,3 +147,28 @@ describe("the modes are options of the one headings engine: the form and storage
     expect(runEngine("headings", comm, base, { paragraphsAsSections: true }).suggestions.map((s) => s.target.line)).toEqual([1, 2]);
   });
 });
+
+/*
+ * v3 F-096 "התאמה גמישה לכתיב" (nikud and gershayim ignored, abbreviations of kind words, plene and defective spelling, small slips): in
+ * V7 numbers are read by kind and value, so "סי' יב", "סימן י״ב" and "סִימָן יב" are one place; a NAME matches by similarity ≥ 0.85, below
+ * "certain". The legacy parity table had no test for it.
+ */
+describe("flexible spelling of headings (v3 F-096), in the default mode", () => {
+  const base = book("b", "ספר הבסיס", ["<h1>ספר הבסיס</h1>", "<h2>ענין הקרבנות</h2>", "<h3>סימן יב</h3>", "אלפא בטא", "<h2>ענין התפלה</h2>", "גמא דלתא"]);
+
+  it("a kind word abbreviated, gershayim and nikud: the same place, certain", () => {
+    for (const h of ["סי' יב", "סימן י״ב", "סִימָן יב"]) {
+      const r = runHeadingsEngine(book("c", "ביאור", ["<h2>ענין הקרבנות</h2>", `<h3>${h}</h3>`, "פירוש"]), base);
+      expect([span(r, 2), at(r, 2)?.confidence]).toEqual([[3, null], "certain"]);
+    }
+  });
+
+  it("a name in plene spelling matches the defective one, at a small cost; a different name does not", () => {
+    const r = runHeadingsEngine(book("c", "ביאור", ["<h2>ענין התפילה</h2>", "פירוש", "<h2>ענין אחר לגמרי</h2>", "פירוש"]), base);
+    expect(span(r, 1)).toEqual([5, null]);
+    expect(at(r, 1)!.reasons.some((x) => x.code === "heading/similar-name")).toBe(true);
+    // align.ts: (1 − similarity) × 0.5; "התפילה" ~ "התפלה" is 0.94, so 0.97
+    expect(at(r, 1)!.score).toBeLessThan(1);
+    expect(at(r, 3)).toBeUndefined();
+  });
+});
