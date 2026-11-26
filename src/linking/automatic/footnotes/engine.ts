@@ -10,7 +10,7 @@ import { confidenceOf, type Candidate, type EngineBook, type EngineContext, type
 import { alignChapters } from "./align";
 import { headingCounter, headingSections, isPlainKey, pairSections, resetChapters, type Chapter, type Occ } from "./chapters";
 import {
-  MAX_CUSTOM_REGEX_INPUT, appRecognisesMarker, compileStyle, detectMarkers, labelCommentators, leadingMarker,
+  MAX_CUSTOM_REGEX_INPUT, appRecognisesMarker, bareLeadingMarker, compileStyle, detectMarkers, labelCommentators, leadingMarker, numeralIsWord,
   type CompiledStyle, type Marker, type MarkerStyle, type Numbering,
 } from "./markers";
 
@@ -100,6 +100,14 @@ const PROGRESS_EVERY = 256;
 const POSITIONAL_MAX = 0.1;
 /** a section whose note count differs from its highest marker: an unnumbered note may have shifted the rest */
 const POSITION_MISMATCH_SCORE = 0.75;
+/** a book with no other kind of note line reads bare "12 text" lines only when at least this many continue the series */
+const BARE_MIN = 3;
+/** how far ahead a bare number may jump in its series, when the number after it follows it (bareSeries) */
+const BARE_GAP_MAX = 10;
+/** under this share of note lines with a marker, the books may have been given the other way round (looksSwapped) */
+const SWAPPED_NOTES_MAX = 0.5;
+const SWAPPED_TEXT =
+  "נראה שהספרים בסדר הפוך: הספר שנבחר כמקור נראה כמו ספר הערות (שורותיו נפתחות במספר), והספר שנבחר כיעד הוא זה שמכיל את סימני ההערות. החליפו ביניהם: המקור הוא הספר עם סימני ההערות, והיעד הוא ספר ההערות.";
 const LIST_MAX = 20;
 
 const r = (code: string, text: string): Reason => ({ code, text });
@@ -177,6 +185,8 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   const notesLines = notes.lines;
   let rawNoteOccs: Occ[] = [];
   let unmarkedNoteLines: number[] = [];
+  /** lines that open with a bare "12 " (bareLeadingMarker): read only where they continue the series (bareSeries) */
+  const bareCandidates: Occ[] = [];
   const contentLines: number[] = [];
   for (const l of notesLines) {
     tick();
@@ -187,10 +197,35 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
     const found: Marker[] = anywhere
       ? notesStyle === "auto" ? withLead(text, includeInline) : detectMarkers(text, notesStyle, { includeInlineNoteMarkers: includeInline })
       : [leadingMarker(text, notesStyle, { includeInlineNoteMarkers: includeInline })].filter((m): m is Marker => m !== null);
+    if (!found.length && !anywhere && notesStyle === "auto") {
+      const bare = bareLeadingMarker(text, { includeInlineNoteMarkers: includeInline }, true);
+      if (bare) bareCandidates.push({ line: l.index, marker: bare });
+    }
     if (!found.length) unmarkedNoteLines.push(l.index);
     for (const m of found) rawNoteOccs.push({ line: l.index, marker: m });
   }
+  // "12 text" (#41 B12): read only where the number continues the series of the notes
+  if (bareCandidates.length) {
+    const { accepted, rejected } = bareSeries(rawNoteOccs, bareCandidates, headingCounter(notesLines));
+    if (accepted.length >= (rawNoteOccs.length ? 1 : BARE_MIN)) {
+      const at = new Set(accepted.map((o) => o.line));
+      rawNoteOccs = [...rawNoteOccs, ...accepted].sort((a, b) => a.line - b.line);
+      unmarkedNoteLines = unmarkedNoteLines.filter((x) => !at.has(x));
+      runNotes.push(
+        r(
+          "footnotes/bare-leading",
+          `${accepted.length} שורות בספר ההערות נפתחות במספר ואחריו רווח, בלי נקודה, סוגריים או תגית (כמו "12 טקסט"). הן נקראו כהערות כי המספרים שלהן ממשיכים את הרצף של ההערות.${rejected ? ` ${rejected} שורות נפתחות במספר שאינו ממשיך את הרצף, ולכן נחשבו להמשך של הערה ולא להערה חדשה.` : ""}`,
+        ),
+      );
+    }
+  }
   const sectioned = notesLines.some((l) => l.heading !== null && l.heading > 1);
+  // the books in the wrong order: the "notes" book has almost no note lines, and the "main" book reads like a notes book. Checked
+  // before the positional reading, which would otherwise read the main text line by line as notes (#41 B12: no message with headings)
+  if (notesOpt === "auto" && !anywhere && rawNoteOccs.length < contentLines.length * SWAPPED_NOTES_MAX && looksSwapped(main, notes, includeInline)) {
+    runNotes.push(r("footnotes/swapped", SWAPPED_TEXT));
+    return { suggestions: [], notes: runNotes, unmatched: [] };
+  }
   const positional = notesOpt === "position" || (notesOpt === "auto" && !anywhere && sectioned && contentLines.length > 0 && rawNoteOccs.length <= contentLines.length * POSITIONAL_MAX);
   if (positional) {
     rawNoteOccs = positionalOccs(notesLines, contentLines, options.headingLevel);
@@ -202,7 +237,7 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   if (!noteOccs.length) {
     // the books in the wrong order (issue #14: "it works but you must swap source and target"): say so, not "check the setting"
     if (looksSwapped(main, notes, includeInline)) {
-      runNotes.push(r("footnotes/swapped", "נראה שהספרים בסדר הפוך: הספר שנבחר כמקור נראה כמו ספר הערות (שורותיו נפתחות במספר), והספר שנבחר כיעד הוא זה שמכיל את סימני ההערות. החליפו ביניהם: המקור הוא הספר עם סימני ההערות, והיעד הוא ספר ההערות."));
+      runNotes.push(r("footnotes/swapped", SWAPPED_TEXT));
       return { suggestions: [], notes: runNotes, unmatched: [] };
     }
     runNotes.push(r("footnotes/no-notes", "לא נמצאו בספר ההערות שורות שנפתחות בסימן הערה (מספר או אות). בדקו את הגדרת הסימון של ההערות."));
@@ -802,25 +837,70 @@ function decideNumbering(opt: Numbering | "auto" | "any", occs: readonly Occ[]):
  */
 function looksSwapped(main: EngineBook, notes: EngineBook, includeInline: boolean): boolean {
   let content = 0;
-  let opening = 0;
+  const opening: Occ[] = [];
+  const bare: Occ[] = [];
   for (const l of main.lines) {
     if (l.heading !== null) continue;
     const text = withoutBom(l.text);
     if (!stripTags(text)) continue;
     content++;
-    if (leadingMarker(text, "auto", { includeInlineNoteMarkers: includeInline })) opening++;
+    const lead = leadingMarker(text, "auto", { includeInlineNoteMarkers: includeInline });
+    if (lead) opening.push({ line: l.index, marker: lead });
+    else {
+      const b = bareLeadingMarker(text, { includeInlineNoteMarkers: includeInline }, true);
+      if (b) bare.push({ line: l.index, marker: b });
+    }
   }
-  if (!content || opening < content * 0.5) return false;
+  // a notes book of the v52 shape ("12 text") opens its lines with bare numbers that run as a series (#41 B12)
+  const accepted = bare.length ? bareSeries(opening, bare, headingCounter(main.lines)).accepted.length : 0;
+  if (!content || opening.length + (accepted >= BARE_MIN ? accepted : 0) < content * 0.5) return false;
   // tag and parentheses markers settle it; bare digits are weak (a page or verse number in prose): at least three, mid-line
   const styles: MarkerStyle[] = ["sup", "sub", "parentheses"];
-  let bare = 0;
+  let glued = 0;
   for (const l of notes.lines) {
     if (l.heading !== null) continue;
     const text = withoutBom(l.text);
     for (const s of styles) if (detectMarkers(text, s, { includeInlineNoteMarkers: includeInline }).length) return true;
-    for (const m of detectMarkers(text, "digits")) if (stripTags(text.slice(0, m.rawStart)).trim() && ++bare >= 3) return true;
+    for (const m of detectMarkers(text, "digits")) if (stripTags(text.slice(0, m.rawStart)).trim() && ++glued >= 3) return true;
   }
   return false;
+}
+
+/**
+ * Which "12 text" lines (bareLeadingMarker) are notes: walking the note lines in order with the notes already read (`known`), a bare
+ * number is a note when it continues the series — the next number, one note skipped, the same number again (a repeated note, later
+ * marked ambiguous), or a new series: at the start or after a heading 1, 2 or a number the next one follows, else 1 when the next
+ * note is 1 or 2. A jump of up to
+ * BARE_GAP_MAX ahead counts when the next number follows it (notes lost in the book, or a numeral that is also a word in between).
+ * A numeral that is also a common word ("לא", "יד") counts only exactly where it is due. Anything else ("40 שנה…" in the middle of
+ * note 2) is a continuation line of the note before it.
+ */
+function bareSeries(known: readonly Occ[], candidates: readonly Occ[], headingBetween: (a: number, b: number) => boolean): { accepted: Occ[]; rejected: number } {
+  const all = [...known.map((o) => ({ o, bare: false })), ...candidates.map((o) => ({ o, bare: true }))].sort((a, b) => a.o.line - b.o.line || a.o.marker.rawStart - b.o.marker.rawStart);
+  const accepted: Occ[] = [];
+  let rejected = 0;
+  let prev: Occ | null = null;
+  for (let i = 0; i < all.length; i++) {
+    const { o, bare } = all[i]!;
+    if (!bare || isStar(o)) {
+      if (!isStar(o)) prev = o;
+      continue;
+    }
+    const n = o.marker.num;
+    const next = all.slice(i + 1).find((x) => !isStar(x.o))?.o.marker.num;
+    const fresh = prev === null || headingBetween(prev.line, o.line);
+    const p = prev?.marker.num;
+    const ok = numeralIsWord(o.marker.token)
+      ? p !== undefined && n === p + 1
+      : (p !== undefined && (n === p + 1 || n === p + 2 || n === p || (n > p && n <= p + BARE_GAP_MAX && next === n + 1))) ||
+        (fresh && (n <= 2 || next === n + 1)) ||
+        (n === 1 && (next === 1 || next === 2));
+    if (ok) {
+      accepted.push(o);
+      prev = o;
+    } else rejected++;
+  }
+  return { accepted, rejected };
 }
 
 const MAIN_CANDIDATES: readonly MarkerStyle[] = ["sup", "sub", "parentheses"];

@@ -14,6 +14,10 @@ import type { DbLine } from "../../../../src/database/otzaria/reader";
  * The companion is rebuilt the way such files are written — one line per note, opening with the
  * marker printed in X ("<sup>N</sup> body") — optionally with X's headings copied in. The engine
  * then has to find every marker in X, follow numbering restarts, and point at the right note line.
+ *
+ * shape "bare" writes each note line the way the v52 personal database writes the notes of אנציקלופדיה תלמודית (#41 B12, #14):
+ * the number, a space and the text ("12 body"), with no tag, dot or bracket. v52 is not on this machine, so the real notes of
+ * the official database are rewritten into that shape: the text and the truth stay real, only the opening changes.
  */
 export interface Bench {
   readonly main: EngineBook;
@@ -24,7 +28,7 @@ export interface Bench {
 
 const MARKER = /<sup\b[^>]*\bclass\s*=\s*"footnote-marker"[^>]*>(.*?)<\/sup>/gis;
 
-export function benchFromLineNotes(title: string, lines: readonly DbLine[], withHeadings: boolean): Bench {
+export function benchFromLineNotes(title: string, lines: readonly DbLine[], withHeadings: boolean, shape: "sup" | "bare" = "sup"): Bench {
   const mainLines: EngineLine[] = lines.map((l) => ({ index: l.index, text: l.content, heading: headingLevel(l.content) }));
   const notesLines: EngineLine[] = [{ index: 0, text: `<h1>הערות ל${title}</h1>`, heading: 1 }];
   const truth = new Map<number, { line: number; charPos: number }>();
@@ -40,7 +44,7 @@ export function benchFromLineNotes(title: string, lines: readonly DbLine[], with
       const label = printed[k++];
       if (!label) continue;
       truth.set(notesLines.length, { line: l.index, charPos: n.charPos });
-      notesLines.push({ index: notesLines.length, text: `<sup>${label}</sup> ${n.body}`, heading: null });
+      notesLines.push({ index: notesLines.length, text: shape === "bare" ? `${label} ${n.body}` : `<sup>${label}</sup> ${n.body}`, heading: null });
     }
   }
   return {

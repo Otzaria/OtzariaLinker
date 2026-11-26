@@ -5,6 +5,6 @@
  */
 export { runFootnotesEngine, type FootnotesOptions } from "./engine";
 export {
-  appRecognisesMarker, checkCustomPattern, compileStyle, detectMarkers, labelCommentators, leadingMarker, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT,
+  appRecognisesMarker, bareLeadingMarker, checkCustomPattern, compileStyle, detectMarkers, labelCommentators, leadingMarker, numeralIsWord, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT,
   type CompiledStyle, type DetectOptions, type Marker, type MarkerStyle, type Numbering, type ParsedToken, type PatternCheck,
 } from "./markers";

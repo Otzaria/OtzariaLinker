@@ -79,16 +79,17 @@ describe.runIf(path)("footnotes engine on the real seforim.db (read-only)", () =
       const lines = await reader.lines(id);
       // plain: no headings in the notes (numbering only); headings: the book's headings copied in;
       // greedy: plain with Link-Notes' original marker-by-marker chapter rules, for comparison
-      const runs = [["plain", false, "global"], ["headings", true, "global"], ["greedy", false, "greedy"]] as const;
-      for (const [mode, withHeadings, chapterAlignment] of runs) {
-        const b = benchFromLineNotes(title, lines, withHeadings);
+      // bare, bare-headings: the note lines open with "12 " (the v52 shape of #41 B12), read with the automatic setting
+      const runs = [["plain", false, "global", "sup"], ["headings", true, "global", "sup"], ["greedy", false, "greedy", "sup"], ["bare", false, "global", "bare"], ["bare-headings", true, "global", "bare"]] as const;
+      for (const [mode, withHeadings, chapterAlignment, shape] of runs) {
+        const b = benchFromLineNotes(title, lines, withHeadings, shape);
         rows.push({ title, mode, ...score(b, runFootnotesEngine(b.main, b.notes, { includeInlineNoteMarkers: true, chapterAlignment })) });
       }
     }
     const sum = (mode: string, k: keyof Score) => rows.filter((x) => x.mode === mode).reduce((a, x) => a + (x[k] as number), 0);
     for (const x of rows)
       console.log(`${x.mode.padEnd(8)} ${String(x.truth).padStart(5)} ${String(x.suggested).padStart(5)} P=${x.precision.toFixed(3)} R=${x.recall.toFixed(3)} anchors=${x.anchorsExact}/${x.correct} certain=${x.certainCorrect}/${x.certain}  ${x.title}`);
-    for (const mode of ["plain", "headings", "greedy"]) {
+    for (const mode of ["plain", "headings", "greedy", "bare", "bare-headings"]) {
       const truth = sum(mode, "truth");
       const suggested = sum(mode, "suggested");
       const correct = sum(mode, "correct");
