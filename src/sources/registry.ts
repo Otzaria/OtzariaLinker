@@ -20,7 +20,7 @@ import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
-import { TextFilesSource, type TextFile } from "./text/text-source";
+import { loneCrMessage, TextFilesSource, type TextFile } from "./text/text-source";
 
 /*
  * Everything the user has opened, behind one door (stage 6). The user drops files without saying
@@ -101,10 +101,12 @@ export class SourceRegistry {
     const result: OpenResult = { sources: [], documents: [], skipped: [] };
     const texts: TextFile[] = [];
     const notUtf8: string[] = [];
+    /** text files with a CR not followed by LF in their first bytes (#41 B10): warned at open, where the store shows warnings */
+    const loneCr: string[] = [];
     for (const f of files) {
       signal?.throwIfAborted();
       const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, texts, notUtf8, signal);
+      await this.route(f, kind, result, texts, notUtf8, signal, loneCr);
     }
     if (texts.length) {
       const src = new TextFilesSource(this.nextId(), labelForTexts(texts), texts);
@@ -115,6 +117,8 @@ export class SourceRegistry {
       const empty = files.filter((f) => f.blob.size === 0 && texts.some((t) => t.path === f.path)).map((f) => f.path);
       if (empty.length)
         src.info.warnings.push({ code: "source/empty-file", message: empty.length === 1 ? `הקובץ "${empty[0]}" ריק — אין בו שורות לקשר. בדקו שבחרתם את הקובץ הנכון.` : `${empty.length} קבצים ריקים, בלי שורות לקשר: ${empty.slice(0, 5).join(", ")}${empty.length > 5 ? "…" : ""}. בדקו שבחרתם את הקבצים הנכונים.` });
+      if (loneCr.length)
+        src.info.warnings.push(loneCrWarning(loneCr));
       if (notUtf8.length)
         src.info.warnings.push({
           code: "source/not-utf8",
@@ -339,7 +343,7 @@ export class SourceRegistry {
     for (const k of [...this.fallbackListings.keys()]) if (sourceIdOfBookKey(k) === sourceId) this.fallbackListings.delete(k);
   }
 
-  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[], signal?: AbortSignal): Promise<void> {
+  private async route(f: InputFile, kind: DetectedKind, result: OpenResult, texts: TextFile[], notUtf8: string[], signal?: AbortSignal, loneCr: string[] = []): Promise<void> {
     switch (kind) {
       case "sqlite":
         try {
@@ -383,7 +387,9 @@ export class SourceRegistry {
       case "text":
         if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
           texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()) });
-          const enc = decodeText(new Uint8Array(await f.blob.slice(0, SNIFF).arrayBuffer()), { partial: f.blob.size > SNIFF }).encoding;
+          const head = new Uint8Array(await f.blob.slice(0, SNIFF).arrayBuffer());
+          const enc = decodeText(head, { partial: f.blob.size > SNIFF }).encoding;
+          if (hasLoneCr(head, f.blob.size > SNIFF)) loneCr.push(f.path);
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
         } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
         return;
@@ -501,6 +507,18 @@ async function fileIdentity(f: InputFile): Promise<string> {
   let at = 0;
   for (const p of parts) joined.set(p, at), (at += p.length);
   return `${size}|${hex}|${sha256Hex(joined)}`;
+}
+
+/** A CR byte not followed by LF (a lone CR, #41 B10); the last byte of a cut head is not judged. */
+function hasLoneCr(bytes: Uint8Array, partial: boolean): boolean {
+  const end = partial ? bytes.length - 1 : bytes.length;
+  for (let i = 0; i < end; i++) if (bytes[i] === 13 && bytes[i + 1] !== 10) return true;
+  return false;
+}
+
+/** The warning of TextFilesSource (text-source.ts loneCrMessage), for the files the open found. */
+function loneCrWarning(paths: readonly string[]): { code: string; message: string } {
+  return { code: "source/lone-cr", message: loneCrMessage(paths) };
 }
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;

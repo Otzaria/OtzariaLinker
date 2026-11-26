@@ -91,3 +91,17 @@ describe("an empty text file (#42 C29)", () => {
     expect(w[0]!.message).not.toContain("full.txt");
   });
 });
+
+describe("a lone CR is warned about when the file is opened (V7 PR1 review, finding 4)", () => {
+  it("the warning is on the source the store shows at open, once", async () => {
+    const r = new SourceRegistry();
+    const res = await r.open([{ path: "cr.txt", blob: new Blob(["א\rב\nג"]) }, { path: "ok.txt", blob: new Blob(["א\r\nב"]) }]);
+    const w = res.sources[0]!.info.warnings.filter((x) => x.code === "source/lone-cr");
+    expect(w).toHaveLength(1);
+    expect(w[0]!.message).toContain("cr.txt");
+    expect(w[0]!.message).not.toContain("ok.txt");
+    const key = res.sources[0]!.books.find((b) => b.path === "cr.txt")!.key;
+    await r.lines(key, 0, 5); // reading it does not add the same warning again
+    expect(res.sources[0]!.info.warnings.filter((x) => x.code === "source/lone-cr")).toHaveLength(1);
+  });
+});
