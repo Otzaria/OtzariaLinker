@@ -1,7 +1,8 @@
 import { embeddedLibraryLinkFiles } from "../core/links/library-link-files";
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
-import { parseProject, serializeProject, type ProjectSource } from "../projects/project-format";
+import { parseProject, serializeProject, type ProjectBookLines, type ProjectSource, type StoredBook } from "../projects/project-format";
+import { keyOfRecord, readEdition, recordId, type BookRecord } from "./edition";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
@@ -93,6 +94,9 @@ export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
  * title, an old project) may be either.
  */
 const sameOrigin = (saved: BookOrigin, open: BookOrigin): boolean => saved === "unknown" || open === "unknown" || (saved === "personal") === (open === "personal");
+
+/** an unresolved book as the user's choice of an open book remembers it (chooseEditions): its identity and edition */
+const choiceKey = (title: string, origin: BookOrigin, source: string | undefined, edition: string | undefined): string => keyOfRecord({ title, origin, source, edition });
 
 /** the builder refuses a link identical to a live one (V3 F-070/F-072/F-086; the rule: core/links/equality.ts identicalLinkKey) */
 const IDENTICAL_TEXT = "קישור זהה כבר קיים בפרויקט: אותן שורות ואותו סוג קשר, אחרי ההמרה של אוצריא (במסד שניהם היו קישור אחד). אין צורך ליצור אותו שוב. כדי לקשר אחרת, בחרו שורה אחרת או סוג קשר אחר.";
@@ -348,7 +352,12 @@ export class AppStore {
       this.sources.value = [...this.sources.value, ...fresh];
       for (const s of fresh) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
-    if (fresh.length) this.attachLinks();
+    if (fresh.length) {
+      this.attachLinks();
+      // a link of a known source binds to a book of another source only when its edition is the saved one (V7 §1.1): those
+      // editions are a few lines each, read before the open is done, so the links are on their books when the user looks
+      await this.editionsSettled();
+    }
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
     const each = (kind: string, run: (path: string, text: string) => void) => {
@@ -442,22 +451,63 @@ export class AppStore {
     await this.service.close(id);
     this.dbLinks.forgetSummary();
     batch(() => {
-      this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
-      // the links keep their books by title, as after a worker restart: a key of the closed source names
-      // nothing now — the reader would not show them on the same book opened again (its key is new), and
-      // the check would take the book for open. attachLinks binds them to the book when it opens again.
+      // the links keep their books by title, origin and source, as a saved project does: a key of the closed source names
+      // nothing now — the reader would not show them on the same book opened again (its key is new), and the check would
+      // take the book for open. attachLinks binds them to the same book when it opens again, and only to it (V7 §1.1).
+      // Unbound while the source is still listed: its label and the book's edition go with the links.
+      const unbind = this.unbinder((key) => sourceIdOfBookKey(key) === id);
       this.linkState.value = rebindLinks(this.linkState.value, (l) => {
-        const s = sourceIdOfBookKey(l.source.book.key) === id ? unboundRef(l.source.book) : l.source.book;
-        const t = sourceIdOfBookKey(l.target.book.key) === id ? unboundRef(l.target.book) : l.target.book;
+        const s = unbind(l.source.book);
+        const t = unbind(l.target.book);
         return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
       });
+      unbind.done();
+      this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
       for (const side of ["source", "target"] as const) {
         if (this.view[side].value?.startsWith(`${id}:`)) this.view[side].value = null;
         if (this.pick[side].value?.bookKey.startsWith(`${id}:`)) this.pick[side].value = null;
       }
     });
+    this.forgetEditions((key) => sourceIdOfBookKey(key) === id);
     this.lines.forgetSource(id);
     return true;
+  }
+
+  /**
+   * Unbinds link books whose keys `closing` names (a source closes, the worker is lost): each becomes "unresolved:" with its
+   * title, origin and the LABEL of its source — and what is known of it (its lines and edition) is kept as the project's record
+   * of that book, so the book opened again binds only if it is the same one, and a changed one is said (V7 §1.1, items 1–4).
+   * Call done() after the links are rebound, before the sources go.
+   */
+  private unbinder(closing: (bookKey: string) => boolean): ((ref: BookRef) => BookRef) & { done(): void } {
+    const records = new Map(this.projectBooks.peek());
+    let changed = false;
+    const seen = new Map<string, BookRef>();
+    const unbind = (ref: BookRef): BookRef => {
+      if (ref.key.startsWith("unresolved:") || !closing(ref.key)) return ref;
+      const hit = seen.get(ref.key);
+      if (hit) return hit;
+      const source = this.sourceLabelOf(ref.key);
+      const rec = this.recordOf(ref.key);
+      const now = this.editions.peek().get(ref.key);
+      // the edition on the ref finds this very file again among books of one title and label (item 6)
+      const known = now ?? rec?.edition;
+      const out: BookRef = { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }), ...(source !== undefined && { source }), ...(known !== undefined && { edition: known }) };
+      seen.set(ref.key, out);
+      // what the links were made on: the project's record of this book (kept as it was, under the book's identity now), else
+      // the book as it is open now
+      const b = this.books.peek().get(ref.key);
+      const lines = rec?.lines ?? (b && (b.lineCount ?? this.lines.count(b.key)));
+      const edition = rec ? rec.edition : now;
+      if (lines !== undefined) {
+        const next: BookRecord = { title: ref.title, origin: ref.origin, ...(source !== undefined && { source }), lines, ...(edition !== undefined && { edition }) };
+        if (rec?.origin !== undefined) records.delete(keyOfRecord(rec));
+        records.set(keyOfRecord(next), next);
+        changed = true;
+      }
+      return out;
+    };
+    return Object.assign(unbind, { done: () => void (changed && (this.projectBooks.value = records)) });
   }
 
   /**
@@ -466,24 +516,26 @@ export class AppStore {
    */
   workerLost(reason: string): void {
     this.log.error("worker", "restarted", { reason, sources: this.sources.value.length }, "worker/restarted");
-    // the links keep their books by title, as a saved project does: the keys named the lost worker's
-    // sources, and attachLinks binds them again to the books opened next (review C2)
-    const unbind = unboundRef;
+    // the links keep their books by title, origin and source, as a saved project does: the keys named the lost worker's
+    // sources, and attachLinks binds them again to the same books when they are opened (review C2, V7 §1.1)
     batch(() => {
-      this.sources.value = [];
-      this.view.source.value = null;
-      this.view.target.value = null;
-      this.clearPicks();
-      this.task.value = null;
+      const unbind = this.unbinder(() => true);
       this.linkState.value = rebindLinks(this.linkState.value, (l) => {
         const s = unbind(l.source.book);
         const t = unbind(l.target.book);
         return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
       });
+      unbind.done();
+      this.sources.value = [];
+      this.view.source.value = null;
+      this.view.target.value = null;
+      this.clearPicks();
+      this.task.value = null;
       // suggestions point at lines of the lost sources: approving one would make a link to nothing
       this.suggestions.run.value = null;
       this.suggestions.current.value = null;
     });
+    this.forgetEditions(() => true);
     this.find.source.close();
     this.find.target.close();
     this.lines.forgetAll();
@@ -509,8 +561,8 @@ export class AppStore {
     const memo = new Map<string, BookRef | null>();
     const resolve = (ref: BookRef): BookRef => {
       if (!ref.key.startsWith("unresolved:")) return ref;
-      const id = `${ref.origin}\u0000${ref.source ?? ""}\u0000${ref.title}`;
-      if (!memo.has(id)) memo.set(id, this.resolveTitle(ref.title, ref.origin, ref.source));
+      const id = `${recordId(ref.title, ref.origin, ref.source)}\u0000${ref.edition ?? ""}`;
+      if (!memo.has(id)) memo.set(id, this.resolveTitle(ref.title, ref.origin, ref.source, ref.edition));
       return memo.get(id) ?? ref;
     };
     this.linkState.value = rebindLinks(this.linkState.value, (l) => {
@@ -520,6 +572,121 @@ export class AppStore {
     });
     this.exchange.booksOpened();
     this.noticeChangedBooks();
+    this.verifyEditions();
+  }
+
+  /**
+   * Links of a known source whose book is open only in ANOTHER source (a renamed or copied file, another personal database or
+   * folder with a book of that title) are never bound to it just because it is the one open (V7 §1.1, item 2). The book's
+   * edition decides: the open candidates' editions are read, and one that matches the saved edition binds (attachLinks again).
+   * When none can be verified, the user is asked, once per book: "bind to the open book" binds by hand (chooseEdition), and
+   * the check then says if its lines changed.
+   */
+  private verifyEditions(): void {
+    const waiting = new Map<string, { title: string; origin: BookOrigin; source: string; edition?: string }>();
+    for (const l of this.linkState.value.links.values())
+      for (const { book: r } of [l.source, l.target])
+        if (r.source !== undefined && r.origin !== "unknown" && r.key.startsWith("unresolved:")) waiting.set(choiceKey(r.title, r.origin, r.source, r.edition), { title: r.title, origin: r.origin, source: r.source, ...(r.edition !== undefined && { edition: r.edition }) });
+    if (!waiting.size) return;
+    const learn: Promise<void>[] = [];
+    const offers: { id: string; title: string; source: string; to: SourceBook }[] = [];
+    const several: string[] = [];
+    for (const [id, w] of waiting) {
+      const kin = (this.booksByTitle.peek().get(w.title) ?? []).filter((b) => sameOrigin(w.origin, b.origin));
+      if (!kin.length) continue;
+      const saved = this.savedEdition(recordId(w.title, w.origin, w.source), w.edition);
+      const unread = saved === undefined ? [] : kin.filter((b) => !this.editions.peek().has(b.key) && !this.editionTried.has(b.key));
+      if (unread.length) {
+        learn.push(...unread.map((b) => this.learnEdition(b.key)));
+        continue;
+      }
+      if (kin.length === 1 && !this.editionOffered.has(`${id}\u0000${kin[0]!.key}`)) offers.push({ id, title: w.title, source: w.source, to: kin[0]! });
+      else if (kin.length > 1 && !this.editionOffered.has(id)) (this.editionOffered.add(id), several.push(`"${w.title}" (מ"${w.source}")`));
+    }
+    if (learn.length) this.track(Promise.all(learn).then(() => this.attachLinks()));
+    if (offers.length) {
+      for (const o of offers) this.editionOffered.add(`${o.id}\u0000${o.to.key}`);
+      const where = (b: SourceBook) => this.sourceLabelOf(b.key) ?? "";
+      this.notify(
+        "warning",
+        `${offers.length === 1 ? `הקישורים של "${offers[0]!.title}" נשמרו על הספר מ"${offers[0]!.source}", והספר בשם הזה שפתוח עכשיו הוא מ"${where(offers[0]!.to)}".` : `הקישורים של ${offers.length.toLocaleString("he")} ספרים נשמרו על ספרים ממקור אחר מזה שפתוח עכשיו.`} הכלי לא קשר אותם אליו, כי ייתכן שזו מהדורה אחרת ומספרי השורות שונים. אם זה אותו ספר, לחצו "קשרו לספר הפתוח": הבדיקה תסמן אם מספר השורות או הטקסט השתנו. אחרת פתחו את המקור המקורי.`,
+        offers.length > 1 ? offers.map((o) => `"${o.title}": נשמר מ"${o.source}", פתוח מ"${where(o.to)}"`) : undefined,
+        { label: "קשרו לספר הפתוח", run: () => this.chooseEditions(offers.map((o) => [o.id, o.to.key] as const)) },
+      );
+    }
+    if (several.length)
+      this.notify("warning", `הקישורים של ${several.length === 1 ? several[0] : `${several.length.toLocaleString("he")} ספרים`} לא נקשרו: פתוחים כמה ספרים בשם הזה ממקורות אחרים, ואי אפשר לדעת איזה מהם הוא הספר שהקישורים נעשו עליו. פתחו את המקור המקורי של הספר.`, several.length > 1 ? several : undefined);
+  }
+
+  /** The user says these books, open now, are the ones the links were saved on (verifyEditions): they bind to them. */
+  chooseEditions(choices: readonly (readonly [choice: string, bookKey: string])[]): void {
+    const next = new Map(this.editionChoices.peek());
+    for (const [choice, key] of choices) {
+      if (!this.books.peek().has(key)) continue;
+      next.set(choice, key);
+      // the book's identity alone too, when it names one book (the project's record of it then binds to the same book)
+      const [origin, source, title] = choice.split("\u0000") as [BookOrigin, string, string];
+      const id = recordId(title, origin, source);
+      if ((this.recordsById.peek().get(id)?.length ?? 0) <= 1) next.set(choiceKey(title, origin, source, undefined), key);
+    }
+    this.editionChoices.value = next;
+    this.attachLinks();
+  }
+
+  /** links of a book the user bound by hand to another open book (chooseEditions): choiceKey → book key */
+  private readonly editionChoices = signal<ReadonlyMap<string, string>>(new Map());
+  /** the offers already made (verifyEditions), so each is made once */
+  private readonly editionOffered = new Set<string>();
+
+  /** The edition of each open book, once read (learnEdition; core/text/fingerprint.ts editionFingerprint). */
+  readonly editions = signal<ReadonlyMap<string, string>>(new Map());
+  /** the edition reads by book key, and the bindings waiting on them ("attach:<n>") — editionsSettled waits on all */
+  private readonly editionRuns = new Map<string, Promise<void>>();
+  private attachSeq = 0;
+  /** books whose edition was asked for and settled (read, or failed): not asked again */
+  private readonly editionTried = new Set<string>();
+
+  /** Reads an open book's edition in the background (a few lines, state/edition.ts readEdition); once per book. */
+  learnEdition(bookKey: string): Promise<void> {
+    const running = this.editionRuns.get(bookKey);
+    if (running) return running;
+    const run = (async () => {
+      const b = this.books.peek().get(bookKey);
+      if (!b) return;
+      const count = b.lineCount ?? this.lines.count(bookKey) ?? (await this.lines.learnCount(bookKey));
+      if (count === undefined) return;
+      const edition = await readEdition((k, from, to) => this.service.lines(k, from, to), bookKey, count);
+      if (this.books.peek().has(bookKey)) this.editions.value = new Map(this.editions.peek()).set(bookKey, edition);
+    })()
+      .catch((err) => this.log.warn("edition", "not read", { error: String((err as Error)?.message ?? err) }))
+      .finally(() => this.editionTried.add(bookKey));
+    this.editionRuns.set(bookKey, run);
+    return run;
+  }
+
+  /** Work that waits on editions (binding, notices): editionsSettled waits for it too. */
+  private track(p: Promise<unknown>): void {
+    const key = `then:${++this.attachSeq}`;
+    const run = p.then(
+      () => void this.editionRuns.delete(key),
+      () => void this.editionRuns.delete(key),
+    );
+    this.editionRuns.set(key, run);
+  }
+
+  /** Waits until every edition asked for so far is read, and what waits on them is done (opening, the check and tests wait). */
+  async editionsSettled(): Promise<void> {
+    for (;;) {
+      const awaited = new Set(this.editionRuns.values());
+      await Promise.all(awaited);
+      if ([...this.editionRuns.values()].every((p) => awaited.has(p))) return;
+    }
+  }
+
+  private forgetEditions(gone: (bookKey: string) => boolean): void {
+    const next = new Map([...this.editions.peek()].filter(([k]) => !gone(k)));
+    if (next.size !== this.editions.peek().size) this.editions.value = next;
+    for (const k of [...this.editionRuns.keys()]) if (gone(k)) (this.editionRuns.delete(k), this.editionTried.delete(k));
   }
 
   /** The open book a link's BookRef points at: by key, or by exact title for links imported before the book was open. */
@@ -528,7 +695,7 @@ export class AppStore {
     if (own || !ref.key.startsWith("unresolved:")) return own;
     // an unresolved book is the open book that resolveTitle would bind — the same rules, so a link that stays unresolved
     // because two editions match is not shown, edited or exported as one of them (V7 PR1 review, finding 2)
-    const hit = this.resolveTitle(ref.title, ref.origin, ref.source);
+    const hit = this.resolveTitle(ref.title, ref.origin, ref.source, ref.edition);
     return hit ? this.books.value.get(hit.key) : undefined;
   }
 
@@ -546,24 +713,62 @@ export class AppStore {
   /**
    * The open book a title (or a path_2) names; null when none is open.
    *
-   * Without a known origin (an import by title, an old project) a non-personal book is preferred, as
-   * before. A saved project knows the origin (and, since V7, the source's label): a personal book binds
-   * only to a personal book and a library book only to a library one (#41 B18) — a same-titled book of
-   * the other kind is a different book, and the link stays unresolved rather than move to it silently.
-   * Several candidates of that origin are told apart by the source label; if it does not decide, the
-   * link stays unresolved too (V7 §1.1: no silent binding to another edition).
+   * Without a known source (an import by title, a project saved before V7): without a known origin a
+   * non-personal book is preferred, as before; with one, a personal book binds only to a personal book and
+   * a library book only to a library one (#41 B18), and two candidates of that origin leave it unresolved.
+   *
+   * With the source's label (a saved project since V7, a closed source, a lost worker) the book is THAT book
+   * (V7 §1.1, state/edition.ts): the one open book of that origin from a source with that label — or, when the
+   * label does not decide (the file was renamed or copied, two sources share a name), the one candidate whose
+   * edition is the saved edition. Never a book only because it is the one open of that title (item 2): the
+   * link stays unresolved, and verifyEditions asks the user (chooseEditions binds by hand).
+   *
+   * Two books of one title, origin AND label (two folders, each with a "user_books.db") are told apart only by
+   * their editions (item 6): the ref's own edition (StoredBook.edition), else the project's one record of it.
    */
-  resolveTitle(title: string, origin: BookOrigin = "unknown", source?: string): BookRef | null {
+  resolveTitle(title: string, origin: BookOrigin = "unknown", source?: string, edition?: string): BookRef | null {
     const hits = this.booksByTitle.value.get(title) ?? this.booksByTitle.value.get(titleFromPath2(title));
     if (!hits?.length) return null;
-    if (origin === "unknown") {
-      const b = hits.find((x) => x.origin !== "personal") ?? hits[0]!;
-      return this.refOf(b.key);
+    // (an open book always has a known origin: "unknown" is an import by title or a project from before origins were saved)
+    if (source === undefined || origin === "unknown") {
+      if (origin === "unknown") return this.refOf((hits.find((x) => x.origin !== "personal") ?? hits[0]!).key);
+      const kin = hits.filter((x) => sameOrigin(origin, x.origin));
+      return kin.length === 1 ? this.refOf(kin[0]!.key) : null;
     }
+    const chosen = this.editionChoices.value.get(choiceKey(title, origin, source, edition)) ?? this.editionChoices.value.get(choiceKey(title, origin, source, undefined));
+    if (chosen !== undefined && this.books.value.has(chosen)) return this.refOf(chosen);
+    const id = recordId(title, origin, source);
     const kin = hits.filter((x) => sameOrigin(origin, x.origin));
-    if (kin.length <= 1) return kin[0] ? this.refOf(kin[0].key) : null;
-    const labelled = source === undefined ? [] : kin.filter((x) => this.sourceLabelOf(x.key) === source);
-    return labelled.length === 1 ? this.refOf(labelled[0]!.key) : null;
+    const labelled = kin.filter((x) => this.sourceLabelOf(x.key) === source);
+    // the label decides, unless the project knows two books under it (then the edition must)
+    const twoUnderLabel = (this.recordsById.value.get(id)?.length ?? 0) > 1;
+    if (labelled.length === 1 && !(twoUnderLabel && edition !== undefined)) return this.refOf(labelled[0]!.key);
+    const wanted = this.savedEdition(id, edition);
+    if (wanted === undefined) return null;
+    const editions = this.editions.value;
+    const same = (labelled.length ? labelled : kin).filter((x) => editions.get(x.key) === wanted);
+    return same.length === 1 ? this.refOf(same[0]!.key) : null;
+  }
+
+  /** Open books whose identity (title, origin, source label) another open book shares: only their editions tell them apart. */
+  private readonly sharedIdentity = computed(() => {
+    const byId = new Map<string, string[]>();
+    for (const s of this.sources.value) for (const b of s.books) pushTo(byId, recordId(b.title, b.origin, s.info.label), b.key);
+    return new Set([...byId.values()].filter((keys) => keys.length > 1).flat());
+  });
+
+  /** The project's records by book identity (title, origin, source): more than one when two books share it (item 6). */
+  private readonly recordsById = computed(() => {
+    const out = new Map<string, BookRecord[]>();
+    for (const r of this.projectBooks.value.values()) pushTo(out, recordId(r.title, r.origin, r.source), r);
+    return out;
+  });
+
+  /** The edition a book of this identity was saved with: the ref's own, else the project's one record of it. */
+  private savedEdition(id: string, own: string | undefined): string | undefined {
+    if (own !== undefined) return own;
+    const recs = this.recordsById.value.get(id);
+    return recs?.length === 1 ? recs[0]!.edition : undefined;
   }
 
   /* ---------------- reading and picking ---------------- */
@@ -695,6 +900,8 @@ export class AppStore {
     }
     const link: Link = { ...d, id: this.newLinkId(), status: "new", provenance: "user" };
     this.apply("יצירת קישור", [...addChanges([link]), ...this.trimAround(link)]);
+    // the editions of the books the link is made on, read now in the background: the project saves them (V7 §1.1)
+    for (const side of [link.source, link.target]) if (this.books.peek().has(side.book.key) && !this.editionTried.has(side.book.key)) void this.learnEdition(side.book.key);
     batch(() => {
       this.pick.target.value = null;
       this.draftHeRef.value = null;
@@ -1005,7 +1212,16 @@ export class AppStore {
       // database links around the project's own links: validation reports "already in the database"
       await this.dbLinks.loadAround(this.allLinks.value);
       // the length of each book the saved project recorded, so a changed book is said (export/book-changed)
-      await Promise.all([...this.projectBookLines.value.keys()].map((t) => this.resolveTitle(t)).flatMap((ref) => (ref && this.lineCountOf(ref) === undefined ? [this.lines.learnCount(this.bookOf(ref)!.key)] : [])));
+      // and their editions, so a book whose text changed with the same count is said too (V7 §1.1)
+      await Promise.all(
+        [...this.bookRecords.value].flatMap(([key, rec]) => {
+          const b = this.books.peek().get(key);
+          if (!b) return [];
+          const count = b.lineCount ?? this.lines.count(key);
+          // (a book whose count changed is "changed" already: its edition need not be read)
+          return [...(count === undefined ? [this.lines.learnCount(key)] : []), ...(rec.edition !== undefined && (count === undefined || count === rec.lines) ? [this.learnEdition(key)] : [])];
+        }),
+      );
       let done = 0;
       for (const [key, lines] of need) await this.lines.loadFacts(key, lines, { signal: opts.signal, onChunk: () => opts.onProgress?.(++done, total) });
       return true;
@@ -1138,11 +1354,10 @@ export class AppStore {
       libraryFileListed: (title) => embeddedLibraryLinkFiles().titles.has(title),
       libraryFileListLabel: embeddedLibraryLinkFiles().label,
       existing: (l) => this.dbLinks.matchDb(l),
+      // by the book's identity and edition, not by its title (V7 §1.1, item 4): another book of the same title is not "changed"
       bookChanged: (ref) => {
-        const saved = this.projectBookLines.value.get(ref.title);
-        if (saved === undefined) return undefined;
-        const now = this.lineCountOf(ref);
-        return now !== undefined && now !== saved ? { saved, now } : undefined;
+        const b = this.bookOf(ref);
+        return b && this.changeOf(b.key);
       },
     };
   }
@@ -1150,42 +1365,89 @@ export class AppStore {
   /* ---------------- projects, autosave, recovery ---------------- */
 
   /**
-   * How many lines each book had when the open project was saved (ProjectFile.bookLines, V5 P1-10). A book
-   * open now with another count has changed, and the links on it may point at other lines: the check
-   * and the export warn (export/book-changed) until the user says the links were checked (acceptBookChange).
+   * What is known of each book the project's links were made on (ProjectFile.bookLines, V5 P1-10; by book identity since V7,
+   * state/edition.ts): its lines and its edition then, by title, origin and source label. A book open now with another count —
+   * or the same count and another edition — has changed, and the links on it may point at other lines: the check and the export
+   * warn (export/book-changed) until the user says the links were checked (acceptBookChange). A record without origin is of an
+   * older project and holds for its title.
    */
-  readonly projectBookLines = signal<ReadonlyMap<string, number>>(new Map());
-  /** the changed books already announced in a notice, so it is said once per project */
+  readonly projectBooks = signal<ReadonlyMap<string, BookRecord>>(new Map());
+  /** the changed books already announced in a notice, so each is said once per project */
   private readonly changedNoticed = new Set<string>();
   /** books whose unknown length was asked for (LineStore.learnCount), so it is asked once */
   private readonly countAsked = new Set<string>();
 
-  /** The number of lines of the open book a ref names, when known (databases up front, text files once read). */
-  private lineCountOf(ref: BookRef): number | undefined {
-    const b = this.bookOf(ref);
-    return b && (b.lineCount ?? this.lines.count(b.key));
+  /**
+   * Each open book's record: the record whose identity binds to it (resolveTitle: label, edition, or the user's choice). Records
+   * of older projects (title only) are kept apart and hold for every book of their title, as before.
+   */
+  private readonly recordsBound = computed(() => {
+    const byBook = new Map<string, BookRecord>();
+    const byTitle = new Map<string, BookRecord>();
+    for (const r of this.projectBooks.value.values()) {
+      if (r.origin === undefined) {
+        byTitle.set(r.title, r);
+        continue;
+      }
+      const id = recordId(r.title, r.origin, r.source);
+      const ref = this.resolveTitle(r.title, r.origin, r.source, (this.recordsById.value.get(id)?.length ?? 0) > 1 ? r.edition : undefined);
+      if (ref && !byBook.has(ref.key)) byBook.set(ref.key, r);
+    }
+    return { byBook, byTitle };
+  });
+
+  /** The record of an open book (recordsBound), if the project has one. */
+  private recordOf(bookKey: string): BookRecord | undefined {
+    const { byBook, byTitle } = this.recordsBound.value;
+    const own = byBook.get(bookKey);
+    if (own) return own;
+    const b = this.books.value.get(bookKey);
+    return b && byTitle.get(b.title);
+  }
+
+  /** Every open book that has a record, with it. */
+  private readonly bookRecords = computed<ReadonlyMap<string, BookRecord>>(() => {
+    const out = new Map<string, BookRecord>();
+    const { byBook, byTitle } = this.recordsBound.value;
+    for (const [k, r] of byBook) out.set(k, r);
+    if (byTitle.size) for (const b of this.books.value.values()) if (!out.has(b.key) && byTitle.has(b.title)) out.set(b.key, byTitle.get(b.title)!);
+    return out;
+  });
+
+  /** How an open book differs from the project's record of it: another line count, or the same count and another edition. */
+  private changeOf(bookKey: string): { saved: number; now: number; content?: true } | undefined {
+    const rec = this.recordOf(bookKey);
+    const b = this.books.value.get(bookKey);
+    if (!rec || !b) return undefined;
+    this.lines.tick.value; // a text book's count is learned on read
+    const now = b.lineCount ?? this.lines.count(bookKey);
+    if (now === undefined) return undefined;
+    if (now !== rec.lines) return { saved: rec.lines, now };
+    const edition = this.editions.value.get(bookKey);
+    return rec.edition !== undefined && edition !== undefined && edition !== rec.edition ? { saved: rec.lines, now, content: true } : undefined;
   }
 
   /**
-   * Says once which books of the project changed since it was saved (they may have moved its links). A
-   * text book does not know its length until read: it is learned in the background, then said.
+   * Says once which books of the project changed since it was saved (they may have moved its links). A text book does not
+   * know its length until read, and an edition is read in the background: both are learned, then said.
    */
   private noticeChangedBooks(): void {
     const changed: string[] = [];
     const learn: Promise<unknown>[] = [];
-    for (const [title, saved] of this.projectBookLines.value) {
-      if (this.changedNoticed.has(title)) continue;
-      const ref = this.resolveTitle(title);
-      const now = ref ? this.lineCountOf(ref) : undefined;
-      if (ref && now === undefined && !this.countAsked.has(ref.key)) {
-        this.countAsked.add(ref.key);
-        learn.push(this.lines.learnCount(ref.key));
-      }
-      if (now === undefined || now === saved) continue;
-      this.changedNoticed.add(title);
-      changed.push(`"${title}": היו ${saved.toLocaleString("he")} שורות, עכשיו ${now.toLocaleString("he")}`);
+    for (const [key, rec] of this.bookRecords.peek()) {
+      const b = this.books.peek().get(key)!;
+      const said = `${keyOfRecord(rec)}\u0000${key}`;
+      if (this.changedNoticed.has(said)) continue;
+      const now = b.lineCount ?? this.lines.count(key);
+      if (now === undefined && !this.countAsked.has(key)) (this.countAsked.add(key), learn.push(this.lines.learnCount(key)));
+      if (now === rec.lines && rec.edition !== undefined && !this.editionTried.has(key)) learn.push(this.learnEdition(key));
+      const change = this.changeOf(key);
+      if (!change) continue;
+      this.changedNoticed.add(said);
+      const where = rec.source !== undefined ? ` (מ"${this.sourceLabelOf(key) ?? rec.source}")` : "";
+      changed.push(change.content ? `"${b.title}"${where}: מספר השורות לא השתנה (${now!.toLocaleString("he")}), אבל הטקסט בחלק מהשורות השתנה` : `"${b.title}"${where}: היו ${rec.lines.toLocaleString("he")} שורות, עכשיו ${now!.toLocaleString("he")}`);
     }
-    if (learn.length) void Promise.all(learn).then(() => this.noticeChangedBooks());
+    if (learn.length) this.track(Promise.all(learn).then(() => this.noticeChangedBooks()));
     if (!changed.length) return;
     this.notify(
       "warning",
@@ -1195,43 +1457,83 @@ export class AppStore {
   }
 
   /**
-   * The user checked the links of books that changed since the project was saved: their present line
-   * count becomes the project's (saved with it), and the warning goes. Marks the project changed.
+   * The user checked the links of books that changed since the project was saved: their present line count and edition become
+   * the project's (saved with it), and the warning goes. A book is named by a link's book (the very book, V7 §1.1) or by a
+   * title (every open book of that title that has a record). Marks the project changed.
    */
-  acceptBookChange(titles: readonly string[]): void {
-    const next = new Map(this.projectBookLines.value);
+  acceptBookChange(books: readonly (string | BookRef)[]): void {
+    const next = new Map(this.projectBooks.value);
     let changed = false;
-    for (const t of titles) {
-      const ref = this.resolveTitle(t);
-      const now = ref ? this.lineCountOf(ref) : undefined;
-      if (now === undefined || next.get(t) === undefined || next.get(t) === now) continue;
-      next.set(t, now);
+    const keys = new Set<string>();
+    for (const x of books)
+      if (typeof x === "string") for (const b of this.booksByTitle.value.get(x) ?? []) keys.add(b.key);
+      else {
+        const b = this.bookOf(x);
+        if (b) keys.add(b.key);
+      }
+    for (const key of keys) {
+      const rec = this.recordOf(key);
+      const b = this.books.value.get(key);
+      if (!rec || !b || !this.changeOf(key)) continue;
+      const now = (b.lineCount ?? this.lines.count(key))!;
+      const edition = this.editions.value.get(key);
+      // a book whose count changed was not sampled: its new edition is read now, and saved with the project (bookLinesNow)
+      if (edition === undefined && !this.editionTried.has(key)) void this.learnEdition(key);
+      if (rec.origin === undefined) next.set(keyOfRecord(rec), { ...rec, lines: now });
+      else {
+        // the record is now of the book as it is open: under its identity (a book bound by hand keeps it so)
+        const source = this.sourceLabelOf(key);
+        const fresh: BookRecord = { title: b.title, origin: b.origin, ...(source !== undefined && { source }), lines: now, ...(edition !== undefined && { edition }) };
+        next.delete(keyOfRecord(rec));
+        next.set(keyOfRecord(fresh), fresh);
+      }
       changed = true;
     }
     if (!changed) return;
-    this.projectBookLines.value = next;
+    this.projectBooks.value = next;
     this.linkState.value = touch(this.linkState.value);
   }
 
-  /** The line counts the project saves: as saved before for a book the user did not accept as changed, else as open now. */
-  private bookLinesNow(): { title: string; lines: number }[] {
-    const saved = this.projectBookLines.value;
-    const out = new Map<string, number>();
+  /**
+   * What the project saves of each book its links use: the record as saved before for a book the user did not accept as changed,
+   * else the book as open now — under the book's identity (title, origin, source label) and with its edition. A book that is not
+   * open keeps what is known of it. Two books of one title are two entries (V7 §1.1, item 6).
+   */
+  private bookLinesNow(): ProjectBookLines[] {
+    const out = new Map<string, ProjectBookLines>();
+    const done = new Set<string>();
     for (const l of this.allLinks.value) {
       if (l.provenance === "db") continue;
       for (const side of [l.source, l.target]) {
-        const t = side.book.title;
-        if (out.has(t)) continue;
-        const n = saved.get(t) ?? this.lineCountOf(side.book);
-        if (n !== undefined) out.set(t, n);
-        else {
-          // a text book does not know its length until read: learned now, saved with the next autosave
-          const b = this.bookOf(side.book);
-          if (b && !this.countAsked.has(b.key)) (this.countAsked.add(b.key), void this.lines.learnCount(b.key));
+        // each book once: a project of 100K links names a few hundred books
+        const seenKey = side.book.key.startsWith("unresolved:") ? `${choiceKey(side.book.title, side.book.origin, side.book.source, side.book.edition)}` : side.book.key;
+        if (done.has(seenKey)) continue;
+        done.add(seenKey);
+        const b = this.bookOf(side.book);
+        if (!b) {
+          const r = side.book;
+          const id = recordId(r.title, r.origin, r.source);
+          const recs = this.recordsById.value.get(id) ?? [];
+          const rec = (recs.length > 1 ? recs.find((x) => x.edition === r.edition) : recs[0]) ?? this.recordsBound.value.byTitle.get(r.title);
+          if (rec && !out.has(keyOfRecord(rec))) out.set(keyOfRecord(rec), { ...rec });
+          continue;
         }
+        if (b.key !== side.book.key && done.has(b.key)) continue;
+        done.add(b.key);
+        const source = this.sourceLabelOf(b.key);
+        const rec = this.recordOf(b.key);
+        const now = b.lineCount ?? this.lines.count(b.key);
+        const lines = rec?.lines ?? now;
+        // the edition the links were made on: the record's; one not known then is the book's now when its count did not change
+        const edition = rec?.edition ?? (lines === now ? this.editions.value.get(b.key) : undefined);
+        // a text book does not know its length until read, nor any book its edition: learned now, saved with the next autosave
+        if (now === undefined && !this.countAsked.has(b.key)) (this.countAsked.add(b.key), void this.lines.learnCount(b.key));
+        if (edition === undefined && !this.editionTried.has(b.key)) void this.learnEdition(b.key);
+        const entry: ProjectBookLines = { title: b.title, origin: b.origin, ...(source !== undefined && { source }), lines: lines!, ...(edition !== undefined && { edition }) };
+        if (lines !== undefined && !out.has(keyOfRecord(entry))) out.set(keyOfRecord(entry), entry);
       }
     }
-    return [...out].map(([title, lines]) => ({ title, lines }));
+    return [...out.values()];
   }
 
   /** The sources the open project was saved with (audit F10); missingSources lists those not open again. */
@@ -1239,14 +1541,19 @@ export class AppStore {
 
   /**
    * The project's sources that are not open yet, each with the titles its links still wait for. A
-   * source that recorded its titles is back when they are all open (whatever source holds them — the
-   * links bind by title); an older project's source, by its label.
+   * source that recorded its titles is back when they are all open and no link of that source still waits
+   * for its book (V7 §1.1: a book of that title from another source binds only when it is the same edition);
+   * an older project's source, by its label.
    */
   readonly missingSources = computed<(ProjectSource & { missingTitles: string[] })[]>(() => {
     const open = this.booksByTitle.value;
     const labels = new Set(this.sources.value.map((s) => s.info.label));
+    const waiting = new Set<string>();
+    if (this.projectSources.value.length)
+      for (const l of this.linkState.value.links.values())
+        for (const side of [l.source, l.target]) if (side.book.source !== undefined && side.book.key.startsWith("unresolved:")) waiting.add(`${side.book.source}\u0000${side.book.title}`);
     return this.projectSources.value.flatMap((s) => {
-      const missingTitles = (s.titles ?? []).filter((t) => !open.has(t));
+      const missingTitles = (s.titles ?? []).filter((t) => !open.has(t) || waiting.has(`${s.label}\u0000${t}`));
       const missing = s.titles?.length ? missingTitles.length > 0 : !labels.has(s.label);
       return missing ? [{ ...s, missingTitles }] : [];
     });
@@ -1294,6 +1601,8 @@ export class AppStore {
         bookLines: this.bookLinesNow(),
         coverage: this.coverage.snapshot(),
         sourceOf: (k) => this.sourceLabelOf(k),
+        // the edition, where title, origin and source do not tell the book apart (two sources of one name, item 6)
+        editionOf: (k) => (this.sharedIdentity.value.has(k) ? this.editions.value.get(k) : undefined),
       },
       APP_VERSION,
       undefined,
@@ -1322,14 +1631,26 @@ export class AppStore {
     const ls0 = this.linkState.peek();
     const unsaved = this.dirty.peek() && (ls0.links.size > 0 || ls0.altToc.size > 0 || ls0.rejected.size > 0) ? this.projectText() : null;
     let p;
+    const unbound = (b: StoredBook): BookRef => ({ key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.source !== undefined && { source: b.source }), ...(b.edition !== undefined && { edition: b.edition }) });
     try {
-      p = parseProject(text, (b) => this.resolveTitle(b.title, b.origin, b.source) ?? { key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.source !== undefined && { source: b.source }) });
+      p = parseProject(text, unbound);
     } catch (err) {
       return void this.notify("error", `"${path}": ${(err as Error).message}`);
     }
+    // the project's records of its books first: a book's saved edition decides which open book its links bind to (V7 §1.1)
+    const records = new Map<string, BookRecord>();
+    for (const b of p.bookLines) records.set(keyOfRecord(b), { ...b });
+    this.projectBooks.value = records;
+    const memo = new Map<string, BookRef>();
+    const bind = (ref: BookRef): BookRef => {
+      const id = choiceKey(ref.title, ref.origin, ref.source, ref.edition);
+      if (!memo.has(id)) memo.set(id, this.resolveTitle(ref.title, ref.origin, ref.source, ref.edition) ?? ref);
+      return memo.get(id)!;
+    };
+    const links = p.links.map((l) => ({ ...l, source: { ...l.source, book: bind(l.source.book) }, target: { ...l.target, book: bind(l.target.book) } }));
     const old = this.linkState.value.links;
     const changes: Change[] = [...old.values()].map((l) => ({ id: l.id, before: l }));
-    for (const l of p.links) changes.push({ id: l.id, ...(old.get(l.id) && { before: old.get(l.id)! }), after: l });
+    for (const l of links) changes.push({ id: l.id, ...(old.get(l.id) && { before: old.get(l.id)! }), after: l });
     // the project's alt_toc replaces the current one, in the same undoable action
     const ls = this.linkState.value;
     const altChanges: AltTocChange[] = [...ls.altToc.keys()].filter((t) => !p.altToc.some((b) => b.title === t)).map((t) => altTocChange(ls, t, null));
@@ -1349,7 +1670,6 @@ export class AppStore {
       this.view.source.value = show(p.view.source) ?? this.view.source.value;
       this.view.target.value = show(p.view.target) ?? this.view.target.value;
       this.projectSources.value = p.sources;
-      this.projectBookLines.value = new Map(p.bookLines.map((b) => [b.title, b.lines] as const));
       this.coverage.restore(p.coverage);
       this.changedNoticed.clear();
       // the switch "ספרי ספריית אוצריא" as the user left it, for each source when it is open again
@@ -1374,6 +1694,7 @@ export class AppStore {
       });
     }
     this.noticeChangedBooks();
+    this.verifyEditions();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
     if (snapshots.length)
       this.notify("info", `בפרויקט יש עותק של קובצי הקישורים של ${snapshots.length === 1 ? `"${snapshots[0]}"` : `${snapshots.length} ספרים`} מהספרייה. לפני ייצוא שלהם טענו אותם שוב מהספרייה (הכלי יוודא שהם לא השתנו), או אשרו בחלון הייצוא שהעותק העדכני.`, snapshots.length > 1 ? snapshots.slice(0, 50) : undefined);
@@ -1609,11 +1930,6 @@ const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev
 
 export const TYPE_CHOICES = AUTHORABLE_TYPES.map((t) => t.toLowerCase());
 export const isKnownType = (raw: string): boolean => parseConnectionType(raw).known;
-
-/** A book ref by title only ("unresolved:"), as a saved project holds it: attachLinks binds it when a book of that title opens. */
-function unboundRef(ref: BookRef): BookRef {
-  return ref.key.startsWith("unresolved:") ? ref : { key: `unresolved:${ref.title}`, title: ref.title, origin: ref.origin, ...(ref.isBaseBook !== undefined && { isBaseBook: ref.isBaseBook }) };
-}
 
 /** at most this many unanswered recovery offers are kept (each is a whole project) */
 const MAX_RECOVERY_OFFERS = 3;

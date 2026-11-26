@@ -64,6 +64,11 @@ export interface StoredBook {
    * different sources (#41 B18): a hint only — a renamed file still binds by title and origin.
    */
   source?: string;
+  /**
+   * Optional (V7, without a version bump): the book's edition (core/text/fingerprint.ts), written only when the title, origin
+   * and source do not tell the book apart — two open sources of one name with a book of that title (item 6).
+   */
+  edition?: string;
 }
 interface StoredSide {
   book: StoredBook;
@@ -119,9 +124,17 @@ export interface ProjectCoverage {
   at: number;
 }
 
+/**
+ * A book the project's links were made on: how many lines it had when the project was saved, and — optional fields of V7, without
+ * a version bump: older readers ignore them — which book it was (origin and source label, as StoredBook) and its edition
+ * (core/text/fingerprint.ts editionFingerprint). An entry without origin is of an older project: it holds for the title.
+ */
 export interface ProjectBookLines {
   title: string;
   lines: number;
+  origin?: BookOrigin;
+  source?: string;
+  edition?: string;
 }
 
 export interface ProjectData {
@@ -138,12 +151,16 @@ export interface ProjectData {
   coverage?: ProjectCoverage[];
   /** the label of the source a book key belongs to (StoredBook.source); absent: no hint is written */
   sourceOf?: (bookKey: string) => string | undefined;
+  /** the edition of a book whose title, origin and source do not tell it apart (StoredBook.edition); undefined: not written */
+  editionOf?: (bookKey: string) => string | undefined;
 }
 
-const storeSide = (s: LinkSide, sourceOf?: (bookKey: string) => string | undefined): StoredSide => {
-  const source = s.book.key.startsWith("unresolved:") ? s.book.source : sourceOf?.(s.book.key);
+const storeSide = (s: LinkSide, sourceOf?: (bookKey: string) => string | undefined, editionOf?: (bookKey: string) => string | undefined): StoredSide => {
+  const unresolved = s.book.key.startsWith("unresolved:");
+  const source = unresolved ? s.book.source : sourceOf?.(s.book.key);
+  const edition = unresolved ? s.book.edition : editionOf?.(s.book.key);
   return {
-    book: { title: s.book.title, origin: s.book.origin, ...(s.book.isBaseBook !== undefined && { isBaseBook: s.book.isBaseBook }), ...(source && { source }) },
+    book: { title: s.book.title, origin: s.book.origin, ...(s.book.isBaseBook !== undefined && { isBaseBook: s.book.isBaseBook }), ...(source && { source }), ...(edition && { edition }) },
     line: s.line,
     ...(s.end !== undefined && { end: s.end }),
   };
@@ -156,7 +173,7 @@ const storeSide = (s: LinkSide, sourceOf?: (bookKey: string) => string | undefin
  */
 export function serializeProject(p: ProjectData, app: string, now = new Date(), cache?: WeakMap<Link, string>): string {
   // database links are never part of a project: they are read again from the database
-  const stored = (l: Link): StoredLink => ({ ...l, source: storeSide(l.source, p.sourceOf), target: storeSide(l.target, p.sourceOf) });
+  const stored = (l: Link): StoredLink => ({ ...l, source: storeSide(l.source, p.sourceOf, p.editionOf), target: storeSide(l.target, p.sourceOf, p.editionOf) });
   const kept = p.links.filter((l) => l.provenance !== "db");
   const file: ProjectFile = {
     format: PROJECT_FORMAT,
@@ -170,7 +187,7 @@ export function serializeProject(p: ProjectData, app: string, now = new Date(), 
     ...(p.altToc?.length && { altToc: p.altToc }),
     ...(p.dbMappings?.length && { dbMappings: p.dbMappings }),
     ...(p.libraryFiles?.length && { libraryFiles: p.libraryFiles.map((f) => ({ title: f.title, records: f.records, hash: f.hash, ...(f.layout && { layout: f.layout }) })) }),
-    ...(p.bookLines?.length && { bookLines: p.bookLines.map((b) => ({ title: b.title, lines: b.lines })) }),
+    ...(p.bookLines?.length && { bookLines: p.bookLines.map((b) => ({ title: b.title, lines: b.lines, ...(b.origin && { origin: b.origin }), ...(b.source !== undefined && { source: b.source }), ...(b.edition && { edition: b.edition }) })) }),
     ...(p.coverage?.length && { coverage: p.coverage }),
   };
   const text = JSON.stringify(file);
@@ -248,10 +265,19 @@ function rebuildSource(s: ProjectSource): ProjectSource {
 function rebuildBookLines(raw: unknown): ProjectBookLines[] {
   if (!Array.isArray(raw)) return [];
   const out = new Map<string, ProjectBookLines>();
-  for (const x of raw as Record<string, unknown>[])
-    if (x && typeof x === "object" && str(x.title) && x.title && !out.has(x.title) && isInt(x.lines)) out.set(x.title, { title: x.title, lines: x.lines });
+  for (const x of raw as Record<string, unknown>[]) {
+    if (!x || typeof x !== "object" || !str(x.title) || !x.title || !isInt(x.lines)) continue;
+    // one entry per book: by title, origin, source and edition (two books of one title are two entries, V7 §1.1)
+    const origin = ORIGINS.has(x.origin as BookOrigin) ? (x.origin as BookOrigin) : undefined;
+    const source = origin && str(x.source) && x.source.length <= 500 ? x.source : undefined;
+    const edition = isEdition(x.edition) ? x.edition : undefined;
+    const id = `${origin ?? ""}\u0000${source ?? ""}\u0000${x.title}\u0000${edition ?? ""}`;
+    if (!out.has(id)) out.set(id, { title: x.title, lines: x.lines, ...(origin && { origin }), ...(source !== undefined && { source }), ...(edition && { edition }) });
+  }
   return [...out.values()];
 }
+/** an edition as core/text/fingerprint.ts editionFingerprint writes it */
+const isEdition = (x: unknown): x is string => typeof x === "string" && /^\d{1,12}:[0-9a-f]{16}$/.test(x);
 
 /* ---- coverage of the books: rebuilt from checked fields (untrusted input) ---- */
 function rebuildCoverage(raw: unknown): ProjectCoverage[] {
@@ -332,7 +358,7 @@ const isEntry = (e: Record<string, unknown>): boolean => !!e && typeof e === "ob
 const ORIGINS = new Set<BookOrigin>(["otzaria", "sefaria", "personal", "unknown"]);
 const str = (x: unknown): x is string => typeof x === "string";
 function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | null {
-  const book = (b: StoredBook): StoredBook => ({ title: b.title, origin: ORIGINS.has(b.origin) ? b.origin : "unknown", ...(typeof b.isBaseBook === "boolean" && { isBaseBook: b.isBaseBook }), ...(str(b.source) && b.source.length <= 500 && { source: b.source }) });
+  const book = (b: StoredBook): StoredBook => ({ title: b.title, origin: ORIGINS.has(b.origin) ? b.origin : "unknown", ...(typeof b.isBaseBook === "boolean" && { isBaseBook: b.isBaseBook }), ...(str(b.source) && b.source.length <= 500 && { source: b.source }), ...(isEdition(b.edition) && { edition: b.edition }) });
   const side = (s: StoredSide) => ({ book: bind(book(s.book)), line: s.line, ...(s.end !== undefined && { end: s.end }) });
   const a = l.anchor as unknown as Record<string, unknown> | undefined;
   if (a !== undefined && (!a || !isInt(a.rawStart) || (a.rawEnd !== undefined && !isInt(a.rawEnd)) || (a.label !== undefined && !str(a.label)))) return null;

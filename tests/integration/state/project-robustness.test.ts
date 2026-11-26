@@ -28,6 +28,8 @@ const memKv = () => {
   return { mem, kv };
 };
 const tick = () => new Promise((r) => setTimeout(r, 15));
+/** an edition (core/text/fingerprint.ts editionFingerprint): the line count and 16 hex digits */
+const EDITION = /^\d+:[0-9a-f]{16}$/;
 const PAIRS: ReadonlySet<EngineId> = new Set(["headings", "dibur-hamatchil", "footnotes"]);
 
 /** a session with decisions of every kind: approved suggestions, one approved then edited, rejections, a manual link */
@@ -56,9 +58,11 @@ describe("reopened after a book's text changed", () => {
     // the autosave writes the project a moment after each change; a text book's length is learned by then
     a.store.projectText();
     await tick();
+    await a.store.editionsSettled(); // and its edition (V7 §1.1), read in the background like the length
     a.store.saveProject();
     const project = String(a.saved.at(-1)!.data);
-    expect(JSON.parse(project).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length }]));
+    // V7 §1.1: by the book's identity (origin, source) and with its edition, not by title only
+    expect(JSON.parse(project).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", origin: "otzaria", source: "ביאורים", lines: BIUR_LINES.length, edition: expect.stringMatching(EDITION) }]));
 
     // the commentary was edited: a line was added at the top, so every line number after it moved by one
     const b = makeStore();
@@ -84,18 +88,26 @@ describe("reopened after a book's text changed", () => {
     b.store.acceptBookChange(["ביאור על בראשית"]);
     expect(b.store.dirty.value).toBe(true);
     expect((await b.store.quality.run())!.issues.some((i) => i.problem.code === "export/book-changed")).toBe(false);
-    expect(JSON.parse(b.store.projectText()).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length + 1 }]));
+    await b.store.editionsSettled(); // the new edition, read in the background
+    const accepted = JSON.parse(b.store.projectText()).bookLines.find((x: { title: string }) => x.title === "ביאור על בראשית");
+    expect(accepted).toEqual({ title: "ביאור על בראשית", origin: "otzaria", source: "ביאורים", lines: BIUR_LINES.length + 1, edition: expect.stringMatching(EDITION) });
+    // the edition saved is the book's NEW edition
+    expect(accepted.edition).not.toBe(JSON.parse(project).bookLines.find((x: { title: string }) => x.title === "ביאור על בראשית").edition);
   });
 
   it("saving before the changed book was checked keeps the old count: the warning is not lost by a save", async () => {
     const a = await workedOn();
     a.store.projectText();
     await tick();
+    await a.store.editionsSettled();
+    const saved = a.store.projectText();
     const b = makeStore();
     await b.store.openFiles([DB]);
     await b.store.openFiles([text("ביאורים/ביאור על בראשית.txt", [...BIUR_LINES, "שורה נוספת"])]);
-    b.store.openProject("p.otzlinker.json", a.store.projectText());
-    expect(JSON.parse(b.store.projectText()).bookLines).toEqual(expect.arrayContaining([{ title: "ביאור על בראשית", lines: BIUR_LINES.length }]));
+    b.store.openProject("p.otzlinker.json", saved);
+    const old = JSON.parse(saved).bookLines.find((x: { title: string }) => x.title === "ביאור על בראשית");
+    expect(old).toEqual({ title: "ביאור על בראשית", origin: "otzaria", source: "ביאורים", lines: BIUR_LINES.length, edition: expect.stringMatching(EDITION) });
+    expect(JSON.parse(b.store.projectText()).bookLines).toEqual(expect.arrayContaining([old]));
   });
 });
 
@@ -104,6 +116,10 @@ describe("reopened from a moved or renamed folder", () => {
     const a = await workedOn("ביאורים");
     const folder = a.store.sources.value.find((s) => s.info.kind === "text-files")!;
     a.store.setLibrarySource(folder.info.id, true);
+    // V7 §1.1: the folder's name no longer decides alone — the book's edition, saved with the project, shows that the renamed
+    // folder holds the same book (the autosave writes the project after it is read: tests/integration/state/edition-identity)
+    a.store.projectText();
+    await a.store.editionsSettled();
     const project = a.store.projectText();
 
     const b = makeStore();

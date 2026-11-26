@@ -19,6 +19,11 @@ export interface BookRef {
    * (StoredBook.source), kept so that the right one of same-titled books binds when it opens (#41 B18).
    */
   readonly source?: string;
+  /**
+   * Only on an unresolved book (V7 §1.1): its edition (core/text/fingerprint.ts editionFingerprint) when known — what tells it
+   * apart from a book of the same title, origin and source label (StoredBook.edition).
+   */
+  readonly edition?: string;
 }
 
 export interface LinkSide {

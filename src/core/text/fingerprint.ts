@@ -39,3 +39,25 @@ export function bytesFingerprint(bytes: Uint8Array): string {
 
 /** One fingerprint of several parts (a book, its bases, the plan of its steps), in the given order. */
 export const combineFingerprints = (parts: readonly string[]): string => linesFingerprint(parts);
+
+/**
+ * The lines an EDITION fingerprint reads (V7 §1.1): the first, the last, and evenly between them, EDITION_SAMPLES in all (every
+ * line of a shorter book). Few on purpose: a project binds hundreds of books, and a database book is read lazily, line by line.
+ */
+export const EDITION_SAMPLES = 32;
+export function editionSampleLines(count: number): number[] {
+  if (count <= EDITION_SAMPLES) return Array.from({ length: Math.max(0, count) }, (_, i) => i);
+  const out = new Set<number>();
+  for (let i = 0; i < EDITION_SAMPLES; i++) out.add(Math.floor((i * (count - 1)) / (EDITION_SAMPLES - 1)));
+  return [...out];
+}
+
+/**
+ * A book's edition (V7 §1.1, docs/contracts/DATABASE_SUPPORT_MATRIX.md §9): its line count, and a fingerprint of the sampled
+ * lines (editionSampleLines), each with its number. Equal text gives an equal edition from any source (a renamed or copied
+ * file); another line count, or a change in a sampled line, gives another. A change between the samples that keeps the count
+ * is not seen: the edition tells "the same book" from "another edition", it does not prove that no character changed.
+ */
+export function editionFingerprint(count: number, lines: readonly number[], texts: readonly (string | undefined)[]): string {
+  return `${count}:${linesFingerprint(lines.map((n, i) => `${n}\t${texts[i] ?? "\u0000"}`)).split(":")[1]}`;
+}

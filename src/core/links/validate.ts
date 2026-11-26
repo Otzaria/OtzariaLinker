@@ -90,10 +90,11 @@ export interface ValidationContext {
   /** How a link matches the links of the open databases (core/links/equality.ts); absent = not checked. */
   existing?(link: Link): LinkMatch | null;
   /**
-   * The open book has a different number of lines than when the saved project was made (V5 P1-10): its
-   * text changed, and links by line number may now point at other lines. Absent/undefined = not known.
+   * The open book has a different number of lines than when the saved project was made (V5 P1-10) — or the same number and
+   * another edition (`content`, V7 §1.1: a sampled line changed): its text changed, and links by line number may now point at
+   * other lines. By the book's identity, not its title. Absent/undefined = not known.
    */
-  bookChanged?(book: BookRef): { saved: number; now: number } | undefined;
+  bookChanged?(book: BookRef): { saved: number; now: number; content?: true } | undefined;
 }
 
 export type LinksFileState = "imported" | "unverified" | "confirmed-new" | "missing";
@@ -258,13 +259,14 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
   if (s.book.title === t.book.title && s.line === t.line && lastOf(s) === lastOf(t))
     add("error", "export/same-line", `הקישור יוצא משורה ${s.line + 1} ב"${s.book.title}" אל אותה שורה בדיוק, ולכן אינו מקשר דבר. בחרו שורה אחרת באחד הצדדים.`);
 
-  for (const b of s.book.title === t.book.title ? [s.book] : [s.book, t.book]) {
+  // each BOOK once (two editions of one title are two books, V7 §1.1)
+  for (const b of s.book.key === t.book.key ? [s.book] : [s.book, t.book]) {
     const changed = ctx.bookChanged?.(b);
     if (changed)
       add(
         "warning",
         "export/book-changed",
-        `הספר "${b.title}" השתנה מאז שהפרויקט נשמר: היו בו ${changed.saved.toLocaleString("he")} שורות, ועכשיו ${changed.now.toLocaleString("he")}. הקישור נשמר לפי מספר שורה, ולכן ייתכן שהוא מצביע עכשיו על שורה אחרת. אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים ("השוואת מהדורות"); אחרת בדקו את הקישור על הטקסט.`,
+        `הספר "${b.title}" השתנה מאז שהפרויקט נשמר: ${changed.content ? `מספר השורות לא השתנה (${changed.now.toLocaleString("he")}), אבל הטקסט בחלק מהשורות השתנה` : `היו בו ${changed.saved.toLocaleString("he")} שורות, ועכשיו ${changed.now.toLocaleString("he")}`}. הקישור נשמר לפי מספר שורה, ולכן ייתכן שהוא מצביע עכשיו על שורה אחרת. אם יש לכם את המהדורה הקודמת, פתחו את שתיהן והעבירו את הקישורים ("השוואת מהדורות"); אחרת בדקו את הקישור על הטקסט.`,
       );
   }
   sideChecks("ספר המקור", link.source, ctx, add);

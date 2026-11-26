@@ -133,7 +133,7 @@ export function QaPanel() {
                   </button>
                 )}
                 {qaAction(i.problem, purpose) === "accept-edition" && (
-                  <button class="btn text small" title="בדקתם את הקישורים על הטקסט החדש והם נכונים: מספר השורות הנוכחי של הספר יישמר בפרויקט, והאזהרה תוסר" onClick={() => remedy(() => store.acceptBookChange([i.link.source.book.title, i.link.target.book.title]))}>
+                  <button class="btn text small" title="בדקתם את הקישורים על הטקסט החדש והם נכונים: מספר השורות הנוכחי של הספר יישמר בפרויקט, והאזהרה תוסר" onClick={() => remedy(() => store.acceptBookChange([i.link.source.book, i.link.target.book]))}>
                     הקישורים נבדקו
                   </button>
                 )}
