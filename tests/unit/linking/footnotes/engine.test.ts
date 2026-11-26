@@ -190,6 +190,30 @@ describe("chapters anchored to headings", () => {
     expect(pairs(res)).toEqual(["1>1"]);
     expect(codes(res.notes)).toContain("footnotes/headings-unpaired");
   });
+
+  /*
+   * #42 C13: the notes book has a chapter the book does not (an introduction's notes, a chapter printed only in the notes). Three of
+   * the four notes sections pair by heading (75%, under the 80% that "auto" asked of the NOTES side), so the chapters were inferred by
+   * numbering, and chapter ג of the book went to the notes of the extra chapter at "possible". Every section of the BOOK that holds
+   * markers pairs by an equal heading: that is enough to follow the headings.
+   */
+  it("an extra chapter in the notes book: each chapter of the book goes to the notes under the equal heading (#42 C13)", () => {
+    const n = ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", ...noteLines(["1", "2"]), "<h2>פרק ב</h2>", ...noteLines(["1", "2"]), "<h2>הוספה</h2>", ...noteLines(["1", "2"]), "<h2>פרק ג</h2>", ...noteLines(["1", "2"])];
+    const m = ["<h1>ספר</h1>", "<h2>פרק א</h2>", "א<sup>1</sup> ב<sup>2</sup>", "<h2>פרק ב</h2>", "ג<sup>1</sup> ד<sup>2</sup>", "<h2>פרק ג</h2>", "ה<sup>1</sup> ו<sup>2</sup>"];
+    const res = run(m, n);
+    expect(pairs(res)).toEqual(["2>2", "2>3", "4>5", "4>6", "6>11", "6>12"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain" && s.rules.includes("chapter:heading"))).toBe(true);
+    // the extra chapter's notes are reported, not linked
+    expect(res.notes.find((x) => x.code === "footnotes/note-without-marker")?.text).toContain("(שורות 9, 10)");
+  });
+
+  it("the same with the book's chapters in a different order from the notes' sequence", () => {
+    const n = ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", ...noteLines(["1", "2", "3"]), "<h2>פרק ב</h2>", ...noteLines(["1", "2"]), "<h2>פרק ג</h2>", ...noteLines(["1"])];
+    const m = ["<h1>ספר</h1>", "<h2>פרק א</h2>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>", "<h2>פרק ג</h2>", "ה<sup>1</sup>"];
+    const res = run(m, n);
+    expect(pairs(res)).toEqual(["2>2", "2>3", "2>4", "4>9"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
 });
 
 describe("repeats, duplicates and the unmatched report", () => {

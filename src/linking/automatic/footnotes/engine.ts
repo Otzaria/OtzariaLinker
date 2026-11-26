@@ -554,11 +554,16 @@ function planChapters(
     const withOccs = ns.sections.filter((s) => notesBySection.has(s.id));
     // every main section takes part: a chapter whose markers are all missing must still claim its notes
     const pairs = pairSections(ms.sections, withOccs);
-    const useHeadings = mode === "headings" ? pairs.size > 0 : withOccs.length >= 2 && pairs.size / withOccs.length >= 0.8;
+    // #42 C13: an extra chapter in the notes book (or one the book lacks) leaves part of the NOTES unpaired; when the sections of the
+    // BOOK that hold markers pair by an equal heading, the headings still say where each marker's notes are — far better than the
+    // numbering, which sent chapter ג of the book to the extra chapter's notes
+    const mainWith = new Set(mainOccs.map((o) => ms.sectionOf[o.line]!));
+    const pairedMain = new Set(pairs.values());
+    const mainShare = mainWith.size ? [...mainWith].filter((id) => pairedMain.has(id)).length / mainWith.size : 0;
+    const useHeadings = mode === "headings" ? pairs.size > 0 : withOccs.length >= 2 && (pairs.size / withOccs.length >= 0.8 || mainShare >= 0.8);
     if (useHeadings) {
       const chapters: Chapter[] = [];
       const groups: Group[] = [];
-      const pairedMain = new Set(pairs.values());
       for (const s of withOccs) {
         const mId = pairs.get(s.id);
         if (mId === undefined) continue;
@@ -581,7 +586,9 @@ function planChapters(
       return {
         byHeadings: true,
         chapters, groups, orphanMain,
-        describe: `הפרקים זוהו לפי כותרות: ${pairs.size} פרקים בהערות הותאמו לכותרת זהה בספר${unpaired ? `, ו־${unpaired} פרקים בלי כותרת מקבילה קושרו לפי איפוס המספור (בביטחון נמוך יותר)` : ""}.`,
+        describe: `הפרקים זוהו לפי כותרות: ${pairs.size} פרקים בהערות הותאמו לכותרת זהה בספר${
+          !unpaired ? "" : leftMain.length ? `, ו־${unpaired} פרקים בלי כותרת מקבילה קושרו לפי איפוס המספור (בביטחון נמוך יותר)` : `. ל־${unpaired} פרקים בהערות אין כותרת מקבילה בספר, ולכן ההערות שבהם לא קושרו (ראו "הערות בלי סימן")`
+        }.`,
       };
     }
     if (mode === "headings") runNotes.push(r("footnotes/headings-unpaired", "התבקש פיצול לפי כותרות, אבל אף כותרת בספר ההערות לא נמצאה גם בספר. נעשה פיצול לפי איפוס המספור."));
