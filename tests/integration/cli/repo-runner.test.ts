@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { strToU8, zipSync } from "fflate";
@@ -173,6 +173,45 @@ describe("the runner refuses what would overwrite or write into the repository",
     expect(r.err).toMatch(/אינה ריקה/);
     expect(tree(busy)).toEqual(["keep.txt"]);
     expect(readFileSync(join(busy, "keep.txt"), "utf8")).toBe("mine");
+  });
+
+  // V7 PR4 review, finding 2: the check compared path.resolve strings, so a case variant of the repository's path (on a
+  // case-insensitive file system) or a junction/symlink into it passed, and the run wrote into the repository.
+  const copyRepo = () => {
+    const root = fresh("case");
+    const repo = join(root, "Repo");
+    cpSync(ZMANENU, repo, { recursive: true });
+    return { root, repo };
+  };
+  const caseInsensitive = (() => {
+    const d = fresh("probe");
+    mkdirSync(join(d, "Probe"));
+    return existsSync(join(d, "probe"));
+  })();
+
+  it.runIf(caseInsensitive)("--out in a case variant of the repository's path: refused, nothing written", async () => {
+    const { root, repo } = copyRepo();
+    const r = await untouched(repo, ["--repo", repo, "--out", join(root, "repo", "linker-out")]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/בתוך המאגר|המאגר עצמו/);
+  });
+
+  it("--out through a junction or symlink into the repository: refused, nothing written", async () => {
+    const { root, repo } = copyRepo();
+    const link = join(root, "link");
+    symlinkSync(repo, link, process.platform === "win32" ? "junction" : "dir");
+    for (const out of [join(link, "linker-out"), link]) {
+      const r = await untouched(repo, ["--repo", repo, "--out", out]);
+      expect(r.code, out).toBe(1);
+      expect(r.err).toMatch(/בתוך המאגר|המאגר עצמו/);
+    }
+  });
+
+  it("--out that holds the repository: refused as such, not only as a non-empty folder", async () => {
+    const { root, repo } = copyRepo();
+    const r = await untouched(repo, ["--repo", repo, "--out", root]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/המאגר נמצא בתוכה/);
   });
 
   it("wrong arguments exit with 2 and the usage", async () => {

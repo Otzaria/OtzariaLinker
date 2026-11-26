@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, openAsBlob, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, openAsBlob, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { booksService } from "../app/books-service";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
@@ -248,12 +248,39 @@ function countRecords(text: string): number {
   }
 }
 
-/** --out: never the repository or inside it, never a file, and empty (nothing in it is ever replaced). */
+/**
+ * The path a file system really means: the nearest existing ancestor through realpath (junctions, symlinks, subst drives and,
+ * on Windows, the stored letter case), plus the part that does not exist yet as given. Case-folded where the file system
+ * ignores case (win32, darwin), so `C:\x\Repo` and `C:\x\repo` compare equal (V7 PR4 review, finding 2).
+ */
+function realKey(p: string): string {
+  let head = resolve(p);
+  const rest: string[] = [];
+  let real: string;
+  for (;;) {
+    try {
+      real = join(realpathSync.native(head), ...rest);
+      break;
+    } catch {
+      const up = dirname(head);
+      if (up === head) {
+        real = resolve(p);
+        break;
+      }
+      rest.unshift(basename(head));
+      head = up;
+    }
+  }
+  return process.platform === "win32" || process.platform === "darwin" ? real.toLowerCase() : real;
+}
+
+/** --out: never the repository, inside it or holding it, never a file, and empty (nothing in it is ever replaced). */
 function checkOut(repo: string, out: string): string {
-  const r = resolve(repo);
   const o = resolve(out);
+  const [rk, ok] = [realKey(repo), realKey(out)];
   const inside = (a: string, b: string) => a === b || a.startsWith(b.endsWith(sep) ? b : b + sep);
-  if (inside(o, r)) throw new LinkerError("repo/unsafe-out", `תיקיית הפלט "${out}" היא המאגר עצמו או בתוכו. הכלי אינו כותב לתוך המאגר: בחרו תיקייה מחוץ לו.`, { out: o });
+  if (inside(ok, rk)) throw new LinkerError("repo/unsafe-out", `תיקיית הפלט "${out}" היא המאגר עצמו או בתוכו. הכלי אינו כותב לתוך המאגר: בחרו תיקייה מחוץ לו.`, { out: o });
+  if (inside(rk, ok)) throw new LinkerError("repo/unsafe-out", `תיקיית הפלט "${out}" מכילה את המאגר (המאגר נמצא בתוכה). הכלי אינו כותב לתיקייה שהמאגר בתוכה: בחרו תיקייה ריקה מחוץ למאגר.`, { out: o });
   if (existsSync(o)) {
     if (!statSync(o).isDirectory()) throw new LinkerError("repo/unsafe-out", `"${out}" הוא קובץ, לא תיקייה. תנו תיקייה ריקה או חדשה.`, { out: o });
     if (readdirSync(o).length) throw new LinkerError("repo/exists", `תיקיית הפלט "${out}" אינה ריקה. הכלי אינו דורס קבצים: תנו תיקייה ריקה או חדשה.`, { out: o });
