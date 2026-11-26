@@ -339,6 +339,36 @@ test("repository: a failed or missing read of a book's links is never shown as '
 });
 
 /*
+ * V7 §3.14: one book's relations as a small hand-drawn map — the book and its direct neighbours only (never the repository), the
+ * database's links, a suggested pair dashed; folded until asked for.
+ */
+test("repository: the map of one book's direct relations, with a suggested pair", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const dlg = await openRepository(page);
+  await dlg.getByRole("button", { name: "ניתוח הקישורים של הספרים" }).click();
+  await expect(dlg.getByText(/נקראו הקישורים של כל [\d,]+ הספרים/)).toBeVisible({ timeout: 60_000 });
+  await dlg.getByRole("button", { name: "הצעת זוגות לפי השמות" }).click();
+  await expect(dlg.getByText(/זוגות הוצעו מתוך/)).toBeVisible();
+  await dlg.getByLabel("חיפוש ספר").fill("ארצות החיים");
+  await dlg.locator(".repo-book", { hasText: "6 קישורים" }).first().getByRole("button", { name: /^פרטי הספר/ }).click();
+  const detail = dlg.getByRole("region", { name: /^פרטי הספר/ });
+  await expect(detail).toContainText("6", { timeout: 30_000 });
+  await expect(detail.locator(".repo-map svg")).toHaveCount(0);
+  await detail.getByText("מפת הקשרים של הספר").click();
+  const map = detail.getByRole("img", { name: /^ארצות החיים ו/ });
+  await expect(map).toBeVisible();
+  const nodes = await map.locator("g").count();
+  expect(nodes).toBeGreaterThan(0);
+  expect(nodes).toBeLessThanOrEqual(8);
+  await expect(map.locator("g.repo-map-sug title", { hasText: "המאיר לארץ על ארצות החיים:" })).toContainText("מוצע כמפרש שלו");
+  await expect(map.locator("line[marker-end]")).not.toHaveCount(0);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+/*
  * V7 §3.13: the source is named; a book whose links could not be read is counted apart and is "unknown", never first among the
  * books with fewest links; the list filters the partly linked and the unread ones and sorts by problems; the analysis is saved as a
  * report, where an unread book has empty counts, not zeros.

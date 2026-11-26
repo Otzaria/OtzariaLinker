@@ -142,6 +142,60 @@ export function repoList(books: readonly SourceBook[], rows: ReadonlyMap<string,
   return out;
 }
 
+/** One direct neighbour of a book (V7 §3.14): the database's links each way, the project's links, a suggested pair. */
+export interface BookRelation {
+  title: string;
+  key?: string;
+  /** database links from this book to it, and from it to this book */
+  out: number;
+  in: number;
+  project: number;
+  /** of the project's links, those the QA doubts */
+  problems: number;
+  /** a suggested pair: the neighbour is this book's base, or written on it */
+  suggested?: "base" | "dependant";
+  /** in another source, or a book that is not open */
+  external: boolean;
+}
+
+/**
+ * The direct relations of ONE book, joined by title, for its small map: at most `max`, the suggested and the doubted ones always among
+ * them, then the most linked. Nothing beyond the neighbours: a map of the whole repository would be millions of nodes.
+ */
+export function bookRelations(
+  bookKey: string,
+  sourceId: string,
+  byBook: readonly { bookKey: string; title: string; out: number; in: number }[],
+  project: readonly { title: string; problem: boolean }[],
+  proposals: readonly { dependant: { key: string; title: string }; base: { key: string; title: string } }[],
+  max = 8,
+): BookRelation[] {
+  const m = new Map<string, BookRelation>();
+  const at = (title: string, key?: string, closed = false) => {
+    let r = m.get(title);
+    if (!r) m.set(title, (r = { title, ...(key && { key }), out: 0, in: 0, project: 0, problems: 0, external: closed || (!!key && sourceIdOfBookKey(key) !== sourceId) }));
+    return r;
+  };
+  for (const b of byBook) {
+    const closed = b.bookKey.startsWith("unresolved:");
+    const r = at(b.title, closed ? undefined : b.bookKey, closed);
+    r.out += b.out;
+    r.in += b.in;
+  }
+  for (const p of project) {
+    const r = at(p.title);
+    r.project++;
+    if (p.problem) r.problems++;
+  }
+  for (const p of proposals) {
+    if (p.dependant.key === bookKey) at(p.base.title, p.base.key).suggested = "base";
+    else if (p.base.key === bookKey) at(p.dependant.title, p.dependant.key).suggested = "dependant";
+  }
+  const weight = (r: BookRelation) => r.out + r.in + r.project;
+  const first = (r: BookRelation) => (r.suggested || r.problems ? 0 : 1);
+  return [...m.values()].sort((a, b) => first(a) - first(b) || weight(b) - weight(a)).slice(0, max).sort((a, b) => weight(b) - weight(a));
+}
+
 /** What the report says of a book: never a count for a book that was not read. */
 export function repoStatus(r: RepoRow | undefined): string {
   if (!r) return "לא נבדק";
