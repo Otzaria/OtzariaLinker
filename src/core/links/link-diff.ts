@@ -131,20 +131,19 @@ const typeKey = (l: Link) => {
  * key order, the fields the tool keeps without knowing (passthrough), and the record's own text when the writer would
  * spell it otherwise (fileText). Only tells "identical" from "equivalent". What is not known is taken as the writer's
  * own form: a link made in the tool has no file text and no path of its own; it has no key order either, so key orders
- * are compared only when both records have one (sameWriting).
+ * are compared only when both records have one. Plain field comparisons: it runs for every "same" pair.
  */
-const writtenKey = (l: Link) =>
-  JSON.stringify([
-    l.heRef2,
-    l.ref1 ?? null,
-    l.ref2 ?? null,
-    l.declaredType,
-    l.typeNull === true,
-    l.targetPath ?? `${l.target.book.title}.txt`,
-    l.passthrough && Object.keys(l.passthrough).length ? l.passthrough : null,
-    l.fileText ?? null,
-  ]);
-const sameWriting = (x: Link, y: Link) => writtenKey(x) === writtenKey(y) && (!x.keyOrder || !y.keyOrder || x.keyOrder.join("\u0001") === y.keyOrder.join("\u0001"));
+const passthroughText = (l: Link) => (l.passthrough && Object.keys(l.passthrough).length ? JSON.stringify(l.passthrough) : "");
+const sameWriting = (x: Link, y: Link) =>
+  x.heRef2 === y.heRef2 &&
+  x.ref1 === y.ref1 &&
+  x.ref2 === y.ref2 &&
+  x.declaredType === y.declaredType &&
+  (x.typeNull === true) === (y.typeNull === true) &&
+  (x.targetPath ?? `${x.target.book.title}.txt`) === (y.targetPath ?? `${y.target.book.title}.txt`) &&
+  (x.fileText ?? "") === (y.fileText ?? "") &&
+  (!x.passthrough && !y.passthrough ? true : passthroughText(x) === passthroughText(y)) &&
+  (!x.keyOrder || !y.keyOrder || (x.keyOrder.length === y.keyOrder.length && x.keyOrder.every((k, i) => k === y.keyOrder![i])));
 const overlaps = (x: LinkSide, y: LinkSide) => x.line <= span(y) && y.line <= span(x);
 const id = (o: Oriented) => `${at(o.s)}>${at(o.t)}:${o.type}`;
 const rangeKey = (o: Oriented) => `${span(o.s)}:${span(o.t)}`;
@@ -164,8 +163,9 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
   const usedB = new Uint8Array(B.length);
   let nEquivalent = 0;
 
-  // one round: bucket the unpaired B by a key, then pair each unpaired A with the first B of its key
-  const round = (key: (o: Oriented) => string, kind: (x: Oriented, y: Oriented) => LinkDiffKind) => {
+  // one round: bucket the unpaired B by a key, then pair each unpaired A with the first B of its key — or, given
+  // `prefer`, with the first that it prefers when the bucket holds several
+  const round = (key: (o: Oriented) => string, kind: (x: Oriented, y: Oriented) => LinkDiffKind, prefer?: (x: Oriented, y: Oriented) => boolean) => {
     const buckets = new Map<string, number[]>();
     B.forEach((o, i) => {
       if (usedB[i]) return;
@@ -179,7 +179,11 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
       const list = buckets.get(key(x));
       if (!list) return;
       let j: number | undefined;
-      while ((j = list.shift()) !== undefined && usedB[j]);
+      if (prefer && list.length > 1) {
+        const pick = list.findIndex((c) => !usedB[c] && prefer(x, B[c]!));
+        if (pick >= 0) j = list.splice(pick, 1)[0];
+      }
+      if (j === undefined) while ((j = list.shift()) !== undefined && usedB[j]);
       if (j === undefined) return;
       const y = B[j]!;
       usedA[i] = usedB[j] = 1;
@@ -191,9 +195,8 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
     });
   };
 
-  // the exact twin first (also as written), so that a record is "equivalent" only when no identical one is there
-  if (!loose) round((o) => `${strict(o)}|${writtenKey(o.l)}`, () => "same");
-  round(full, () => "same");
+  // the exact twin (also as written) first, so that a record is "equivalent" only when no identical one is there
+  round(full, () => "same", loose ? undefined : (x, y) => sameWriting(x.l, y.l));
   round(id, (x, y) =>
     rangeKey(x) !== rangeKey(y) ? "range"
     : loose ? "same"
