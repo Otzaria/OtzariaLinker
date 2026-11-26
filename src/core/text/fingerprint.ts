@@ -22,5 +22,20 @@ export function linesFingerprint(lines: Iterable<string>): string {
   return `${n}:${(a >>> 0).toString(16).padStart(8, "0")}${(b >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+/**
+ * The same two FNV-1a lanes over raw bytes, with the length in front: a cheap identity of a part of a file (a text book's
+ * first and last bytes, sources/registry.ts textIdentity). Not a security hash.
+ */
+export function bytesFingerprint(bytes: Uint8Array): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ 0x5bd1e995;
+  for (let i = 0; i < bytes.length; i++) {
+    const c = bytes[i]!;
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x01000193) ^ (b >>> 15);
+  }
+  return `${bytes.length}:${(a >>> 0).toString(16).padStart(8, "0")}${(b >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 /** One fingerprint of several parts (a book, its bases, the plan of its steps), in the given order. */
 export const combineFingerprints = (parts: readonly string[]): string => linesFingerprint(parts);
