@@ -391,7 +391,7 @@ export class SourceRegistry {
           const enc = decodeText(head, { partial: f.blob.size > SNIFF }).encoding;
           if (hasLoneCr(head, f.blob.size > SNIFF)) loneCr.push(f.path);
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
-        } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
+        } else result.skipped.push({ path: f.path, reason: misnamedReason(f.path) });
         return;
       case "json":
         // other JSON (an array of records, an object holding one, JSON Lines): the user maps its fields
@@ -522,6 +522,16 @@ function hasLoneCr(bytes: Uint8Array, partial: boolean): boolean {
 /** The warning of TextFilesSource (text-source.ts loneCrMessage), for the files the open found. */
 function loneCrWarning(paths: readonly string[]): { code: string; message: string } {
   return { code: "source/lone-cr", message: loneCrMessage(paths) };
+}
+
+/**
+ * Why a file whose bytes are not what its name says was not opened (#41 B24): a damaged .db used to be called "a text file
+ * that is not .txt" — the detector found no SQLite header, and every unknown file fell into "text".
+ */
+function misnamedReason(path: string): string {
+  if (/\.(db|sqlite3?|db3)$/i.test(path)) return "הקובץ אינו מסד SQLite תקין (חסרה כותרת המסד): ייתכן שהוא פגום, חלקי (ההורדה לא הסתיימה) או שאינו מסד בכלל. הורידו או העתיקו אותו שוב ונסו שוב.";
+  if (/\.zip$/i.test(path)) return "הקובץ אינו ZIP תקין: ייתכן שהוא פגום או שההורדה לא הסתיימה. הורידו אותו שוב, או פתחו את התיקייה עצמה.";
+  return "קובץ טקסט שאינו \u200e.txt — לא נטען כספר.";
 }
 
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;

@@ -13,3 +13,10 @@ describe("how long a notice stays (audit F16)", () => {
     expect(NOTICE_LONG_MS).toBeGreaterThan(NOTICE_SHORT_MS);
   });
 });
+
+describe("files that did not open (#41 B24)", () => {
+  it("a sticky notice stays until it is closed: the reason must not fade before it can be read", async () => {
+    const { noticeLifetimeMs } = await import("../../../src/state/notice-policy");
+    expect(noticeLifetimeMs({ kind: "warning", details: ["x: y"], sticky: true })).toBeNull();
+  });
+});

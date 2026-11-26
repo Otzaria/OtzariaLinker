@@ -70,6 +70,8 @@ export interface Notice {
   /** longer explanation (list of skipped files, problems…) */
   details?: string[];
   action?: { label: string; run: () => void };
+  /** stays until closed (notice-policy.ts) */
+  sticky?: boolean;
 }
 
 export interface Task {
@@ -346,6 +348,9 @@ export class AppStore {
         "warning",
         `${filesCount(res.skipped.length)} ${res.skipped.length === 1 ? "לא נפתח" : "לא נפתחו"}.`,
         res.skipped.map((s) => `${s.path}: ${empty.has(s.path) ? "הקובץ ריק (אין בו אף בייט)." : s.reason}`),
+        undefined,
+        // the reason is what the user needs: it stays until closed (#41 B24 — it faded after 15 seconds)
+        true,
       );
     }
     const opened = fresh.flatMap((s) => s.books);
@@ -1503,9 +1508,9 @@ export class AppStore {
   }
 
   /** shows a notice; its id lets the module that raised it take it back when it no longer holds (U20) */
-  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): number {
+  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"], sticky?: boolean): number {
     logNotice(this.log, kind, text, details);
-    const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }) };
+    const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }), ...(sticky && { sticky }) };
     this.notices.value = [...this.notices.value, n].slice(-6);
     return n.id;
   }
