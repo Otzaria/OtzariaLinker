@@ -31,7 +31,18 @@ export type ErrorCode =
   | "source/closed"
   | "db/mapping-invalid"
   | "db/mapping-unknown-token"
-  | "db/corrupt";
+  | "db/corrupt"
+  /** the headless core and the Otzaria plugin host (headless/, docs/PLUGIN_READINESS.md) */
+  | "plugin/host-error"
+  | "plugin/unknown-book"
+  | "plugin/bad-content"
+  | "plugin/bad-file-name"
+  | "plugin/file-too-large"
+  /** the folder-repository runner (cli/, docs/HEADLESS.md) */
+  | "repo/not-found"
+  | "repo/unsafe-out"
+  | "repo/exists"
+  | "repo/bad-args";
 
 export class LinkerError extends Error {
   override readonly name = "LinkerError";

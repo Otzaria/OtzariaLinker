@@ -22,8 +22,10 @@ const ALLOWED: Record<string, readonly string[]> = {
   // the optional AI review (docs/AI_INTEGRATION.md): pure, over the engines' suggestions. No layer above lists it, so
   // nothing of it can reach the single HTML file, which makes no network call (AGENTS.md 2.1)
   ai: ["core", "linking"],
+  // the headless core and the Otzaria plugin host (docs/PLUGIN_READINESS.md): pure, like the layers it wraps
+  headless: ["core", "matching", "linking", "formats"],
 };
-const PURE = new Set(["core", "matching", "linking", "formats", "ai"]);
+const PURE = new Set(["core", "matching", "linking", "formats", "ai", "headless"]);
 const FRAMEWORK = /^(preact|@preact\/)/;
 
 const SRC = resolve("src");
@@ -123,6 +125,48 @@ describe("no import cycles", () => {
   it("no module reaches itself through runtime imports", () => expect(cycles).toEqual([]));
 });
 
+/** every module a file reaches through its runtime imports (type-only imports are erased and do not count) */
+function reach(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const walk = (file: string): void => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const s of specifiers(readFileSync(file, "utf8"))) {
+      if (s.typeOnly || !s.spec.startsWith(".")) continue;
+      const base = resolve(file, "..", s.spec.replace(/\.js$/, ""));
+      const next = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find((c) => existsSync(c));
+      if (next) walk(next);
+    }
+  };
+  walk(entry);
+  return seen;
+}
+
+/*
+ * The plugin package and the CLI (V7 §4.15, §4.16). The plugin entry is bundled into one script for an Otzaria plugin: it may
+ * reach only the pure layers (no database reader, no worker, no state, no Preact). The CLI runs the app's own state and worker code
+ * in Node, so it may reach those, but never the UI: nothing it reaches is `ui` or a .tsx file, and of `app` only books-service.ts
+ * (the one mapping BooksService ← SourcesApi). Neither is imported by the rest of src/, so the HTML build stays as it was.
+ */
+describe("the plugin entry and the cli layer", () => {
+  it("headless/plugin-entry.ts reaches only core, matching, linking, formats and headless", () => {
+    const layers = new Set([...reach(resolve(SRC, "headless", "plugin-entry.ts"))].map(layerOf));
+    expect([...layers].filter((l) => !["core", "matching", "linking", "formats", "headless"].includes(l))).toEqual([]);
+    expect(layers.has("headless") && layers.has("linking")).toBe(true);
+  });
+
+  it("nothing outside them imports headless or cli", () => {
+    const hits: string[] = [];
+    for (const file of files(SRC)) {
+      const from = layerOf(file);
+      if (from === "headless" || from === "cli") continue;
+      for (const s of specifiers(readFileSync(file, "utf8")))
+        if (s.spec.startsWith(".") && ["headless", "cli"].includes(layerOf(resolve(file, "..", s.spec)))) hits.push(relative(SRC, file));
+    }
+    expect(hits).toEqual([]);
+  });
+});
+
 /*
  * The headless surface (issue 9, docs/PLUGIN_READINESS.md). The pure layers must run where there is no page: in a Node
  * test, in a worker, in a plugin host. So (1) none of them touches a browser global in code, and (2) the adapter
@@ -160,18 +204,7 @@ describe("the headless surface", () => {
   });
 
   it("linking/adapters.ts reaches only core, matching and linking through its runtime imports", () => {
-    const seen = new Set<string>();
-    const walk = (file: string): void => {
-      if (seen.has(file)) return;
-      seen.add(file);
-      for (const s of specifiers(readFileSync(file, "utf8"))) {
-        if (s.typeOnly || !s.spec.startsWith(".")) continue;
-        const base = resolve(file, "..", s.spec.replace(/\.js$/, ""));
-        const next = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find((c) => existsSync(c));
-        if (next) walk(next);
-      }
-    };
-    walk(resolve(SRC, "linking", "adapters.ts"));
+    const seen = reach(resolve(SRC, "linking", "adapters.ts"));
     const layers = new Set([...seen].map(layerOf));
     expect([...layers].sort()).toEqual(["core", "linking", "matching"].filter((l) => layers.has(l)));
     expect(seen.size).toBeGreaterThan(20); // it does read the engines

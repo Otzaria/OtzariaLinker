@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-plugin/
+dist-cli/
 coverage/
 test-results/
 playwright-report/
