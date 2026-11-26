@@ -23,6 +23,10 @@ import { maxlinkJob } from "../../../src/workers/maxlink-job";
  *   heldout   — a fixed rule over the database: every book with a declared base (book_base_text) whose title is
  *               "<X> על <base title>", 300–6,000 lines, base under 40,000 lines, at least 50 of its lines linked to the
  *               base in the database, ordered by an FNV-1a hash of "<commentary>><base>", the first 12 not in `tune`;
+ *   noheadings — the same rule and order as heldout but any title, up to 20,000 lines and a base up to 60,000 (without the 12 held-out
+ *               pairs), only commentaries with at most two heading lines (the
+ *               ד"ה engine searches the whole base for them: #41 B2, #42 C9), the first 16; every other one (by that order) is
+ *               the half the caps were calibrated on ("tune"), the rest the half they were checked on ("heldout");
  *   unrelated — pairs that are NOT commentary and base: named same-genre neighbours, and each held-out commentary
  *               against the base of the next held-out pair (rotation). Nothing there is a correct pair.
  * "Right"/"wrong" is AGREEMENT WITH THE DATABASE: the suggested place (line or range) holds a line the database
@@ -31,7 +35,7 @@ import { maxlinkJob } from "../../../src/workers/maxlink-job";
 const path = process.env.OTZARIA_DB;
 const OUT = process.env.V7_BENCH_OUT;
 const DIS = process.env.V7_BENCH_DIS;
-const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated";
+const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings";
 const ONLY = process.env.V7_BENCH_ONLY?.split(";").map((s) => s.split(">").map((t) => t.trim()) as [string, string]);
 
 const TUNE: readonly [string, string][] = [
@@ -99,20 +103,24 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         return gold;
       };
 
-      const heldout = async (): Promise<[string, string][]> => {
+      /** the declared pairs in hash order; `loose`: any title and up to 20,000 lines (the no-headings set, whose books are rarely "X על Y") */
+      const candidates = (loose = false): [string, string][] => {
         const tuned = new Set(TUNE.map(([c, b]) => `${c}>${b}`));
         const cands: [string, string][] = [];
         for (const c of books) {
-          if (!c.bases?.length || !c.title.includes(" על ") || (c.lineCount ?? 0) < 300 || (c.lineCount ?? 0) > 6000) continue;
+          if (!c.bases?.length || (!loose && !c.title.includes(" על ")) || (c.lineCount ?? 0) < 300 || (c.lineCount ?? 0) > (loose ? 20000 : 6000)) continue;
           for (const bk of c.bases) {
             const b = byKey.get(bk);
-            if (!b || !c.title.endsWith(` על ${b.title}`) || (b.lineCount ?? Infinity) > 40000) continue;
+            if (!b || (!loose && !c.title.endsWith(` על ${b.title}`)) || (b.lineCount ?? Infinity) > (loose ? 60000 : 40000)) continue;
             if (!tuned.has(`${c.title}>${b.title}`)) cands.push([c.title, b.title]);
           }
         }
         cands.sort((x, y) => fnv1a(`${x[0]}>${x[1]}`) - fnv1a(`${y[0]}>${y[1]}`) || (x.join(">") < y.join(">") ? -1 : 1));
+        return cands;
+      };
+      const heldout = async (): Promise<[string, string][]> => {
         const out: [string, string][] = [];
-        for (const p of cands) {
+        for (const p of candidates()) {
           if (out.length >= 12) break;
           const gold = await goldOf(byTitle.get(p[0])!, byTitle.get(p[1])!);
           if (gold.size >= 50) out.push(p);
@@ -120,10 +128,26 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         return out;
       };
 
+      /** the first 16 candidates after the held-out ones whose commentary has no heading line (by its text, not by any engine) */
+      const noHeadings = async (): Promise<[string, string][]> => {
+        const taken = new Set((await heldout()).map((p) => p.join(">")));
+        const out: [string, string][] = [];
+        for (const p of candidates(true)) {
+          if (out.length >= 16) break;
+          if (taken.has(p.join(">"))) continue;
+          const c = byTitle.get(p[0])!;
+          const lines = await reg.lines(c.key, 0, Number.MAX_SAFE_INTEGER);
+          // the book's title and an introduction may be headings; a third heading line divides the text
+          if (lines.filter((l) => (l.heading !== null && l.heading !== undefined) || /^s*<h[1-6]/i.test(l.text)).length > 2) continue;
+          if ((await goldOf(c, byTitle.get(p[1])!)).size >= 50) out.push(p);
+        }
+        return out;
+      };
       let pairs: [string, string][];
       if (ONLY) pairs = ONLY;
       else if (SET === "tune") pairs = [...TUNE];
       else if (SET === "heldout") pairs = await heldout();
+      else if (SET === "noheadings") pairs = await noHeadings();
       else {
         const h = await heldout();
         pairs = [...UNRELATED_NAMED, ...h.map(([c], i) => [c, h[(i + 1) % h.length]![1]] as [string, string]).filter(([c, b]) => !c.endsWith(` על ${b}`))];
@@ -236,7 +260,8 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
           }
         }
         const notes = res.items.flatMap((i) => (i.result?.notes ?? []).map((n) => n.code));
-        const row = { set: SET, pair: `${ct} > ${bt}`, planned, ms, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], raw, dhWords, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
+        const half = SET === "noheadings" ? (pairs.indexOf(pairs.find(([x, y]) => x === ct && y === bt)!) % 2 === 0 ? "tune" : "heldout") : SET;
+        const row = { set: SET, half, pair: `${ct} > ${bt}`, planned, ms, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], raw, dhWords, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
         appendFileSync(OUT!, `${JSON.stringify(row)}\n`);
         if (DIS) for (const d of dis) appendFileSync(DIS, `${JSON.stringify(d)}\n`);
         const lv = (t: Tally, k: string) => (t[k] ? `${t[k]![0]}/${t[k]![0] + t[k]![1]}` : "-");
