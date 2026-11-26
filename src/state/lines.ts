@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals";
 import type { SourceLine } from "../core/books";
+import { linkMatchIndex, type LinkMatchIndex } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import type { LineFacts } from "../core/links/validate";
 import type { BooksService } from "./services";
@@ -239,7 +240,6 @@ export class LineStore {
    */
   beginCheck(): void {
     this.existing.beginKeep();
-    this.existingLines.clear();
   }
 
   /** Loads the given lines of a book chunk by chunk and keeps their facts for factsAt (see `facts`). */
@@ -274,39 +274,42 @@ export class LineStore {
   }
 
   /**
-   * The database links at the very lines a check needs (loadExistingLines), by book and line, kept until the next check. "Already
-   * in the database" is decided by the links on a project link's own lines (core/links/equality.ts: the start lines), and a chunk of
-   * a heavily linked book holds tens of thousands of them: reading whole chunks made the check of 249 links on seforim.db take
-   * 9 minutes (V7 §4.9, docs/reviews/V7_PERFORMANCE.md §9).
+   * What the database has at the very lines the checks needed (loadExistingLines), by book and line: the match index of the links
+   * read there (core/links/equality.ts), not the links themselves. "Already in the database" is decided by the links on a project
+   * link's own lines (the start lines), and a chunk of a heavily linked book holds tens of thousands of them: reading whole chunks
+   * made the check of 249 links on seforim.db take 8-9 minutes (V7 §4.9, docs/reviews/V7_PERFORMANCE.md §9). A database open in the
+   * tool never changes, so what was read is kept for the next check (QA and then the export read the same lines) until its source
+   * is closed or the worker is replaced.
    */
-  private readonly existingLines = new Map<string, Map<number, readonly Link[]>>();
+  private readonly existingLines = new Map<string, Map<number, LinkMatchIndex>>();
 
   /**
-   * Reads the database links at these lines of a book, one call per run of consecutive lines; each line of a run is given the
-   * run's links (a superset, which the identity match does not mind). A read that fails leaves its lines without (nothing to
-   * compare, as a failed chunk).
+   * Reads the database links at those of these lines that were not read yet, one call per run of consecutive lines; each line of a
+   * run gets the run's index (a superset, which the identity match does not mind). A read that fails leaves its lines without
+   * (nothing to compare, as a failed chunk), to be tried again by the next check.
    */
   async loadExistingLines(bookKey: string, indexes: Iterable<number>, signal?: AbortSignal): Promise<void> {
-    const sorted = [...new Set(indexes)].sort((a, b) => a - b);
     let book = this.existingLines.get(bookKey);
     if (!book) this.existingLines.set(bookKey, (book = new Map()));
+    const known = book;
+    const sorted = [...new Set(indexes)].filter((i) => !known.has(i)).sort((a, b) => a - b);
     for (let i = 0; i < sorted.length; ) {
       let j = i;
       while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
       signal?.throwIfAborted();
       try {
-        const items = await this.service.existingLinks(bookKey, sorted[i]!, sorted[j]!);
-        for (let k = i; k <= j; k++) book.set(sorted[k]!, items);
+        const ix = linkMatchIndex(await this.service.existingLinks(bookKey, sorted[i]!, sorted[j]!));
+        for (let k = i; k <= j; k++) book.set(sorted[k]!, ix);
       } catch {
         /* not compared, like a chunk that failed */
       }
       i = j + 1;
     }
-    this.tick.value = this.tick.peek() + 1;
+    if (sorted.length) this.tick.value = this.tick.peek() + 1;
   }
 
-  /** The database links read at a line for the current check (loadExistingLines); undefined when it did not read the line. */
-  existingAtLine(bookKey: string, index: number): readonly Link[] | undefined {
+  /** The match index of the database links read at a line by a check (loadExistingLines); undefined when none read it. */
+  existingIndexAt(bookKey: string, index: number): LinkMatchIndex | undefined {
     return this.existingLines.get(bookKey)?.get(index);
   }
 

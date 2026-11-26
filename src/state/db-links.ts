@@ -376,11 +376,15 @@ export class DbLinksState {
     let best: LinkMatch | null = null;
     for (const end of [l.source, l.target]) {
       const b = this.host.bookOf(end.book);
-      // the links a check read at this very line, else the chunk a view loaded
-      const chunk = b && (this.host.lines.existingAtLine(b.key, end.line) ?? this.host.lines.existingPeek(b.key, end.line));
-      if (!chunk?.length) continue;
-      let ix = this.chunkIndexes.get(chunk);
-      if (!ix) this.chunkIndexes.set(chunk, (ix = linkMatchIndex(chunk)));
+      if (!b) continue;
+      // what a check read at this very line, else the chunk a view loaded
+      let ix = this.host.lines.existingIndexAt(b.key, end.line);
+      if (!ix) {
+        const chunk = this.host.lines.existingPeek(b.key, end.line);
+        if (!chunk?.length) continue;
+        ix = this.chunkIndexes.get(chunk);
+        if (!ix) this.chunkIndexes.set(chunk, (ix = linkMatchIndex(chunk)));
+      }
       const m = matchLink(l, ix);
       if (m === "same-link") return m;
       best ??= m;

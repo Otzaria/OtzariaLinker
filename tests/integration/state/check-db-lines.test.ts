@@ -63,7 +63,15 @@ describe("the check reads the database links at its links' lines (V7 §4.9)", ()
     const problems = validateExport(store.allLinks.value, store.validation());
     const inDb = links.filter((l) => (problems.get(l.id) ?? []).some((p) => p.code === "export/in-db")).map((l) => l.id);
     expect(inDb).toEqual(["u:0", "u:1", "u:2", "u:3", "u:4"]);
-    // the quality check, the same rule
+    // the quality check, the same rule — and the database's links are not read again (a database opened in the tool never changes;
+    // QA and then the export read the same lines twice, 83 s and 30 s for 249 links in the staged run)
+    calls.length = 0;
     expect((await store.quality.run())!.issues.filter((i) => i.problem.code === "export/in-db").map((i) => i.link.id).sort()).toEqual(inDb);
+    expect((await store.exchange.prepareExport())!.counts.files).toBe(1);
+    expect(calls).toEqual([]);
+    // a link added later: only its own lines are read
+    store.linkState.value = commit(store.linkState.value, "test", addChanges([project(12)]));
+    await store.quality.run();
+    expect(calls.map(([key, from, to]) => `${key}#${from}-${to}`).sort()).toEqual(["s1:1#8405-8405", "s1:2#8409-8409"]);
   });
 });
