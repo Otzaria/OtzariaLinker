@@ -113,7 +113,10 @@ export function detectRepoLayout(paths: readonly string[]): RepoLayout {
   const dup = new Set(duplicateTitles.map((d) => d.title));
   const books = candidates.filter((b) => !dup.has(b.title));
 
-  const linksFiles = all.filter((p) => p.endsWith(LINKS_SUFFIX) && nameOf(p).length > LINKS_SUFFIX.length).map((p) => ({ path: p, title: nameOf(p).slice(0, -LINKS_SUFFIX.length) }));
+  // zmanenu's builder reads source/links and nothing else (docs/format.md): a links file elsewhere — the builder's own test fixtures,
+  // builder/test/fixtures/examples/links, in the real repository — is not the repository's, and a book never "updates" it
+  const linksPlace = (p: string) => kind !== "zmanenu" || dirOf(p) === ZMANENU_LINKS;
+  const linksFiles = all.filter((p) => p.endsWith(LINKS_SUFFIX) && nameOf(p).length > LINKS_SUFFIX.length && linksPlace(p)).map((p) => ({ path: p, title: nameOf(p).slice(0, -LINKS_SUFFIX.length) }));
   const existing = new Map<string, string>();
   for (const f of linksFiles) if (!existing.has(f.title)) existing.set(f.title, f.path);
   const bookOf = new Map(books.map((b) => [b.title, b]));

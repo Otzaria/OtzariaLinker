@@ -93,6 +93,18 @@ describe("detectRepoLayout", () => {
     expect(l.books.map((b) => b.title)).toEqual(["אחר"]);
   });
 
+  // found on the real clone of Otzaria/zmanenu-library (V7 round 2, item 8): its builder's test fixtures hold links files
+  // (builder/test/fixtures/examples/links/*_links.json). The builder reads source/links only, so those are not the repository's
+  // links files — but they were counted, and a book of source/books with the same title would have had its links "update" the
+  // builder's fixture instead of source/links.
+  it("zmanenu: only source/links holds the repository's links files; a links file elsewhere (the builder's fixtures) is not one", () => {
+    const fixtures = ["builder/test/fixtures/examples/links/ספר לדוגמה_links.json", "builder/test/fixtures/examples/links/ביאור על ספר לדוגמה_links.json"];
+    const l = detectRepoLayout([...ZMANENU, ...fixtures]);
+    expect(l.linksFiles).toEqual([{ path: "source/links/ביאור על ספר לדוגמה_links.json", title: "ביאור על ספר לדוגמה" }]);
+    expect(l.linksFileFor("ספר לדוגמה")).toEqual({ path: "source/links/ספר לדוגמה_links.json", exists: false });
+    expect(l.linksFileFor("ביאור על ספר לדוגמה")).toEqual({ path: "source/links/ביאור על ספר לדוגמה_links.json", exists: true });
+  });
+
   it("a links file whose name is not a book of the tree is still listed (it may serve the official library)", () => {
     const l = detectRepoLayout([...ZMANENU, "source/links/בראשית_links.json"]);
     expect(l.linksFiles.map((f) => f.title)).toContain("בראשית");
