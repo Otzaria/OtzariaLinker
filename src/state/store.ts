@@ -1002,7 +1002,7 @@ export class AppStore {
     const ok = await this.runTask(label, async (opts) => {
       this.lines.beginCheck();
       // database links around the project's own links: validation reports "already in the database"
-      await this.dbLinks.loadAround(this.allLinks.value);
+      await this.dbLinks.loadAround(this.allLinks.value, opts.signal);
       // the length of each book the saved project recorded, so a changed book is said (export/book-changed)
       await Promise.all([...this.projectBookLines.value.keys()].map((t) => this.resolveTitle(t)).flatMap((ref) => (ref && this.lineCountOf(ref) === undefined ? [this.lines.learnCount(this.bookOf(ref)!.key)] : [])));
       let done = 0;
