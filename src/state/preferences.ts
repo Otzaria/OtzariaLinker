@@ -159,6 +159,19 @@ export function resetLayout(prefs: Preferences, width: number): void {
   });
 }
 
+/**
+ * The side panel's width while the suggestions are reviewed (#41 B23): the table of suggestions holds both lines of each
+ * suggestion, and at 1366px its share of a four-column layout (1.4 of 6.4) left the texts cut to a few words. While
+ * the "הצעות" tab is shown and the user has not set the side panel's width themselves (it is the preset's), the side
+ * panel is as wide as a reader (SUGGESTIONS_SIDE; at 1366px about 90px more). A border dragged or moved in that tab
+ * keeps the width shown, and from then on it is the user's own.
+ */
+export const SUGGESTIONS_SIDE = 2;
+export function effectiveLayout(layout: Layout, sideTab: string): Layout {
+  if (sideTab !== "suggestions" || layout.hidden.includes("side") || layout.sizes.side !== PRESETS[layout.preset].sizes.side) return layout;
+  return { ...layout, sizes: { ...layout.sizes, side: Math.max(layout.sizes.side, SUGGESTIONS_SIDE) } };
+}
+
 /** "איפוס ההגדרות" (version 3's "איפוס לברירות המחדל", F-131): every setting and the layout back to their defaults. */
 export function resetPreferences(prefs: Preferences, width: number): void {
   batch(() => {

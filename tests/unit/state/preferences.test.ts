@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseLayout, fitLayoutToWidth, loadPreferences, PRESETS, resetLayout, resetPreferences } from "../../../src/state/preferences";
+import { chooseLayout, fitLayoutToWidth, loadPreferences, PRESETS, resetLayout, resetPreferences, effectiveLayout } from "../../../src/state/preferences";
 
 /** A Storage in memory: what the preferences write is what the next session reads. */
 function memory(init: Record<string, string> = {}): Storage {
@@ -63,6 +63,19 @@ describe("the layout follows the window's width (V5 UX audit U14, owner's choice
     expect(prefs.layout.value).toEqual(PRESETS.drawer);
     expect(fitLayoutToWidth(prefs, 1440)).toBe("restored");
     expect(prefs.layout.value).toEqual(PRESETS.four);
+  });
+});
+
+describe("the side panel while the suggestions are reviewed (#41 B23)", () => {
+  it("as wide as a reader in the suggestions tab, while its width is the preset's; other tabs and a width of the user's unchanged", () => {
+    const four = structuredClone(PRESETS.four);
+    expect(effectiveLayout(four, "suggestions").sizes).toEqual({ ...four.sizes, side: 2 });
+    expect(effectiveLayout(four, "builder")).toBe(four);
+    const mine = { ...four, sizes: { ...four.sizes, side: 1.1 } };
+    expect(effectiveLayout(mine, "suggestions")).toBe(mine);
+    expect(effectiveLayout(structuredClone(PRESETS.drawer), "suggestions").sizes.side).toBe(2);
+    const hidden = { ...four, hidden: ["side" as const] };
+    expect(effectiveLayout(hidden, "suggestions")).toBe(hidden);
   });
 });
 

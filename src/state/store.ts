@@ -38,6 +38,7 @@ import { PersonalCsvState } from "./personal-csv";
 import { RepositoryState } from "./repository";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
+import { HeadingSearch } from "./heading-search";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -126,6 +127,8 @@ export class AppStore {
   readonly repository: RepositoryState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
+  /** the headings of many books at once (state/heading-search.ts, version 3's global heading index) */
+  readonly headingSearch: HeadingSearch;
 
   readonly screen = signal<Screen>("home");
   /** every source this window opened, with all its books */
@@ -288,6 +291,20 @@ export class AppStore {
     this.personalCsv = new PersonalCsvState(this, service, saver);
     this.repository = new RepositoryState(this, service, saver);
     this.guided = new GuidedFlowState(this);
+    this.headingSearch = new HeadingSearch(
+      {
+        books: this.books,
+        sources: this.sources,
+        inUse: () => {
+          const keys = new Set<string>();
+          for (const side of ["source", "target"] as const) if (this.view[side].peek()) keys.add(this.view[side].peek()!);
+          for (const l of this.linkState.peek().links.values()) for (const ref of [l.source.book, l.target.book]) keys.add(this.bookOf(ref)?.key ?? ref.key);
+          return keys;
+        },
+        runTask: (label, run, count) => this.runTask(label, run, count),
+      },
+      service,
+    );
   }
 
   /** the guided flow's step, for the router */
