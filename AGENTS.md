@@ -141,6 +141,8 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 | state ← עולם חיצוני | `src/state/services.ts` |
 | פעולות ה־Worker | `src/workers/sources-api.ts` |
 | קובץ פרויקט | `src/projects/project-format.ts` |
+| הליבה בלי ממשק ותוסף אוצריא (`Otzaria.call`, חבילה נפרדת `dist-plugin/`) | `src/headless/core.ts`, `src/headless/otzaria-host.ts` ([`docs/PLUGIN_READINESS.md`](docs/PLUGIN_READINESS.md)) |
+| מאגר ספרים בתיקיות מ־Node (`dist-cli/linker.mjs`): זיהוי, מקום הקבצים, קריאה בלבד, כתיבה רק ל־`--out` ריקה | `src/headless/repo-layout.ts`, `src/cli/run.ts` ([`docs/HEADLESS.md`](docs/HEADLESS.md)) |
 | בדיקות חוזה על רשומות אמיתיות | `tests/contracts/`, `tests/fixtures/contracts/README.md` |
 
 ## 5. איך בודקים שינוי
