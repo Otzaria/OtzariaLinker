@@ -1408,12 +1408,24 @@ export class AppStore {
     /** the revision last written: the state changes without a new revision (books bound to links) are not written again */
     let written = this.linkState.peek().revision;
     let reported = false;
+    /*
+     * The write waits for a moment the page is idle (#42 C5: serializing 100,000 links and handing them to IndexedDB took a
+     * ~300 ms task 1.5 s after each edit, wherever the user was in the middle of typing or scrolling). requestIdleCallback
+     * with a timeout, so a busy page still saves within a few seconds; without it (Node, old browsers) at once.
+     */
+    const g = globalThis as { requestIdleCallback?: (cb: () => void, o: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    let idle: number | undefined;
+    const whenIdle = (run: () => void) => {
+      if (typeof g.requestIdleCallback !== "function") return run();
+      if (idle !== undefined) g.cancelIdleCallback?.(idle);
+      idle = g.requestIdleCallback(() => ((idle = undefined), run()), { timeout: AUTOSAVE_IDLE_TIMEOUT_MS });
+    };
     const stop = effect(() => {
       const rev = this.linkState.value.revision;
       if (first) return void (first = false);
       clearTimeout(timer);
       this.autosave.value = "pending";
-      timer = setTimeout(() => {
+      timer = setTimeout(() => whenIdle(() => {
         const ls = this.linkState.peek();
         if (ls.revision === written) return void (this.autosave.value = "saved");
         written = ls.revision;
@@ -1432,7 +1444,7 @@ export class AppStore {
             reported = true;
           },
         );
-      }, delayMs);
+      }), delayMs);
       void rev;
     });
     /*
@@ -1522,7 +1534,7 @@ export class AppStore {
       },
       () => {},
     );
-    return () => (clearTimeout(timer), stop(), (this.recoveryQueue = null));
+    return () => (clearTimeout(timer), idle !== undefined && g.cancelIdleCallback?.(idle), stop(), (this.recoveryQueue = null));
   }
 
   /* ---------------- notices and tasks ---------------- */
@@ -1628,6 +1640,8 @@ function unboundRef(ref: BookRef): BookRef {
 const MAX_RECOVERY_OFFERS = 3;
 /** the browser autosave's key; each window writes `<key>:w:<window id>` (startAutosave) */
 export const AUTOSAVE_KEY = "autosave:v1";
+/** the longest an autosave waits for an idle moment of the page before it writes anyway (startAutosave) */
+export const AUTOSAVE_IDLE_TIMEOUT_MS = 3000;
 
 /** The window the autosave runs in (main.tsx: a Web Locks lock per window). */
 export interface AutosaveWindow {
