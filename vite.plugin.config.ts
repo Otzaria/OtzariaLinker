@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
+import { licenseBanner } from "./build/plugins/license-notice.ts";
+
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
 /*
  * The plugin package (issue 9, V7 §4.15): the headless core (src/headless/plugin-entry.ts) as ONE classic script for an Otzaria
@@ -8,6 +12,8 @@ import { defineConfig } from "vite";
  */
 export default defineConfig({
   publicDir: false,
+  // the bundle carries the program's notice and the notices of the packages inside it (AGENTS.md §2.7)
+  plugins: [licenseBanner({ version: pkg.version })],
   build: {
     target: "es2022",
     outDir: "dist-plugin",

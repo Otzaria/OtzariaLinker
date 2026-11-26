@@ -82,7 +82,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
   כך גם כותבים קוד חדש מהסוג הזה.
 - **מאגרים מחוץ לארגון Otzaria: רעיונות בלבד.** בלי קוד ובלי טבלאות נתונים.
 - מאגרי הארגון (Link-Notes, otzaria-link-generator ועוד) מותר לנייד; ציינו בהערה את המקור ואת ה־commit.
-- חבילה חדשה בתוצר: רישיון תואם GPL-3, והוספה לרשימת `licenseNotice` ב־`vite.config.ts`.
+- חבילה חדשה בתוצר: רישיון תואם GPL-3, והוספה לרשימת `licenseNotice` ב־`vite.config.ts`. ב־`dist-cli/` וב־`dist-plugin/` ההודעות נכתבות לבד (`licenseBanner`, לפי המודולים שנכנסו לחבילה), ו־`tests/unit/license-notice.test.ts` בודקת את שלוש החבילות.
 - הפרטים: [`docs/research/REUSE_MATRIX.md`](docs/research/REUSE_MATRIX.md) §0 ו־§8.
 
 ### 2.8 commits

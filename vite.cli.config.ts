@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { licenseBanner } from "./build/plugins/license-notice.ts";
 import { wasmBase64 } from "./build/plugins/wasm-base64.ts";
+
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
 /*
  * The folder-repository runner for Node (V7 §4.16, #46; docs/HEADLESS.md): src/cli/bin.ts as ONE ES module, dist-cli/linker.mjs,
@@ -12,7 +16,8 @@ export default defineConfig({
   resolve: {
     alias: [{ find: /^zstd-wasm-decoder\/class$/, replacement: fileURLToPath(new URL("./node_modules/zstd-wasm-decoder/_esm/zstd-wasm.js", import.meta.url)) }],
   },
-  plugins: [wasmBase64()],
+  // the bundle carries the program's notice and the notices of the packages inside it (AGENTS.md §2.7)
+  plugins: [wasmBase64(), licenseBanner({ version: pkg.version })],
   ssr: { noExternal: true, target: "node" },
   build: {
     ssr: "src/cli/bin.ts",
