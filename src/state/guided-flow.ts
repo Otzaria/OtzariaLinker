@@ -5,7 +5,7 @@ import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
 import type { EngineId, SourceFilter } from "../linking/automatic";
 import { compileSourceFilter, ENGINES, parseSourceFilter } from "../linking/automatic";
-import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation, type UserPair } from "../linking/plan";
+import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation, type TargetHierarchy, type UserPair } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
 import type { LinkState } from "./history";
@@ -146,6 +146,30 @@ function ownRelations(plan: MaxLinkPlan): Map<string, Relation> {
     if (!cur || ((cur.dhOnly || cur.through) && !r.dhOnly && !r.through)) own.set(r.dependant.key, r);
   }
   return own;
+}
+
+/**
+ * The whole books a commentary is aimed at in a plan (V7 §3.7): its commentary relations to a whole book, not a part of one, not a
+ * path through another commentary, not "only its lines on an intermediate commentator" — the targets the user may add to and order.
+ */
+export function wholeTargets(plan: MaxLinkPlan, dependantTitle: string): Relation[] {
+  const out = new Map<string, Relation>();
+  for (const s of plan.steps) {
+    // a step that searches only the lines naming the book (an intermediate commentator, a secondary target) is not a target of its own
+    if (s.kind !== "pair" || s.options?.["addressedOnly"]) continue;
+    const r = s.relation;
+    if (r.dependant.title === dependantTitle && r.kind === "commentary" && !r.scope && !r.through && !r.dhOnly && !out.has(r.base.key)) out.set(r.base.key, r);
+  }
+  return [...out.values()];
+}
+
+/** One target book of a commentary, as the plan uses it: the primary one, a secondary one (in priority order), or one of equals. */
+export interface GuidedTarget {
+  title: string;
+  key: string;
+  role: "primary" | "secondary" | "equal";
+  /** the user added it (it can be removed); otherwise the plan found it */
+  added: boolean;
 }
 
 /**
@@ -383,6 +407,9 @@ export interface GuidedRecord {
   pairControls?: Record<string, PairControl>;
   /** the line filter of the run (issue #27, findings #40 A1): which lines of the books may carry a link, for every method; absent in older records */
   lineFilter?: SourceFilter;
+  /** the target books added to commentaries, and the target hierarchies (V7 §3.7), by the commentary's title; absent in older records */
+  extraTargets?: Record<string, string[]>;
+  targets?: Record<string, TargetHierarchy>;
   links: number;
   /** the result was downloaded: nothing to continue */
   done: boolean;
@@ -421,6 +448,26 @@ function cleanPairMethods(raw: object): Record<string, string[]> {
   return out;
 }
 
+/** Keys from JSON.parse: "__proto__" would set the prototype of a plain object (cleanPairMethods), so the maps have none. */
+function cleanExtraTargets(raw: object): Record<string, string[]> {
+  const out: Record<string, string[]> = Object.create(null);
+  for (const [k, v] of Object.entries(raw)) {
+    const list = Array.isArray(v) ? v.filter((e): e is string => typeof e === "string" && !!e) : [];
+    if (k !== "__proto__" && list.length) out[k] = list;
+  }
+  return out;
+}
+function cleanTargets(raw: object): Record<string, TargetHierarchy> {
+  const out: Record<string, TargetHierarchy> = Object.create(null);
+  for (const [k, v] of Object.entries(raw)) {
+    const h = v as Partial<Record<keyof TargetHierarchy, unknown>> | null;
+    if (k === "__proto__" || !h || typeof h !== "object" || typeof h.primary !== "string" || !h.primary) continue;
+    const secondary = Array.isArray(h.secondary) ? h.secondary.filter((e): e is string => typeof e === "string") : undefined;
+    out[k] = { primary: h.primary, ...(secondary && { secondary }), ...((h.fallback === "review" || h.fallback === "primary") && { fallback: h.fallback }) };
+  }
+  return out;
+}
+
 export function parseGuidedRecord(text: string | null | undefined): GuidedRecord | null {
   if (!text) return null;
   try {
@@ -442,6 +489,8 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
       ...(r.pairMethods && typeof r.pairMethods === "object" && Object.keys(cleanPairMethods(r.pairMethods)).length > 0 && { pairMethods: cleanPairMethods(r.pairMethods) }),
       ...(r.pairControls && typeof r.pairControls === "object" && Object.keys(cleanPairControls(r.pairControls)).length > 0 && { pairControls: cleanPairControls(r.pairControls) }),
       ...(lineFilter && { lineFilter }),
+      ...(r.extraTargets && typeof r.extraTargets === "object" && Object.keys(cleanExtraTargets(r.extraTargets)).length > 0 && { extraTargets: { ...cleanExtraTargets(r.extraTargets) } }),
+      ...(r.targets && typeof r.targets === "object" && Object.keys(cleanTargets(r.targets)).length > 0 && { targets: { ...cleanTargets(r.targets) } }),
       links: Number(r.links) || 0,
       done: r.done === true,
       savedAt: Number(r.savedAt) || 0,
@@ -504,6 +553,13 @@ export class GuidedFlowState {
    * (null = every line). Kept in the saved flow (GuidedRecord.lineFilter) and given to the job, which keeps it too (JobRecord.lineFilter).
    */
   readonly lineFilter = signal<SourceFilter | null>(null);
+  /**
+   * The target books the user added to a commentary, by its title (V7 §3.7, issue #26 "why not two or three target books"): its
+   * automatic bases stay, and these are added as pairs of the user (PlanChoices.pairs). Kept in the saved flow.
+   */
+  readonly extraTargets = signal<Readonly<Record<string, readonly string[]>>>({});
+  /** the user's target hierarchy of a commentary with several targets, by its title (PlanChoices.targets, #45); none = inferred or equals */
+  readonly targets = signal<Readonly<Record<string, TargetHierarchy>>>({});
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
   readonly saved = signal<GuidedRecord | null>(null);
   /** where a continued flow had got to: step 1 leads back there once its books are open again */
@@ -536,9 +592,28 @@ export class GuidedFlowState {
     const prefer = this.preferSource.value || (this.preferLabel ? this.host.sources.value.find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
     const methods = this.pairMethods.value;
     const controls = this.pairControls.value;
-    const pairs = this.repoScope.value?.pairs ?? [];
-    const choices = { ...(pairs.length && { pairs }), ...(Object.keys(methods).length && { methods }), ...(Object.keys(controls).length && { controls }) };
-    return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(choices).length ? choices : undefined);
+    const targets = this.targets.value;
+    const repoPairs = this.repoScope.value?.pairs ?? [];
+    const planWith = (pairs: readonly UserPair[]) => {
+      const choices = { ...(pairs.length && { pairs }), ...(Object.keys(methods).length && { methods }), ...(Object.keys(controls).length && { controls }), ...(Object.keys(targets).length && { targets }) };
+      return this.host.maxLink.plan(scope, this.engineSet(), prefer || undefined, Object.keys(choices).length ? choices : undefined);
+    };
+    const auto = planWith(repoPairs);
+    const extras = Object.entries(this.extraTargets.value);
+    if (!extras.length || !auto) return auto;
+    // a commentary with pairs of the user is linked only through them (plan.ts PlanChoices.pairs): its automatic whole-book bases
+    // are named too, so adding a target book never drops the base the plan found
+    const pairs = [...repoPairs];
+    const named = new Set(pairs.map((p) => pairMethodKey(p.dependant, p.base)));
+    const add = (p: UserPair) => {
+      const k = pairMethodKey(p.dependant, p.base);
+      if (!named.has(k)) (named.add(k), pairs.push(p));
+    };
+    for (const [dep, titles] of extras) {
+      for (const r of wholeTargets(auto, dep)) add({ dependant: dep, base: r.base.title, dependantKey: r.dependant.key, baseKey: r.base.key });
+      for (const t of titles) if (t !== dep) add({ dependant: dep, base: t });
+    }
+    return planWith(pairs);
   });
 
   readonly missing = computed<MissingBase[]>(() => {
@@ -601,6 +676,8 @@ export class GuidedFlowState {
       this.pairMethods.value = {};
       this.pairControls.value = {};
       this.lineFilter.value = null;
+      this.extraTargets.value = {};
+      this.targets.value = {};
       this.resumeTo.value = null;
       this.saved.value = null;
       this.bundle.value = null;
@@ -646,6 +723,8 @@ export class GuidedFlowState {
       this.pairMethods.value = (r.pairMethods ?? {}) as Record<string, readonly PairEngineId[]>;
       this.pairControls.value = r.pairControls ?? {};
       this.lineFilter.value = r.lineFilter ?? null;
+      this.extraTargets.value = r.extraTargets ?? {};
+      this.targets.value = r.targets ?? {};
       this.repoScope.value = null;
       this.bookSources.value = [];
       this.resumeTo.value = r.step;
@@ -729,6 +808,46 @@ export class GuidedFlowState {
       this.lineFilter.value = spec;
     } else this.lineFilter.value = null;
     return null;
+  }
+
+  /** The target books added to a commentary (by titles, in priority order); none takes it back to the automatic plan. */
+  setExtraTargets(dependantTitle: string, titles: readonly string[]): void {
+    const next = { ...this.extraTargets.peek() };
+    const list = [...new Set(titles.filter((t) => t && t !== dependantTitle))];
+    if (list.length) next[dependantTitle] = list;
+    else {
+      delete next[dependantTitle];
+      this.setTargetHierarchy(dependantTitle, null);
+    }
+    this.extraTargets.value = next;
+  }
+
+  /** Which target of a commentary is primary, the order of the others, and the fallback (#45); null: the plan decides. */
+  setTargetHierarchy(dependantTitle: string, h: TargetHierarchy | null): void {
+    const next = { ...this.targets.peek() };
+    if (h) next[dependantTitle] = { primary: h.primary, ...(h.secondary && { secondary: [...h.secondary] }), ...(h.fallback && { fallback: h.fallback }) };
+    else delete next[dependantTitle];
+    this.targets.value = next;
+  }
+
+  /** Quick remove of an added target book: it leaves the commentary's targets and its hierarchy. */
+  removeTarget(dependantTitle: string, title: string): void {
+    const h = this.targets.peek()[dependantTitle];
+    if (h) this.setTargetHierarchy(dependantTitle, h.primary === title ? null : { ...h, ...(h.secondary && { secondary: h.secondary.filter((t) => t !== title) }) });
+    this.setExtraTargets(dependantTitle, (this.extraTargets.peek()[dependantTitle] ?? []).filter((t) => t !== title));
+  }
+
+  /** The target books of a commentary as the plan uses them: the primary first, then the others in priority order. */
+  targetsOf(dependantTitle: string): GuidedTarget[] {
+    const plan = this.plan.value;
+    if (!plan) return [];
+    const added = new Set(this.extraTargets.value[dependantTitle] ?? []);
+    const h = plan.hierarchies?.find((x) => x.dependant.title === dependantTitle);
+    if (h) return [{ ...h.primary, role: "primary" as const }, ...h.secondary.map((b) => ({ ...b, role: "secondary" as const }))].map((b) => ({ title: b.title, key: b.key, role: b.role, added: added.has(b.title) }));
+    const all = wholeTargets(plan, dependantTitle).map((r) => r.base);
+    // equals, in the order the user added them after the plan's own
+    all.sort((a, b) => (added.has(a.title) ? [...added].indexOf(a.title) + 1 : 0) - (added.has(b.title) ? [...added].indexOf(b.title) + 1 : 0));
+    return all.map((b) => ({ title: b.title, key: b.key, role: "equal" as const, added: added.has(b.title) }));
   }
 
   setPreferSource(id: string): void {
@@ -865,6 +984,8 @@ export class GuidedFlowState {
       ...(Object.keys(this.pairMethods.value).length && { pairMethods: Object.fromEntries(Object.entries(this.pairMethods.value).map(([k, v]) => [k, [...v]])) }),
       ...(Object.keys(this.pairControls.value).length && { pairControls: { ...this.pairControls.value } }),
       ...(this.lineFilter.value && { lineFilter: this.lineFilter.value }),
+      ...(Object.keys(this.extraTargets.value).length && { extraTargets: Object.fromEntries(Object.entries(this.extraTargets.value).map(([k, v]) => [k, [...v]])) }),
+      ...(Object.keys(this.targets.value).length && { targets: { ...this.targets.value } }),
       links: this.facts.value.links,
       done: this.downloaded.value !== null,
       savedAt: Date.now(),

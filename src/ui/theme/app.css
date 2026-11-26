@@ -126,8 +126,8 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .cov-range .btn.small, .pair-row .btn.small { min-height: 24px; }
 .cov-where { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-sm); }
 /* the guided plan's pairs: title fit and a method per pair (issues 21, 26) */
-.guided-pairs { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
-.guided-pairs > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
+.guided-pairs, .guided-targets { border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-low); }
+.guided-pairs > summary, .guided-targets > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
 .pairs-body { padding: 0 10px 10px; display: grid; gap: 8px; }
 .pair-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .pair-row { display: grid; gap: 4px; padding: 8px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--outline-variant); min-width: 0; overflow-wrap: anywhere; }
@@ -152,6 +152,15 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .pick-list { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; display: grid; gap: 2px; }
 .pick-list .check { display: flex; gap: 8px; align-items: start; padding: 2px 4px; overflow-wrap: anywhere; }
 .pick-count { margin: 0; font-size: var(--fs-sm); }
+/* V7 §3.7: a filter by file or database next to the search; the ticked books above, with a quick remove (numbered when the order matters) */
+.pick-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick-filters input { flex: 1 1 12rem; min-width: 0; }
+.picked, .target-list { margin: 0; padding-inline-start: 0; list-style: none; display: grid; gap: 2px; font-size: var(--fs-sm); }
+.picked.ordered, .target-list { padding-inline-start: 1.5em; list-style: decimal; }
+.picked li, .target-list li { display: flex; gap: 6px; align-items: center; overflow-wrap: anywhere; }
+.target-role { margin-inline-start: 6px; cursor: default; }
+.target-role.primary { background: var(--secondary-container); color: var(--on-secondary-container); border-color: var(--secondary); }
+.add-targets > summary { cursor: pointer; font-size: var(--fs-sm); }
 .dbl-unresolved { display: inline-block; padding: 0 8px; border-radius: var(--radius-full); border: 1px dashed var(--warning); background: var(--warning-container); color: var(--on-warning-container); font-size: var(--fs-sm); }
 /* the types page (3.5) */
 .types-help { width: min(720px, calc(100vw - 32px)); }

@@ -407,6 +407,72 @@ test("guided flow: the plan's pairs — title fit with reasons, a method per pai
  * (advanced), the methods the plan will not run and why, and what the pair is expected to cost. Nothing is locked: "chosen by the
  * tool" is where every control starts. A pair switched off stays on the list so that it can be switched back on.
  */
+/*
+ * V7 §3.7, issues #26 and #45: several target books for one commentary, in the plan. The user searches and ticks a target book
+ * (a filter by file or database, a count), sees the primary one and the secondary ones in order, makes another one primary, and
+ * removes an added book in one click; the plan (its pairs list) follows each change.
+ */
+test("guided flow: a commentary's target books — add, search and filter, primary and priority, quick remove", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const dir = folder("הספרים שלי", { "ביאור על בראשית": BOOKS["ביאור על בראשית"]! });
+  await page.goto(distUrl);
+  await chooseTask(page, "auto", "folder-otzaria");
+  const main = page.locator("main.guided");
+  const next = main.locator(".guided-foot").getByRole("button", { name: /^הבא/ });
+  const chooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "הספרים: תיקייה" }).click();
+  await (await chooser).setFiles(dir);
+  await expect(main.getByRole("list", { name: "נבחרו" })).toContainText("1 ספרים", { timeout: 30_000 });
+  await next.click();
+  await next.click();
+  const dbChooser = page.waitForEvent("filechooser");
+  await main.getByRole("button", { name: "מסד אוצריא: מסד נתונים" }).click();
+  await (await dbChooser).setFiles([DB]);
+  await expect(main.getByText("כל ספרי הבסיס נמצאו.")).toBeVisible({ timeout: 30_000 });
+  await next.click();
+  await expect(page).toHaveURL(/#\/guided\/plan$/);
+
+  const box = main.locator("details.guided-targets");
+  await expect(box).not.toHaveAttribute("open", "");
+  await box.locator("summary").first().click();
+  const row = box.locator('.pair-row[data-dependant="ביאור על בראשית"]');
+  const targets = row.getByRole("list", { name: "הספרים ש־ביאור על בראשית כתוב עליהם" }).locator("li");
+  await expect(targets).toHaveText(["בראשית"]);
+  await expect(row).toContainText("כתוב על ספר אחד");
+
+  // add two target books: search, a filter by file or database, the count
+  await row.locator("details.add-targets > summary").click();
+  const pick = row.locator("fieldset.book-checklist");
+  await expect(pick.getByRole("combobox", { name: /^מתוך איזה קובץ או מסד/ })).toBeVisible();
+  await pick.getByRole("combobox", { name: /^מתוך איזה קובץ או מסד/ }).selectOption({ label: "seforim.db" });
+  await pick.getByRole("searchbox").fill("על בראשית");
+  await pick.getByRole("checkbox", { name: 'רש"י על בראשית' }).check();
+  await pick.getByRole("checkbox", { name: "תרגום אונקלוס על בראשית" }).check();
+  await expect(pick.getByRole("status")).toHaveText("נבחרו 2");
+  await expect(row).toContainText("כתוב על 3 ספרים");
+  // the base is primary (the others are written on it); the others are searched in the order they were added
+  await expect(targets).toHaveText([/^בראשית\s*ראשי/, /^רש"י על בראשית\s*משני 1/, /^תרגום אונקלוס על בראשית\s*משני 2/]);
+  await expect(box.locator("summary").first()).toContainText("1 על כמה ספרים");
+
+  // priority: Onkelos up, then made primary
+  await row.getByRole("button", { name: 'העלאת "תרגום אונקלוס על בראשית" בסדר העדיפות' }).click();
+  await expect(targets).toHaveText([/^בראשית/, /^תרגום אונקלוס על בראשית/, /^רש"י על בראשית/]);
+  await row.getByRole("button", { name: '"רש"י על בראשית" הספר הראשי של ביאור על בראשית' }).click();
+  await expect(targets.first()).toHaveText(/^רש"י על בראשית\s*ראשי/);
+  await row.getByRole("checkbox", { name: /לקשר לספר הראשי רק כהצעה לבדיקה/ }).check();
+  await expect(row.getByRole("checkbox", { name: /לקשר לספר הראשי רק כהצעה לבדיקה/ })).toBeChecked();
+
+  // quick remove: from the targets list, and from the picker's own list of what was ticked
+  await row.getByRole("button", { name: 'הסרת "רש"י על בראשית" מהספרים של ביאור על בראשית' }).click();
+  await expect(targets).toHaveText([/^בראשית/, /^תרגום אונקלוס על בראשית/]);
+  await pick.getByRole("button", { name: "הסרת תרגום אונקלוס על בראשית" }).click();
+  await expect(targets).toHaveText(["בראשית"]);
+  await expect(pick.getByRole("status")).toHaveText("נבחרו 0");
+  await plain(page);
+  expect(seen.errors).toEqual([]);
+});
+
 test("guided flow: the controls of one pair — include, link type, threshold, reasons and cost; a phone shows cards", async ({ page }) => {
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1280, height: 900 });
