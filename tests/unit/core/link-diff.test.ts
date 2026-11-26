@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { detailDifferences, diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { linkDiffCsv } from "../../../src/formats/report/link-diff-report";
+import { DIFF_KIND_LABELS, diffGroupLabels, linkDiffCsv } from "../../../src/formats/report/link-diff-report";
 
 /*
  * The semantic diff of two link sets and the lossless merge of several links files of one book
@@ -102,15 +102,38 @@ describe("diffLinks", () => {
    * printed neither field, so both columns read identically. They are their own group now, and the fields
    * that differ are known (and shown).
    */
-  it("a record that differs only in heRef_2, ref_1 or ref_2 is a 'details' row, not a conflict", () => {
+  it("a record that differs only in heRef_2, ref_1 or ref_2 is not a conflict", () => {
     const d = diffLinks(
       [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40)],
       [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 41)],
     );
     const group = (s: number) => diffGroup(d.rows.find((r) => r.a!.source.line === s)!);
-    expect([1, 2, 3].map(group)).toEqual(["details", "details", "details"]);
-    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(3); // the kind stays: merges still treat it as a disagreement
+    // V7 §1.7: a Sefaria ref (what the weekly sync reads) is told apart from the place's display name
+    expect([1, 2, 3].map(group)).toEqual(["refs", "details", "refs"]);
+    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(1); // the kinds stay: merges still treat them as a disagreement
+    expect(d.rows.filter((r) => r.kind === "ref")).toHaveLength(2);
     expect(group(4)).toBe("conflict"); // another target line is a real disagreement
+  });
+
+  /*
+   * V7 §1.7 (#15): "display only" and "a ref changed" were one kind ("details") and one group, labelled "only the place
+   * name" — though ref_1/ref_2 are what the library's weekly sync reads, not a display label. heRef_2 alone is display
+   * only; a ref_1/ref_2 difference (with or without heRef_2) is its own kind and group, and a merge never overwrites it.
+   */
+  it("a Sefaria ref change is its own kind and group, apart from a display-only change of heRef_2", () => {
+    const a = [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40, { heRef2: "x", ref2: "A" })];
+    const b = [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 40, { heRef2: "y", ref2: "B" })];
+    const d = diffLinks(a, b);
+    const row = (s: number) => d.rows.find((r) => r.a!.source.line === s)!;
+    expect([1, 2, 3, 4].map((s) => row(s).kind)).toEqual(["ref", "details", "ref", "ref"]);
+    expect([1, 2, 3, 4].map((s) => diffGroup(row(s)))).toEqual(["refs", "details", "refs", "refs"]);
+    expect(d.counts).toMatchObject({ ref: 3, details: 1 });
+    expect(DIFF_KIND_LABELS.ref).not.toBe(DIFF_KIND_LABELS.details);
+    expect(diffGroupLabels("א", "ב").refs).not.toBe(diffGroupLabels("א", "ב").details);
+    // a ref change is a disagreement: the merge keeps the preferred side and reports the other
+    const m = mergeLinkSets([{ name: "a", links: a }, { name: "b", links: b }], 0);
+    expect(m.conflicts.map((c) => c.kind).sort()).toEqual(["details", "ref", "ref", "ref"]);
+    expect(m.entries).toHaveLength(4);
   });
 
   it("names the fields that differ, and only those", () => {

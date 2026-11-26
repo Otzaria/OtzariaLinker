@@ -16,7 +16,8 @@ import { storedForm } from "./stored-form";
  *   anchor     … the word anchor differs
  *   direction  … the record is written the other way round (source ↔ target, "source" ↔ "commentary")
  *   type       … the declared type differs; or the same two lines with another stored type
- *   details    … only heRef_2 / ref_1 / ref_2 differ
+ *   ref        … ref_1 / ref_2 differ (the Sefaria refs the library's weekly sync reads), heRef_2 maybe too
+ *   details    … only heRef_2 differs: the target's display name, nothing Otzaria stores
  *   target     the same source line and target book, another target line ("conflict")
  *   moved      the same target line and source book, another source line ("moved to another line")
  *   removed    only in A
@@ -25,9 +26,9 @@ import { storedForm } from "./stored-form";
  * Linear in the number of links (hash buckets), so 100K-link files compare in well under a second.
  * Pure; the one equality rule (equality.ts) is its "same stored link" level.
  */
-export type LinkDiffKind = "same" | "range" | "anchor" | "type" | "direction" | "details" | "target" | "moved" | "removed" | "added";
+export type LinkDiffKind = "same" | "range" | "anchor" | "type" | "direction" | "ref" | "details" | "target" | "moved" | "removed" | "added";
 
-export const LINK_DIFF_KINDS: readonly LinkDiffKind[] = ["same", "range", "anchor", "type", "direction", "details", "target", "moved", "removed", "added"];
+export const LINK_DIFF_KINDS: readonly LinkDiffKind[] = ["same", "range", "anchor", "type", "direction", "ref", "details", "target", "moved", "removed", "added"];
 
 export interface LinkDiffRow {
   readonly kind: LinkDiffKind;
@@ -47,18 +48,21 @@ export interface LinkDiff {
 }
 
 /**
- * What a row means for a reader: the six groups the comparison screen filters by. "details" is the same
- * stored link whose only difference is heRef_2 / ref_1 / ref_2 (#15): wording of the target's place, not a
- * disagreement about the link — so it is not a "conflict". Only the GROUP is separate; the row's `kind`
- * stays "details", which `mergeLinkSets` still reports as a disagreement (nothing held is overwritten).
+ * What a row means for a reader: the groups the comparison screen filters by. "details" is the same stored
+ * link whose only difference is heRef_2 (#15): the display name of the target's place, not a disagreement
+ * about the link — so it is not a "conflict". "refs" is the same stored link with other ref_1 / ref_2: the
+ * Sefaria refs the library's weekly sync reads, so not display only (V7 §1.7), and not another target
+ * either. Only the GROUPS are separate; `mergeLinkSets` still reports both kinds as a disagreement
+ * (nothing held is overwritten).
  */
-export type LinkDiffGroup = "identical" | "conflict" | "details" | "overlap" | "onlyA" | "onlyB";
+export type LinkDiffGroup = "identical" | "conflict" | "refs" | "details" | "overlap" | "onlyA" | "onlyB";
 
 export function diffGroup(r: LinkDiffRow): LinkDiffGroup {
   if (r.kind === "same") return "identical";
   if (r.kind === "removed") return "onlyA";
   if (r.kind === "added") return "onlyB";
   if (r.kind === "details") return "details";
+  if (r.kind === "ref") return "refs";
   return r.kind === "range" || r.overlap ? "overlap" : "conflict";
 }
 
@@ -163,6 +167,7 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
     : anchorKey(x.l) !== anchorKey(y.l) ? "anchor"
     : x.flipped !== y.flipped ? "direction"
     : typeKey(x.l) !== typeKey(y.l) ? "type"
+    : seenRef(x.l.ref1) !== seenRef(y.l.ref1) || seenRef(x.l.ref2) !== seenRef(y.l.ref2) ? "ref"
     : "details",
   );
   // the same two lines, either way round: another stored type, or the record turned around

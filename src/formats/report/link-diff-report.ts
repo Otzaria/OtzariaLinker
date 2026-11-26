@@ -12,7 +12,8 @@ export const DIFF_KIND_LABELS: Readonly<Record<LinkDiffKind, string>> = {
   anchor: "עוגן שונה",
   type: "סוג שונה",
   direction: "כיוון הפוך",
-  details: "שם מקום/ref שונה",
+  ref: "ציון ספריא שונה",
+  details: "שם המקום שונה",
   target: "יעד שונה",
   moved: "עבר לשורה אחרת",
   removed: "נמחק",
@@ -25,6 +26,7 @@ const only = (name: string) => (name.startsWith("ה") && !name.includes(".") ? `
 export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffGroup, string>> => ({
   identical: "זהים",
   conflict: "סותרים",
+  refs: "ציוני ספריא שונים",
   details: "רק שם המקום",
   overlap: "טווחים חופפים",
   onlyA: only(a),
@@ -35,7 +37,7 @@ export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffG
 export const DETAIL_LABELS: Readonly<Record<DetailField, string>> = { heRef2: "שם המקום ביעד", ref1: "ציון ספריא בספר המקור", ref2: "ציון ספריא בספר היעד" };
 
 /**
- * What a "details" row says on each side: only the fields that differ, quoted so that a space or an empty
+ * What a "details" or "ref" row says on each side: only the fields that differ, quoted so that a space or an empty
  * value is visible ("שם המקום ביעד: «x» ← «y»" shows the two as the same line would hide it, #15).
  */
 export function detailsText(a: Link | undefined, b: Link | undefined, side: "a" | "b"): string {

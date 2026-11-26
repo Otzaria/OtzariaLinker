@@ -15,7 +15,7 @@ import { ltr } from "../shell/file-name";
  * Files picked here are only read for the comparison; a merge is applied to the project as ONE
  * undoable action, after its preview.
  */
-const GROUPS: readonly LinkDiffGroup[] = ["conflict", "details", "overlap", "onlyA", "onlyB", "identical"];
+const GROUPS: readonly LinkDiffGroup[] = ["conflict", "refs", "details", "overlap", "onlyA", "onlyB", "identical"];
 const PAGE = 100;
 
 export function CompareDialog({ onClose }: { onClose: () => void }) {
@@ -135,9 +135,9 @@ const typeText = (raw: string, advanced: boolean) => {
 };
 const linkText = (l: Link | undefined, advanced: boolean) => (l ? `${place(l.source)} ← ${place(l.target)} · ${typeText(l.declaredType, advanced)}${l.anchor ? ` · עוגן ${l.anchor.rawStart}` : ""}` : "—");
 
-/** a link in a table cell; a "details" row adds the fields that differ — otherwise both columns read the same (#15) */
+/** a link in a table cell; a "details" or "ref" row adds the fields that differ — otherwise both columns read the same (#15) */
 function Cell({ l, advanced, kind, a, b, side }: { l: Link | undefined; advanced: boolean; kind: string; a?: Link; b?: Link; side: "a" | "b" }) {
-  const extra = kind === "details" ? detailsText(a, b, side) : "";
+  const extra = kind === "details" || kind === "ref" ? detailsText(a, b, side) : "";
   return (
     <td>
       {linkText(l, advanced)}
@@ -163,7 +163,7 @@ function DiffView() {
   return (
     <section class="cmp-diff" aria-label="תוצאת ההשוואה">
       <div class="filters" style="padding:0">
-        {GROUPS.filter((g) => g !== "details" || counts[g] > 0).map((g) => (
+        {GROUPS.filter((g) => (g !== "details" && g !== "refs") || counts[g] > 0).map((g) => (
           <button key={g} class="chip" aria-pressed={group === g} onClick={() => (setGroup(g), setShown(PAGE))}>
             {labels[g]} <span class="count">{counts[g].toLocaleString("he")}</span>
           </button>
