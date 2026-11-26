@@ -36,7 +36,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
   `<link href>` ל־`http(s)`, `@import` ו־`url()` ל־`http(s)`, `importScripts`, קריאה חשופה ל־`fetch(`
   (שיטה בשם `fetch`, כמו `this.fetch`, מותרת), `XMLHttpRequest`, `WebSocket`, `EventSource` ו־`sendBeacon`.
   פונט או אייקון מ־CDN נתפסים רק אם הם נטענים באחד מהאופנים האלה (`@import`, `url()`, `<link>`), ופונט אייקונים
-  בכלל אינו נסרק. הסקריפט גם מכשיל תוצר מעל 1.9MiB (`BUDGET`);
+  בכלל אינו נסרק. הסקריפט גם מכשיל תוצר מעל 2MiB (`BUDGET`, ‏2,097,152 בתים);
 - ה־CSP שב־`index.html` (`default-src 'none'`, `connect-src blob: data:`);
 - כל בדיקות ה־E2E רצות עם `offline: true` ומוודאות שאין אף בקשה שאינה `file:`/`data:`/`blob:` (`tests/e2e/helpers.ts`).
 

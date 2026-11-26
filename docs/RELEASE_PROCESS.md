@@ -125,7 +125,8 @@ checkout ל־tag, `npm ci`, `npm run build`, והשוואת ה־hash.
 ## 7. רישיון בתוצר
 
 `build/plugins/license-notice.ts` כותב בראש הקובץ הבנוי את הודעת ה־GPL-3.0-or-later, קישור לקוד המקור
-ב־tag של הגרסה, ואת הרישיון המלא של כל חבילה מוטמעת (`preact`, `@preact/signals`, `fflate`,
-`zstd-wasm-decoder`). חבילה חדשה בתוצר מוסיפים לרשימה ב־`vite.config.ts`, אחרת ההודעה שלה חסרה.
+ב־tag של הגרסה, ואת הרישיון המלא של כל חבילה מוטמעת (`preact`, `@preact/signals`, `@preact/signals-core`, `fflate`,
+`zstd-wasm-decoder`). חבילה חדשה בתוצר, גם כזו שמגיעה כתלות של חבילה אחרת, מוסיפים לרשימה ב־`vite.config.ts`.
+`tests/unit/license-notice.test.ts` משווה את הרשימה לחבילות שאינן dev ב־`package-lock.json`, ונכשלת כשחסרה אחת.
 
 </div>
