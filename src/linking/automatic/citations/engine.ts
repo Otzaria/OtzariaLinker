@@ -358,7 +358,8 @@ export class CitationRun {
           }
         }
         if (p.citation.unit) {
-          const res = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
+          const found = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
+          const res = found && { ...found, r: contentStart(found.r, index, heRefAt) };
           if (res) p.resolved.push({ target: t, res: res.r, heRef: res.r.line === res.r.end && heRefAt ? heRefAt(res.r.line) : null, ...(res.fallback && { fallback: true }), ...(res.addressed && { addressed: true }) });
           else if (!index || index.via === "none") p.unindexed++;
           continue;
@@ -374,7 +375,7 @@ export class CitationRun {
           const chapters = (this.units.byBook.get(book.key) ?? bookUnits ?? []).filter((x) => x.kind === "chapter");
           // "פרק בתרא": the last chapter
           const u = n === 0 ? chapters.at(-1) : chapters.find((x) => x.ordinal === n);
-          if (u) p.resolved.push({ target: t, res: { book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, heRef: null });
+          if (u) p.resolved.push({ target: t, res: contentStart({ book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, index, heRefAt), heRef: null });
           continue;
         }
         // "[בב"ש שער ג']": a book's own level named by its word ("כלל", "שער") is read by the position of the
@@ -588,6 +589,21 @@ function alternativeReading(elems: readonly AddrElem[]): AddrElem[] | null {
 }
 
 const SECTION_KINDS: ReadonlySet<string> = new Set(["klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]);
+
+/** how far past a unit's first line its first line of content is looked for (a chapter heading, an amud heading, a title) */
+const MAX_HEADING_SKIP = 8;
+
+/**
+ * A unit cited whole starts at its first line of CONTENT (issue #42 C18). A chapter's alt_toc entry (a unit cited by name, a
+ * chapter by number) is often its heading line, and the export holds a link with a heading at either end (export/heading-line):
+ * 35 of 24,619 suggestions of a sample began on one. In a book indexed by its references a heading is a line with no heRef —
+ * the first line under it that has one is where the unit's text begins. The reference index's own nodes already begin there.
+ */
+function contentStart(r: Resolution, index: TargetIndex | null, heRefAt: ((line: number) => string | null) | undefined): Resolution {
+  if (!heRefAt || index?.via !== "heref" || r.end <= r.line || heRefAt(r.line)) return r;
+  for (let l = r.line + 1, last = Math.min(r.end, r.line + MAX_HEADING_SKIP); l <= last; l++) if (heRefAt(l)) return { ...r, line: l };
+  return r;
+}
 
 const isDafElem = (e: AddrElem): boolean => e.kind === "daf" || e.amud !== undefined;
 

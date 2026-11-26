@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Link } from "../../../../src/core/links/model";
 import { validateLink, type ValidationContext } from "../../../../src/core/links/validate";
-import { AliasIndex, citationGate, citationHintStrength } from "../../../../src/linking/automatic/citations";
-import { B, BOOKS, heRefOf, LIB, libraryOf, ref, run } from "./v7-fixture";
+import { AliasIndex, buildHeadingsIndex, citationGate, citationHintStrength, type CitationLibrary } from "../../../../src/linking/automatic/citations";
+import { B, BOOKS, dapim, heRefOf, LIB, libraryOf, ref, run } from "./v7-fixture";
 
 /*
  * The V7 round of the citations engine (spec §2.9, §2.10; issue #23; review findings #41 B6–B9, #42 C17–C21). Each block
@@ -131,5 +131,28 @@ describe("C17 — a range of verses is a target range where the record may carry
     expect(s.target).toEqual({ book: B.gen, line: verse(1) });
     expect(s.citedSpan).toEqual({ line: verse(1), end: verse(3) });
     expect(s.warnings.map((w) => w.code)).toContain("citations/range-first-line");
+  });
+});
+
+describe("C18 — a link to a unit starts at its first line of content, not at its heading (export/heading-line)", () => {
+  it("a chapter cited by name (alt_toc), whose entry is the chapter's heading line: the first line under it", () => {
+    const ket = ref("ket", "כתובות", "otzaria");
+    const refs = dapim("כתובות", 12);
+    const lib: CitationLibrary = { ...libraryOf([{ book: ket, refs }]), units: [{ book: ket, kind: "chapter", entries: [{ name: "המדיר", line: 1 }, { name: "אף על פי", line: 25 }], lastLine: refs.length - 1 }] };
+    expect(refs[1]!.heRef).toBeNull(); // the alt_toc entry: the heading of daf ב.
+    const s = run("ועיין בפרק המדיר דכתובות ושם", {}, lib).suggestions[0]!;
+    expect(s.target.book.key).toBe("ket");
+    expect(s.target.line).toBe(2);
+    expect(refs[2]!.heRef).toBe("כתובות, ב., א");
+    expect(s.target.end).toBe(24);
+  });
+
+  it("a siman found by a text book's headings: the line under the heading, not the heading (control: this one was right)", () => {
+    const mish = ref("mish", "משכנות יעקב", "otzaria");
+    const lines = ["<h1>משכנות יעקב</h1>", "<h2>סימן כא</h2>", "שאלה ראשונה", "תשובה", "<h2>סימן כב</h2>", "שאלה שניה", "תשובה שניה"].map((text, index) => ({ index, text, heading: /^<h(\d)/.exec(text) ? Number(/^<h(\d)/.exec(text)![1]) : null }));
+    const lib: CitationLibrary = { catalog: [{ book: mish }], index: (b) => buildHeadingsIndex(b, lines) };
+    const s = run('וראיתי בספר [משכנות יעקב סי\' כ"ב] שכתב', {}, lib).suggestions[0]!;
+    expect(s.target.book.key).toBe("mish");
+    expect(s.target.line).toBe(5);
   });
 });
