@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseLayout, fitLayoutToWidth, loadPreferences, PRESETS, resetLayout } from "../../../src/state/preferences";
+import { chooseLayout, fitLayoutToWidth, loadPreferences, PRESETS, resetLayout, resetPreferences } from "../../../src/state/preferences";
 
 /** A Storage in memory: what the preferences write is what the next session reads. */
 function memory(init: Record<string, string> = {}): Storage {
@@ -63,5 +63,65 @@ describe("the layout follows the window's width (V5 UX audit U14, owner's choice
     expect(prefs.layout.value).toEqual(PRESETS.drawer);
     expect(fitLayoutToWidth(prefs, 1440)).toBe("restored");
     expect(prefs.layout.value).toEqual(PRESETS.four);
+  });
+});
+
+describe("density, reset and the settings of version 3 (V7 parity F-133, F-131, F-129)", () => {
+  it("density has four levels, starts on comfortable and is saved", () => {
+    const s = memory();
+    const prefs = loadPreferences(s);
+    expect(prefs.density.value).toBe("comfortable");
+    prefs.density.value = "dense";
+    expect(JSON.parse(s.getItem("otzaria-linker:prefs:v1")!).density).toBe("dense");
+    expect(loadPreferences(s).density.value).toBe("dense");
+    // a value that is not a level is the default, not a broken page
+    expect(loadPreferences(memory({ "otzaria-linker:prefs:v1": JSON.stringify({ density: "huge" }) })).density.value).toBe("comfortable");
+  });
+
+  it("reset: every setting back to its default and saved so; the layout too", () => {
+    const s = memory();
+    const prefs = loadPreferences(s);
+    prefs.theme.value = "dark";
+    prefs.fontScale.value = 1.4;
+    prefs.density.value = "compact";
+    prefs.advanced.value = true;
+    prefs.createMode.value = "click";
+    prefs.suggestionsView.value = "card";
+    chooseLayout(prefs, structuredClone(PRESETS.stack));
+    resetPreferences(prefs, 1440);
+    expect(prefs.theme.value).toBe("system");
+    expect(prefs.fontScale.value).toBe(1);
+    expect(prefs.density.value).toBe("comfortable");
+    expect(prefs.advanced.value).toBe(false);
+    expect(prefs.createMode.value).toBe("builder");
+    expect(prefs.suggestionsView.value).toBe("table");
+    expect(prefs.layout.value).toEqual(PRESETS.four);
+    expect(JSON.parse(s.getItem("otzaria-linker:prefs:v1")!)).toMatchObject({ theme: "system", density: "comfortable", advanced: false });
+  });
+
+  it("the settings of version 3 (otzaria-linker/settings/v2) are carried over once: theme, density, advanced", () => {
+    const s = memory({ "otzaria-linker/settings/v2": JSON.stringify({ theme: "auto", density: "compact", advanced: true, linesPerChunk: 400 }) });
+    const prefs = loadPreferences(s);
+    expect(prefs.theme.value).toBe("system");
+    expect(prefs.density.value).toBe("compact");
+    expect(prefs.advanced.value).toBe(true);
+    // saved under the new key; the old key is left as it was (version 3 may still be used in this browser)
+    expect(JSON.parse(s.getItem("otzaria-linker:prefs:v1")!)).toMatchObject({ theme: "system", density: "compact", advanced: true });
+    expect(s.getItem("otzaria-linker/settings/v2")).not.toBeNull();
+    expect(loadPreferences(memory({ "otzaria-linker/settings/v2": JSON.stringify({ theme: "dark" }) })).theme.value).toBe("dark");
+  });
+
+  it("the old settings never override settings of this version, and a broken old value is ignored", () => {
+    const prefs = loadPreferences(
+      memory({
+        "otzaria-linker/settings/v2": JSON.stringify({ theme: "dark", density: "dense" }),
+        "otzaria-linker:prefs:v1": JSON.stringify({ theme: "light" }),
+      }),
+    );
+    expect(prefs.theme.value).toBe("light");
+    expect(prefs.density.value).toBe("comfortable");
+    expect(loadPreferences(memory({ "otzaria-linker/settings/v2": "{not json" })).theme.value).toBe("system");
+    const odd = loadPreferences(memory({ "otzaria-linker/settings/v2": JSON.stringify({ theme: 7, density: "x", advanced: "yes" }) }));
+    expect([odd.theme.value, odd.density.value, odd.advanced.value]).toEqual(["system", "comfortable", false]);
   });
 });

@@ -8,6 +8,9 @@ import { batch, effect, signal, type Signal } from "@preact/signals";
 export type ThemeSetting = "system" | "light" | "dark";
 export type CreateMode = "builder" | "click";
 export type SuggestionsView = "table" | "inline" | "card";
+/** Version 3's four densities (F-133): the padding, size and spacing of the book lines (tokens.css [data-density]). */
+export type Density = "spacious" | "comfortable" | "compact" | "dense";
+export const DENSITIES: readonly Density[] = ["spacious", "comfortable", "compact", "dense"];
 
 export type PanelId = "sources" | "source" | "target" | "side";
 export type LayoutPreset = "four" | "drawer" | "stack";
@@ -30,6 +33,7 @@ export const PRESETS: Record<LayoutPreset, Layout> = {
 export interface Preferences {
   theme: Signal<ThemeSetting>;
   fontScale: Signal<number>;
+  density: Signal<Density>;
   advanced: Signal<boolean>;
   createMode: Signal<CreateMode>;
   suggestionsView: Signal<SuggestionsView>;
@@ -48,21 +52,49 @@ export interface Preferences {
 export const NARROW_WIDTH = 1200;
 
 const KEY = "otzaria-linker:prefs:v1";
+/** Version 3's one settings key (F-129). Read once, when this version has no settings of its own yet; never written. */
+export const LEGACY_KEY = "otzaria-linker/settings/v2";
+
+const DEFAULTS = { theme: "system" as ThemeSetting, fontScale: 1, density: "comfortable" as Density, advanced: false, createMode: "builder" as CreateMode, suggestionsView: "table" as SuggestionsView };
+
+/**
+ * The settings of version 3 that still mean something here: the theme ("auto" was "system"), the density and the
+ * advanced mode. Its other 13 settings have no counterpart (they were removed or became choices on the screen
+ * that uses them, V7_LEGACY_PARITY §4.4), so they are not carried over.
+ */
+function legacySettings(storage: Storage | null): Record<string, unknown> {
+  let old: Record<string, unknown>;
+  try {
+    old = JSON.parse(storage?.getItem(LEGACY_KEY) ?? "null") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  if (!old || typeof old !== "object") return {};
+  const out: Record<string, unknown> = {};
+  if (old.theme === "auto") out.theme = "system";
+  else if (old.theme === "light" || old.theme === "dark") out.theme = old.theme;
+  if (DENSITIES.includes(old.density as Density)) out.density = old.density;
+  if (typeof old.advanced === "boolean") out.advanced = old.advanced;
+  return out;
+}
 
 export function loadPreferences(storage: Storage | null = safeStorage()): Preferences {
   let saved: Partial<Record<keyof Preferences, unknown>> = {};
   try {
-    saved = JSON.parse(storage?.getItem(KEY) ?? "{}") as typeof saved;
+    const own = storage?.getItem(KEY);
+    // the first run of this version in a browser that ran version 3 starts on its settings (F-129)
+    saved = (own == null ? legacySettings(storage) : JSON.parse(own)) as typeof saved;
   } catch {
     /* corrupt or blocked — start from defaults */
   }
   const pick = <T>(v: unknown, ok: (x: unknown) => boolean, d: T): T => (ok(v) ? (v as T) : d);
   const prefs: Preferences = {
-    theme: signal(pick(saved.theme, (x) => x === "system" || x === "light" || x === "dark", "system" as ThemeSetting)),
-    fontScale: signal(pick(saved.fontScale, (x) => typeof x === "number" && x >= 0.7 && x <= 2, 1)),
-    advanced: signal(pick(saved.advanced, (x) => typeof x === "boolean", false)),
-    createMode: signal(pick(saved.createMode, (x) => x === "builder" || x === "click", "builder" as CreateMode)),
-    suggestionsView: signal(pick(saved.suggestionsView, (x) => x === "table" || x === "inline" || x === "card", "table" as SuggestionsView)),
+    theme: signal(pick(saved.theme, (x) => x === "system" || x === "light" || x === "dark", DEFAULTS.theme)),
+    fontScale: signal(pick(saved.fontScale, (x) => typeof x === "number" && x >= 0.7 && x <= 2, DEFAULTS.fontScale)),
+    density: signal(pick(saved.density, (x) => DENSITIES.includes(x as Density), DEFAULTS.density)),
+    advanced: signal(pick(saved.advanced, (x) => typeof x === "boolean", DEFAULTS.advanced)),
+    createMode: signal(pick(saved.createMode, (x) => x === "builder" || x === "click", DEFAULTS.createMode)),
+    suggestionsView: signal(pick(saved.suggestionsView, (x) => x === "table" || x === "inline" || x === "card", DEFAULTS.suggestionsView)),
     // a narrow window starts on "two texts and a side panel" through fitLayoutToWidth, which keeps
     // this layout to return to when the window is made wide
     layout: signal(pick(saved.layout, isLayout, structuredClone(PRESETS.four))),
@@ -124,6 +156,19 @@ export function resetLayout(prefs: Preferences, width: number): void {
     prefs.layoutChosen.value = false;
     prefs.layoutAuto.value = null;
     fitLayoutToWidth(prefs, width);
+  });
+}
+
+/** "איפוס ההגדרות" (version 3's "איפוס לברירות המחדל", F-131): every setting and the layout back to their defaults. */
+export function resetPreferences(prefs: Preferences, width: number): void {
+  batch(() => {
+    prefs.theme.value = DEFAULTS.theme;
+    prefs.fontScale.value = DEFAULTS.fontScale;
+    prefs.density.value = DEFAULTS.density;
+    prefs.advanced.value = DEFAULTS.advanced;
+    prefs.createMode.value = DEFAULTS.createMode;
+    prefs.suggestionsView.value = DEFAULTS.suggestionsView;
+    resetLayout(prefs, width);
   });
 }
 
