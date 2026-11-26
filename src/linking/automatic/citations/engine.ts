@@ -446,16 +446,18 @@ export class CitationRun {
         continue;
       }
       const res = best.res;
-      // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1)
-      const ranged = this.opts.ranges && res.end > res.line && !this.sefariaOwned(res.book);
-      // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
-      const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
-      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
       const inlineMode = this.opts.citationType === "inline-linker";
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
       // INLINE_LINKER needs the anchor (start and end after it): without one the suggestion stays a REFERENCE
       const inline = inlineMode && anchor !== undefined && c.rawEnd > c.rawStart;
+      // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1). An
+      // INLINE_LINKER record never reaches the sync (private use only, LINK_FORMATS §1.12, which allows its line_index_2_end):
+      // "בראשית א, א-ג" is the three verses there (issue #42 C17)
+      const ranged = this.opts.ranges && res.end > res.line && (inline || !this.sefariaOwned(res.book));
+      // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
+      const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
+      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
       // the id names the span (raw offsets in the line) even without an anchor, so a measure or a
       // reviewer can tell two mentions in one line apart; two mentions of the same place in one line
       // without anchors are still ONE link

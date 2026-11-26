@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Link } from "../../../../src/core/links/model";
 import { validateLink, type ValidationContext } from "../../../../src/core/links/validate";
 import { AliasIndex, citationGate, citationHintStrength } from "../../../../src/linking/automatic/citations";
-import { B, heRefOf, LIB, run } from "./v7-fixture";
+import { B, BOOKS, heRefOf, LIB, libraryOf, ref, run } from "./v7-fixture";
 
 /*
  * The V7 round of the citations engine (spec §2.9, §2.10; issue #23; review findings #41 B6–B9, #42 C17–C21). Each block
@@ -101,5 +101,35 @@ describe("B9 — a book of a personal database gets the 'ציטוט בטקסט' 
 
   it("a Sefaria source still gets none, whatever the type (control)", () => {
     expect(run(text, { citationType: "inline-linker" }, LIB, "sefaria").suggestions[0]!.anchor).toBeUndefined();
+  });
+});
+
+describe("C17 — a range of verses is a target range where the record may carry one", () => {
+  const text = "כמו שנאמר (בראשית א, א-ג) ועוד";
+  const verse = (n: number) => BOOKS.find((b) => b.book.key === B.gen.key)!.refs.findIndex((r) => r.heRef === `בראשית, א, ${["", "א", "ב", "ג"][n]}`);
+
+  it("'ציטוט בטקסט' (private use: LINK_FORMATS §1.12 allows line_index_2_end): verses א–ג, also in a Sefaria book", () => {
+    const s = run(text, { citationType: "inline-linker" }).suggestions[0]!;
+    expect(s.declaredType).toBe("INLINE_LINKER");
+    expect(s.target).toEqual({ book: B.gen, line: verse(1), end: verse(3) });
+    expect(s.heRef2).toBe("בראשית א, א-ג");
+    // for private use the export writes it (the range on the Sefaria side is a warning there: it holds until Sefaria changes)
+    const link: Link = { id: s.id, status: "new", provenance: "auto", source: s.source, target: s.target, declaredType: s.declaredType, heRef2: s.heRef2, anchor: s.anchor! };
+    const ctx: ValidationContext = { line: () => ({ exists: true, heading: null, anchorLength: 40 }), lineCount: () => 1000, purpose: "private" };
+    expect(validateLink(link, ctx).filter((p) => p.severity === "error")).toEqual([]);
+  });
+
+  it("a book that is not Sefaria's: the range, in the default type too", () => {
+    const own = ref("own", "בראשית", "otzaria");
+    const lib = libraryOf([{ book: own, refs: BOOKS[0]!.refs }]);
+    const s = run(text, {}, lib).suggestions[0]!;
+    expect(s.target).toEqual({ book: own, line: verse(1), end: verse(3) });
+  });
+
+  it("a 'reference' into a Sefaria book: the first verse, and the span is kept (citedSpan) — the weekly sync remaps only the start (§1.8)", () => {
+    const s = run(text).suggestions[0]!;
+    expect(s.target).toEqual({ book: B.gen, line: verse(1) });
+    expect(s.citedSpan).toEqual({ line: verse(1), end: verse(3) });
+    expect(s.warnings.map((w) => w.code)).toContain("citations/range-first-line");
   });
 });
