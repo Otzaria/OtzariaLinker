@@ -39,7 +39,7 @@ export interface MaxLinkHost {
   notify(kind: NoticeKind, text: string, details?: string[]): void;
   runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null>;
   /** keys of the open books the library treats as Sefaria's (AppStore.sefariaOwnedKeys): the engines' answer to it */
-  sefariaOwnedKeys?(): string[];
+  sefariaOwnedKeys?(keys?: Iterable<string>): string[];
 }
 
 export interface MaxLinkRunOptions {
@@ -273,14 +273,63 @@ export class MaxLinkState {
       // the books by title only: session keys are not kept in a job (a resumed job plans from the titles)
       ...(plan.choices && { choices: { ...plan.choices, ...(plan.choices.pairs && { pairs: plan.choices.pairs.map(({ dependantKey: _d, baseKey: _b, ...rest }) => rest) }) } }),
     });
-    this.dropStored(this.job.peek());
+    // the finished books of the job before, with their results in memory: reused below where nothing they depend on changed
+    const prev = this.jobRestored.peek() ? null : this.job.peek();
+    const earlier = new Map<string, { book: JobBook; result: BookResult }>();
+    for (const b of prev?.books ?? []) {
+      const r = this.results.get(b.title);
+      if ((b.status === "done" || b.status === "no-match" || b.status === "unchanged") && b.fingerprint && r && !r.partial) earlier.set(b.title, { book: b, result: r });
+    }
+    this.dropStored(prev ?? this.job.peek());
     this.results.clear();
     this.useSteps(plan);
     batch(() => {
       this.jobRestored.value = false;
       this.job.value = job;
     });
+    if (earlier.size && (await this.reuse(earlier)) === null) return false;
     return this.drive();
+  }
+
+  /**
+   * A new run of books that ran in the job before (V7 §2.15): a book whose fingerprint — its text, its bases' texts,
+   * its steps and the run's settings — is the one it had keeps its result as "unchanged" instead of running again.
+   * The result is the same one the engines would give again (they are deterministic over that input); the user's
+   * decisions are links and rejections of the project and never part of it. Returns the number reused, null when cancelled.
+   */
+  private async reuse(earlier: ReadonlyMap<string, { book: JobBook; result: BookResult }>): Promise<number | null> {
+    const fingerprints = this.service.fingerprints?.bind(this.service);
+    const job = this.job.peek()!;
+    const steps = this.jobSteps!;
+    const titles = job.books.filter((b) => b.status === "pending" && earlier.has(b.title) && steps.has(b.title)).map((b) => b.title);
+    if (!fingerprints || !titles.length) return 0;
+    const keys = [...new Set(titles.flatMap((t) => fingerprintKeys(steps.get(t)!)))];
+    const fps = await this.host.runTask(`בודק אילו ספרים השתנו מאז ההרצה הקודמת (${titles.length.toLocaleString("he")})…`, (opts) => fingerprints(keys, opts), (d, t) => countOf("ספר", d, t));
+    if (fps === null) return null;
+    let reused = 0;
+    // the books of this plan by title, to bind a kept result to this session's keys (the plan may bind a title elsewhere)
+    const keyOf = new Map([...steps.values()].flatMap((st) => fingerprintKeys(st)).map((k) => [this.host.refOf(k).title, k] as const));
+    for (const t of titles) {
+      const own = steps.get(t)!;
+      const was = earlier.get(t)!;
+      const fp = bookFingerprint(own, fps, job.engineOptions, job.lineFilter, this.sefariaTitles(own));
+      if (!fp || fp !== was.book.fingerprint) continue;
+      rebind(was.result, (title) => keyOf.get(title));
+      this.results.set(t, was.result);
+      const i = job.books.findIndex((b) => b.title === t);
+      const { status: _s, ...rest } = was.book;
+      this.setBook(t, { ...job.books[i]!, ...rest, status: "unchanged" });
+      void this.kv?.set(resultKey(job.id, i), JSON.stringify(was.result)).catch(() => {});
+      reused++;
+    }
+    return reused;
+  }
+
+  /** The titles among a book's steps (the book and its bases) that the library treats as Sefaria's: part of its fingerprint. */
+  private sefariaTitles(steps: readonly PlanStep[]): string[] {
+    const keys = fingerprintKeys(steps);
+    const owned = new Set(this.host.sefariaOwnedKeys?.(keys) ?? []);
+    return keys.filter((k) => owned.has(k)).map((k) => this.host.refOf(k).title);
   }
 
   /** Pauses the job: the book that runs now is stopped and waits, the finished ones stay. */
@@ -451,7 +500,7 @@ export class MaxLinkState {
     const decisions = this.decisionsByTitle();
     this.setBooks((b) => {
       if (!finished.has(b.title)) return b;
-      const fp = bookFingerprint(steps.get(b.title)!, fps, job.engineOptions, job.lineFilter);
+      const fp = bookFingerprint(steps.get(b.title)!, fps, job.engineOptions, job.lineFilter, this.sefariaTitles(steps.get(b.title)!));
       if (fp && fp === b.fingerprint) return skip ? { ...b, status: "unchanged" } : b;
       changed++;
       this.results.delete(b.title);
@@ -613,7 +662,7 @@ export class MaxLinkState {
     this.results.set(title, result);
     const i = job.books.findIndex((b) => b.title === title);
     const done = stored.map((s) => ({ engine: s.engine, ...(s.item.error !== undefined && { error: s.item.error }), suggestions: s.item.result?.suggestions.length ?? 0 }));
-    this.setBook(title, finishBook(job.books[i]!, done, ms, bookFingerprint(steps, res.fingerprints ?? {}, job.engineOptions, job.lineFilter)));
+    this.setBook(title, finishBook(job.books[i]!, done, ms, bookFingerprint(steps, res.fingerprints ?? {}, job.engineOptions, job.lineFilter, this.sefariaTitles(steps))));
     void this.kv?.set(resultKey(job.id, i), JSON.stringify(result)).catch(() => {
       /* storage full: the book runs again after a reload (ensurePlan) */
     });

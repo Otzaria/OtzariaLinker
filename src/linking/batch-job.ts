@@ -186,14 +186,26 @@ export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRe
  * steps' signature. Undefined when one of the texts has no fingerprint (unreadable): such a book is
  * never skipped as unchanged.
  */
-export function bookFingerprint(steps: readonly PlanStep[], fps: Readonly<Record<string, string>>, engineOptions?: JobRecord["engineOptions"], lineFilter?: SourceFilter | null): string | undefined {
+export function bookFingerprint(
+  steps: readonly PlanStep[],
+  fps: Readonly<Record<string, string>>,
+  engineOptions?: JobRecord["engineOptions"],
+  lineFilter?: SourceFilter | null,
+  /**
+   * the titles among the book and its bases that the library treats as Sefaria's (the engines' `sefariaOwned`): it
+   * changes what they write (no range on a Sefaria side), so it is the run's setting like an engine option (V7 §2.15).
+   * Only when there are any: a job recorded before keeps its fingerprints.
+   */
+  sefariaTitles?: readonly string[],
+): string | undefined {
   const source = steps[0]?.source;
   if (!source || !fps[source.key]) return undefined;
   const others = [...new Set(steps.flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])))];
   if (others.some((k) => !fps[k])) return undefined;
   const titleOf = new Map(steps.flatMap((s) => (s.kind === "pair" ? [[s.target.key, s.target.title] as const] : [])));
   const bases = others.map((k) => `${titleOf.get(k)}=${fps[k]}`).sort();
-  return combineFingerprints([fps[source.key]!, ...bases, stepsSignature(steps, engineOptions, lineFilter)]);
+  const sefaria = sefariaTitles?.length ? [`sefaria:${JSON.stringify([...new Set(sefariaTitles)].sort())}`] : [];
+  return combineFingerprints([fps[source.key]!, ...bases, stepsSignature(steps, engineOptions, lineFilter), ...sefaria]);
 }
 
 /** Every book key a book's fingerprint reads. */
