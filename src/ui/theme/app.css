@@ -259,6 +259,16 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .group-head .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .book-list li.twin .meta { color: var(--warning); }
 .panel-head .src-badge { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * #40 A2 (#24): a long source badge (a twin title's "מסד אישי: <long file name>.db") took the head's width and the name
+ * shrank to 10px at 1280, its letters stacked. The name now keeps a readable minimum and grows first; the badge gives way
+ * (ellipsis, full text on hover), and in a head narrower than 560px it moves to a row of its own under the name.
+ */
+.reader .panel-head h2.book-title { flex: 1 1 0; min-width: min(6em, 100%); }
+.reader .panel-head .src-badge { flex: 0 100 auto; max-width: 40%; }
+@container rhead (max-width: 560px) {
+  .reader .panel-head .src-badge.twin { order: 10; flex: 1 1 100%; max-width: 100%; }
+}
 .builder .end .src-badge { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .book-search { padding: 6px; border-bottom: 1px solid var(--outline-variant); display: grid; gap: 6px; }
 .book-list { list-style: none; margin: 0; padding: 4px; }
