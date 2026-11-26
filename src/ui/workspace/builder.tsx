@@ -128,6 +128,12 @@ export function Builder() {
           {editing ? "שמירת השינויים" : "יצירת קישור"}
         </button>
         <kbd>Ctrl+Enter</kbd>
+        {editing && (
+          <button class="btn outlined" disabled={!draft || errors.length > 0} onClick={() => store.createFromDraft({ asNew: true })} title="הקישור שנערך נשאר כמו שהוא, ונוצר קישור נוסף לפי מה שבבונה: למשל אותו מקור עם יעד אחר">
+            <Icon name="fl_copy" size={18} />
+            שמירה כקישור נוסף
+          </button>
+        )}
         <span class="grow" />
         {(s || t || editing) && (
           <button class="btn text" onClick={() => store.clearPicks()}>

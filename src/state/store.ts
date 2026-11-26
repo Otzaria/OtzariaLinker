@@ -662,9 +662,20 @@ export class AppStore {
 
   /* ---------------- links ---------------- */
 
-  createFromDraft(): Link | null {
+  /** `asNew` while editing: the draft becomes an ADDITIONAL link (a copy with other ends, V7 §3.10) and the edited one stays as it was. */
+  createFromDraft(opts: { asNew?: boolean } = {}): Link | null {
     const d = this.draft.value;
     if (!d || this.draftProblems.value.some((p) => p.severity === "error")) return null;
+    const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    if (opts.asNew && edited) {
+      // the duplicate check of the draft leaves out the link being edited: a copy on the same lines would be that link twice
+      const same = (a: Link["source"], b: Link["source"]) => a.book.title === b.book.title && a.line === b.line && (a.end ?? a.line) === (b.end ?? b.line);
+      if (same(d.source, edited.source) && same(d.target, edited.target)) {
+        this.notify("warning", "העותק זהה לקישור שנערך. בחרו שורת יעד (או מקור) אחרת, ואז שמרו כקישור נוסף.");
+        return null;
+      }
+      this.editing.value = null;
+    }
     if (this.editing.value) {
       const before = this.linkState.value.links.get(this.editing.value);
       if (!before) return null;
@@ -681,7 +692,8 @@ export class AppStore {
       this.draftRef2.value = "";
       // keep the source pick only when it was a range/anchor the user may link again; else advance to the next line
       const s = this.pick.source.value;
-      if (s && !s.anchor && s.end === undefined) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+      // (a copy keeps it: its point is another target for the same source)
+      if (s && !s.anchor && s.end === undefined && !opts.asNew) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
     });
     return link;
   }

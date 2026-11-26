@@ -175,3 +175,64 @@ test("link types help: every type, grouped, with where it shows in Otzaria and t
   expect(seen.external).toEqual([]);
   await ctx.close();
 });
+
+/*
+ * V7 §3.10, the visual editor as a whole: a range by Shift, both ends by dragging a line number onto a target line, a link edited and
+ * saved as an ADDITIONAL link (another target for the same source, the original kept), delete, several links chosen at once in the
+ * links tab, and undo/redo of each step.
+ */
+test("visual editor: Shift range, drag between lines, copy a link to another target, delete, multi-select, undo/redo", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "פירוש על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  const source = page.locator(".reader.source");
+  const target = page.locator(".reader.target");
+  await expect(target.locator(".ln").nth(3)).toBeVisible();
+  const builder = page.locator(".builder");
+
+  // a range: click, then Shift+click
+  await source.locator('.ln[data-i="1"] .tx').click();
+  await source.locator('.ln[data-i="2"] .tx').click({ modifiers: ["Shift"] });
+  await expect(builder.locator(".end.source")).toContainText("שורות 2–3");
+  await builder.getByRole("button", { name: "ניקוי" }).click();
+
+  // drag the source line's number onto a target line: both ends are filled
+  await source.locator('.ln[data-i="1"] .no').dragTo(target.locator('.ln[data-i="2"] .tx'));
+  await expect(builder.locator(".end.source")).toContainText("שורה 2");
+  await expect(builder.locator(".end.target")).toContainText("שורה 3");
+  await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
+  await builder.getByRole("button", { name: "יצירת קישור" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+
+  // edit it, pick another target, save it as an additional link: the first stays
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  await page.locator(".link-item").first().getByRole("button", { name: "עריכה" }).click();
+  await target.locator('.ln[data-i="3"] .tx').click();
+  await builder.getByRole("button", { name: "שמירה כקישור נוסף" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+  await expect(target.locator('.ln[data-i="2"] .mark.new')).toHaveText("1");
+  await expect(target.locator('.ln[data-i="3"] .mark.new')).toHaveText("1");
+  await page.getByRole("button", { name: "ביטול הפעולה האחרונה" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+  await page.getByRole("button", { name: "ביצוע חוזר" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+
+  // several at once in the links tab, and delete one
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  const items = page.locator(".link-item");
+  await expect(items).toHaveCount(2);
+  await items.nth(0).getByRole("checkbox", { name: "בחירה" }).check();
+  await items.nth(1).getByRole("checkbox", { name: "בחירה" }).check();
+  await expect(items.locator('input[type="checkbox"]:checked')).toHaveCount(2);
+  await items.nth(0).getByRole("button", { name: "מחיקה" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+  await page.keyboard.press("Control+z");
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
+});
