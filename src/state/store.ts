@@ -853,11 +853,7 @@ export class AppStore {
       const hi = Math.max(cur.end ?? cur.line, line, cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
-    if (side === "source" && this.editing.value) {
-      // a new source line makes the old ref_1 wrong — the sync would move the link back to it (B2)
-      const edited = this.linkState.value.links.get(this.editing.value);
-      if (edited && !(this.sameBook(edited.source.book, bookKey) && edited.source.line === this.pick.source.value?.line)) this.draftRef1.value = "";
-    }
+    if (side === "source") this.sourceMoved(cur);
     if (side === "target") {
       // a new target makes the old reference wrong — also while editing (UX review #3)
       const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
@@ -886,8 +882,22 @@ export class AppStore {
     else if (titleDeclaresDependencyOn(b, a)) this.draftType.value = "commentary";
   }
 
+  /**
+   * A new source line makes the typed ref_1 wrong — the library's sync would move the link back to the line it names (B2). While
+   * editing: unless the pick is back on the edited link's own line. Else: whenever the source line is another than before (V7
+   * round 2 review, finding 1 — ref_1 was cleared only while editing, so it went with the next link too).
+   */
+  private sourceMoved(before: Pick | null): void {
+    const now = this.pick.source.peek();
+    const edited = this.editing.peek() ? this.linkState.peek().links.get(this.editing.peek()!) : undefined;
+    const kept = edited ? this.sameBook(edited.source.book, now?.bookKey ?? "") && edited.source.line === now?.line : before?.bookKey === now?.bookKey && before?.line === now?.line;
+    if (!kept) this.draftRef1.value = "";
+  }
+
   pickAnchor(side: Side, bookKey: string, line: number, anchor: Pick["anchor"]): void {
+    const cur = this.pick[side].value;
     this.pick[side].value = { bookKey, line, ...(anchor && { anchor }) };
+    if (side === "source") this.sourceMoved(cur);
     this.activeSide.value = side;
     this.autoType();
   }
@@ -947,7 +957,10 @@ export class AppStore {
       this.draftRef2.value = "";
       // keep the source pick only when it was a range/anchor the user may link again; else advance to the next line
       const s = this.pick.source.value;
-      if (s && !s.anchor && s.end === undefined) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+      if (s && !s.anchor && s.end === undefined) {
+        this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+        this.draftRef1.value = ""; // the typed ref_1 named the line just linked (finding 1)
+      }
     });
     return link;
   }
