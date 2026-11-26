@@ -41,7 +41,7 @@ export interface ExchangeHost {
   readonly screen?: ReadonlySignal<string>;
   /** advanced mode: the report carries the problems' technical detail (audit F14) */
   readonly prefs?: { readonly advanced: ReadonlySignal<boolean> };
-  readonly lines: Pick<LineStore, "peek">;
+  readonly lines: Pick<LineStore, "peek" | "heRefAt">;
   readonly altToc: Pick<AltTocState, "loadLines" | "plan">;
   bookOf(ref: BookRef): SourceBook | undefined;
   resolveTitle(title: string): BookRef | null;
@@ -320,7 +320,8 @@ export class ExchangeState {
       const side = srcSef ? l.source : l.target;
       if ((srcSef ? l.ref1 : l.ref2) !== undefined) continue;
       const b = host.bookOf(side.book);
-      const ref = b && sefariaRefFromHeRef(host.lines.peek(b.key, side.line)?.heRef);
+      // the line as the check read it: the views' cache may have dropped it since (V7 §4.10)
+      const ref = b && sefariaRefFromHeRef(host.lines.heRefAt(b.key, side.line));
       if (!ref) continue;
       changes.push({ id: l.id, before: l, after: { ...l, ...(srcSef ? { ref1: ref } : { ref2: ref }) } });
     }

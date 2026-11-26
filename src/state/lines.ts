@@ -260,11 +260,27 @@ export class LineStore {
       // read at once: the chunk was just loaded (or found), and nothing ran in between to evict it
       const s = this.lines.state(bookKey, c);
       if (s?.status !== "ready") continue; // a failed chunk: its lines stay "not verified"
+      let refs = this.heRefs.get(bookKey);
       for (const i of list) {
         const l = s.items[i - c * CHUNK];
-        if (l) book.set(i, lineFacts(l));
+        if (!l) continue;
+        book.set(i, lineFacts(l));
+        if (l.heRef) (refs ??= this.heRefs.set(bookKey, new Map()).get(bookKey)!).set(i, l.heRef);
       }
     }
+  }
+
+  /**
+   * The heRef of each line a check read (loadFacts), kept like the facts: the export fills a link's Sefaria ref from it after the
+   * check has read every line, and the views' cache has dropped the first chunks by then (V7 §4.10: 44,453 of 44,975 links of a
+   * v52 run were held back for a missing ref_2 their lines' heRefs gave).
+   */
+  private readonly heRefs = new Map<string, Map<number, string>>();
+
+  /** A line's heRef: from the cache, else as the last check read it; undefined when never read (or it has none). */
+  heRefAt(bookKey: string, index: number): string | null | undefined {
+    const l = this.peek(bookKey, index);
+    return l ? l.heRef : this.heRefs.get(bookKey)?.get(index);
   }
 
   /** The facts of a line: from the cache, else as the last check read them; undefined when never read. */
@@ -316,6 +332,7 @@ export class LineStore {
   forgetAll(): void {
     this.counts.clear();
     this.facts.clear();
+    this.heRefs.clear();
     this.existingLines.clear();
     this.lines.drop("");
     this.existing.drop("");
@@ -323,6 +340,7 @@ export class LineStore {
 
   forgetSource(sourceId: string): void {
     for (const k of [...this.facts.keys()]) if (k.startsWith(`${sourceId}:`)) this.facts.delete(k);
+    for (const k of [...this.heRefs.keys()]) if (k.startsWith(`${sourceId}:`)) this.heRefs.delete(k);
     for (const k of [...this.existingLines.keys()]) if (k.startsWith(`${sourceId}:`)) this.existingLines.delete(k);
     this.lines.drop(`${sourceId}:`);
     this.existing.drop(`${sourceId}:`);
