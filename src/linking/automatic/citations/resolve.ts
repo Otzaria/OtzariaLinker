@@ -271,12 +271,14 @@ function resolveDaf(book: BookRef, node: Node, elemsIn: readonly AddrElem[], lab
   if (e.kind !== "daf" && e.kind !== "?") return null;
   // "פ' ד'" is a chapter (or verse), never a daf
   if (e.kind === "?" && e.explicit) return null;
-  // "שבת לא.-לב:": from the first amud to the last (issue #42 C21); a range with no amud at its end is not read
-  if (e.to !== undefined && e.toAmud !== undefined && e.amud !== undefined && elems.length === 1) {
-    const from = node.children.get(`d${e.n}${e.amud === 1 ? "a" : "b"}`);
-    const last = node.children.get(`d${e.to}${e.toAmud === 1 ? "a" : "b"}`);
+  // "שבת לא.-לב:": from the first amud to the last (issue #42 C21); an end with no amud is the whole daf — "שבת לא-לב" from amud א of
+  // לא to the last amud of לב, "שבת לא:-לב" from amud ב of לא (V7 round 2, C21)
+  if (e.to !== undefined && elems.length === 1 && (e.toAmud !== undefined || e.amud !== undefined || e.kind === "daf" || e.numeral.form === "bare")) {
+    const amudOf = (n: number, a: 1 | 2) => node.children.get(`d${n}${a === 1 ? "a" : "b"}`);
+    const from = e.amud !== undefined ? amudOf(e.n, e.amud) : (amudOf(e.n, 1) ?? amudOf(e.n, 2));
+    const last = e.toAmud !== undefined ? amudOf(e.to, e.toAmud) : (amudOf(e.to, 2) ?? amudOf(e.to, 1));
     if (!from || !last || last.last < from.first) return null;
-    const side = (a: 1 | 2) => (a === 1 ? "." : ":");
+    const side = (a: 1 | 2 | undefined) => (a === 1 ? "." : a === 2 ? ":" : "");
     return { book, line: from.first, end: last.last, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title} ${[...label, `${gem(e.n)}${side(e.amud)}-${gem(e.to)}${side(e.toAmud)}`].join(", ")}`, via: "heref", daf: true };
   }
   if (e.to !== undefined) return null;
