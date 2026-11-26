@@ -16,7 +16,7 @@ import {
   type Suggestion,
 } from "../types";
 import { align, type AlignContext, type AlignEvent, type Alignment } from "./align";
-import { assessNumbering, numberingNote, numberingWarning, targetElement, type LevelStats } from "./consistency";
+import { assessNumbering, numberingNote, numberingWarning, rangeWidthCap, targetElement, type LevelStats } from "./consistency";
 import { QuoteChecker } from "./quote";
 import { dafElement, kindThe, kindWord, type NumberingMode, type PathElement } from "./numbering";
 import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "./structure";
@@ -290,8 +290,16 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
         score = Math.min(score, belowHigh);
       }
     }
+    // #42 C15: a link to a whole unit is capped by the unit's width (RANGE_WIDTH)
+    const span = sideOf(base, chosen.start, chosen.end);
+    const wide = rangeWidthCap((span.end ?? span.line) - span.line + 1, describe(chosen.path) || "הקטע");
+    if (wide) score = Math.min(score, (wide.cap === "high" ? opts.thresholds.certain : opts.thresholds.high) - 0.001);
     const confidence: Confidence = confidenceOf(score, runnerUp, opts.thresholds);
     const { reasons, warnings, rules } = explain(chosen, base, baseRanges);
+    if (wide && (confidence === "possible" || confidence === "high")) {
+      warnings.push(wide.warning);
+      rules.push("headings.wide-range");
+    }
     if (section && inside.length && inside.length < all.length) rules.push("headings.inside-section");
     if (outsideSection) {
       warnings.push({ code: "heading/outside-section", text: `המקום שנמצא אינו בתוך המקום של הקטע שהשורה שייכת אליו (${describe(section.path)}), ולכן הביטחון הוגבל ל"אפשרית"` });

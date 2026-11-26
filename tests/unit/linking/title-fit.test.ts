@@ -122,3 +122,20 @@ describe("titleFit — QA round 2 (H)", () => {
   });
 });
 
+/* #42 C15: the explanation names the headings behind the share, not only the share */
+describe("titleFit — the reasons show which headings fit and which do not", () => {
+  it("other titles: the reason quotes headings that have no place in the base", () => {
+    const r = titleFit(book("פירוש", ["<h1>פירוש</h1>", "<h2>שער הראשון</h2>", "מילים של פסקה", "<h2>שער השני</h2>", "מילים של פסקה", "<h2>שער השלישי</h2>", "מילים של פסקה"]), base);
+    expect(r.reasons.find((x) => x.code === "title-fit/other-titles")!.text).toContain('"שער הראשון"');
+  });
+
+  it("the same titles: the reason quotes one that was found; some titles: one found and one not", () => {
+    const fit = titleFit(book("פירוש על ספר", ["<h1>פירוש על ספר</h1>", ...chapters(8)]), base);
+    expect(fit.reasons.find((x) => x.code === "title-fit/same-titles")!.text).toContain('"פרק א"');
+    const lines = ["<h1>פירוש</h1>", ...chapters(2), "<h2>פרק יא</h2>", "מילים", "<h2>פרק יב</h2>", "מילים", "<h2>פרק יג</h2>", "מילים"];
+    const text = titleFit(book("פירוש", lines), base).reasons.find((x) => x.code === "title-fit/some-titles")!.text;
+    expect(text).toContain('"פרק א"');
+    expect(text).toContain('"פרק יא"');
+  });
+});
+
