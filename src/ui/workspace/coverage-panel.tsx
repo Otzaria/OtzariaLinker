@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { coverageSummary } from "./coverage-summary";
+import { coverageSummary, linkOrigins, type LinkOrigins } from "./coverage-summary";
 import type { CoverageSummary, LineCoverage, LineRange } from "../../linking/coverage";
+import type { BookRef } from "../../core/links/model";
 import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
@@ -24,6 +25,16 @@ const BUCKETS: readonly { id: LineCoverage; label: string; hint: string }[] = [
   { id: "multiple", label: "לכמה מקומות", hint: "שורה שמקושרת לשני מקומות שונים או יותר" },
   { id: "unlinked", label: "בלי קישור", hint: "שורת תוכן שאף קישור לא נוגע בה" },
   { id: "not-suitable", label: "כותרות", hint: "כותרת לא מקבלת קישור (אוצריא מוחקת אותו)" },
+  { id: "candidate", label: "רק הצעה ממתינה", hint: "שורה שרק הצעה שעוד לא אושרה מגיעה אליה: היא אינה קישור עד שתאשרו אותה" },
+  { id: "doubtful", label: "קישור בעייתי", hint: "שורה שהבדיקה מפקפקת בקישור שלה" },
+];
+const ORIGINS: readonly { id: keyof LinkOrigins; label: string }[] = [
+  { id: "db", label: "מהמסד" },
+  { id: "imported", label: "מיובאים" },
+  { id: "manual", label: "נוצרו ידנית" },
+  { id: "approved", label: "הצעות שאושרו" },
+  { id: "pending", label: "הצעות ממתינות" },
+  { id: "rejected", label: "הצעות שנדחו" },
 ];
 const placeLabel = (r: LineRange) => (r.end > r.start ? `שורות ${r.start + 1}–${r.end + 1}` : `שורה ${r.start + 1}`);
 const n = (x: number) => x.toLocaleString("he");
@@ -36,6 +47,24 @@ function fromSaved(c: ProjectCoverage): CoverageSummary {
   return { total: c.lines, byBucket, suitable, unlinked: byBucket.unlinked, unlinkedShare: suitable ? byBucket.unlinked / suitable : 0, ranges: c.ranges.map(([start, end]) => ({ start, end })) };
 }
 const stamp = (at: number) => new Date(at).toLocaleString("he", { dateStyle: "medium", timeStyle: "short" });
+
+/** The book's links by origin (#17, V7 §3.12), as they are now; the database's count is "לא ידוע" when it was not read, never 0. */
+function Origins({ bookKey, links }: { bookKey: string; links: PanelSummary["links"] }) {
+  const store = useStore();
+  const state = store.suggestions.state.value;
+  const mine = (s: { source: { book: BookRef }; target: { book: BookRef } }) => store.sameBook(s.source.book, bookKey) || store.sameBook(s.target.book, bookKey);
+  const states = (store.suggestions.run.value?.result.suggestions ?? []).filter(mine).map((s) => state.get(s.id) ?? "pending");
+  const o = linkOrigins(store.linksOfBook(bookKey), links, states);
+  return (
+    <ul class="cov-counts" aria-label="קישורים לפי מקור">
+      {ORIGINS.filter((x) => o[x.id] !== undefined).map((x) => (
+        <li key={x.id} class="cov-count" data-origin={x.id}>
+          <span>{x.label}</span> <b>{o[x.id] === null ? "לא ידוע" : n(o[x.id]!)}</b>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function CoveragePanel() {
   const store = useStore();
@@ -166,6 +195,7 @@ export function CoveragePanel() {
                 </li>
               ))}
             </ul>
+            {fresh && bookKey && <Origins bookKey={bookKey} links={fresh.links} />}
             {current.ranges.length > 0 && (
               <ol class="cov-ranges" aria-label="קטעים בלי קישור">
                 {current.ranges.slice(0, shown).map((r) => {

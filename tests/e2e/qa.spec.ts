@@ -55,6 +55,13 @@ test("coverage: the unlinked ranges of a book, the buckets, jump to a range and 
   await expect(cov.locator(".cov-count[data-bucket=unlinked]")).toContainText("3");
   await expect(cov.locator(".cov-count[data-bucket=linked]")).toContainText("2");
   await expect(cov.locator(".cov-count[data-bucket=not-suitable]")).toContainText("2"); // the two headings
+  // #17, V7 §3.12: the lines that only a pending suggestion or a doubted link reach, and the links by origin, each apart
+  await expect(cov.locator(".cov-count[data-bucket=candidate]")).toContainText("0");
+  await expect(cov.locator(".cov-count[data-bucket=doubtful]")).toContainText("0");
+  const origins = cov.getByRole("list", { name: "קישורים לפי מקור" });
+  await expect(origins.locator("[data-origin=imported]")).toContainText("2");
+  await expect(origins.locator("[data-origin=manual]")).toContainText("0");
+  await expect(origins.locator("[data-origin=db]")).toHaveCount(0); // a text book has no database
   const ranges = cov.locator(".cov-range");
   await expect(ranges).toHaveCount(2);
   await expect(ranges.nth(0)).toContainText("שורות 3–4");

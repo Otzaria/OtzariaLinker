@@ -1,4 +1,31 @@
-import type { LineCoverage } from "../../linking/coverage";
+import type { LineCoverage, LinksReading } from "../../linking/coverage";
+import type { Provenance } from "../../core/links/model";
+import type { SuggestionState } from "../../state/suggestions";
+
+/** A book's links by where they come from (#17, V7 §3.12). `db`: null when the database's read failed or was not made; absent for a text book. */
+export interface LinkOrigins {
+  db?: number | null;
+  imported: number;
+  manual: number;
+  approved: number;
+  pending: number;
+  rejected: number;
+}
+
+export function linkOrigins(links: readonly { provenance: Provenance; status: string }[], reading: LinksReading | undefined, states: readonly SuggestionState[]): LinkOrigins {
+  const o: LinkOrigins = { imported: 0, manual: 0, approved: 0, pending: 0, rejected: 0 };
+  if (reading?.state === "counted") o.db = reading.count;
+  else if (reading?.state === "none") o.db = 0;
+  else if (reading?.state !== "no-database") o.db = null;
+  for (const l of links) {
+    if (l.status === "deleted" || l.provenance === "db") continue;
+    if (l.provenance === "file" || l.provenance === "import") o.imported++;
+    else if (l.provenance === "auto") o.approved++;
+    else o.manual++;
+  }
+  for (const s of states) if (s === "pending" || s === "rejected") o[s]++;
+  return o;
+}
 
 /** What the coverage summary sentence needs of a book's coverage (linking/coverage.ts CoverageCounts and its ranges). */
 export interface CoverageSummaryInput {
