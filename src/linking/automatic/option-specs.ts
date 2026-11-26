@@ -107,6 +107,21 @@ function lineFilterSpecs(stripDefault: boolean, essential: boolean): OptionSpec[
 }
 const isLineFilterKey = (key: string) => key.startsWith("lineFilter");
 
+/**
+ * The run's ranges (linking/ranges.ts applyRunRanges; v3 F-104, the link kinds "range until the next match"): on the book the run links
+ * from and on the book it links to, what the engine proposes (default, not sent), one line, or until the next match of the run. Options of
+ * every pair engine, so they are stored with a job and are part of its fingerprint like any other option (batch-job.ts stepsSignature).
+ */
+const RANGE_CHOICES = [
+  ["engine", "כמו שהשיטה מציעה"],
+  ["line", "שורה אחת בלבד"],
+  ["next-match", "עד לפני ההתאמה הבאה"],
+] as const;
+const RUN_RANGE_SPECS: readonly OptionSpec[] = [
+  { kind: "select", key: "sourceRange", label: "טווח בספר המקשר", default: "engine", choices: RANGE_CHOICES, hint: "\"עד לפני ההתאמה הבאה\": כל קישור מכסה את השורות שאחריו, עד השורה שלפני ההצעה הבאה של ההרצה או עד כותרת. כמו \"טווח במקור\" בגרסה 3." },
+  { kind: "select", key: "targetRange", label: "טווח בספר שאליו מקשרים", default: "engine", choices: RANGE_CHOICES, hint: "\"שורה אחת בלבד\" מבטל את הטווח שהשיטה מציעה (למשל פרק שלם). בספר של ספריא לא נכתב טווח בכל מקרה." },
+];
+
 export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[]>> = {
   headings: [
     { kind: "select", key: "numbering", label: "קריאת מספרים בכותרות", default: "lenient", choices: [["lenient", "סלחנית (יה, ער, רחצ נקראים)"], ["strict", "מדויקת בלבד"]] },
@@ -114,6 +129,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "untaggedHeadings", label: "שורות קצרות כמו \"פרק ג\" נחשבות כותרת גם בלי תגית", default: true },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
     ...THRESHOLDS,
   ],
@@ -129,6 +145,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
     { kind: "boolean", key: "itemRanges", label: "פסקאות ההמשך כטווח אחד בפירוש", default: false, hint: "במקום קישור לכל פסקה: קישור אחד לכל פריט (ס\"ק), עם טווח בפירוש עד הפסקה האחרונה שלו. כמו בקובץ של ארץ יהודה על ארצות החיים." },
     { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
+    ...RUN_RANGE_SPECS,
     ...THRESHOLDS,
   ],
   footnotes: [
@@ -141,6 +158,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "select", key: "chapterAlignment", label: "שיוך הסימנים לפרקים", default: "global", choices: [["global", "גלובלי (מומלץ)"], ["greedy", "סימן אחר סימן (כמו Link-Notes)"]] },
     { kind: "boolean", key: "includeInlineNoteMarkers", label: "לקרוא גם סימנים של הערות שכבר מוטמעות בשורה", default: false },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
   ],
   citations: [
@@ -198,6 +216,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "sectionRanges", label: "לקשר לכל הסעיף שתחתיה ההפניה מצביעה (טווח)", default: false },
     { kind: "select", key: "anchors", label: "עוגן על המילים שנמצאו", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
     { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
     ...THRESHOLDS,
   ],

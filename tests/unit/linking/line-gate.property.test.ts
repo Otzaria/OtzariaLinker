@@ -80,6 +80,7 @@ function run(engine: EngineId, k: Case, options: Record<string, unknown>) {
 }
 
 const ENGINES: readonly EngineId[] = ["headings", "dibur-hamatchil", "footnotes", "pattern"];
+const ENGINES_BY_EVIDENCE = { words: ["dibur-hamatchil", "pattern"] as readonly EngineId[] };
 
 describe("the line filter of a run: no suggestion from an excluded line, in any engine (#40 A1)", () => {
   for (const engine of ENGINES) {
@@ -104,6 +105,39 @@ describe("the line filter of a run: no suggestion from an excluded line, in any 
         { numRuns: 60 },
       );
       expect(leakWithout).toBeGreaterThan(0);
+    });
+  }
+
+  /*
+   * The range policy (V7 round 2, item 5) through every engine: with the run's source ranges "until the next match" (linking/ranges.ts), no
+   * range on the filtered book runs over a content line the filter excludes — the guard trims it, whichever engine proposed it. The property
+   * has teeth: without the filter, the same ranges do cover such lines.
+   */
+  for (const engine of ENGINES) {
+    it(`${engine}: no range on the filtered book covers an excluded line`, () => {
+      let coveredWithout = 0;
+      const commSide = (s: Suggestion) => (s.source.book.key === "comm" ? s.source : s.target.book.key === "comm" ? s.target : null);
+      fc.assert(
+        fc.property(bookCase, filterArb, (k, spec) => {
+          const allowed = permitted(k.comm, spec);
+          const excluded = new Set(k.comm.map((t, i) => i).filter((i) => headingLevel(k.comm[i]!) === null && stripTags(k.comm[i]!).trim() !== "" && !allowed.has(i)));
+          const covers = (r: { suggestions: readonly Suggestion[] }) =>
+            r.suggestions.filter((s) => {
+              const side = commSide(s);
+              if (!side || side.end === undefined) return false;
+              for (let x = side.line + 1; x <= side.end; x++) if (excluded.has(x)) return true;
+              return false;
+            }).length;
+          const options = { sourceRange: "next-match", ...(engine === "footnotes" && { targetRange: "next-match" }) };
+          if (covers(run(engine, k, { sourceFilter: spec, ...options }))) return false;
+          coveredWithout += covers(run(engine, k, options));
+          return true;
+        }),
+        { numRuns: 60 },
+      );
+      // the structure engines (headings, footnotes) propose on every line, so their own suggestions already bound each range; the words engines
+      // skip lines, and there the guard is what keeps a range off an excluded line
+      if (ENGINES_BY_EVIDENCE.words.includes(engine)) expect(coveredWithout).toBeGreaterThan(0);
     });
   }
 
