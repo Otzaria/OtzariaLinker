@@ -112,12 +112,13 @@ describe("reopened after a book's text changed", () => {
 });
 
 describe("reopened from a moved or renamed folder", () => {
-  it("the links bind by title, the missing-sources list clears, and the user's \"library books\" switch is kept", async () => {
+  it("the links bind to the renamed folder by the book's edition saved with the project, the missing-sources list clears, and the user's \"library books\" switch is kept", async () => {
     const a = await workedOn("ביאורים");
     const folder = a.store.sources.value.find((s) => s.info.kind === "text-files")!;
     a.store.setLibrarySource(folder.info.id, true);
     // V7 §1.1: the folder's name no longer decides alone — the book's edition, saved with the project, shows that the renamed
     // folder holds the same book (the autosave writes the project after it is read: tests/integration/state/edition-identity)
+    // A project saved before the edition was read binds nothing to the renamed folder silently: the user is asked (edition-identity)
     a.store.projectText();
     await a.store.editionsSettled();
     const project = a.store.projectText();
