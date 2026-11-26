@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { repoProgressText } from "./repo-progress";
 import { TYPE_LABELS } from "../../core/links/connection-type";
 import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
@@ -181,7 +182,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                     <span class="sr-only" role="status">{progress.stage === "links" ? "הניתוח רץ." : "חישוב הכיסוי רץ."}</span>
                     <progress max={progress.total || 1} value={progress.done} aria-label="התקדמות הניתוח" aria-valuetext={`${n(progress.done)} מתוך ${n(progress.total)} ספרים`} />
                     <span aria-hidden="true">
-                      {progress.stage === "links" ? "נקראו הקישורים של" : "חושב כיסוי של"} {n(progress.done)} מתוך {n(progress.total)} ספרים. אפשר לעצור, והספרים שנקראו נשמרים.
+                      {repoProgressText(progress)}
                     </span>
                   </div>
                 )}
