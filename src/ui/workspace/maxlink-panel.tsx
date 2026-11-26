@@ -9,6 +9,7 @@ import { Icon } from "../icons/icon";
 import { sourceNameText } from "../shell/file-name";
 import { BookChecklist } from "./book-checklist";
 import { EngineOptions, EssentialOptions } from "./engine-options";
+import { SourceFilterPreviewBox } from "./source-filter-preview";
 import "./maxlink.css";
 
 /*
@@ -204,9 +205,8 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
       <p class="muted" style="margin:0;font-size:var(--fs-sm)">
         הכלי רק מציע. שום קישור לא נוצר בלי אישור שלכם, ו"אישור כל הוודאיות" מאשר רק הצעות ודאיות.
       </p>
-      {lineFilter.ok && lineFilter.filter && (
-        <p class="muted" role="status" style="margin:0;font-size:var(--fs-sm)">סינון השורות חל על כל השיטות של ההרצה: שורה שהסינון אינו כולל לא תקבל הצעה מאף שיטה.</p>
-      )}
+      {/* the run's line filter, with its preview on any book of the plan (#42 C16) */}
+      {lineFilter.ok && plan && <SourceFilterPreviewBox engine={[...enabled][0] ?? "headings"} books={plan.books.filter((b) => !b.skipped).map((b) => b.book.key)} filter={lineFilter.filter} />}
       {!lineFilter.ok && <p class="warn-text" role="alert" style="margin:0">{lineFilter.reason}</p>}
       <div class="row">
         <button class="btn filled" disabled={!plan?.steps.length || !!store.task.value || invalid} onClick={start} title={invalid ? "יש הגדרה לא תקינה בהגדרות השיטות" : undefined}>

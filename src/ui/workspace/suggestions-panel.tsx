@@ -27,6 +27,9 @@ import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
  * Nothing is linked without approval; approval is one undoable action.
  */
 const STATE_LABEL: Record<SuggestionState, string> = { pending: "ממתינה", approved: "אושרה", rejected: "נדחתה", exists: "כבר קיים" };
+const METHOD_MODE = { one: "השיטה שבחרתם", several: "כמה שיטות שאבחר", auto: "כל השיטות שמתאימות, מאוחדות" } as const;
+/** the pair methods that run without settings of the user's own (a pattern needs one) */
+const PICKABLE: readonly PairEngineId[] = ["headings", "dibur-hamatchil", "footnotes"];
 /** the decision keys, Latin and the Hebrew layout's same key (help §13) */
 const DECIDE_KEYS: Record<string, "approve" | "reject" | "reset"> = { a: "approve", ש: "approve", r: "reject", ר: "reject", delete: "reject", u: "reset", ו: "reset" };
 /** what each level means for the reviewer (V7 §3.11): on the level's chip and badge */
@@ -170,14 +173,18 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const single = info.singleBook === true;
   /** more targets for the same book, and "every method that fits, merged" (issue 26): the run is then a pair plan (state/maxlink.ts pairPlan) */
   const [extra, setExtra] = useState<readonly string[]>([]);
-  const [mergeAll, setMergeAll] = useState(false);
-  const commentaryEngine = engine === "headings" || engine === "dibur-hamatchil";
+  /** how many methods run on the pair (V7 §3.8): the one chosen, several ticked, or every one that fits (the planner's choice) */
+  const [methodMode, setMethodMode] = useState<"one" | "several" | "auto">("one");
+  const [ticked, setTicked] = useState<readonly PairEngineId[]>(["headings", "dibur-hamatchil"]);
   const multiEligible = mode === "pair" && !single && engine !== "pattern";
+  const methods = multiEligible && methodMode !== "one" ? methodMode : "one";
   // ticked books that were closed, or became the book in a reader, no longer count
   const live = extra.filter((k) => store.books.value.has(k) && k !== s && k !== t);
   const targets = [...new Set([t, ...live].filter((k): k is string => !!k && k !== s))];
-  const multi = multiEligible && (live.length > 0 || (mergeAll && commentaryEngine));
-  const ready = single ? !!s : mode === "pair" ? (multi ? !!s && targets.length > 0 : !!s && !!t && s !== t) : !!batchSource;
+  const multi = multiEligible && (live.length > 0 || methods !== "one");
+  /** the methods of a pair plan, and why each runs: what the form shows before the run */
+  const pairPlan = useMemo(() => (multi && s && targets.length ? store.maxLink.pairPlan(s, targets, methods === "auto" ? undefined : methods === "several" ? ticked : [engine as PairEngineId], engine === "footnotes" ? "notes" : undefined) : null), [multi, s, targets.join(), methods, ticked, engine]);
+  const ready = single ? !!s : mode === "pair" ? (multi ? !!pairPlan?.steps.length : !!s && !!t && s !== t) : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
     if (mode !== "batch" || !src) return [];
@@ -196,10 +203,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const start = async () => {
     const options = check.options;
     if (multi) {
-      const methods: readonly PairEngineId[] | undefined = mergeAll && commentaryEngine ? undefined : [engine as PairEngineId];
-      const plan = store.maxLink.pairPlan(s!, targets, methods, engine === "footnotes" ? "notes" : undefined);
+      if (!pairPlan) return;
       const label = `${store.refOf(s!).title} מול ${targets.map((k) => store.refOf(k).title).join(", ")}`;
-      if (await store.maxLink.run(plan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
+      if (await store.maxLink.run(pairPlan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
       return;
     }
     const ok = single ? await store.suggestions.runCitations(s!, options) : mode === "pair" ? await store.suggestions.runEngine(engine, s!, t!, options) : await store.suggestions.runBatch(engine, batchSource, options);
@@ -246,14 +252,37 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
                 <summary>עוד ספרי יעד לאותו ספר (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
                 <BookChecklist label="עוד ספרי יעד" selected={live} onChange={setExtra} exclude={[s, t]} />
               </details>
-              {commentaryEngine && (
-                <label class="check">
-                  <input type="checkbox" checked={mergeAll} onChange={(e) => setMergeAll(e.currentTarget.checked)} />
-                  <span>
-                    <b>כל השיטות שמתאימות, מאוחדות</b>
-                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת). סינון השורות שבחרתם חל על כל השיטות.</span>
-                  </span>
-                </label>
+              <div class="filters" style="padding:0" role="radiogroup" aria-label="כמה שיטות" onKeyDown={rovingKeys}>
+                {(["one", "several", "auto"] as const).map((m) => (
+                  <button key={m} class="chip" role="radio" aria-checked={methods === m} tabIndex={rovingTabIndex(methods === m)} onClick={() => setMethodMode(m)}>
+                    {METHOD_MODE[m]}
+                  </button>
+                ))}
+              </div>
+              {methods === "several" && (
+                <fieldset class="ml-engines">
+                  <legend>השיטות שירוצו</legend>
+                  {PICKABLE.map((e) => (
+                    <label key={e} class="check">
+                      <input type="checkbox" checked={ticked.includes(e)} onChange={(ev) => setTicked((p) => (ev.currentTarget.checked ? [...p, e] : p.filter((x) => x !== e)))} />
+                      <span>{ENGINES.find((x) => x.id === e)!.title}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              {/* which methods will run, and why: the plan itself (V7 §3.8) */}
+              {pairPlan && (
+                <ul class="problems" aria-label="מה ירוץ">
+                  {pairPlan.steps.length ? (
+                    pairPlan.steps.map((st) => (
+                      <li key={st.id} class="info">
+                        <span><b>{ENGINES.find((x) => x.id === st.engine)?.title}</b>{st.kind === "pair" && ` ← ${st.target.title}`}: {st.why}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li class="warning"><span>אף שיטה לא מתאימה לזוג הזה. בחרו "שיטה אחת", או שיטות אחרות.</span></li>
+                  )}
+                </ul>
               )}
             </>
           )}
@@ -284,7 +313,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         </>
       )}
       <EssentialOptions engine={engine} values={values} check={check} onChange={onOption} />
-      {mode === "pair" && !single && <SourceFilterPreviewBox engine={engine} source={s} options={check.options} />}
+      {/* the filter is the run's, on every path (#40 A1): its preview too (#42 C16) — a pair's source, or the commentaries of a batch */}
+      <SourceFilterPreviewBox engine={engine} books={mode === "pair" ? (s ? [s] : []) : preview.filter((p) => p.target).map((p) => p.source.key)} options={check.options} />
+      {methods !== "one" && multi && <p class="muted" style="margin:0;font-size:var(--fs-sm)">ההגדרות שלמעלה הן של "{info.title}"; השיטות האחרות רצות בהגדרות ברירת המחדל שלהן.</p>}
       {advanced ? (
         <EngineOptions
           engine={engine}
