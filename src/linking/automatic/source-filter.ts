@@ -7,8 +7,9 @@ import type { EngineBook, EngineLine, EngineResult, Reason, Suggestion } from ".
  * but only the lines that start with [א]"). One general mechanism in four stages, none of them an engine:
  *   (a) eligibility   a line enters the engine when its start matches the prefix (mode "include", the default) or when it does not
  *                     ("exclude"): the prefix is a preset ("[א]", "(א)", "א)", a bold "ד"ה" label) or a regular expression of the user's;
- *   (b) preprocessing for MATCHING ONLY the prefix is replaced by as many spaces as it has characters (`strip`), so that the words after it
- *                     are what the engine reads, and every raw offset in the line is still the original's;
+ *   (b) preprocessing for MATCHING ONLY the prefix's visible characters become spaces, one for one, its tags and entities stay (`strip`,
+ *                     blankMarker), so that the words after it are what the engine reads, and every raw and visible offset in the line
+ *                     is still the original's;
  *   (c) matching      the engine of the user's choice, unchanged (dibur-hamatchil, headings, notes, pattern);
  *   (d) output        the line, the anchor and the matched words of a suggestion are those of the ORIGINAL line, because they were never computed
  *                     on another string: the line the engine reads has the same index and the same length.
@@ -132,13 +133,47 @@ export function parseSourceFilter(raw: unknown): SourceFilter | null {
   return { prefix, ...(mode !== undefined && { mode }), ...(strip !== undefined && { strip }) };
 }
 
+/**
+ * The line with its marker blanked for matching (findings #41 B3): every VISIBLE character before `end` becomes a space, one for one (a
+ * UTF-16 unit for a unit), while tags and entities stay exactly as they are. Blanking the tags too ("<b>[א] אלפא</b>" → spaces up to the
+ * words) left a stray "</b>", lost the bold label the engine reads a dibur by, and moved every visible offset by the tag's length — the
+ * generator does not count a tag (core/text/offsets.ts). Here the raw length, every raw and every visible offset, and the tags are the
+ * original's. The scan follows offsets.ts: "<" opens a tag until the next ">" (with none, the rest is hidden, and so kept), "&…;" of up to
+ * ten characters is one visible unit (kept whole).
+ */
+export function blankMarker(text: string, end: number): string {
+  let out = "";
+  let inTag = false;
+  let i = 0;
+  for (; i < end && i < text.length; i++) {
+    const c = text[i]!;
+    if (inTag) {
+      out += c;
+      if (c === ">") inTag = false;
+    } else if (c === "<") {
+      inTag = true;
+      out += c;
+    } else if (c === "&") {
+      const stop = Math.min(text.length, i + 10);
+      let j = i + 1;
+      while (j < stop && text[j] !== ";") j++;
+      if (j < stop) {
+        out += text.slice(i, j + 1);
+        i = j;
+      } else out += " ";
+    } else out += " ";
+  }
+  return out + text.slice(i);
+}
+
 /** True when the line enters the engine: a content line that has the prefix (include) or lacks it (exclude). Headings and blank lines are not judged. */
 const judged = (l: EngineLine) => l.heading === null && stripTags(l.text).trim() !== "";
 
 /**
  * The book as the engine reads it: the same lines at the same indexes. An ineligible content line is empty (unless `blankExcluded` is
  * false: an engine that reads the book's structure keeps it, and the gate drops what it proposes there); an eligible one has its prefix
- * replaced by spaces when the filter strips (every character, tags included, so no offset moves). The input is not changed.
+ * blanked when the filter strips (blankMarker: its visible characters become spaces, its tags and entities stay, so no offset moves). The
+ * input is not changed.
  */
 export function applySourceFilter(book: EngineBook, filter: CompiledSourceFilter, blankExcluded = true): EngineBook {
   const lines = book.lines.map((l): EngineLine => {
@@ -147,7 +182,7 @@ export function applySourceFilter(book: EngineBook, filter: CompiledSourceFilter
     const eligible = (m !== null) === (filter.mode === "include");
     if (!eligible) return blankExcluded ? { ...l, text: "" } : l;
     if (m === null || !filter.strip || filter.mode === "exclude") return l;
-    return { ...l, text: " ".repeat(m.matchFrom) + l.text.slice(m.matchFrom) };
+    return { ...l, text: blankMarker(l.text, m.matchFrom) };
   });
   return { ...book, lines };
 }
@@ -205,7 +240,7 @@ export class LineGate {
     if (!judged(l)) return l;
     if (!eligible) return this.blankExcluded ? { ...l, text: "" } : l;
     if (m === null || !this.filter.strip || this.filter.mode === "exclude") return l;
-    return { ...l, text: " ".repeat(m.matchFrom) + l.text.slice(m.matchFrom) };
+    return { ...l, text: blankMarker(l.text, m.matchFrom) };
   }
 
   /** The whole book through stages 1 and 2. */
