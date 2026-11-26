@@ -1,5 +1,5 @@
 import type { SourceRegistry } from "../sources/registry";
-import { citationsJob } from "./citations-job";
+import { citationsJob, forgetCitationSource } from "./citations-job";
 import { batchJob, diffJob, engineJob, titleFitJob } from "./engine-job";
 import { fingerprintsJob, maxlinkJob } from "./maxlink-job";
 import { RpcFailure, type CallContext, type CallOptions, type Handlers } from "./rpc";
@@ -25,7 +25,8 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
     existingMatchIndexes: (ctx, bookKey, runs) => registry.existingMatchIndexes(bookKey, runs, ctx.signal),
     coverageEnds: (ctx, bookKey) => registry.coverageEnds(bookKey, { signal: ctx.signal }),
-    close: (_ctx, sourceId) => registry.close(sourceId),
+    // the citations caches hold indexes by book key: a closed source's are never asked again (V7 round 2, item 10)
+    close: (_ctx, sourceId) => (forgetCitationSource(registry, sourceId), registry.close(sourceId)),
     titleFit: (ctx, source, target) => titleFitJob(registry, source, target, jobCtx(ctx)),
     diffBooks: (ctx, oldKey, newKey) => diffJob(registry, oldKey, newKey, jobCtx(ctx)),
     runBatch: (ctx, engine, pairs, options) => batchJob(registry, engine, pairs, options, jobCtx(ctx)),

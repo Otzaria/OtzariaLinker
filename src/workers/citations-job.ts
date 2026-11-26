@@ -31,6 +31,23 @@ const MAX_OWN_UNITS = 300;
 const pagesCache = new WeakMap<SourceRegistry, Map<string, DafStructure | null>>();
 const MAX_PAGES = 50;
 
+/**
+ * Drops what the caches hold for the books of a closed source (V7 round 2, item 10). Their keys are never asked again (a source
+ * opened again gets new keys), yet the target indexes stayed until the line budget pushed them out: a run of 10 books on seforim.db
+ * left ~240 MB of them on the heap after the database was closed (docs/reviews/V7_PERFORMANCE.md §9.4). The catalog's aliases are
+ * built from the open books, so they go too.
+ */
+export function forgetCitationSource(registry: SourceRegistry, sourceId: string): void {
+  const mine = (key: string) => key.startsWith(`${sourceId}:`);
+  for (const cache of [indexCache.get(registry), ownUnitsCache.get(registry), pagesCache.get(registry)]) if (cache) for (const k of [...cache.keys()]) if (mine(k)) cache.delete(k);
+  aliasCache.delete(registry);
+}
+
+/** The book keys the citations caches hold (for tests and diagnostics). */
+export function cachedCitationBooks(registry: SourceRegistry): string[] {
+  return [indexCache.get(registry), ownUnitsCache.get(registry), pagesCache.get(registry)].flatMap((c) => [...(c?.keys() ?? [])]);
+}
+
 /*
  * The citations engine in the worker (single-book): reads the SOURCE book chunk by chunk, then
  * resolves its citations against the index of each book some citation may point to — one book at a
