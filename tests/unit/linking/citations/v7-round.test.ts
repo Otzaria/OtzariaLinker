@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { Link } from "../../../../src/core/links/model";
+import { validateLink, type ValidationContext } from "../../../../src/core/links/validate";
 import { AliasIndex, citationGate, citationHintStrength } from "../../../../src/linking/automatic/citations";
 import { B, heRefOf, LIB, run } from "./v7-fixture";
 
@@ -65,5 +67,39 @@ describe("B8 — a bare Arabic number between a book's name and a Hebrew noun is
     expect(run("ועיין יהושע פרק 9 ושם").suggestions[0]!.confidence).toBe("certain");
     expect(run("ועיין (יהושע 9) ושם").suggestions[0]!.confidence).not.toBe("possible");
     expect(run("כמו שנאמר יהושע 9, 2 ועוד").suggestions[0]!.confidence).not.toBe("possible");
+  });
+});
+
+describe("B9 — a book of a personal database gets the 'ציטוט בטקסט' anchor for private use", () => {
+  const text = "כמו שאמרו (ברכות יג:) ושם";
+  it("citationType inline-linker: INLINE_LINKER with an anchor on the citation words, from a personal book too", () => {
+    const r = run(text, { citationType: "inline-linker" }, LIB, "personal");
+    const s = r.suggestions[0]!;
+    expect(s.declaredType).toBe("INLINE_LINKER");
+    expect(text.slice(s.anchor!.rawStart, s.anchor!.rawEnd!)).toBe("ברכות יג:");
+    expect(r.notes.map((n) => n.code)).toContain("citations/inline-linker");
+    expect(r.notes.map((n) => n.code)).not.toContain("citations/anchors-source");
+  });
+
+  it("the default (reference, which a library export accepts) stays without an anchor, and the note says how to get one for private use", () => {
+    const r = run(text, {}, LIB, "personal");
+    expect(r.suggestions[0]!.anchor).toBeUndefined();
+    expect(r.suggestions[0]!.declaredType).toBe("reference");
+    const note = r.notes.find((n) => n.code === "citations/anchors-source")!;
+    expect(note.text).toContain("ציטוט בטקסט");
+    expect(note.text).toContain("לשימוש פרטי");
+  });
+
+  it("the export accepts that link for private use and holds it back from the library (validateLink, LINK_FORMATS §1.12)", () => {
+    const s = run(text, { citationType: "inline-linker" }, LIB, "personal").suggestions[0]!;
+    const link: Link = { id: s.id, status: "new", provenance: "auto", source: s.source, target: s.target, declaredType: s.declaredType, heRef2: s.heRef2, anchor: s.anchor! };
+    const ctx: ValidationContext = { line: () => ({ exists: true, heading: null, anchorLength: 40 }), lineCount: () => 1000 };
+    const errors = (purpose?: "private") => validateLink(link, { ...ctx, ...(purpose && { purpose }) }).filter((p) => p.severity === "error").map((p) => p.code);
+    expect(errors("private")).toEqual([]);
+    expect(errors()).toContain("export/inline-linker-private-only");
+  });
+
+  it("a Sefaria source still gets none, whatever the type (control)", () => {
+    expect(run(text, { citationType: "inline-linker" }, LIB, "sefaria").suggestions[0]!.anchor).toBeUndefined();
   });
 });

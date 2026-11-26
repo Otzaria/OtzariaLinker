@@ -542,12 +542,15 @@ export class CitationRun {
   private anchorPolicy(target: BookRef, cache: Map<string, boolean>): boolean {
     const hit = cache.get(target.key);
     if (hit !== undefined) return hit;
-    // INLINE_LINKER (private use): the offsets are in the user's own source line, so the target may be a Sefaria book
+    // INLINE_LINKER (private use): the offsets are in the user's own source line, so the target may be a Sefaria book.
+    // A book of a personal database (origin "personal") too (issue #41 B9): Otzaria's personal import places such a book (an
+    // attached database, docs/contracts/LINK_FORMATS.md §1.12) — but only as INLINE_LINKER, which validateLink accepts for a
+    // PRIVATE export alone; a "reference" from it stays anchorless, as the library is not where its links go
+    const inline = this.opts.citationType === "inline-linker";
     const ok =
       this.opts.anchors === "auto" &&
-      this.source.origin === "otzaria" &&
-      !this.sefariaOwned(this.source) &&
-      (this.opts.citationType === "inline-linker" || (target.origin === "otzaria" && !this.sefariaOwned(target)));
+      ((this.source.origin === "otzaria" && !this.sefariaOwned(this.source)) || (inline && this.source.origin === "personal")) &&
+      (inline || (target.origin === "otzaria" && !this.sefariaOwned(target)));
     cache.set(target.key, ok);
     return ok;
   }
@@ -559,6 +562,11 @@ export class CitationRun {
     if (!without && this.opts.citationType === "inline-linker")
       return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote() };
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
+    if (this.source.origin === "personal")
+      return {
+        code: "citations/anchors-source",
+        text: 'ספר המקור הוא ספר ממסד אישי, ולכן קישור מסוג "הפניה" נכתב בלי עוגן על מילות ההפניה (הוא יוצג בפאנל הקישורים). כדי שהמילים יסומנו ויהיו לחיצות בתוך הטקסט, בחרו בסוג הקישור "ציטוט בטקסט" וייצאו לשימוש פרטי: ייבוא אישי באוצריא יודע לאתר ספרים של מסד מצורף. ' + inlineLinkerVersionNote(),
+      };
     if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };
     return { code: "citations/anchors-sefaria", text: "קישורים לספרי ספריא נכתבים בלי עוגן על מילות ההפניה: הספרייה אינה מקבלת עוגן בקישור מספר אוצריא אל ספר ספריא. הם יוצגו בפאנל הקישורים." };
