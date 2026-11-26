@@ -29,15 +29,20 @@ import type { EngineBook } from "../../../src/linking/automatic/types";
  *               (as a plain text file without headings: the engine searches the whole base for every line; #41 B2, #42 C9 —
  *               the database has almost no commentary with a declared base and no headings). Every other pair (by that order)
  *               is the half the caps were calibrated on ("tune"), the rest the half they were checked on ("heldout");
+ * With V7_BENCH_PERSONAL=1 the same rules run on the personal v52 database (OTZARIA_PERSONAL_DB), whose books declare no base: the title
+ * "X על <a book of the same database>" stands for the declaration (notes books and the masorah left out). It was never tuned on.
+ *   yd        — every book declared written on the שולחן ערוך יורה דעה (finding #41 B2 was measured there): an independent held-out set;
  *   unrelated — pairs that are NOT commentary and base: named same-genre neighbours, and each held-out commentary
  *               against the base of the next held-out pair (rotation). Nothing there is a correct pair.
  * "Right"/"wrong" is AGREEMENT WITH THE DATABASE: the suggested place (line or range) holds a line the database
  * links the commentary line to. The database is not ground truth (it is incomplete and sometimes wrong).
  */
-const path = process.env.OTZARIA_DB;
+/** V7_BENCH_PERSONAL=1: the personal (v52) database of OTZARIA_PERSONAL_DB instead, its books included (they are "personal" there) */
+const PERSONAL = process.env.V7_BENCH_PERSONAL === "1";
+const path = PERSONAL ? process.env.OTZARIA_PERSONAL_DB : process.env.OTZARIA_DB;
 const OUT = process.env.V7_BENCH_OUT;
 const DIS = process.env.V7_BENCH_DIS;
-const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings";
+const SET = (process.env.V7_BENCH_SET ?? "tune") as "tune" | "heldout" | "unrelated" | "noheadings" | "yd";
 const ONLY = process.env.V7_BENCH_ONLY?.split(";").map((s) => s.split(">").map((t) => t.trim()) as [string, string]);
 
 const TUNE: readonly [string, string][] = [
@@ -89,7 +94,7 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
     try {
       const reg = new SourceRegistry();
       const opened = await reg.open([{ path: "seforim.db", blob: fileBlob(fd) }]);
-      const books: SourceBook[] = opened.sources.flatMap((s) => s.books).filter((b) => b.origin !== "personal");
+      const books: SourceBook[] = opened.sources.flatMap((s) => s.books).filter((b) => PERSONAL || b.origin !== "personal");
       const byTitle = new Map(books.map((b) => [b.title, b] as const));
       const byKey = new Map(books.map((b) => [b.key, b] as const));
       const ref = (b: SourceBook): BookRef => ({ key: b.key, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }) });
@@ -110,8 +115,12 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         const tuned = new Set(TUNE.map(([c, b]) => `${c}>${b}`));
         const cands: [string, string][] = [];
         for (const c of books) {
-          if (!c.bases?.length || !c.title.includes(" על ") || (c.lineCount ?? 0) < 300 || (c.lineCount ?? 0) > 6000) continue;
-          for (const bk of c.bases) {
+          // the personal (v52) database declares no bases: there the title alone says it ("X על <a book of the same database>"),
+          // without notes books ("הערות על", the footnotes method) and the masorah
+          const bases = PERSONAL ? (/^(הערות|מסורה)/.test(c.title) ? [] : [byTitle.get(c.title.slice(c.title.lastIndexOf(" על ") + 4))?.key].filter((k): k is string => !!k)) : c.bases;
+          // (the personal database has few such books: 100 to 20,000 lines there)
+          if (!bases?.length || !c.title.includes(" על ") || (c.lineCount ?? 0) < (PERSONAL ? 100 : 300) || (c.lineCount ?? 0) > (PERSONAL ? 20000 : 6000)) continue;
+          for (const bk of bases) {
             const b = byKey.get(bk);
             if (!b || !c.title.endsWith(` על ${b.title}`) || (b.lineCount ?? Infinity) > 40000) continue;
             if (!tuned.has(`${c.title}>${b.title}`)) cands.push([c.title, b.title]);
@@ -151,6 +160,11 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
       else if (SET === "tune") pairs = [...TUNE];
       else if (SET === "heldout") pairs = await heldout();
       else if (SET === "noheadings") pairs = await noHeadings();
+      else if (SET === "yd") {
+        // every book the database declares written on the שולחן ערוך יורה דעה (the finding #41 B2 was measured there, on v52): never tuned on
+        const yd = books.find((x) => x.title === "שולחן ערוך, יורה דעה" || x.title === "שולחן ערוך יורה דעה");
+        pairs = yd ? books.filter((x) => x.bases?.includes(yd.key) && (x.lineCount ?? 0) <= 40000).map((x) => [x.title, yd.title] as [string, string]) : [];
+      }
       else {
         const h = await heldout();
         pairs = [...UNRELATED_NAMED, ...h.map(([c], i) => [c, h[(i + 1) % h.length]![1]] as [string, string]).filter(([c, b]) => !c.endsWith(` על ${b}`))];
@@ -276,7 +290,8 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         }
         const notes = res.items.flatMap((i) => (i.result?.notes ?? []).map((n) => n.code));
         const half = SET === "noheadings" ? (pairs.indexOf(pairs.find(([x, y]) => x === ct && y === bt)!) % 2 === 0 ? "tune" : "heldout") : SET;
-        const row = { set: SET, half, pair: `${ct} > ${bt}`, planned, ms, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], raw, dhWords, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
+        const fit = (res.items as readonly { pairFit?: { verdict: string; metrics: object } }[]).find((i) => i.pairFit)?.pairFit;
+        const row = { set: SET, half, pair: `${ct} > ${bt}`, planned, ms, pairFit: fit && { verdict: fit.verdict, ...fit.metrics }, gold: gold.size, steps: steps.map((s) => s.engine), errors: res.items.filter((i) => i.error).map((i) => i.error), notes: [...new Set(notes)], raw, dhWords, merged: out, mergedWritten: outWritten, combos, b1, innerAlt, rangeHigh, stats: merged.stats };
         appendFileSync(OUT!, `${JSON.stringify(row)}\n`);
         if (DIS) for (const d of dis) appendFileSync(DIS, `${JSON.stringify(d)}\n`);
         const lv = (t: Tally, k: string) => (t[k] ? `${t[k]![0]}/${t[k]![0] + t[k]![1]}` : "-");

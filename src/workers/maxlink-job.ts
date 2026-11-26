@@ -6,6 +6,7 @@ import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-
 import { capSpanned, compileForEngine, LineGate, runEngineSliced, SOURCE_FILTER_OPTION, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { capConfidence, capUndecided } from "../linking/batch";
 import { titleFit, titleGateAdvice, type TitleFitReport, type TitleGateAdvice } from "../linking/title-fit";
+import { applyPairFit, pairFit } from "../linking/pair-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -49,6 +50,12 @@ export interface MaxLinkJobOptions {
    * the library benchmark does (BENCH_STEP_S), so one slow pair does not cost the book's other steps.
    */
   stepBudgetMs?: number;
+  /**
+   * Pairs ("<source key>><target key>", the step's input direction) the user chose to run whatever the pair check says (#42 C10): their
+   * suggestions are kept when the check finds the pair unsuitable or undecided, capped at "possible" with the reasons. A pair the user
+   * named (relation via "user") or forced the headings method on is forced already.
+   */
+  forcedPairs?: readonly string[];
 }
 
 /**
@@ -255,6 +262,11 @@ export async function maxlinkJob(
   const items: StepResult[] = [];
   /** the fingerprint of every book read (MaxLinkJobResult.fingerprints) */
   const fps = new Map<string, string>();
+  /**
+   * The pair check (linking/pair-fit.ts, #42 C10) of every whole-book pair step, once the library's links are read: per pair, the
+   * steps' items, whether the user named it, and the ד"ה lines that were searched and not found (what the check needs of the run).
+   */
+  const gated = new Map<string, { step: Extract<PlanStep, { kind: "pair" }>; items: number[]; forced: boolean; dh: EngineResult | null }>();
 
   let loaded = null as { key: string; source: EngineBook; target: EngineBook } | null;
   let loadError = null as { key: string; message: string } | null;
@@ -328,6 +340,14 @@ export async function maxlinkJob(
         result = await guard(step, await run(registry, step.source, optionsOf(step.engine), inner));
       }
       const cut = ctx.signal?.aborted === true;
+      if (step.kind === "pair" && !step.relation.through && (step.engine === "dibur-hamatchil" || step.engine === "headings")) {
+        const g = gated.get(pairKey(step)) ?? { step, items: [], forced: false, dh: null };
+        g.items.push(items.length);
+        g.forced ||= step.relation.via === "user" || step.titleForced === true || (options.forcedPairs?.includes(pairKey(step)) ?? false);
+        if (step.engine === "dibur-hamatchil")
+          g.dh = { ...result, unmatched: result.unmatched.filter((u) => u.reasons.some((x) => x.code === "dh/not-found")).map((u) => ({ line: u.line, reasons: [{ code: "dh/not-found", text: "" }] })) };
+        gated.set(pairKey(step), g);
+      }
       items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...((cut || overBudget()) && { stopped: true }) });
       if (cut) {
         stopped = true;
@@ -358,6 +378,21 @@ export async function maxlinkJob(
     }
   }
   if (ctx.signal?.aborted) stopped = true;
+  // #42 C10: is the commentary written on this base at all? Judged per pair from the metadata, the library's links and the ד"ה run
+  for (const g of gated.values()) {
+    const { source, target, relation } = g.step;
+    const prefix = [`${source.title}#`, `${target.title}#`];
+    let libraryLinks = 0;
+    for (const k of keys) {
+      const [a, b] = k.split("|") as [string, string];
+      if ((a.startsWith(prefix[0]!) && b.startsWith(prefix[1]!)) || (a.startsWith(prefix[1]!) && b.startsWith(prefix[0]!))) libraryLinks++;
+    }
+    const report = pairFit({ commentary: source, base: target, dh: g.dh, declared: relation.via === "base-text" || relation.via === "title" || relation.scope !== undefined, libraryLinks });
+    for (const i of g.items) {
+      const it = items[i]!;
+      if (it.result) items[i] = { ...it, result: { ...applyPairFit(it.result, report, g.forced, { commentary: source.title, base: target.title }), unmatched: [] }, pairFit: report };
+    }
+  }
   // the fingerprint of every book the steps depend on (V5 P1-8): the ones a single-book engine read by
   // itself are hashed here (a text book is in its source's cache; a failing read leaves it out)
   const wanted = new Set<string>(focusBooks);
