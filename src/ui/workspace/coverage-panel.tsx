@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { coverageSummary } from "./coverage-summary";
 import type { CoverageSummary, LineCoverage, LineRange } from "../../linking/coverage";
 import { COVERAGE_RANGES_MAX, type ProjectCoverage } from "../../state/coverage";
 import type { Side } from "../../state/store";
@@ -144,11 +145,7 @@ export function CoveragePanel() {
               </p>
             )}
             <p class="cov-sum" role="status">
-              {current.suitable === 0
-                ? "אין בספר שורות תוכן."
-                : current.unlinked === 0
-                  ? current.suitable === 1 ? "שורת התוכן היחידה של הספר מקושרת או מכוסה בטווח." : `כל ${n(current.suitable)} שורות התוכן של הספר מקושרות או מכוסות בטווח.`
-                  : `${n(current.unlinked)} מתוך ${n(current.suitable)} שורות תוכן (${Math.round(current.unlinkedShare * 100)}%) עדיין בלי קישור, ${current.ranges.length === 1 ? "בקטע אחד" : `ב־${n(current.ranges.length)} קטעים`}.`}
+              {coverageSummary(current)}
               <span class="muted"> {dbBook ? "קישורי הפרויקט וקישורי המסד נספרים." : "רק קישורי הפרויקט נספרים."}</span>
             </p>
             <ul class="cov-counts">
