@@ -569,7 +569,7 @@ dialog.start-task { width: min(620px, calc(100vw - 32px)); }
   .app-bar .brand { margin-inline-end: 2px; }
   .app-bar .export { padding-inline: 10px; }
   .app-bar .export .cnt::before, .app-bar .export .cnt::after { content: none; }
-  .app-bar .export .cnt { margin-inline-start: 4px; padding: 0 6px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--on-primary) 22%, transparent); font-size: var(--fs-sm); }
+  .app-bar .export .cnt { margin-inline-start: 4px; padding: 0 6px; border-radius: var(--radius-full); background: var(--on-primary); color: var(--primary); font-weight: 600; font-size: var(--fs-sm); }
   .app-bar .task { order: 99; flex-basis: 100%; margin: 0; }
   .narrow-only { display: flex !important; }
 }
