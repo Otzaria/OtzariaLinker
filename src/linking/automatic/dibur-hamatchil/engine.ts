@@ -218,6 +218,8 @@ interface Placement {
   readonly tie?: TieState & { readonly common: MatchParts };
   /** a line placed by its own words in a LOCAL window (not the whole base): how many words of its ד"ה matched (SHORT_LOCAL) */
   readonly localWords?: number;
+  /** … and whether that place is before the previous line's (SHORT_LOCAL) */
+  readonly localBackward?: true;
 }
 
 /** Reasons, rule ids and warnings of a placement. */
@@ -1083,15 +1085,6 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
         rules.push(cap.rule);
         warnings.push(r(cap.rule, `הדיבור המתחיל קצר (${words === 1 ? "מילה אחת" : `${words} מילים`}) ונמצא בחיפוש בכל ספר הבסיס, בלי כותרת שמצמצמת את החיפוש. מילים כאלה נמצאות במקומות רבים, והמקום נבחר לפי סדר ההתקדמות של הפירוש, ולכן הוודאות הוגבלה ל"${label}".`));
       }
-      // a ד"ה of a few words found BEFORE the previous line's place in a local window (SHORT_LOCAL, V7 benchmark §7.1): the walk
-      // chose an earlier place of common words
-      const short = confidence === "high" ? shortLocalCap({ words: matchedWords, local: window.kind !== "book", backward: prevIn !== null && win.line < prevIn, unordered: false }) : null;
-      if (short) {
-        confidence = short.cap;
-        score = Math.min(score, thresholds.high - 0.01);
-        rules.push(short.rule);
-        warnings.push(r(short.rule, `הדיבור המתחיל קצר (${matchedWords === 1 ? "מילה אחת" : `${matchedWords} מילים`}) ונמצא לפני המקום של השורה הקודמת בספר הבסיס. מילים כאלה נמצאות במקומות רבים, ופירוש שחוזר אחורה עם מילים מעטות טועה לעתים קרובות, ולכן הוודאות הוגבלה ל"${CONFIDENCE_LABELS[confidence]}". בדקו את המקום לפני האישור.`));
-      }
       // a phrase that stands elsewhere too: said, and its other places offered, even when the level was already below the cap
       if (repeats.length) {
         rules.push("dh/repeated-phrase");
@@ -1115,7 +1108,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       rootScore: score,
       depth: 0,
       ...(tie ? { tie: { ...tie, common } } : {}),
-      ...(window.kind !== "book" ? { localWords: matchedWords } : {}),
+      ...(window.kind !== "book" ? { localWords: matchedWords, ...(prevIn !== null && win.line < prevIn && { localBackward: true as const }) } : {}),
     };
     const out = withMatch(placed, common, part, tie);
     // the other lines that hold the same words are its alternatives, saying why they were not chosen
@@ -1476,34 +1469,45 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
   }
 
   /*
-   * ── a commentary that does not follow its base (SHORT_LOCAL, V7 benchmark §7.1) ──────────────────
-   * A short ד"ה in a local window is placed by the walk's order as much as by its words. When the book itself goes back often — a
-   * share of its placements in local windows found before the previous line's place — that order is no evidence, and the word a note
-   * opens with is often its topic rather than a quote (כף החיים: "ואם", "כבד"). Then every "high" ד"ה of one or two words in a local
-   * window is "possible", and the run says why.
+   * ── a short ד"ה in a local window (SHORT_LOCAL, V7 benchmark §7.1) ────────────────────────────────
+   * A short ד"ה in a local window is placed by the walk's order as much as by its words. Two cases where that order is no evidence,
+   * both only at "high": a ד"ה of up to three words found BEFORE the previous line's place (the walk chose an earlier place of common
+   * words), and, in a commentary that itself goes back often — a share of its placements in local windows found before the previous
+   * line's place — every ד"ה of one or two words (the word a note opens with is often its topic rather than a quote: כף החיים "ואם",
+   * "כבד"). Applied after the order passes, so they see the same placements as before; a line that inherits a capped place (בא"ד, שם,
+   * an item paragraph) is capped with it.
    */
   {
     const local = placements.filter((pl) => pl.localWords !== undefined && meta.get(pl.cLine)?.direct);
     const backward = local.filter((pl) => pl.warnings.some((w) => w.code === "dh/backward")).length;
-    if (unorderedShare(local.length, backward)) {
-      let capped = 0;
+    const unordered = unorderedShare(local.length, backward);
+    const cappedRoots = new Map<number, string>();
+    let unorderedCapped = 0;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      const m = meta.get(pl.cLine);
+      if (pl.confidence !== "high" || pl.localWords === undefined || !m?.direct) continue;
+      const cap = shortLocalCap({ words: pl.localWords, local: true, backward: pl.localBackward === true, unordered });
+      if (!cap) continue;
+      if (cap.rule === "dh/short-unordered") unorderedCapped++;
+      cappedRoots.set(pl.cLine, cap.rule);
+      const words = pl.localWords === 1 ? "מילה אחת" : `${pl.localWords} מילים`;
+      const why =
+        cap.rule === "dh/short-backward"
+          ? `הדיבור המתחיל קצר (${words}) ונמצא לפני המקום של השורה הקודמת בספר הבסיס. מילים כאלה נמצאות במקומות רבים, ופירוש שחוזר אחורה עם מילים מעטות טועה לעתים קרובות, ולכן הוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`
+          : `הדיבור המתחיל קצר (${words}), והמקום שלו נבחר גם לפי סדר ההתקדמות של הפירוש. הפירוש הזה חוזר אחורה בספר הבסיס לעתים קרובות, ולכן הסדר אינו ראיה, והוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`;
+      placements[i] = { ...pl, confidence: cap.cap, score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, cap.rule], warnings: [...pl.warnings, r(cap.rule, why)] };
+    }
+    if (cappedRoots.size)
       for (let i = 0; i < placements.length; i++) {
         const pl = placements[i]!;
-        if (pl.confidence !== "high" || pl.localWords === undefined || !meta.get(pl.cLine)?.direct) continue;
-        const cap = shortLocalCap({ words: pl.localWords, local: true, backward: false, unordered: true });
-        if (!cap) continue;
-        capped++;
-        placements[i] = {
-          ...pl,
-          confidence: cap.cap,
-          score: Math.min(pl.score, thresholds.high - 0.01),
-          rules: [...pl.rules, cap.rule],
-          warnings: [...pl.warnings, r(cap.rule, `הדיבור המתחיל קצר (${pl.localWords === 1 ? "מילה אחת" : `${pl.localWords} מילים`}), והמקום שלו נבחר גם לפי סדר ההתקדמות של הפירוש. הפירוש הזה חוזר אחורה בספר הבסיס לעתים קרובות, ולכן הסדר אינו ראיה, והוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`)],
-        };
+        const m = meta.get(pl.cLine);
+        const rule = m && !m.direct ? cappedRoots.get(m.root) : undefined;
+        if (!rule || (pl.confidence !== "certain" && pl.confidence !== "high")) continue;
+        placements[i] = { ...pl, confidence: "possible", score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, rule], warnings: [...pl.warnings, r(rule, `השורה יורשת את המקום של שורה ${m!.root + 1} בפירוש, שהוודאות שלה הוגבלה ל"אפשרית" (דיבור המתחיל קצר); לכן גם הוודאות שלה הוגבלה.`)] };
       }
-      if (capped)
-        notes.push(r("dh/short-unordered", `${backward} מתוך ${local.length} השורות שמוקמו בתוך קטע (${Math.round((100 * backward) / local.length)}%) נמצאו לפני המקום של השורה הקודמת: הפירוש אינו הולך לפי סדר ספר הבסיס. לכן ${capped} הצעות של דיבור המתחיל בן מילה או שתיים הוגבלו ל"אפשרית"; בדקו אותן לפני האישור.`));
-    }
+    if (unorderedCapped)
+      notes.push(r("dh/short-unordered", `${backward} מתוך ${local.length} השורות שמוקמו בתוך קטע (${Math.round((100 * backward) / local.length)}%) נמצאו לפני המקום של השורה הקודמת: הפירוש אינו הולך לפי סדר ספר הבסיס. לכן ${unorderedCapped} הצעות של דיבור המתחיל בן מילה או שתיים הוגבלו ל"אפשרית"; בדקו אותן לפני האישור.`));
   }
 
   /*

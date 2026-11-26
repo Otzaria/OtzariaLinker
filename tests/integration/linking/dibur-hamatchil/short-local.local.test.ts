@@ -6,7 +6,7 @@ import type { EngineBook, EngineResult, Suggestion } from "../../../../src/linki
 import { SourceRegistry } from "../../../../src/sources/registry";
 
 /*
- * The verified engine errors of V7_MATCHING_BENCHMARK.md §7 that are a short ד"ה inside a LOCAL window (§7.1): ten lines of כף החיים
+ * The verified engine errors of V7_MATCHING_BENCHMARK.md §7 that are a short ד"ה inside a LOCAL window (§7.1): fifteen lines of כף החיים
  * על שולחן ערוך יורה דעה, read in the text and judged against the database (the database right, the engine wrong). Each case is the
  * commentary line, the base line the engine chose, the line the database links, and the word(s) the line opens with — no book text.
  * Before §7.1 every one of them was "high" at the wrong line; now none is "certain" or "high" there. The control: ש"ך and ט"ז on the
@@ -28,6 +28,14 @@ const CASES: readonly (readonly [number, number, number, string])[] = [
   [7293, 437, 436, "וכן"],
   [3953, 289, 292, 'אע"ג'],
   [6694, 395, 394, "בהמה"],
+  // five more of the same sample, judged again by the database's own structure: its links of כף החיים come in unbroken blocks of
+  // consecutive notes per seif (5185–5295 → 328, 16170–16284 → 1090, 16520–16539 → 1097), and the engine's place is an island inside
+  // such a block (V7_MATCHING_BENCHMARK.md §7)
+  [5195, 326, 328, "ואם"],
+  [5267, 326, 328, "ואם"],
+  [16190, 1088, 1090, "סכנה"],
+  [16274, 1088, 1090, "מים"],
+  [16522, 1096, 1097, "מדברי"],
 ];
 
 function fileBlob(fd: number, from = 0, to = fstatSync(fd).size): Blob {
@@ -65,7 +73,7 @@ describe.runIf(path)('a short ד"ה in a local window: the verified errors of כ
 
   const ends = (s: Suggestion, cKey: string) => (s.source.book.key === cKey ? [s.source, s.target] : [s.target, s.source]);
 
-  it('none of the ten is "certain" or "high" at the wrong line; each says why', () => {
+  it('none of the fifteen is "certain" or "high" at the wrong line; each says why', () => {
     const { res, cKey } = results.get(KAF)!;
     const wrong: string[] = [];
     for (const [cLine, bad, , dh] of CASES) {
