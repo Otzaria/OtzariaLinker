@@ -97,4 +97,6 @@ export interface KeyValueStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /** every key (optional: the autosave then cannot find what other windows left behind) */
+  keys?(): Promise<string[]>;
 }

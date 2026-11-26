@@ -1260,8 +1260,16 @@ export class AppStore {
     this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
   }
 
-  /** Opens a saved project, replacing the current links (one undo step back to what was there). */
+  /**
+   * Opens a saved project, replacing the current links (one undo step back to what was there).
+   *
+   * Over work that was not saved, that work is kept (#41 B21): in the browser's recovery queue — so a
+   * refresh offers it again — and in a notice whose action brings it back. Undo works too, but only until
+   * the tab is closed or refreshed.
+   */
   openProject(path: string, text: string): void {
+    const ls0 = this.linkState.peek();
+    const unsaved = this.dirty.peek() && (ls0.links.size > 0 || ls0.altToc.size > 0 || ls0.rejected.size > 0) ? this.projectText() : null;
     let p;
     try {
       p = parseProject(text, (b) => this.resolveTitle(b.title, b.origin, b.source) ?? { key: `unresolved:${b.title}`, title: b.title, origin: b.origin, ...(b.isBaseBook !== undefined && { isBaseBook: b.isBaseBook }), ...(b.source !== undefined && { source: b.source }) });
@@ -1301,35 +1309,70 @@ export class AppStore {
     // the sources to open again are a list that stays until they are open (sources panel, empty reader) — not a fading notice (audit F10)
     this.notify("success", `נפתח פרויקט מ־${p.savedAt ? new Date(p.savedAt).toLocaleString("he") : "תאריך לא ידוע"}: ${p.links.length.toLocaleString("he")} קישורים.${missing ? ` כדי לראות אותם על הטקסט, פתחו שוב ${missing === 1 ? "את הקובץ או המסד של הפרויקט" : `את ${missing.toLocaleString("he")} הקבצים והמסדים של הפרויקט`} — הרשימה ב"קבצים ומסדים".` : ""}`);
     if (p.skipped) this.notify("warning", `${p.skipped} רשומות פגומות בפרויקט דולגו.`);
+    if (unsaved) {
+      void this.recoveryQueue?.add(unsaved);
+      const n = recoverableCount(unsaved);
+      this.notify("warning", `העבודה הקודמת לא נשמרה (${n.toLocaleString("he")} קישורים והחלטות), והפרויקט "${path}" נפתח במקומה. היא נשמרה בצד: אפשר להחזיר אותה בכפתור כאן, והיא תוצע שוב גם בפתיחה הבאה של הכלי.`, undefined, {
+        label: "החזרת העבודה הקודמת",
+        run: () => (void this.recoveryQueue?.take(unsaved), this.openProject("העבודה הקודמת", unsaved)),
+      });
+    }
     this.noticeChangedBooks();
     const snapshots = [...new Set([...p.libraryFiles.map((f) => f.title), ...p.links.filter((l) => l.provenance === "file").map((l) => l.source.book.title)])];
     if (snapshots.length)
       this.notify("info", `בפרויקט יש עותק של קובצי הקישורים של ${snapshots.length === 1 ? `"${snapshots[0]}"` : `${snapshots.length} ספרים`} מהספרייה. לפני ייצוא שלהם טענו אותם שוב מהספרייה (הכלי יוודא שהם לא השתנו), או אשרו בחלון הייצוא שהעותק העדכני.`, snapshots.length > 1 ? snapshots.slice(0, 50) : undefined);
   }
 
+  /** The browser autosave, while startAutosave runs: what the last write did (V7 §1.2: the user sees whether the work is kept). */
+  readonly autosave = signal<"idle" | "pending" | "saved" | "failed">("idle");
+  /** the recovery queue of the running autosave: opening a project over unsaved work puts that work in it (#41 B21) */
+  private recoveryQueue: { add(text: string): Promise<void>; take(text: string): Promise<void> } | null = null;
+
   /**
    * Saves the project to the browser a moment after every change, and offers to restore what a
    * crash, refresh or closed tab left behind (stage 14). Returns a disposer.
+   *
+   * With a `window` (the app always passes one) each window of the tool writes its own key,
+   * `autosave:v1:w:<id>`: one IndexedDB serves every window, and a single key let the last write erase
+   * the work of the others (#41 B17). The id survives a refresh of the same tab (main.tsx keeps it in
+   * sessionStorage), so a refresh is offered that tab's work. What a window that is no longer open left
+   * behind — and the single key of older versions — is moved, at start, into the shared recovery queue
+   * and offered to the next window that starts; a window still open keeps its own. Without a window (tests
+   * of older behaviour) the single key is used as before.
    */
-  startAutosave(kv: KeyValueStore, delayMs = 1500): () => void {
-    const KEY = "autosave:v1";
+  startAutosave(kv: KeyValueStore, delayMs = 1500, window?: AutosaveWindow): () => void {
+    const KEY = window ? `${AUTOSAVE_KEY}:w:${window.id}` : AUTOSAVE_KEY;
+    const RECOVERED = `${AUTOSAVE_KEY}:recovered`;
+    const exclusive = <T>(fn: () => Promise<T>): Promise<T> => (window?.exclusive ? window.exclusive(fn) : fn());
     let timer: ReturnType<typeof setTimeout> | undefined;
     let first = true;
     /** the revision last written: the state changes without a new revision (books bound to links) are not written again */
     let written = this.linkState.peek().revision;
+    let reported = false;
     const stop = effect(() => {
       const rev = this.linkState.value.revision;
       if (first) return void (first = false);
       clearTimeout(timer);
+      this.autosave.value = "pending";
       timer = setTimeout(() => {
         const ls = this.linkState.peek();
-        if (ls.revision === written) return;
+        if (ls.revision === written) return void (this.autosave.value = "saved");
         written = ls.revision;
         const empty = ls.links.size === 0 && ls.altToc.size === 0 && ls.rejected.size === 0;
-        (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).catch(() => {
-          /* storage blocked or full — autosave is best effort; the next change tries again */
-          written = -1;
-        });
+        (empty ? kv.delete(KEY) : kv.set(KEY, this.projectText())).then(
+          () => {
+            if (written === ls.revision) this.autosave.value = "saved";
+            reported = false;
+          },
+          (err: unknown) => {
+            // storage blocked or full: the next change tries again, and the user hears of it once (not per change)
+            written = -1;
+            this.autosave.value = "failed";
+            this.log.error("autosave.failed", String((err as Error | undefined)?.message ?? err));
+            if (!reported) this.notify("warning", "השמירה האוטומטית בדפדפן נכשלה (ייתכן שהאחסון מלא או חסום). העבודה עדיין פתוחה כאן — שמרו את הפרויקט לקובץ כדי לא לאבד אותה.");
+            reported = true;
+          },
+        );
       }, delayMs);
       void rev;
     });
@@ -1338,31 +1381,61 @@ export class AppStore {
      * user did not answer (they went on working without restoring or dismissing it) is kept aside
      * (`:recovered`), so the autosave of the new work cannot overwrite it (UX review #4) — and it is offered
      * again at the next start, after the newer work: never left in storage where nothing would offer it.
+     * The queue is shared by the windows: each change of it reads it again inside `exclusive`, so two
+     * windows never write back each other's stale copy.
      */
-    const RECOVERED = `${KEY}:recovered`;
-    const keep = (list: readonly string[]) => void (list.length ? kv.set(RECOVERED, JSON.stringify(list)) : kv.delete(RECOVERED)).catch(() => {});
+    // one change at a time in this window too (a dismiss and a restore in a row would each write back the other's copy)
+    let chain: Promise<void> = Promise.resolve();
+    const update = (change: (list: string[]) => string[]) =>
+      (chain = chain.then(() =>
+        exclusive(async () => {
+          const next = change(keptOffers(await kv.get(RECOVERED)));
+          await (next.length ? kv.set(RECOVERED, JSON.stringify(next)) : kv.delete(RECOVERED));
+        }).catch(() => {}),
+      ));
+    const take = (text: string) => update((list) => list.filter((t) => t !== text));
+    const add = (text: string) => update((list) => [text, ...list.filter((t) => t !== text)].slice(0, MAX_RECOVERY_OFFERS));
+    this.recoveryQueue = { add, take };
     const offer = (queue: readonly string[]) => {
       const [text, ...rest] = queue;
       if (text === undefined) return void (this.recovery.value = null);
       this.recovery.value = {
         links: recoverableCount(text),
-        // the restored work is the project now (its autosave is KEY); the older offers wait for the next start
-        restore: () => (keep(rest), this.openProject("שמירה אוטומטית", text), (this.recovery.value = null)),
-        dismiss: () => (keep(rest), offer(rest)),
+        // the restored work is the project now (this window's autosave keeps it); the other offers wait for the next start
+        restore: () => (void take(text), this.openProject("שמירה אוטומטית", text), (this.recovery.value = null)),
+        dismiss: () => (void take(text), offer(rest)),
       };
     };
-    void Promise.all([kv.get(KEY), kv.get(RECOVERED)]).then(
-      ([current, kept]) => {
+    void exclusive(async () => {
+      const own = await kv.get(KEY);
+      /* the work of windows that are gone (and the single key of older versions) joins the queue, once */
+      const orphans: string[] = [];
+      if (window) {
+        const live = await window.live().catch(() => null);
+        const keys = (await kv.keys?.().catch(() => [] as string[])) ?? [];
+        for (const k of keys) {
+          const id = k.startsWith(`${AUTOSAVE_KEY}:w:`) ? k.slice(AUTOSAVE_KEY.length + 3) : k === AUTOSAVE_KEY ? "" : null;
+          if (id === null || id === window.id) continue;
+          // a window that may still be open keeps its key: without the browser's answer only the old single key moves
+          if (id !== "" && (!live || live.has(id))) continue;
+          const text = await kv.get(k);
+          if (text) orphans.push(text);
+          await kv.delete(k);
+        }
+      }
+      let queue: string[] = [];
+      for (const text of [own, ...orphans, ...keptOffers(await kv.get(RECOVERED))]) if (text && !queue.includes(text) && recoverableCount(text) > 0) queue.push(text);
+      queue = queue.slice(0, MAX_RECOVERY_OFFERS);
+      await (queue.length ? kv.set(RECOVERED, JSON.stringify(queue)) : kv.delete(RECOVERED));
+      return queue;
+    }).then(
+      (queue) => {
         if (this.linkState.peek().links.size || this.linkState.peek().altToc.size || this.linkState.peek().rejected.size) return;
-        const queue: string[] = [];
-        for (const text of [current, ...keptOffers(kept)]) if (text && !queue.includes(text) && recoverableCount(text) > 0) queue.push(text);
-        if (!queue.length) return;
-        keep(queue.slice(0, MAX_RECOVERY_OFFERS));
-        offer(queue.slice(0, MAX_RECOVERY_OFFERS));
+        if (queue.length) offer(queue);
       },
       () => {},
     );
-    return () => (clearTimeout(timer), stop());
+    return () => (clearTimeout(timer), stop(), (this.recoveryQueue = null));
   }
 
   /* ---------------- notices and tasks ---------------- */
@@ -1460,6 +1533,18 @@ function unboundRef(ref: BookRef): BookRef {
 
 /** at most this many unanswered recovery offers are kept (each is a whole project) */
 const MAX_RECOVERY_OFFERS = 3;
+/** the browser autosave's key; each window writes `<key>:w:<window id>` (startAutosave) */
+export const AUTOSAVE_KEY = "autosave:v1";
+
+/** The window the autosave runs in (main.tsx: a Web Locks lock per window). */
+export interface AutosaveWindow {
+  /** this window's id, kept across a refresh of the same tab */
+  readonly id: string;
+  /** the ids of the windows of the tool that are open now (this one included); null when the browser cannot tell */
+  live(): Promise<ReadonlySet<string> | null>;
+  /** runs `fn` while no other window runs one (Web Locks); absent: `fn` runs at once */
+  exclusive?<T>(fn: () => Promise<T>): Promise<T>;
+}
 
 /** links, alt_toc books and rejections a saved project text holds; 0 when it is not one */
 function recoverableCount(text: string): number {

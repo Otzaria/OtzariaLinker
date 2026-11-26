@@ -209,6 +209,8 @@ describe("the app died in the middle of work", () => {
     c.store.recovery.value!.restore();
     expect(c.store.allLinks.value).toHaveLength(6);
     expect(c.store.linkState.value.rejected.size).toBeGreaterThanOrEqual(3);
+    // V7 (#41 B17): the queue is shared by the windows, so each change of it reads it again before writing — a moment later
+    await tick();
     expect(mem.has("autosave:v1:recovered")).toBe(false);
   });
 });
