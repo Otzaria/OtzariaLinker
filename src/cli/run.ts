@@ -139,8 +139,10 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
 
   const g = store.guided;
   g.start();
-  if (selected.length) await g.addBooks([...(await Promise.all(selected.map((b) => repo.input(b.path)))), ...imports]);
+  // the database first: the repository's links files may name official books (Otzarya-Unofficial-Books' "X על אבות" → "משנה אבות"),
+  // and a record read before its book is open is reported "not found by its exact name" (found on the real clone, V7 round 2 item 8)
   if (o.db && dbBlob) await g.addBases([{ path: o.db.split(/[\\/]/).at(-1)!, blob: dbBlob }]);
+  if (selected.length) await g.addBooks([...(await Promise.all(selected.map((b) => repo.input(b.path)))), ...imports]);
   if (o.methods?.length) g.setMethods(new Set(o.methods));
   const repoSources = new Set(g.bookSources.value);
   const plan = g.plan.value;

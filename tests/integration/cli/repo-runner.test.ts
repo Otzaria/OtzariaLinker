@@ -110,6 +110,22 @@ describe("the runner on a repository shaped like Otzarya-Unofficial-Books", { ti
     expect(rep.external.skipped).toEqual([]);
   });
 
+  // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): its links files of "X על אבות" link to the official
+  // "משנה אבות" by path_2. The runner loaded the repository's files before it opened the database, so every such record was reported
+  // "the book was not found by its exact name; Otzaria will skip such a link" — 14 notices, 6,014 lines, all wrong.
+  it("an existing record that links to an official book is read with the database open: no 'book not found' for it", async () => {
+    const root = fresh("official-path2");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const file = join(repo, "ספרים/תנ״ך/מפרשים/links/ביאור חדש על בראשית_links.json");
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, JSON.stringify([{ line_index_1: 4, line_index_2: 3, heRef_2: "בראשית, א, א", path_2: "בראשית.txt", "Conection Type": "source" }], null, 2));
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--dry-run", "--json", ...HIGH]);
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(r.out) as RunReport;
+    expect(rep.notices.flatMap((n) => [n.text, ...(n.details ?? [])]).filter((t) => /לא נמצא בשם מדויק/.test(t))).toEqual([]);
+  });
+
   // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): git on Windows with core.autocrlf=true checks the
   // files out with CRLF (the index holds LF). The export writes LF, so every existing links file of the books run came out as an
   // "update" with the same records — 21 files in "בית שני" whose only difference was the line endings, which git does not even see.
