@@ -129,6 +129,8 @@ describe("compare → merge → export → read back → compare: no differences
           lines.push(linePairIdentity(l));
         }
         const out = await exported(store);
+        // V7 §1.9: exporting again, with nothing changed, gives the same bytes
+        expect((await exported(store)).text).toBe(out.text);
         // a library record is never held back; a merged-in new link may be (a ref on a book that is not Sefaria's…), with its reason
         expect(out.held.filter((l) => l.provenance === "file")).toEqual([]);
         store.compare.addFiles([{ path: `out/${FILE}`, text: out.text }]);
