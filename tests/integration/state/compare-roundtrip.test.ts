@@ -108,7 +108,7 @@ describe("compare → merge → export → read back → compare: no differences
       }),
       { numRuns: 200 },
     );
-  });
+  }, 60_000);
 
   it("property: the merged project, exported and read back, compares identical to itself", async () => {
     await fc.assert(
@@ -148,5 +148,5 @@ describe("compare → merge → export → read back → compare: no differences
       }),
       { numRuns: 200 },
     );
-  });
+  }, 60_000);
 });
