@@ -5,6 +5,7 @@ import { parseProject, serializeProject, type ProjectSource } from "../projects/
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
+import { identicalLinkKey, linePairIdentity } from "../core/links/equality";
 import { matchedAfterEdit } from "../core/links/matched";
 import type { BookOrigin, BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
@@ -92,6 +93,9 @@ export type SideTab = "builder" | "links" | "suggestions" | "qa" | "books";
  * title, an old project) may be either.
  */
 const sameOrigin = (saved: BookOrigin, open: BookOrigin): boolean => saved === "unknown" || open === "unknown" || (saved === "personal") === (open === "personal");
+
+/** the builder refuses a link identical to a live one (V3 F-070/F-072/F-086; the rule: core/links/equality.ts identicalLinkKey) */
+const IDENTICAL_TEXT = "קישור זהה כבר קיים בפרויקט: אותן שורות ואותו סוג קשר, אחרי ההמרה של אוצריא (במסד שניהם היו קישור אחד). אין צורך ליצור אותו שוב. כדי לקשר אחרת, בחרו שורה אחרת או סוג קשר אחר.";
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -240,8 +244,34 @@ export class AppStore {
       const fields = dropped.filter((x) => x.startsWith("anchor_"));
       if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: "פרטים שהסנכרון השבועי של הספרייה רשם על העוגן יוסרו מהקישור, כי העוגן או השורה השתנו.", detail: fields.join(", ") });
     }
+    // V3 refused to make or edit into a link IDENTICAL to a live one (F-070, F-072, F-086): by the one equality rule
+    const twin = this.twinOf(d, base?.id);
+    if (twin.identical) out.push({ code: "builder/identical", severity: "error", message: IDENTICAL_TEXT });
+    else if (twin.sameLines) out.push({ code: "builder/same-lines", severity: "info", message: "בין שתי השורות האלה כבר יש בפרויקט קישור מסוג אחר או בכיוון אחר. הקישור הזה יישמר בנוסף לו." });
     return out;
   });
+
+  /**
+   * A live project link that is the same as `l` (other than the link `except`): IDENTICAL — one record once Otzaria stores it
+   * (core/links/equality.ts identicalLinkKey, the rule of export/duplicate) — or only between the same two lines (another type
+   * or direction, linePairIdentity). Lines are compared first, so a project of 100K links costs one pass of integer compares.
+   * Database links are not the project's (export/in-db speaks of them).
+   */
+  private twinOf(l: Link, except?: string, among: Iterable<Link> = this.linkState.value.links.values()): { identical?: Link; sameLines?: Link } {
+    const lo = Math.min(l.source.line, l.target.line);
+    const hi = Math.max(l.source.line, l.target.line);
+    let key: string | null | undefined;
+    let pair: string | undefined;
+    let sameLines: Link | undefined;
+    for (const x of among) {
+      if (x.id === except || x.status === "deleted" || x.provenance === "db") continue;
+      if (Math.min(x.source.line, x.target.line) !== lo || Math.max(x.source.line, x.target.line) !== hi) continue;
+      if (key === undefined) key = identicalLinkKey(l);
+      if (key !== null && identicalLinkKey(x) === key) return { identical: x };
+      if (!sameLines && linePairIdentity(x) === (pair ??= linePairIdentity(l))) sameLines = x;
+    }
+    return sameLines ? { sameLines } : {};
+  }
 
   private noticeSeq = 0;
   private linkSeq = 0;
@@ -726,10 +756,27 @@ export class AppStore {
     if (this.editing.value && ids.includes(this.editing.value)) this.clearPicks();
   }
 
+  /**
+   * Brings deleted links back. Not one whose IDENTICAL link was made meanwhile (V3 F-070: two live copies would be two equal
+   * records in the exported file): it stays deleted, and the user is told. Of several deleted copies restored together, one.
+   */
   restoreLinks(ids: readonly string[]): void {
     const s = this.linkState.value;
-    const changes = ids.map((id) => restoreChange(s, id)).filter((c): c is Change => !!c);
-    this.apply(changes.length === 1 ? "שחזור קישור" : `שחזור ${linksCount(changes.length)}`, changes);
+    const changes: Change[] = [];
+    let refused = 0;
+    for (const id of ids) {
+      const c = restoreChange(s, id);
+      if (!c) continue;
+      const back = c.after!;
+      if (this.twinOf(back, id).identical || this.twinOf(back, id, changes.map((x) => x.after!)).identical) {
+        refused++;
+        continue;
+      }
+      changes.push(c);
+    }
+    if (changes.length) this.apply(changes.length === 1 ? "שחזור קישור" : `שחזור ${linksCount(changes.length)}`, changes);
+    if (refused)
+      this.notify("warning", `${refused === 1 ? "קישור אחד לא שוחזר" : `${refused.toLocaleString("he")} קישורים לא שוחזרו`}: בינתיים נוצר בפרויקט קישור זהה (אותן שורות ואותו סוג קשר), ובאוצריא שניהם היו קישור אחד. הקישור הקיים נשאר. אם אתם רוצים את הקישור שנמחק, מחקו קודם את הקיים.`);
   }
 
   setType(ids: readonly string[], declaredType: string): void {
