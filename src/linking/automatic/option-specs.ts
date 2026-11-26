@@ -129,6 +129,8 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
     { kind: "boolean", key: "itemRanges", label: "פסקאות ההמשך כטווח אחד בפירוש", default: false, hint: "במקום קישור לכל פסקה: קישור אחד לכל פריט (ס\"ק), עם טווח בפירוש עד הפסקה האחרונה שלו. כמו בקובץ של ארץ יהודה על ארצות החיים." },
     { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
+    // #41 B5 (#26): the engine always took a declared type (engine.ts DhOptions.declaredType); only the form lacked it
+    { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
     ...THRESHOLDS,
   ],
   footnotes: [

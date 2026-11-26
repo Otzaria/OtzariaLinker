@@ -77,3 +77,12 @@ describe("engine option specs", () => {
     const r = toEngineOptions("footnotes", { ...defaultFormValues("footnotes"), mainMarkers: "digits", numbering: "letters" }, "essential");
     expect(r.options).toEqual({ mainMarkers: "digits" });
   });});
+
+describe("every engine that takes a link type offers it in its form (#41 B5, #26)", () => {
+  it("dibur-hamatchil has the type choice, like headings and footnotes, and it reaches the engine", async () => {
+    const { ENGINE_OPTION_SPECS, defaultFormValues, toEngineOptions } = await import("../../../src/linking/automatic/option-specs");
+    expect(ENGINE_OPTION_SPECS["dibur-hamatchil"].some((s) => s.key === "declaredType")).toBe(true);
+    const r = toEngineOptions("dibur-hamatchil", { ...defaultFormValues("dibur-hamatchil"), declaredType: "reference" });
+    expect((r.options as Record<string, unknown>).declaredType).toBe("reference");
+  });
+});
