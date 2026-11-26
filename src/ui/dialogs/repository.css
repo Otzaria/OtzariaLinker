@@ -58,3 +58,5 @@ dialog.repository .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: 
 .repo-map-sug line { stroke-dasharray: 5 4; }
 .repo-map-bad line { stroke: var(--error); stroke-width: 3.5; }
 .repo-map-bad circle { fill: var(--error); }
+.repo-map summary { min-block-size: 24px; display: flex; align-items: center; cursor: pointer; }
+@media (pointer: coarse) { .repo-map summary { min-block-size: 44px; } }
