@@ -163,3 +163,33 @@ describe("opening a project over unsaved work (B21)", () => {
     expect(a.notices.value.some((n) => n.action && n.text.includes("לא נשמרה"))).toBe(false);
   });
 });
+
+describe("more closed windows than the recovery queue holds (V7 PR1 review, finding 3)", () => {
+  it("no window's work is deleted: what does not fit stays stored and is offered at a later start", async () => {
+    const { mem, kv } = memKv();
+    const open = new Set(["a", "b", "c", "d"]);
+    let n = 1;
+    for (const id of ["a", "b", "c", "d"]) {
+      const s = newStore();
+      s.startAutosave(kv, 0, windowOf(id, () => open));
+      await s.openFiles([links(`פירוש ${id}`, n++)]);
+    }
+    await tick(50);
+    open.clear();
+    const seen: number[] = [];
+    // window after window starts and dismisses what it is offered: every closed window's work comes up once
+    for (const id of ["e", "f", "g"]) {
+      open.add(id);
+      const w = newStore();
+      w.startAutosave(kv, 0, windowOf(id, () => open));
+      await tick(50);
+      while (w.recovery.value) {
+        seen.push(w.recovery.value.links);
+        w.recovery.value.dismiss();
+      }
+      await tick(20);
+    }
+    expect(seen.sort()).toEqual([1, 2, 3, 4]);
+    expect([...mem.keys()].filter((k) => k.startsWith("autosave:v1"))).toEqual([]);
+  });
+});

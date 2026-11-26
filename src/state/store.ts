@@ -1390,15 +1390,26 @@ export class AppStore {
      */
     // one change at a time in this window too (a dismiss and a restore in a row would each write back the other's copy)
     let chain: Promise<void> = Promise.resolve();
+    /*
+     * The queue holds MAX_RECOVERY_OFFERS texts; what does not fit is never dropped (V7 PR1 review, finding 3: a fourth closed
+     * window's work was deleted). It is put back in a key of its own, `<key>:w:spill-…`, which no live window owns: a later
+     * start moves it into the queue when there is room, like a closed window's key.
+     */
+    let spills = 0;
+    const spill = async (texts: readonly string[]) => {
+      for (const t of texts) await kv.set(`${AUTOSAVE_KEY}:w:spill-${Date.now().toString(36)}-${(spills++).toString(36)}`, t);
+    };
     const update = (change: (list: string[]) => string[]) =>
       (chain = chain.then(() =>
         exclusive(async () => {
-          const next = change(keptOffers(await kv.get(RECOVERED)));
+          const all = change(keptOffers(await kv.get(RECOVERED)));
+          const next = all.slice(0, MAX_RECOVERY_OFFERS);
+          await spill(all.slice(MAX_RECOVERY_OFFERS));
           await (next.length ? kv.set(RECOVERED, JSON.stringify(next)) : kv.delete(RECOVERED));
         }).catch(() => {}),
       ));
     const take = (text: string) => update((list) => list.filter((t) => t !== text));
-    const add = (text: string) => update((list) => [text, ...list.filter((t) => t !== text)].slice(0, MAX_RECOVERY_OFFERS));
+    const add = (text: string) => update((list) => [text, ...list.filter((t) => t !== text)]);
     this.recoveryQueue = { add, take };
     const offer = (queue: readonly string[]) => {
       const [text, ...rest] = queue;
@@ -1412,24 +1423,34 @@ export class AppStore {
     };
     void exclusive(async () => {
       const own = await kv.get(KEY);
-      /* the work of windows that are gone (and the single key of older versions) joins the queue, once */
-      const orphans: string[] = [];
+      /* the work of windows that are gone (and the single key of older versions, and spilled texts): their keys, found first */
+      const orphanKeys: string[] = [];
       if (window) {
         const live = await window.live().catch(() => null);
-        const keys = (await kv.keys?.().catch(() => [] as string[])) ?? [];
+        const keys = ((await kv.keys?.().catch(() => [] as string[])) ?? []).sort();
         for (const k of keys) {
           const id = k.startsWith(`${AUTOSAVE_KEY}:w:`) ? k.slice(AUTOSAVE_KEY.length + 3) : k === AUTOSAVE_KEY ? "" : null;
           if (id === null || id === window.id) continue;
-          // a window that may still be open keeps its key: without the browser's answer only the old single key moves
-          if (id !== "" && (!live || live.has(id))) continue;
-          const text = await kv.get(k);
-          if (text) orphans.push(text);
-          await kv.delete(k);
+          // a window that may still be open keeps its key: without the browser's answer only the old single key and spills move
+          if (id !== "" && !id.startsWith("spill-") && (!live || live.has(id))) continue;
+          orphanKeys.push(k);
         }
       }
-      let queue: string[] = [];
-      for (const text of [own, ...orphans, ...keptOffers(await kv.get(RECOVERED))]) if (text && !queue.includes(text) && recoverableCount(text) > 0) queue.push(text);
-      queue = queue.slice(0, MAX_RECOVERY_OFFERS);
+      // read last: what other windows (or this one) changed in the queue meanwhile is in it
+      const queue: string[] = [];
+      for (const text of [own, ...keptOffers(await kv.get(RECOVERED))]) if (text && !queue.includes(text) && recoverableCount(text) > 0) queue.push(text);
+      // more than fits (this window's own work came in front of a full queue): the rest waits in spill keys, not dropped
+      await spill(queue.splice(MAX_RECOVERY_OFFERS));
+      // the orphans join while there is room; the others stay in their keys for a later start (V7 PR1 review, finding 3)
+      for (const k of orphanKeys) {
+        const text = await kv.get(k);
+        const useful = !!text && recoverableCount(text) > 0;
+        if (useful && !queue.includes(text!)) {
+          if (queue.length >= MAX_RECOVERY_OFFERS) continue;
+          queue.push(text!);
+        }
+        await kv.delete(k);
+      }
       await (queue.length ? kv.set(RECOVERED, JSON.stringify(queue)) : kv.delete(RECOVERED));
       return queue;
     }).then(
