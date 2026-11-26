@@ -716,4 +716,5 @@ main.guided .bulk-approve { margin: 0; }
   details > summary { min-height: 44px; box-sizing: border-box; display: flex; align-items: center; }
   .guided label.check, .guided-purpose .check, .pair-ctl label.check, .pick-list .check, .ml-engines label.check { min-height: 44px; align-items: center; }
   .sug-results summary, dialog.alt-toc summary, main.guided summary { min-height: 44px; display: flex; align-items: center; }
+  .variant-choice .chip { min-height: 44px; }
 }
