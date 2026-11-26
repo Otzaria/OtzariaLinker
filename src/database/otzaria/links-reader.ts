@@ -48,6 +48,10 @@ export interface BookLinkRows {
   ownLine: Float64Array;
   /** 0-based line at the OTHER end, from link.targetLineIndex, for the rows where the listed book is the stored source (-1: not known) */
   otherLine: Int32Array;
+  /** line id at the OTHER end (the coverage's compact read finds a source's line index by it, #42 C8) */
+  otherLineId: Float64Array;
+  /** link.targetLineIndex of every row, as the full read (rows()) takes it; NaN when the table has no such column */
+  targetIndex: Float64Array;
   /** "index": through the book indexes of `link`; "scan": a full scan (the database has no such index) */
   method: "index" | "scan";
 }
@@ -128,6 +132,8 @@ export class DbLinksReader {
       type: new Uint8Array(rows.length),
       ownLine: new Float64Array(rows.length),
       otherLine: new Int32Array(rows.length).fill(-1),
+      otherLineId: new Float64Array(rows.length),
+      targetIndex: new Float64Array(rows.length).fill(NaN),
       method,
     };
     rows.forEach(({ id, v }, i) => {
@@ -138,8 +144,34 @@ export class DbLinksReader {
       out.other[i] = Number(v[isOut ? tb : sb]);
       out.type[i] = CONNECTION_TYPES.indexOf(this.typeOf(name));
       out.ownLine[i] = Number(v[isOut ? sl : tl]);
+      out.otherLineId[i] = Number(v[isOut ? tl : sl]);
+      if (tliAt >= 0) out.targetIndex[i] = Number(v[tliAt]);
       if (isOut && tliAt >= 0 && v[tliAt] !== null && v[tliAt] !== undefined) out.otherLine[i] = Number(v[tliAt]);
     });
+    return out;
+  }
+
+  /** lineIndex of each line id (from the line table, as rows() reads both ends); a missing line is absent */
+  async lineIndexes(lineIds: Iterable<number>): Promise<Map<number, number>> {
+    const li = col(this.t.line, "lineIndex");
+    const out = new Map<number, number>();
+    for (const [id, r] of await this.file.getMany(this.t.line, lineIds)) out.set(id, Number(r.values[li] ?? -1));
+    return out;
+  }
+
+  /** The stored range ends (link_range.endLineIndex) of the given links, by link id: [source side, target side] (#42 C8). */
+  async rangeEnds(linkIds: readonly number[]): Promise<Map<number, [number | undefined, number | undefined]>> {
+    const out = new Map<number, [number | undefined, number | undefined]>();
+    if (!this.ix.range || !this.t.range || !linkIds.length) return out;
+    const recs = await this.file.seekIndexMany(this.ix.range, linkIds.map((id) => [id]));
+    const got = await this.file.getMany(this.t.range, recs.map((r) => Number(r.at(-1))));
+    const [linkId, side, end] = ["linkId", "side", "endLineIndex"].map((n) => col(this.t.range!, n));
+    for (const r of got.values()) {
+      const id = Number(r.values[linkId!]);
+      const e = out.get(id) ?? [undefined, undefined];
+      e[Number(r.values[side!]) === 1 ? 1 : 0] = Number(r.values[end!]);
+      out.set(id, e);
+    }
     return out;
   }
 

@@ -3,6 +3,7 @@ import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/bo
 import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
+import { coverageEndsOf, type CoverageEnds } from "../core/links/coverage-ends";
 import type { Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
@@ -171,6 +172,16 @@ export class SourceRegistry {
 
   async existingLinks(bookKey: string, from: number, to: number): Promise<Link[]> {
     return this.of(bookKey).existingLinks(bookKey, from, to);
+  }
+
+  /**
+   * A book's existing links as the coverage rules read them (#42 C7, C8): the source's compact read, or its existingLinks()
+   * compacted here, in the worker. An end is the book's when its key is the book's key (a database link names its own book so).
+   */
+  async coverageEnds(bookKey: string, ctx: { signal?: AbortSignal } = {}): Promise<CoverageEnds> {
+    const s = this.of(bookKey);
+    if (s.coverageEnds) return s.coverageEnds(bookKey, ctx);
+    return coverageEndsOf(await s.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER), (r) => r.key === bookKey);
   }
 
   /** A whole book, chunk by chunk (see BookSource.scan); pages through lines() for a source without scan. */

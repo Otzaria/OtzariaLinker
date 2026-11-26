@@ -1,5 +1,6 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
+import type { CoverageEnds } from "../core/links/coverage-ends";
 import type { Link } from "../core/links/model";
 import type { LinkListing } from "./db/link-listing";
 
@@ -32,6 +33,11 @@ export interface BookSource {
    * source has no links at all (the reason goes to the user).
    */
   linkListing?(bookKey: string, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<LinkListing | string>;
+  /**
+   * A book's existing links in the compact form the coverage rules read (core/links/coverage-ends.ts, #42 C7, C8). Optional:
+   * the registry compacts existingLinks() of a source without it.
+   */
+  coverageEnds?(bookKey: string, ctx: { signal?: AbortSignal }): Promise<CoverageEnds>;
   /** alternative TOC structures the source already has for a book; null = the source cannot have any */
   altToc?(bookKey: string): Promise<LibraryAltTocStructure[] | null>;
   /** other names of the source's books (bookKey → names), for the citations engine; absent = titles only */

@@ -1,5 +1,6 @@
 import { MAX_BOOK_LINES } from "../../core/limits";
 import { CONNECTION_TYPES, canonicalTypeString } from "../../core/links/connection-type";
+import { CoverageEndsBuilder, coverageEndsOf, type CoverageEnds } from "../../core/links/coverage-ends";
 import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type DbLinkTable, type Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
 import type { LibraryAltTocStructure } from "../../core/alt-toc/model";
@@ -149,6 +150,55 @@ export class DbBookSource implements BookSource {
       for (const l of part) if (!before.some((k) => sameLink(k, l))) out.push(l);
     }
     return out;
+  }
+
+  /**
+   * The book's links as the coverage rules read them (core/links/coverage-ends.ts, #42 C7, C8): from the link table's book
+   * indexes (bookLinks), the line indexes of the other ends that are not stored on the link, and the range ends — no anchor, no
+   * heRef, no Link object. existingLinks() of בראשית built 235,898 Links in the worker and sent them all to the page. The
+   * numbers are the ones toLink() gives (the same lines, the same rangeEnd clamp, the same titles). A database whose links are
+   * also (or only) in external_link or user_link is read through existingLinks(), and compacted here.
+   */
+  async coverageEnds(bookKey: string, ctx: { signal?: AbortSignal } = {}): Promise<CoverageEnds> {
+    if (!this.links || this.ext || this.user) return coverageEndsOf(await this.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER), (r) => r.key === bookKey);
+    const id = this.idOf(bookKey);
+    const rows = await this.links.bookLinks(id, ctx);
+    ctx.signal?.throwIfAborted();
+    const own = new Map((await this.reader.lineEntries(id)).map((e) => [e.id, e.index]));
+    const n = rows.ids.length;
+    // the line index of a stored SOURCE end is not on the link: read from the line table (a stored target's is targetLineIndex)
+    const need: number[] = [];
+    for (let i = 0; i < n; i++) if (rows.dir[i] === 1 || rows.other[i] === id || Number.isNaN(rows.targetIndex[i]!)) need.push(rows.otherLineId[i]!);
+    const lineOf = await this.links.lineIndexes(need);
+    ctx.signal?.throwIfAborted();
+    const ranges = await this.links.rangeEnds(Array.from(rows.ids));
+    ctx.signal?.throwIfAborted();
+    const title = (bookId: number) => this.booksById.get(bookId)?.title ?? `#${bookId}`;
+    const total = (bookId: number) => this.booksById.get(bookId)?.totalLines ?? null;
+    const out = new CoverageEndsBuilder();
+    for (let i = 0; i < n; i++) {
+      const linkId = rows.ids[i]!;
+      const range = ranges.get(linkId);
+      const ownId = rows.ownLine[i]!;
+      const otherId = rows.otherLineId[i]!;
+      const tIndex = rows.targetIndex[i]!;
+      // the stored source and target ends, as toLink() reads them
+      const isOut = rows.dir[i] === 0;
+      const srcBook = isOut ? id : rows.other[i]!;
+      const tgtBook = isOut ? rows.other[i]! : id;
+      const srcLine = isOut ? own.get(ownId) : lineOf.get(otherId);
+      const tgtLine = !Number.isNaN(tIndex) ? tIndex : isOut ? lineOf.get(otherId) : own.get(ownId);
+      // a link the by-line read would not find: its end in this book is not one of the book's lines
+      if ((isOut ? srcLine : own.get(ownId)) === undefined) continue;
+      out.links++;
+      const s = srcLine ?? -1;
+      const t = tgtLine ?? -1;
+      const sEnd = rangeEnd(s, range?.[0], total(srcBook)) ?? s;
+      const tEnd = rangeEnd(t, range?.[1], total(tgtBook)) ?? t;
+      if (srcBook === id) out.add(s, sEnd, title(tgtBook), t, tEnd);
+      if (tgtBook === id) out.add(t, tEnd, title(srcBook), s, sEnd);
+    }
+    return out.build();
   }
 
   /**
