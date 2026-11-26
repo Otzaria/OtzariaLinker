@@ -177,7 +177,9 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
   };
   let zmanenuExternal: ReturnType<typeof externalRecords> | null = null;
   if (external.length && layout.external === "links-csv") {
-    const csv = await store.personalCsv.prepare();
+    // only the links this run made to the official library: the project also holds the repository's own links (its files, the new
+    // internal ones), which are not links.csv rows and are not "not written" there
+    const csv = await store.personalCsv.prepare(new Set(external.map((l) => l.id)));
     if (csv) {
       const folders = nextCsvFolders(layout.csvFolders ?? [], csv.files.map((f) => f.folder));
       csv.files.forEach((f, i) => files.push({ path: `${layout.csvRoot}/${folders[i]}/${f.name}`, action: "new", kind: "links-csv", records: f.rows, text: f.text }));
@@ -223,9 +225,15 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
       byPath.set(at.path, { path: at.path, action: "update", kind: "links-json", records: aside.records + added.added, before: aside.records, text: added.text });
     } else byPath.set(at.path, { path: at.path, action: at.exists ? "update" : "new", kind: "links-json", records: f.records, ...(f.before !== undefined && { before: f.before }), text: f.text });
   }
-  // a book whose file the export writes back exactly as the repository has it is not a change: not written, only counted
+  // a book whose file the export writes back exactly as the repository has it is not a change: not written, only counted. Exactly,
+  // but for CRLF line endings: git on Windows (core.autocrlf) checks LF files out with CRLF, and the export writes LF (pipeline rule,
+  // formats/links-json/layout.ts); such a file is the same file to git (found on the real Otzarya-Unofficial-Books clone)
   const unchanged: string[] = [];
-  for (const [path, f] of byPath) if (f.action === "update" && f.text === (await repo.text(path))) (unchanged.push(path), byPath.delete(path));
+  for (const [path, f] of byPath) {
+    if (f.action !== "update") continue;
+    const now = await repo.text(path);
+    if (f.text === now || (now.includes("\r\n") && f.text === now.replace(/\r\n/g, "\n"))) (unchanged.push(path), byPath.delete(path));
+  }
   if (zmanenuExternal)
     for (const [title, records] of zmanenuExternal.byTitle) {
       const at = fileFor(title);

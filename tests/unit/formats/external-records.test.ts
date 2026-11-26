@@ -86,6 +86,19 @@ describe("appendRecords", () => {
   });
 });
 
+// V7 round 2, item 8: a repository checked out with CRLF (git core.autocrlf on Windows) — the records added keep its line endings,
+// so the file is not left with both
+describe("appendRecords on a CRLF file", () => {
+  it("the added elements use CRLF too; the existing text is kept byte for byte", () => {
+    const old = '[\r\n  {\r\n    "line_index_1": 1\r\n  }\r\n]\r\n';
+    const rec = { line_index_1: 2, target_library: "official", book_2: "בראשית", heRef_2: "בראשית, א, א", "Conection Type": "source" };
+    const out = appendRecords(old, [rec]).text;
+    expect(out.startsWith('[\r\n  {\r\n    "line_index_1": 1\r\n  }')).toBe(true);
+    expect(/(^|[^\r])\n/.test(out)).toBe(false);
+    expect(JSON.parse(out)).toEqual([{ line_index_1: 1 }, rec]);
+  });
+});
+
 // V7 round 2, item 9: the links a kept-aside zmanenu file already says, as "the same lines" (core/links/equality.ts)
 describe("recordedLinks", () => {
   const side = (title: string, line: number) => ({ book: { key: "", title, origin: "unknown" as const }, line });

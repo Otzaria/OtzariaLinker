@@ -38,8 +38,9 @@ export class PersonalCsvState {
   ) {}
 
   /** The files for the project's links between personal books and the official library; null when cancelled or there is nothing to say. */
-  async prepare(): Promise<PersonalCsvBundle | null> {
-    const links = this.host.allLinks.value.filter((l) => l.provenance !== "db");
+  async prepare(only?: ReadonlySet<string>): Promise<PersonalCsvBundle | null> {
+    // `only`: these links' ids, not the whole project (the folder-repository runner writes only the links its run made: src/cli/run.ts)
+    const links = this.host.allLinks.value.filter((l) => l.provenance !== "db" && (!only || only.has(l.id)));
     const personal = (b: BookRef) => {
       const sb = this.host.bookOf(b);
       return !!sb && !this.host.isLibrarySource(sourceIdOfBookKey(sb.key));

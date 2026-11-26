@@ -178,5 +178,8 @@ export function appendRecords(text: string | null, records: readonly Record<stri
   const elems = fresh.map((r) => stringifyElement(r, layout));
   const empty = head.endsWith("[");
   const body = layout.indent ? `${empty ? "" : ","}\n${layout.indent}${elems.join(`,\n${layout.indent}`)}\n]` : `${empty ? "" : layout.spaced ? ", " : ","}${elems.join(layout.spaced ? ", " : ",")}]`;
-  return { text: `${head}${body}${tail}`, added: fresh.length };
+  // a file checked out with CRLF (git core.autocrlf on Windows): what is added uses its line endings, so the file has one kind
+  // (JSON escapes a newline inside a string, so every raw newline of the body is layout)
+  const eol = text.includes("\r\n") ? body.replace(/\r?\n/g, "\r\n") : body;
+  return { text: `${head}${eol}${tail}`, added: fresh.length };
 }

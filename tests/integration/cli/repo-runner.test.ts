@@ -100,6 +100,32 @@ describe("the runner on a repository shaped like Otzarya-Unofficial-Books", { ti
     expect(csv).toMatch(/ביאור חדש על בראשית,כן,בראשית,/);
   });
 
+  // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): links.csv was prepared from EVERY link of the project,
+  // so the report said "not written: 7,086 — both sides in the same repository" for the links of the existing files and the new
+  // internal ones (here 60), and an existing record whose path_2 names an official book would have been written into links.csv again
+  it("links.csv holds the run's links to the official library only; the repository's own links are not 'not written' there", async () => {
+    const rep = JSON.parse((await cli(["--repo", UNOFFICIAL, "--db", DB, "--dry-run", "--json", ...HIGH])).out) as RunReport;
+    expect(rep.links.external).toBe(10);
+    expect(rep.external.written).toBe(10);
+    expect(rep.external.skipped).toEqual([]);
+  });
+
+  // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): git on Windows with core.autocrlf=true checks the
+  // files out with CRLF (the index holds LF). The export writes LF, so every existing links file of the books run came out as an
+  // "update" with the same records — 21 files in "בית שני" whose only difference was the line endings, which git does not even see.
+  it("an existing file that differs only by the checkout's CRLF line endings is unchanged, not an update", async () => {
+    const root = fresh("crlf");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const old = join(repo, "ספרים/משנה/מפרשים/links/ביאור ישן על ספר בסיס לדוגמה_links.json");
+    writeFileSync(old, readFileSync(old, "utf8").replace(/\n/g, "\r\n"));
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--dry-run", "--json", ...HIGH]);
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(r.out) as RunReport;
+    expect(rep.files.map((f) => f.path)).not.toContain("ספרים/משנה/מפרשים/links/ביאור ישן על ספר בסיס לדוגמה_links.json");
+    expect(rep.unchanged).toEqual(["ספרים/משנה/מפרשים/links/ביאור ישן על ספר בסיס לדוגמה_links.json"]);
+  });
+
   it("the same from a ZIP of the repository (GitHub's one top folder), offline", async () => {
     const zipDir = fresh("zip");
     const entries: Record<string, Uint8Array> = {};
