@@ -110,13 +110,48 @@ export interface PlacementEvidence {
  *   - two words → "high" at most;
  *   - a phrase that stands in other lines of the base → "high" at most (never "certain"), the other lines as alternatives.
  * Inside a heading's window none of this applies: there the rivals are near, and the search meets them (a repeated phrase at
- * "certain" in a heading window: 38/38 in the same benchmark).
+ * "certain" in a heading window: 38/38 in the same benchmark). A short ד"ה in a local window has its own rules (SHORT_LOCAL below).
  */
 export function evidenceCap(e: PlacementEvidence): { cap: "high" | "possible"; rule: string } | null {
   if (!e.wholeBook) return null;
   if (e.words <= 1) return { cap: "possible", rule: "dh/short-whole-book" };
   if (e.repeats > 0) return { cap: "high", rule: "dh/repeated-phrase" };
   if (e.words === 2) return { cap: "high", rule: "dh/short-whole-book" };
+  return null;
+}
+
+/**
+ * A ד"ה of a few words inside a LOCAL window — the section a heading names, a numbered line, a page — is placed by the words AND by
+ * the walk's order (the first place at or after the previous line's). The order is evidence only when the commentary follows its base.
+ * Measured on the V7 benchmark (docs/validation/V7_MATCHING_BENCHMARK.md §7.1; "high", local windows, against the database):
+ *   - found BEFORE the previous line's place (dh/backward), one to three words: right 482 times in 541 on the יורה דעה set (89.1%; one
+ *     word 193 / 232), against 99.0% for the rest of "high" — the walk picked an earlier place of common words;
+ *   - in a commentary that itself goes back often (כף החיים 11.9% of its placements in local windows backward, קול יעקב 8.7%, the
+ *     מאירי on תענית 7.8%; every other book of the sets under 7.1%), a ד"ה of one or two words: right 75% / 61% / 75% — the word
+ *     a note opens with ("ואם", "כבד") is often the note's own topic, not a quote, and the order cannot rescue it.
+ * Both: "possible" at most, with the rule. The whole-base search has its own caps (evidenceCap).
+ */
+export const SHORT_LOCAL = {
+  /** a backward match of this many words or fewer is capped */
+  backwardWords: 3,
+  /** in an unordered book, a match of this many words or fewer is capped */
+  unorderedWords: 2,
+  /** a book is judged unordered only from this many placements in local windows */
+  minPlaced: 50,
+  /** … and when at least this share of them was found backward */
+  unorderedShare: 0.075,
+} as const;
+
+/** A commentary whose placements in local windows go back this often does not follow its base (SHORT_LOCAL). */
+export function unorderedShare(placed: number, backward: number): boolean {
+  return placed >= SHORT_LOCAL.minPlaced && backward >= placed * SHORT_LOCAL.unorderedShare;
+}
+
+/** The cap on a short ד"ה in a local window (SHORT_LOCAL), with its rule, or null. */
+export function shortLocalCap(e: { words: number; local: boolean; backward: boolean; unordered: boolean }): { cap: "possible"; rule: "dh/short-backward" | "dh/short-unordered" } | null {
+  if (!e.local) return null;
+  if (e.backward && e.words <= SHORT_LOCAL.backwardWords) return { cap: "possible", rule: "dh/short-backward" };
+  if (e.unordered && e.words <= SHORT_LOCAL.unorderedWords) return { cap: "possible", rule: "dh/short-unordered" };
   return null;
 }
 
