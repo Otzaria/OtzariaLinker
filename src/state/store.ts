@@ -197,14 +197,20 @@ export class AppStore {
   readonly dirty = computed(() => this.linkState.value.revision !== this.savedRevision.value);
 
   /** The link the builder would create right now, or null while something is missing. */
-  readonly draft = computed<Link | null>(() => {
+  readonly draft = computed<Link | null>(() => this.composeDraft(this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined));
+
+  /**
+   * The link the builder's picks and fields make. `base`: the link being edited, whose other fields (its imported
+   * record's text, key order, file position, continuation…) the edit keeps; without it, a link made from scratch —
+   * what a new link and a copy saved "as an additional link" get (V7 PR3/PR4 review, finding 3).
+   */
+  private composeDraft(base: Link | undefined): Link | null {
     const s = this.pick.source.value;
     const t = this.pick.target.value;
     if (!s || !t) return null;
     this.lines.tick.value; // heRef depends on loaded lines
     const source: LinkSide = { book: this.refOf(s.bookKey), line: s.line, ...(s.end !== undefined && s.end > s.line && { end: s.end }) };
     const target: LinkSide = { book: this.refOf(t.bookKey), line: t.line, ...(t.end !== undefined && t.end > t.line && { end: t.end }) };
-    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
     const { anchor: _a, ref1: _r1, ref2: _r2, matched: _m, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
@@ -228,7 +234,7 @@ export class AppStore {
     };
     // an edited record never keeps the sync's fields for an anchor or line it no longer has (B2)
     return base ? dropStalePipelineFields(base, d).link : d;
-  });
+  }
   readonly draftProblems = computed<Problem[]>(() => {
     const d = this.draft.value;
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
@@ -664,10 +670,13 @@ export class AppStore {
 
   /** `asNew` while editing: the draft becomes an ADDITIONAL link (a copy with other ends, V7 §3.10) and the edited one stays as it was. */
   createFromDraft(opts: { asNew?: boolean } = {}): Link | null {
-    const d = this.draft.value;
-    if (!d || this.draftProblems.value.some((p) => p.severity === "error")) return null;
     const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
-    if (opts.asNew && edited) {
+    // a copy is a NEW link: built from the picks and fields alone, as from scratch — the edited link's imported
+    // record (its text, key order, file position, merge origins), and its continuation, are that link's, not the copy's
+    const copy = opts.asNew && edited;
+    const d = copy ? this.composeDraft(undefined) : this.draft.value;
+    if (!d) return null;
+    if (copy) {
       // the duplicate check of the draft leaves out the link being edited: a copy on the same lines would be that link twice
       const same = (a: Link["source"], b: Link["source"]) => a.book.title === b.book.title && a.line === b.line && (a.end ?? a.line) === (b.end ?? b.line);
       if (same(d.source, edited.source) && same(d.target, edited.target)) {
@@ -676,8 +685,11 @@ export class AppStore {
         this.notify("warning", `העותק זהה לקישור שנערך. בחרו שורה אחרת ב${r.target.name.replace(/^ה/, "")} (או ב${r.source.name.replace(/^ה/, "")}), ואז שמרו כקישור נוסף.`);
         return null;
       }
+      // the builder's checks, on the copy as it will be made (as draftProblems checks a new link)
+      const { linksFile: _f, ...ctx } = this.validation();
+      if (validateLink(d, { ...ctx, purpose: "private" }).some((p) => p.severity === "error")) return null;
       this.editing.value = null;
-    }
+    } else if (this.draftProblems.value.some((p) => p.severity === "error")) return null;
     if (this.editing.value) {
       const before = this.linkState.value.links.get(this.editing.value);
       if (!before) return null;
