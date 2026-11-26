@@ -124,6 +124,19 @@ const RUN_RANGE_SPECS: readonly OptionSpec[] = [
 
 export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[]>> = {
   headings: [
+    {
+      kind: "select",
+      key: "headingMatch",
+      label: "אופן ההתאמה",
+      default: "structure",
+      choices: [
+        ["structure", "לפי המבנה: סוג ומספר של כל רמה (מומלץ)"],
+        ["content", "לפי תוכן הכותרת: כותרת בבסיס עם אותו טקסט"],
+        ["leaves", "רק תתי־סעיפים: בלי קישור לקטע שלם"],
+      ],
+      hint: "\"לפי תוכן הכותרת\" מתאים לפירוש שהמספור שלו שונה מהבסיס, אבל שמות הקטעים שלו זהים. \"רק תתי־סעיפים\" לא מציע קישור לפרק או לסימן שלם.",
+    },
+    { kind: "boolean", key: "paragraphsAsSections", label: "פסקאות רגילות כסעיפים", default: false, hint: "כשמספר השורות תחת כותרת בפירוש שווה למספר הסעיפים שלה בבסיס, השורה הראשונה מקושרת לסעיף הראשון, השנייה לשני וכן הלאה. הצעות כאלה הן \"אפשריות\" בלבד." },
     { kind: "select", key: "numbering", label: "קריאת מספרים בכותרות", default: "lenient", choices: [["lenient", "סלחנית (יה, ער, רחצ נקראים)"], ["strict", "מדויקת בלבד"]] },
     { kind: "select", key: "inlineMarkers", label: "מספור \"(יב)\" בתחילת שורות הפירוש", default: "auto", choices: [["auto", "אוטומטי — רק כשהוא מקביל לבסיס"], ["always", "תמיד כרמה העמוקה"], ["never", "אף פעם"]] },
     { kind: "boolean", key: "untaggedHeadings", label: "שורות קצרות כמו \"פרק ג\" נחשבות כותרת גם בלי תגית", default: true },

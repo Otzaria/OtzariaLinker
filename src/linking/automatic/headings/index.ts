@@ -18,8 +18,10 @@ import {
 import { align, type AlignContext, type AlignEvent, type Alignment } from "./align";
 import { assessNumbering, numberingNote, numberingWarning, rangeWidthCap, targetElement, type LevelStats } from "./consistency";
 import { QuoteChecker } from "./quote";
-import { dafElement, kindThe, kindWord, type NumberingMode, type PathElement } from "./numbering";
-import { analyzeBook, buildUnits, pathKey, type BookStructure, type Unit } from "./structure";
+import { normalize } from "../../../core/text/hebrew";
+import { phraseSimilarity } from "../../../matching/similarity";
+import { dafElement, kindThe, kindWord, plainText, type NumberingMode, type PathElement } from "./numbering";
+import { analyzeBook, buildUnits, pathKey, type BookStructure, type HeadingInfo, type Unit } from "./structure";
 
 /*
  * The HEADINGS engine (plan stage 8.1): every commentary line inherits its structural position from
@@ -52,7 +54,25 @@ export interface HeadingsOptions extends SefariaOwnedOption {
   readonly thresholds?: ConfidenceThresholds;
   /** Alternatives kept on each suggestion, best first. Default 3. */
   readonly maxAlternatives?: number;
+  /**
+   * How a line's place is found (v3 `structuralMatch` modes, F-095):
+   *   "structure" (default) — the kind and number of every level of the line's path, names by similarity (v3 "structural", and more);
+   *   "content"   — the TEXT of the line's own heading: the base heading with the same text (or ≥ 0.85 alike), its parent's text only a
+   *                 tie-breaker; for a commentary whose numbering is not the base's but whose section names are (v3 "לפי תוכן הכותרת");
+   *   "leaves"    — "structure", but only the deepest sections: a line under a heading that has sub-headings, a partial match and a
+   *                 coarse target (a section with deeper units) are not proposed (v3 "רק תתי־סעיפים").
+   */
+  readonly headingMatch?: HeadingMatch;
+  /**
+   * v3 "התייחס לפסקאות רגילות כאל סעיפים" (trySplit, F-097): when a commentary heading with no sub-headings has K content lines and its
+   * place in the base has exactly K sub-units (sub-headings or "(N)" lines), line k is linked to sub-unit k — an inference from the
+   * counts, so never above "possible". Default false.
+   */
+  readonly paragraphsAsSections?: boolean;
 }
+
+export type HeadingMatch = "structure" | "content" | "leaves";
+export const HEADING_MATCH_MODES: readonly HeadingMatch[] = ["structure", "content", "leaves"];
 
 const ENGINE = "headings" as const;
 /** a target range whose base section has deeper units the commentary did not address */
@@ -69,7 +89,16 @@ interface Scored {
   readonly path: readonly PathElement[];
   readonly score: number;
   readonly alignment: Alignment;
+  /** a warning that belongs to this candidate (headingMatch "content": the heading was found under another parent) */
+  readonly note?: Reason;
 }
+
+/** v3's split is an inference from the counts, not a match (trySplit: score × 0.8) */
+const SPLIT_FACTOR = 0.8;
+/** headingMatch "content": the heading's text found under a parent whose text differs (v3 gave the same parent a bonus instead) */
+const CONTENT_OTHER_PARENT = 0.1;
+const CONTENT_SIMILAR_PARENT = 0.05;
+const CONTENT_SIMILAR_MIN = 0.85;
 
 /** At least this many inline page marks make a base "paged" (as dibur-hamatchil/windows.ts pageMarks) */
 const PAGE_MARKS_MIN = 20;
@@ -97,6 +126,8 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     untaggedHeadings: options.untaggedHeadings ?? true,
     thresholds: options.thresholds ?? DEFAULT_THRESHOLDS,
     maxAlternatives: options.maxAlternatives ?? 3,
+    headingMatch: options.headingMatch ?? "structure",
+    paragraphsAsSections: options.paragraphsAsSections ?? false,
   };
   const notes: Reason[] = [];
   const suggestions: Suggestion[] = [];
@@ -160,6 +191,12 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     return out;
   };
 
+  // the commentary's headings as sections (headingMatch "content" / "leaves", paragraphsAsSections): v3 matched headings, not lines
+  const sections = commentarySections(cs);
+  const content = opts.headingMatch === "content" ? contentMatcher(commentary, cs, base, bs, units) : null;
+  const subunits = opts.paragraphsAsSections ? subunitsOf(bs, units) : null;
+  let splits = 0;
+
   // inline markers on commentary lines
   const useMarkers = decideMarkers(cs, bs, units, opts.inlineMarkers, match, notes);
   structuralNotes(cs, bs, units, notes);
@@ -211,11 +248,17 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/no-position", text: "השורה אינה נמצאת תחת אף כותרת, ולכן אין לה מיקום מבני" }] });
       continue;
     }
-    const all = match(P);
+    const own = sections.headingOf[p]!;
+    if (opts.headingMatch === "leaves" && own >= 0 && !sections.leaf[own]) {
+      unmatched.push({ line: srcIndex, reasons: [notLeaf("commentary", cs.headings[own]!)] });
+      continue;
+    }
+    const all = content ? (own >= 0 ? content(own) : []) : match(P);
     // A line's place must lie inside its section's place: when the section path (P without its last
     // element) is found exactly and unambiguously, candidates outside it are set aside (מכילתא דרשב"י:
     // "פרק ג › פסוק א" matched "הוספה › פרק ג › (א)" fully while "פרק ג" is the main פרק ג).
-    const section = sectionOf(P, match, opts.thresholds.ambiguityMargin);
+    // ("content" places a line by its heading's text and nothing else of its path.)
+    const section = content ? null : sectionOf(P, match, opts.thresholds.ambiguityMargin);
     const inside = section ? all.filter((c) => c.start >= section.start && c.end <= section.end) : all;
     const outsideSection = section !== null && inside.length === 0;
     const cands = inside.length ? inside : all;
@@ -262,9 +305,27 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
       unmatched.push({ line: srcIndex, reasons: [{ code: "heading/number-only", text: `רק המספר ${toGematria(num.n!)} של "${describe(P)}" נמצא בספר הבסיס, ב־${tied.length} מקומות שאין ביניהם הבדל אחר (${tied.slice(0, 3).map((c) => describe(c.path)).join("; ")}${tied.length > 3 ? "…" : ""}); מספר בלבד אינו מקום, ולכן השורה לא קושרה` }] });
       continue;
     }
+    // v3 trySplit (F-097): paragraph k of a heading with no sub-headings → sub-unit k of its place, when the counts are equal
+    let split: { k: number; of: number } | null = null;
+    if (subunits && own >= 0 && sections.leaf[own] && !chosen.alignment.missing && chosen.unit.hasSubunits) {
+      const paras = sections.paragraphs[own]!;
+      const subs = subunits(chosen.unit);
+      const k = paras.indexOf(p);
+      if (k >= 0 && subs.length === paras.length) {
+        const u = subs[k]!;
+        split = { k, of: paras.length };
+        chosen = { ...chosen, unit: u, start: u.start, end: u.end, path: u.path, score: chosen.score * SPLIT_FACTOR };
+        splits++;
+      }
+    }
+    if (opts.headingMatch === "leaves" && !split && (chosen.alignment.missing || chosen.unit.hasSubunits)) {
+      unmatched.push({ line: srcIndex, reasons: [notLeaf("base", chosen)] });
+      continue;
+    }
     const el = targetElement(chosen.alignment);
     const suspect = beyond ?? (el && el.kind !== "name" ? numbering.suspect.get(el.kind) : undefined);
     let score = orderTie ? Math.min(chosen.score, ORDER_CAP) : chosen.score;
+    if (split) score = Math.min(score, belowHigh);
     /*
      * The line's own heading is a NAME the base does not have, below the place that was found ("דף ב. ›
      * רבינו חננאל", "… › שאילתות פרשת צו"): an anthology's source under the daf it was gathered for, and the
@@ -296,6 +357,13 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
     if (wide) score = Math.min(score, (wide.cap === "high" ? opts.thresholds.certain : opts.thresholds.high) - 0.001);
     const confidence: Confidence = confidenceOf(score, runnerUp, opts.thresholds);
     const { reasons, warnings, rules } = explain(chosen, base, baseRanges);
+    if (content) rules.push("headings.content");
+    if (chosen.note) warnings.push(chosen.note);
+    if (split) {
+      const head = cs.headings[own]!;
+      warnings.push({ code: "heading/paragraph-split", text: `תחת "${plainText(commentary.lines[head.at]!.text)}" יש ${split.of} שורות, ובספר הבסיס ${split.of} חלקים; השורה ה־${split.k + 1} קושרה לחלק ה־${split.k + 1} (${describe(chosen.path)}). זו הסקה מהספירה ולא התאמה, ולכן הביטחון הוגבל ל"אפשרית"` });
+      rules.push("headings.paragraph-split");
+    }
     if (wide && (confidence === "possible" || confidence === "high")) {
       warnings.push(wide.warning);
       rules.push("headings.wide-range");
@@ -375,7 +443,138 @@ export function* headingsSteps(commentary: EngineBook, base: EngineBook, options
   if (skipped) notes.push({ code: "heading/skipped-lines", text: `${skipped} שורות בפירוש דולגו: כותרות, שורות ריקות או שורות עם פחות משתי אותיות עבריות` });
   if (numberOnlyLines) notes.push({ code: "heading/number-only", text: `${numberOnlyLines} שורות לא קושרו: רק מספר אחד שלהן נמצא בספר הבסיס, בכמה מקומות שאין ביניהם הבדל אחר (מספור של הפירוש עצמו, כמו "פסקה" או "חלק", מול מספרי פסוקים או סעיפים בכל פרק)` });
   if (partial) notes.push({ code: "heading/partial-matches", text: `${partial} שורות קושרו רק לרמה גבוהה יותר (למשל לפרק כולו), כי הרמה העמוקה שלהן לא נמצאה בספר הבסיס` });
+  if (splits) notes.push({ code: "heading/paragraph-split", text: `${splits} שורות קושרו כ"פסקאות כסעיפים": מספר השורות תחת הכותרת שווה למספר החלקים בספר הבסיס, והשורה ה־k קושרה לחלק ה־k. בדקו אותן לפני אישור` });
+  if (content) notes.push({ code: "heading/content-mode", text: "המקום של כל שורה נקבע לפי הטקסט של הכותרת שמעליה, ולא לפי המספרים שבכותרות" });
   return done();
+}
+
+/** The commentary's headings as sections: the heading each line sits under, whether it has sub-headings, and its content lines. */
+interface CommentarySections {
+  /** per position in book.lines: index into cs.headings of the nearest heading above (the deepest of its path), or -1 */
+  readonly headingOf: readonly number[];
+  /** per heading: no sub-heading below it (v3 "כותרת־עלה") */
+  readonly leaf: readonly boolean[];
+  /** per heading: the positions of its content lines, up to the next heading line of any level (v3 paragraphLines) */
+  readonly paragraphs: readonly (readonly number[])[];
+}
+
+function commentarySections(cs: BookStructure): CommentarySections {
+  const hs = cs.headings;
+  const leaf = hs.map((h, i) => i + 1 >= hs.length || hs[i + 1]!.level <= h.level);
+  const headingOf: number[] = [];
+  const paragraphs: number[][] = hs.map(() => []);
+  let h = -1;
+  let open = false; // no heading line since heading h
+  for (let p = 0; p < cs.lines.length; p++) {
+    while (h + 1 < hs.length && hs[h + 1]!.at <= p) (h++, (open = true));
+    const l = cs.lines[p]!;
+    if (l.skip === "heading") {
+      if (h < 0 || hs[h]!.at !== p) open = false; // a heading line with no elements (a title) closes the paragraphs too
+      headingOf.push(h);
+      continue;
+    }
+    headingOf.push(h);
+    if (h >= 0 && open && l.skip === null) paragraphs[h]!.push(p);
+  }
+  return { headingOf, leaf, paragraphs };
+}
+
+/** The direct sub-units of a base unit, in order: its next-level sub-headings, else its "(N)" lines (v3 `t.children`). */
+function subunitsOf(bs: BookStructure, units: readonly Unit[]): (u: Unit) => Unit[] {
+  const own = new Map<number, Unit>();
+  for (const u of units) if (u.headingAt !== null && !u.marker && !own.has(u.headingAt)) own.set(u.headingAt, u);
+  const idx = new Map(bs.headings.map((h, i) => [h.at, i] as const));
+  const cache = new Map<number, Unit[]>();
+  return (u) => {
+    const hit = cache.get(u.id);
+    if (hit) return hit;
+    let out: Unit[] = [];
+    const i = u.headingAt === null || u.marker ? undefined : idx.get(u.headingAt);
+    if (i !== undefined && own.get(u.headingAt!) === u) {
+      const lv = bs.headings[i]!.level;
+      const below: HeadingInfo[] = [];
+      for (let k = i + 1; k < bs.headings.length && bs.headings[k]!.level > lv; k++) below.push(bs.headings[k]!);
+      const top = Math.min(...below.map((h) => h.level));
+      out = below.filter((h) => h.level === top).map((h) => own.get(h.at)).filter((x): x is Unit => x !== undefined);
+    }
+    if (!out.length && !u.marker) out = units.filter((m) => m.marker && m.parent === u.id);
+    cache.set(u.id, out);
+    return out;
+  };
+}
+
+/**
+ * headingMatch "content" (v3 `_contentScore`): the base headings whose TEXT is the text of the line's heading (1), or alike by at least
+ * CONTENT_SIMILAR_MIN (never 1), each as the unit it heads. The parent's text breaks ties: another parent costs CONTENT_OTHER_PARENT
+ * (alike: CONTENT_SIMILAR_PARENT), so an exact text under another parent is "high", never "certain". Cached per heading.
+ */
+function contentMatcher(commentary: EngineBook, cs: BookStructure, base: EngineBook, bs: BookStructure, units: readonly Unit[]): (h: number) => Scored[] {
+  const textOf = (b: EngineBook, at: number) => normalize(plainText(b.lines[at]!.text));
+  const labelOf = (b: EngineBook, at: number) => plainText(b.lines[at]!.text);
+  const parentOf = (hs: readonly HeadingInfo[], i: number): number | null => {
+    for (let k = i - 1; k >= 0; k--) if (hs[k]!.level < hs[i]!.level) return k;
+    return null;
+  };
+  const own = new Map<number, Unit>();
+  for (const u of units) if (u.headingAt !== null && !u.marker && !own.has(u.headingAt)) own.set(u.headingAt, u);
+  const entries = bs.headings.flatMap((h, i) => {
+    const unit = own.get(h.at);
+    if (!unit) return [];
+    const parent = parentOf(bs.headings, i);
+    return [{ unit, text: textOf(base, h.at), label: labelOf(base, h.at), parent: parent === null ? null : textOf(base, bs.headings[parent]!.at), parentLabel: parent === null ? null : labelOf(base, bs.headings[parent]!.at) }];
+  });
+  const byText = new Map<string, typeof entries>();
+  for (const e of entries) {
+    const list = byText.get(e.text);
+    if (list) list.push(e);
+    else byText.set(e.text, [e]);
+  }
+  const cache = new Map<number, Scored[]>();
+  return (h) => {
+    const hit = cache.get(h);
+    if (hit) return hit;
+    const head = cs.headings[h]!;
+    const text = textOf(commentary, head.at);
+    const label = labelOf(commentary, head.at);
+    const pi = parentOf(cs.headings, h);
+    const parent = pi === null ? null : textOf(commentary, cs.headings[pi]!.at);
+    const parentLabel = pi === null ? null : labelOf(commentary, cs.headings[pi]!.at);
+    let found = (byText.get(text) ?? []).map((e) => ({ e, sim: 1 }));
+    if (!found.length && text)
+      found = entries
+        .filter((e) => Math.abs(e.text.length - text.length) <= Math.max(3, text.length * 0.3))
+        .map((e) => ({ e, sim: phraseSimilarity(text, e.text) }))
+        .filter((x) => x.sim >= CONTENT_SIMILAR_MIN);
+    const c: PathElement = { kind: "name", name: text, label };
+    const scored = found.map(({ e, sim }): Scored => {
+      const b: PathElement = { kind: "name", name: e.text, label: e.label };
+      let cost = sim === 1 ? 0 : 1 - sim * 0.95;
+      let note: Reason | undefined;
+      if (parent !== e.parent) {
+        const alike = parent !== null && e.parent !== null && phraseSimilarity(parent, e.parent) >= CONTENT_SIMILAR_MIN;
+        cost += alike ? CONTENT_SIMILAR_PARENT : CONTENT_OTHER_PARENT;
+        note = { code: "heading/content-other-parent", text: `הכותרת "${label}" נמצאה בספר הבסיס ${e.parentLabel !== null ? `תחת "${e.parentLabel}"` : "בלי כותרת מעליה"}, ${parentLabel !== null ? `ובפירוש היא תחת "${parentLabel}"` : "ובפירוש אין כותרת מעליה"}` };
+      }
+      const alignment: Alignment = { penalty: cost, events: [sim === 1 ? { code: "same-name", c, b } : { code: "similar-name", c, b, sim }], missing: 0 };
+      const score = clamp(1 - cost - (e.unit.hasSubunits ? RANGE_COST : 0));
+      return { unit: e.unit, start: e.unit.start, end: e.unit.end, path: e.unit.path, score, alignment, ...(note && { note }) };
+    });
+    const out = rank(scored);
+    cache.set(h, out);
+    return out;
+  };
+}
+
+/** Why a line is not linked under headingMatch "leaves". */
+function notLeaf(side: "commentary" | "base", x: HeadingInfo | Scored): Reason {
+  if (side === "commentary") return { code: "heading/not-leaf", text: "השורה נמצאת תחת כותרת שיש תחתיה כותרות נוספות; בהגדרה \"רק תתי־סעיפים\" מקשרים רק שורות שתחת הכותרת העמוקה ביותר" };
+  const s = x as Scored;
+  return {
+    code: "heading/not-leaf",
+    text: s.alignment.missing
+      ? `הרמה העמוקה של השורה לא נמצאה בספר הבסיס, ונמצא רק ${describe(s.path)}; בהגדרה "רק תתי־סעיפים" לא מקשרים לקטע שלם`
+      : `בספר הבסיס ${describe(s.path)} מחולק לחלקים קטנים יותר; בהגדרה "רק תתי־סעיפים" לא מקשרים לקטע שלם`,
+  };
 }
 
 /** The base place of the line's section (its path without the last element), when exact and unambiguous. */
