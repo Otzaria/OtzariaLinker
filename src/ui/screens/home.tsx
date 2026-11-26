@@ -1,3 +1,4 @@
+import { linksCount, sourcesCount } from "../../state/history";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EngineId } from "../../linking/automatic";
 import type { SuggestMode } from "../../state/router";
@@ -256,7 +257,7 @@ export function Home() {
         {store.recovery.value && !(store.guided.saved.value && !store.guided.active.value) && (
           <div class="recovery" role="alert">
             <Icon name="fl_history" size={24} />
-            <span class="grow">נמצאה עבודה שלא נשמרה מהפעם הקודמת: {store.recovery.value.links.toLocaleString("he")} קישורים.</span>
+            <span class="grow">נמצאה עבודה שלא נשמרה מהפעם הקודמת: {linksCount(store.recovery.value.links)}.</span>
             <button class="btn filled" onClick={store.recovery.value.restore}>שחזור</button>
             <button class="btn text" onClick={store.recovery.value.dismiss}>התעלמות</button>
           </div>
@@ -291,7 +292,7 @@ export function Home() {
           <div class="recent">
             <button class="btn tonal" onClick={() => (store.screen.value = "workspace")}>
               <Icon name="oz_book_open_medium_lines" size={18} />
-              חזרה לסביבת העבודה ({store.sources.value.length} קבצים ומסדים, {store.linkState.value.links.size.toLocaleString("he")} קישורים)
+              חזרה לסביבת העבודה ({sourcesCount(store.sources.value.length)}, {linksCount(store.linkState.value.links.size)})
             </button>
           </div>
         )}

@@ -91,7 +91,7 @@ function Wizard({ pending }: { pending: PendingDb }) {
         </header>
         <div class="body">
           <p class="muted" style="margin:0">
-            המסד אינו במבנה של אוצריא. יש בו {tables.length.toLocaleString("he")} טבלאות. כדי לפתוח אותו, צריך לומר לכלי איפה שמות הספרים ואיפה שורות הטקסט.
+            המסד אינו במבנה של אוצריא. יש בו {tables.length === 1 ? "טבלה אחת" : `${tables.length.toLocaleString("he")} טבלאות`}. כדי לפתוח אותו, צריך לומר לכלי איפה שמות הספרים ואיפה שורות הטקסט.
             {pending.guess ? " ניחשתי לפי השמות והתוכן — בדקו שזה נכון." : noBooks ? "" : " לא מצאתי ניחוש סביר; בחרו בעצמכם."}
           </p>
 

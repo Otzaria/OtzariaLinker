@@ -353,6 +353,10 @@ export const linksCount = (n: number): string => (n === 1 ? "קישור אחד" 
 export const booksCount = (n: number): string => (n === 1 ? "ספר אחד" : `${n.toLocaleString("he")} ספרים`);
 /** "קובץ אחד" / "1,200 קבצים" */
 export const filesCount = (n: number): string => (n === 1 ? "קובץ אחד" : `${n.toLocaleString("he")} קבצים`);
+/** "נפתח ספר אחד" / "נפתחו 3 ספרים" (#41 B27: the verb agrees with the count) */
+export const booksOpened = (n: number): string => (n === 1 ? "נפתח ספר אחד" : `נפתחו ${booksCount(n)}`);
+/** "קובץ או מסד אחד" / "3 קבצים ומסדים" */
+export const sourcesCount = (n: number): string => (n === 1 ? "קובץ או מסד אחד" : `${n.toLocaleString("he")} קבצים ומסדים`);
 /** "קישור אחד לא ייוצא" / "3 קישורים לא ייוצאו" — the verb agrees too (V5 UX audit U13) */
 export const heldLinksText = (n: number): string => (n === 1 ? "קישור אחד לא ייוצא" : `${n.toLocaleString("he")} קישורים לא ייוצאו`);
 /** "מחיקה אחת לא תגיע לספרייה" / "3 מחיקות לא יגיעו לספרייה" */

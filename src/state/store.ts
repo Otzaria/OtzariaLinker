@@ -15,7 +15,7 @@ import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTit
 import { stripTags } from "../core/text/html";
 import type { EngineId } from "../linking/automatic";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, booksCount, booksOpened, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -350,7 +350,7 @@ export class AppStore {
     }
     const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
+      this.notify("success", `${booksOpened(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
       this.chooseRoles(opened);
       this.toWorkspace();
     } else if (res.documents.length) this.toWorkspace();
@@ -806,7 +806,7 @@ export class AppStore {
     });
     this.attachLinks();
     if (src.books.length) {
-      this.notify("success", `נפתחו ${booksCount(src.books.length)} מ־"${src.info.label}".`);
+      this.notify("success", `${booksOpened(src.books.length)} מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
     }
     this.toWorkspace();
