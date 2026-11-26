@@ -103,6 +103,8 @@ describe("a lone CR is warned about when the file is opened (V7 PR1 review, find
     const key = res.sources[0]!.books.find((b) => b.path === "cr.txt")!.key;
     await r.lines(key, 0, 5); // reading it does not add the same warning again
     expect(res.sources[0]!.info.warnings.filter((x) => x.code === "source/lone-cr")).toHaveLength(1);
+  });
+});
 
 describe("a damaged database or ZIP is called what it is (#41 B24)", () => {
   it("a .db that is not SQLite is not 'a text file that is not .txt'", async () => {
