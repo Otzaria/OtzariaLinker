@@ -128,6 +128,33 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
           return `${agree}/${agree + contradict}${agree + contradict ? ` = ${(agree / (agree + contradict)).toFixed(4)}` : ""}`;
         };
         const raw = Object.fromEntries(["headings", "dibur-hamatchil", "footnotes"].map((e) => [e, { certain: rawJudge(e, "certain"), high: rawJudge(e, "high") }]));
+        // #41 B1: a precise suggestion inside another engine's coarser range — its own level → its merged level, judged against the database;
+        // and a coarse one that kept a finer suggestion of another engine as its alternative (judged: the finer one)
+        const spanOf = (s: (typeof merged.suggestions)[number]["members"][number]["suggestion"], focus: string) => {
+          const o = s.source.book.key === focus ? s.target : s.source;
+          const span = s.citedSpan && o === s.target ? s.citedSpan : { line: o.line, end: o.end ?? o.line };
+          return span.end - span.line + 1;
+        };
+        const b1: Record<string, [number, number, number]> = {};
+        const tally = (k: string, v: boolean | null) => {
+          const e = (b1[k] ??= [0, 0, 0]);
+          e[v === true ? 0 : v === false ? 1 : 2]++;
+        };
+        for (const s of merged.suggestions) {
+          const [f, o] = s.source.book.key === s.focus ? [s.source, s.target] : [s.target, s.source];
+          const known = o.book.key === base!.key ? dbByLine.get(`${f.book.key}#${f.line}`) : undefined;
+          const ok = (x: typeof o, span?: { line: number; end: number }) => (known ? [...known].some((l) => l >= (span?.line ?? x.line) && l <= (span?.end ?? x.end ?? x.line)) : null);
+          const w = spanOf(s, s.focus);
+          if (s.engines.length === 1 && s.members.some((m) => m.suggestion.engine !== s.engine && spanOf(m.suggestion, s.focus) > w)) {
+            const own = s.members.find((m) => m.suggestion.engine === s.engine && spanOf(m.suggestion, s.focus) === w);
+            tally(`contained ${own?.suggestion.confidence ?? "?"}>${s.confidence}`, ok(o, s.citedSpan && o === s.target ? s.citedSpan : undefined));
+          }
+          for (const m of s.members)
+            if (m.suggestion.engine !== s.engine && spanOf(m.suggestion, s.focus) < w) {
+              const mo = m.suggestion.source.book.key === s.focus ? m.suggestion.target : m.suggestion.source;
+              tally(`inner ${m.suggestion.confidence} in ${s.confidence}`, ok(mo));
+            }
+        }
         const raisedToCertain = merged.suggestions.filter((s) => s.rules.includes("maxlink/raised") && s.confidence === "certain");
         const report = {
           base: baseTitle,
@@ -145,6 +172,8 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
           raisedToCertain: raisedToCertain.length,
           raisedToCertainExistsDb: raisedToCertain.filter((s) => s.rules.includes("maxlink/exists-db")).length,
           rawPerEngine: raw,
+          b1,
+          merged: Object.fromEntries(["certain", "high", "possible", "ambiguous"].map((l) => [l, judge(l, () => true, false)])),
           // a precise line inside a coarse range another engine gave: how often is it right, by its level
           insideCertainRange: Object.fromEntries(
             ["certain", "high", "possible"].map((level) => [level, judge(level, (s) => s.rules.includes("maxlink/consistent") && s.members.some((m) => m.suggestion.confidence === "certain" && m.suggestion.engine !== s.engine), false)]),
