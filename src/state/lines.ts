@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals";
 import type { SourceLine } from "../core/books";
-import { linkMatchIndex, type LinkMatchIndex } from "../core/links/equality";
+import { linkMatchIndex, matchIndexOf, type LinkMatchIndex } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import type { LineFacts } from "../core/links/validate";
 import type { BooksService } from "./services";
@@ -309,18 +309,40 @@ export class LineStore {
     if (!book) this.existingLines.set(bookKey, (book = new Map()));
     const known = book;
     const sorted = [...new Set(indexes)].filter((i) => !known.has(i)).sort((a, b) => a - b);
+    const runs: [number, number][] = [];
     for (let i = 0; i < sorted.length; ) {
       let j = i;
       while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
-      signal?.throwIfAborted();
-      try {
-        const ix = linkMatchIndex(await this.service.existingLinks(bookKey, sorted[i]!, sorted[j]!));
-        for (let k = i; k <= j; k++) book.set(sorted[k]!, ix);
-      } catch {
-        /* not compared, like a chunk that failed */
-      }
+      runs.push([sorted[i]!, sorted[j]!]);
       i = j + 1;
     }
+    const keep = (run: readonly [number, number], ix: LinkMatchIndex) => {
+      for (let k = run[0]; k <= run[1]; k++) book.set(k, ix);
+    };
+    // every run of the book in one call that sends back only the identities (V7 round 2 item 11, V7_PERFORMANCE.md §10); a service
+    // without it, or a batch that failed, reads run by run as before
+    let batched = false;
+    if (runs.length && this.service.existingMatchIndexes) {
+      signal?.throwIfAborted();
+      try {
+        const got = await this.service.existingMatchIndexes(bookKey, runs, signal ? { signal } : undefined);
+        if (got.length === runs.length) {
+          runs.forEach((run, r) => keep(run, matchIndexOf(got[r]!)));
+          batched = true;
+        }
+      } catch {
+        signal?.throwIfAborted();
+      }
+    }
+    if (!batched)
+      for (const run of runs) {
+        signal?.throwIfAborted();
+        try {
+          keep(run, linkMatchIndex(await this.service.existingLinks(bookKey, run[0], run[1])));
+        } catch {
+          /* not compared, like a chunk that failed */
+        }
+      }
     if (sorted.length) this.tick.value = this.tick.peek() + 1;
   }
 

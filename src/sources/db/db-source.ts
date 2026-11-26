@@ -1,6 +1,7 @@
 import { MAX_BOOK_LINES } from "../../core/limits";
 import { CONNECTION_TYPES, canonicalTypeString } from "../../core/links/connection-type";
 import { CoverageEndsBuilder, coverageEndsOf, type CoverageEnds } from "../../core/links/coverage-ends";
+import { linkMatchIndex, matchList, type LinkMatchList } from "../../core/links/equality";
 import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type DbLinkTable, type Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
 import type { LibraryAltTocStructure } from "../../core/alt-toc/model";
@@ -150,6 +151,46 @@ export class DbBookSource implements BookSource {
       for (const l of part) if (!before.some((k) => sameLink(k, l))) out.push(l);
     }
     return out;
+  }
+
+  /**
+   * For each run [from, to], the match index of existingLinks(bookKey, from, to) (V7 round 2 item 11; docs/reviews/V7_PERFORMANCE.md
+   * §10): every run's lines in ONE read of the `link` table's line indexes and rows, split back into the runs by the lines each link
+   * was found by, and without the anchors, range ends and suppressed sides existingLinks() attaches (no part of the identity). A
+   * database whose links are also (or only) in external_link or user_link, or without the line indexes, returns null: the registry
+   * then reads existingLinks() run by run — so the result is always the same as the run-by-run read.
+   */
+  async existingMatchIndexes(bookKey: string, runs: readonly (readonly [number, number])[]): Promise<LinkMatchList[] | null> {
+    if (!this.links || this.ext || this.user || !this.links.indexed) return null;
+    const id = this.idOf(bookKey);
+    const entries = [...(await this.reader.lineEntries(id))].sort((a, b) => a.index - b.index);
+    // the line ids of each run, as existingLinks() selects them (index in [from, to]); a line id → the runs it is in
+    const runsOf = new Map<number, number[]>();
+    runs.forEach(([from, to], r) => {
+      let lo = 0;
+      let hi = entries.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (entries[mid]!.index < from) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < entries.length && entries[i]!.index <= to; i++) {
+        const lineId = entries[i]!.id;
+        const at = runsOf.get(lineId);
+        if (at) at.push(r);
+        else runsOf.set(lineId, [r]);
+      }
+    });
+    const read = await this.links.atLinesBare(runsOf.keys());
+    if (!read) return null;
+    const perRun = runs.map(() => [] as Link[]);
+    for (const row of read.rows) {
+      const link = this.toLink(row);
+      const into = new Set<number>();
+      for (const lineId of read.foundBy.get(row.id) ?? []) for (const r of runsOf.get(lineId) ?? []) into.add(r);
+      for (const r of into) perRun[r]!.push(link);
+    }
+    return perRun.map((links) => matchList(linkMatchIndex(links)));
   }
 
   /**

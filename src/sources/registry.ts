@@ -4,6 +4,7 @@ import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
 import { coverageEndsOf, type CoverageEnds } from "../core/links/coverage-ends";
+import { linkMatchIndex, matchList, type LinkMatchList } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import { decodeText } from "../core/text/decode";
@@ -172,6 +173,23 @@ export class SourceRegistry {
 
   async existingLinks(bookKey: string, from: number, to: number): Promise<Link[]> {
     return this.of(bookKey).existingLinks(bookKey, from, to);
+  }
+
+  /**
+   * For each run [from, to] of a book's lines, the match index of its existing links (what the quality check and the export compare
+   * with; V7 round 2 item 11): one call for many runs, and only the identities cross to the page, not a Link per database row. The
+   * source's own one-pass read where it has one (an Otzaria database's `link` table), else existingLinks() run by run, indexed here.
+   */
+  async existingMatchIndexes(bookKey: string, runs: readonly (readonly [number, number])[], signal?: AbortSignal): Promise<LinkMatchList[]> {
+    const s = this.of(bookKey);
+    const fast = s.existingMatchIndexes ? await s.existingMatchIndexes(bookKey, runs) : null;
+    if (fast) return fast;
+    const out: LinkMatchList[] = [];
+    for (const [from, to] of runs) {
+      signal?.throwIfAborted();
+      out.push(matchList(linkMatchIndex(await s.existingLinks(bookKey, from, to))));
+    }
+    return out;
   }
 
   /**

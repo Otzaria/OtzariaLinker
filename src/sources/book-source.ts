@@ -1,6 +1,7 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { CoverageEnds } from "../core/links/coverage-ends";
+import type { LinkMatchList } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import type { LinkListing } from "./db/link-listing";
 
@@ -22,6 +23,12 @@ export interface BookSource {
   lines(bookKey: string, from?: number, to?: number): Promise<SourceLine[]>;
   /** existing links touching lines [from, to] of a book (read-only, provenance "db") */
   existingLinks(bookKey: string, from: number, to: number): Promise<Link[]>;
+  /**
+   * For each run [from, to] of a book's lines, the match index (core/links/equality.ts) of existingLinks(bookKey, from, to) — exactly
+   * that, read in one pass and without building what the identities do not need (V7 round 2 item 11). Optional, and null when the
+   * source cannot do it cheaper: the registry then reads existingLinks() run by run.
+   */
+  existingMatchIndexes?(bookKey: string, runs: readonly (readonly [number, number])[]): Promise<LinkMatchList[] | null>;
   /**
    * The whole book, chunk by chunk, for a scan (in-book search). Optional: without it the registry
    * pages through lines(); a source implements it when it can read a whole book more cheaply.

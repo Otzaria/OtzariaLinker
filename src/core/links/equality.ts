@@ -66,6 +66,18 @@ export function linkMatchIndex(existing: Iterable<Ends & Pick<Link, "declaredTyp
   return { links, pairs };
 }
 
+/**
+ * A LinkMatchIndex as plain arrays: what the worker sends back for many lines at once (existingMatchIndexes, V7 round 2 item 11)
+ * instead of every Link at those lines — the identities are all "already exists" needs.
+ */
+export interface LinkMatchList {
+  readonly links: readonly string[];
+  readonly pairs: readonly string[];
+}
+
+export const matchList = (ix: LinkMatchIndex): LinkMatchList => ({ links: [...ix.links], pairs: [...ix.pairs] });
+export const matchIndexOf = (l: LinkMatchList): LinkMatchIndex => ({ links: new Set(l.links), pairs: new Set(l.pairs) });
+
 /** How a link matches the existing ones: the very same stored link, only the same lines, or not at all. */
 export function matchLink(l: Ends & Pick<Link, "declaredType"> & { provenance?: Link["provenance"] }, index: LinkMatchIndex): LinkMatch | null {
   const id = storedLinkIdentity(l);

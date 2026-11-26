@@ -23,6 +23,7 @@ export function sourcesHandlers(registry: SourceRegistry): Handlers<SourcesApi> 
     testMapping: (ctx, token, mapping) => registry.testMapping(token, mapping, jobCtx(ctx)),
     lines: (_ctx, bookKey, from, to) => registry.lines(bookKey, from, to),
     existingLinks: (_ctx, bookKey, from, to) => registry.existingLinks(bookKey, from, to),
+    existingMatchIndexes: (ctx, bookKey, runs) => registry.existingMatchIndexes(bookKey, runs, ctx.signal),
     coverageEnds: (ctx, bookKey) => registry.coverageEnds(bookKey, { signal: ctx.signal }),
     close: (_ctx, sourceId) => registry.close(sourceId),
     titleFit: (ctx, source, target) => titleFitJob(registry, source, target, jobCtx(ctx)),

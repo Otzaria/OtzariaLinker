@@ -200,7 +200,28 @@ export class DbLinksReader {
     return this.rows(linkIds);
   }
 
-  private async rows(linkIds: Set<number>): Promise<DbLinkRow[]> {
+  /**
+   * atLines() for many lines at once, for identities only (V7 round 2 item 11): the same links, found through the same indexes
+   * (start line, end line, link_coverage), with the requested lines each link was found by — so a caller can split one read into
+   * the runs it was asked for — and without anchors, range ends or suppressed sides (no part of a link's identity: equality.ts).
+   * Null without the line indexes (atLines() would scan the whole table; the caller reads run by run instead).
+   */
+  async atLinesBare(lineIds: Iterable<number>): Promise<{ rows: DbLinkRow[]; foundBy: Map<number, number[]> } | null> {
+    if (!this.indexed) return null;
+    const keys = [...new Set(lineIds)].sort((a, b) => a - b).map((id) => [id]);
+    const foundBy = new Map<number, number[]>();
+    const add = (linkId: number, lineId: number) => {
+      const at = foundBy.get(linkId);
+      if (at) at.push(lineId);
+      else foundBy.set(linkId, [lineId]);
+    };
+    for (const rec of await this.file.seekIndexMany(this.ix.out!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    for (const rec of await this.file.seekIndexMany(this.ix.in!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    if (this.ix.coverage) for (const rec of await this.file.seekIndexMany(this.ix.coverage, keys)) add(Number(rec[1]), Number(rec[0]));
+    return { rows: await this.rows(new Set(foundBy.keys()), false), foundBy };
+  }
+
+  private async rows(linkIds: Set<number>, details = true): Promise<DbLinkRow[]> {
     const links = await this.file.getMany(this.t.link, linkIds);
     const L = (n: string) => col(this.t.link, n);
     const [sb, tb, sl, tl, tli, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("targetLineIndex"), L("connectionTypeId"), L("connectionType")];
@@ -232,7 +253,7 @@ export class DbLinksReader {
         suppressedSides: [],
       });
     }
-    await this.attachDetails(out);
+    if (details) await this.attachDetails(out);
     return out.sort((a, b) => a.id - b.id);
   }
 
