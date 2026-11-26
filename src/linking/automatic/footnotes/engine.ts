@@ -102,6 +102,11 @@ const POSITIONAL_MAX = 0.1;
 const POSITION_MISMATCH_SCORE = 0.75;
 /** a book with no other kind of note line reads bare "12 text" lines only when at least this many continue the series */
 const BARE_MIN = 3;
+/**
+ * a book whose other notes carry markers reads bare "12 text" lines only when at least this many fill gaps in that series: one such
+ * line is as likely a continuation line that opens with a number (V7 PR2 review, finding 1)
+ */
+const BARE_MIN_TAGGED = 2;
 /** how far ahead a bare number may jump in its series, when the number after it follows it (bareSeries) */
 const BARE_GAP_MAX = 10;
 /** under this share of note lines with a marker, the books may have been given the other way round (looksSwapped) */
@@ -207,7 +212,7 @@ function run(main: EngineBook, notes: EngineBook, options: FootnotesOptions, ctx
   // "12 text" (#41 B12): read only where the number continues the series of the notes
   if (bareCandidates.length) {
     const { accepted, rejected } = bareSeries(rawNoteOccs, bareCandidates, headingCounter(notesLines));
-    if (accepted.length >= (rawNoteOccs.length ? 1 : BARE_MIN)) {
+    if (accepted.length >= (rawNoteOccs.length ? BARE_MIN_TAGGED : BARE_MIN)) {
       const at = new Set(accepted.map((o) => o.line));
       rawNoteOccs = [...rawNoteOccs, ...accepted].sort((a, b) => a.line - b.line);
       unmarkedNoteLines = unmarkedNoteLines.filter((x) => !at.has(x));
@@ -887,16 +892,31 @@ function bareSeries(known: readonly Occ[], candidates: readonly Occ[], headingBe
   const accepted: Occ[] = [];
   let rejected = 0;
   let prev: Occ | null = null;
+  let prevTagged = false;
   for (let i = 0; i < all.length; i++) {
     const { o, bare } = all[i]!;
     if (!bare || isStar(o)) {
-      if (!isStar(o)) prev = o;
+      if (!isStar(o)) {
+        prev = o;
+        prevTagged = true;
+      }
       continue;
     }
     const n = o.marker.num;
     const next = all.slice(i + 1).find((x) => !isStar(x.o))?.o.marker.num;
     const fresh = prev === null || headingBetween(prev.line, o.line);
     const p = prev?.marker.num;
+    // V7 PR2 review, finding 1: next to notes read from a marker ("<sup>2</sup>", "2."), a bare number is a note only where it fills a
+    // gap in that series. The same number as the marked note before it ("1 גרם משקלו" after note 1), or a number the next marked
+    // note in the section already carries ("2 שנים אחר כך…" before "<sup>2</sup>"), opens a continuation line of the note before it
+    const nextTagged = all.slice(i + 1).find((x) => !x.bare && !isStar(x.o))?.o;
+    if (
+      (prevTagged && !fresh && p !== undefined && n <= p) ||
+      (nextTagged !== undefined && nextTagged.marker.num <= n && !headingBetween(o.line, nextTagged.line))
+    ) {
+      rejected++;
+      continue;
+    }
     const ok = numeralIsWord(o.marker.token)
       ? p !== undefined && n === p + 1
       : (p !== undefined && (n === p + 1 || n === p + 2 || n === p || (n > p && n <= p + BARE_GAP_MAX && next === n + 1))) ||
@@ -905,6 +925,7 @@ function bareSeries(known: readonly Occ[], candidates: readonly Occ[], headingBe
     if (ok) {
       accepted.push(o);
       prev = o;
+      prevTagged = false;
     } else rejected++;
   }
   return { accepted, rejected };

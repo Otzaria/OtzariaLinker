@@ -499,6 +499,33 @@ describe('notes that open with a bare number: "12 text" (#41 B12, #14, V7 §2.11
     expect(res.notes.find((n) => n.code === "footnotes/unmarked-note-lines")?.text).toContain("(שורות 4)");
   });
 
+  // V7 PR2 review, finding 1: in a notes book whose notes carry tags, a bare number is a note only where it fills a gap in the
+  // tagged series; a line that opens with the number of the tagged note after it, or repeats the one before it, continues a note
+  it("tagged notes: a continuation line that opens with the next tagged number is not a note", () => {
+    const main = ["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup> ועוד<sup>3</sup>."];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה ראשונה ארוכה", "2 שנים אחר כך כתב כך", "<sup>2</sup> הערה שנייה", "<sup>3</sup> הערה שלישית"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3", "1>4"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+    expect(codes(res.notes)).not.toContain("footnotes/bare-leading");
+  });
+
+  it("tagged notes: a continuation line that repeats the number of the tagged note before it is not a note", () => {
+    const main = ["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup>."];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה ראשונה", "1 גרם משקלו", "<sup>2</sup> הערה שנייה"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("tagged notes: a single bare line that fills a gap is not enough to read bare numbers as notes", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה", "2 שנים אחר כך", "<sup>3</sup> הערה"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3"]);
+    expect(codes(res.notes)).not.toContain("footnotes/bare-leading");
+  });
+
   it("ordinary numbers that open prose lines are not markers: no series, no notes", () => {
     const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
     const notes = ["<h1>הערות לספר</h1>", "1990 נולד המחבר", "40 שנה ישב בעיר", "613 מצוות", "7 ימים", "250 איש"];
