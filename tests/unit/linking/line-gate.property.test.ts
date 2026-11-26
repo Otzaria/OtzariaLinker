@@ -156,6 +156,73 @@ describe("LineGate — the guard alone", () => {
     const other = { ...sug(2), source: { book: NOTES, line: 2 } };
     expect(gate().guard({ suggestions: [other], notes: [], unmatched: [] }).suggestions).toHaveLength(1);
   });
+
+  /*
+   * The policy for a RANGE on the filtered book (V7 round 2, item 5): the start line decides whether the suggestion stays (above); a range
+   * that runs over a line the filter EXCLUDES is TRIMMED to end before it — never split into pieces, never kept over it. A range never
+   * ends on a heading (Otzaria drops such a range), so a cut that lands on one steps back; a cut back to the start leaves a single line.
+   * Blank lines and headings are not the filter's (it judges content lines only), and a line the gate never saw is not judged either:
+   * they do not cut. Every engine's result passes this guard (index.ts engineSteps, maxlink-job, citations-job).
+   */
+  describe("a range on the filtered book", () => {
+    // 0 heading · 1 [א] · 2 [ב] · 3 blank · 4 [ג] · 5 excluded · 6 [ד] · 7 heading · 8 excluded · 9 [ה]
+    const ranged = ["<h1>כותרת</h1>", "[א] אלפא", "[ב] בטא", "", "[ג] גמא", "רעש בלי סימן", "[ד] דלתא", "<h2>פרק ב</h2>", "עוד רעש", "[ה] הא"];
+    const g = () => {
+      const c = compileSourceFilter(spec);
+      if (!c.ok) throw new Error(c.reason);
+      const x = new LineGate("comm", c.filter);
+      x.book(book(COMM, ranged));
+      return x;
+    };
+    const span = (line: number, end: number, reversed = false): Suggestion => {
+      const own = { book: COMM, line, end };
+      const other = { book: BASE, line: 2 };
+      return { ...sug(line), id: `r${line}-${end}${reversed}`, source: reversed ? other : own, target: reversed ? own : other } as Suggestion;
+    };
+    const ownSide = (s: Suggestion) => (s.source.book.key === "comm" ? s.source : s.target);
+
+    it("is trimmed to end before the first excluded line, on either side of the record, with a warning and a note", () => {
+      const r = g().guard({ suggestions: [span(1, 6), span(4, 6, true)], notes: [], unmatched: [] });
+      expect(r.suggestions.map((s) => [ownSide(s).line, ownSide(s).end])).toEqual([
+        [1, 4],
+        [4, undefined],
+      ]);
+      expect(r.suggestions.every((s) => s.warnings.some((w) => w.code === "source-filter/range-trimmed"))).toBe(true);
+      expect(r.suggestions[0]!.warnings.find((w) => w.code === "source-filter/range-trimmed")!.text).toContain("6");
+      expect(r.notes.find((n) => n.code === "source-filter/range-trimmed")?.text).toContain("2");
+    });
+
+    it("blank lines and headings inside the range do not cut it; a cut that lands on a heading steps back from it", () => {
+      const r = g().guard({ suggestions: [span(1, 2), span(1, 4), span(6, 9)], notes: [], unmatched: [] });
+      expect(r.suggestions.map((s) => [ownSide(s).line, ownSide(s).end])).toEqual([
+        [1, 2],
+        [1, 4],
+        [6, undefined], // 8 is excluded: the cut is at 7, a heading, so it steps back to 6 — a single line
+      ]);
+      expect(r.suggestions.slice(0, 2).some((s) => s.warnings.length)).toBe(false);
+      expect(r.notes.some((n) => n.code === "source-filter/range-trimmed")).toBe(true);
+    });
+
+    it("an excluded start still drops the whole suggestion (no range is moved to a permitted line)", () => {
+      expect(g().guard({ suggestions: [span(5, 6)], notes: [], unmatched: [] }).suggestions).toEqual([]);
+    });
+
+    it("the single-line records of a span (spanLines) on the filtered book keep only the permitted lines, and the cited span is trimmed like a range", () => {
+      const s: Suggestion = { ...span(1, 1, true), target: { book: COMM, line: 1 }, citedSpan: { line: 1, end: 6 }, spanLines: [1, 2, 4, 5, 6].map((line) => ({ line, heRef2: `h${line}` })) };
+      const [out] = g().guard({ suggestions: [s], notes: [], unmatched: [] }).suggestions;
+      expect(out!.spanLines?.map((x) => x.line)).toEqual([1, 2, 4]);
+      expect(out!.citedSpan).toEqual({ line: 1, end: 4 });
+    });
+
+    it("exclude mode: a range over a marked line is trimmed before it", () => {
+      const c = compileSourceFilter({ ...spec, mode: "exclude" });
+      if (!c.ok) throw new Error(c.reason);
+      const x = new LineGate("comm", c.filter);
+      x.book(book(COMM, ["רעש", "עוד", "[א] אלפא", "סוף"]));
+      const r = x.guard({ suggestions: [span(0, 3)], notes: [], unmatched: [] });
+      expect(r.suggestions.map((s) => [ownSide(s).line, ownSide(s).end])).toEqual([[0, 1]]);
+    });
+  });
 });
 
 describe("runLineFilter — the run's one filter out of the forms' per-engine options", () => {

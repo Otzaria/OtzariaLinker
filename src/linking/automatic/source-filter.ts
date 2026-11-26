@@ -1,5 +1,6 @@
 import { stripTags } from "../../core/text/html";
 import { checkCustomPattern } from "../../core/text/safe-regex";
+import type { LinkSide } from "../../core/links/model";
 import type { EngineBook, EngineLine, EngineResult, Reason, Suggestion } from "./types";
 
 /*
@@ -208,6 +209,10 @@ export function applySourceFilter(book: EngineBook, filter: CompiledSourceFilter
 export class LineGate {
   private readonly permitted = new Set<number>();
   private readonly seen = new Set<number>();
+  /** content lines the filter judged and did NOT let in: a range on the filtered book stops before the first of them */
+  private readonly excluded = new Set<number>();
+  /** heading lines seen: a cut range never ends on one */
+  private readonly headings = new Set<number>();
   /** content lines judged, and how many of them entered */
   total = 0;
   included = 0;
@@ -223,6 +228,7 @@ export class LineGate {
   judge(l: EngineLine): EngineLine {
     if (this.seen.has(l.index)) return this.prepared(l, this.permitted.has(l.index));
     this.seen.add(l.index);
+    if (l.heading !== null) this.headings.add(l.index);
     if (!judged(l)) {
       if (this.filter.mode === "exclude") this.permitted.add(l.index);
       return l;
@@ -233,7 +239,7 @@ export class LineGate {
     if (eligible) {
       this.permitted.add(l.index);
       this.included++;
-    }
+    } else this.excluded.add(l.index);
     return this.prepared(l, eligible, m);
   }
 
@@ -262,14 +268,89 @@ export class LineGate {
     return [s.source, s.target].filter((side) => side.book.key === this.bookKey).map((side) => side.line);
   }
 
-  /** Stage 5: drops every suggestion (and unmatched line) of a line the filter does not permit, and says how many. */
+  /**
+   * The end a range of the filtered book may keep (the RANGE policy, V7 round 2): it runs from its start, which the filter permits, up to
+   * the line before the first line in it that the filter EXCLUDES — trimmed, never split into pieces and never kept over that line. A cut
+   * that lands on a heading steps back from it (Otzaria drops a range that ends on a heading). Blank lines and headings are not the
+   * filter's to judge, and a line the gate never read is not judged either: neither cuts. Returns `end` itself when nothing is excluded.
+   */
+  rangeEnd(line: number, end: number): number {
+    const cut = this.firstExcluded(line, end);
+    if (cut === null) return end;
+    let e = cut - 1;
+    while (e > line && this.headings.has(e)) e--;
+    return e;
+  }
+
+  /** The first excluded line in (line, end], or null. */
+  private firstExcluded(line: number, end: number): number | null {
+    let cut: number | null = null;
+    if (end - line <= this.excluded.size) {
+      for (let x = line + 1; x <= end; x++) if (this.excluded.has(x)) return x;
+      return null;
+    }
+    for (const x of this.excluded) if (x > line && x <= end && (cut === null || x < cut)) cut = x;
+    return cut;
+  }
+
+  /** A side of the filtered book with its range trimmed (rangeEnd), and the excluded line that cut it; null when untouched. */
+  private trimSide(side: LinkSide): { side: LinkSide; cutAt: number } | null {
+    if (side.book.key !== this.bookKey || side.end === undefined || side.end <= side.line) return null;
+    const cutAt = this.firstExcluded(side.line, side.end);
+    if (cutAt === null) return null;
+    const e = this.rangeEnd(side.line, side.end);
+    const { end: _end, ...single } = side;
+    return { side: e > side.line ? { ...side, end: e } : single, cutAt };
+  }
+
+  /** The suggestion with its ranges on the filtered book trimmed (rangeEnd), with a warning that says where; the same object when untouched. */
+  private trimmed(s: Suggestion): Suggestion {
+    const src = this.trimSide(s.source);
+    const tgt = this.trimSide(s.target);
+    // the single-line records of a span and the span they stand for are the target's (types.ts citedSpan, spanLines)
+    const own = s.target.book.key === this.bookKey;
+    const span = own && s.citedSpan && s.citedSpan.end > s.citedSpan.line ? this.rangeEnd(s.citedSpan.line, s.citedSpan.end) : undefined;
+    const records = own && s.spanLines ? s.spanLines.filter((x) => this.allows(x.line) && (span === undefined || x.line <= span)) : undefined;
+    const spanCut = span !== undefined && span !== s.citedSpan!.end;
+    const recordsCut = records !== undefined && records.length !== s.spanLines!.length;
+    if (!src && !tgt && !spanCut && !recordsCut) return s;
+    const cuts = [src, tgt].filter((x): x is { side: LinkSide; cutAt: number } => x !== null);
+    const at = cuts.length ? Math.min(...cuts.map((x) => x.cutAt)) : s.citedSpan && spanCut ? this.firstExcluded(s.citedSpan.line, s.citedSpan.end) : null;
+    const text =
+      at !== null
+        ? `הטווח קוצר: שורה ${(at + 1).toLocaleString("he")} אינה בסינון השורות, ולכן הטווח נגמר לפניה.`
+        : "חלק מהשורות שההצעה עומדת עליהן אינן בסינון השורות, ולכן הן הוסרו ממנה.";
+    return {
+      ...s,
+      ...(src && { source: src.side }),
+      ...(tgt && { target: tgt.side }),
+      ...(spanCut && { citedSpan: { line: s.citedSpan!.line, end: span! } }),
+      ...(recordsCut && { spanLines: records }),
+      warnings: [...s.warnings, { code: "source-filter/range-trimmed", text }],
+    };
+  }
+
+  /**
+   * Stage 5: drops every suggestion (and unmatched line) of a line the filter does not permit, trims every range on the filtered book that
+   * runs over an excluded line (rangeEnd), and says how many of each.
+   */
   guard(r: EngineResult): EngineResult {
     const kept = r.suggestions.filter((s) => this.linesOf(s).every((line) => this.allows(line)));
     const dropped = r.suggestions.length - kept.length;
     const unmatched = r.unmatched.filter((u) => this.allows(u.line));
-    if (!dropped && unmatched.length === r.unmatched.length) return r;
-    const notes = dropped ? [{ code: "source-filter/guard", text: `${dropped.toLocaleString("he")} הצעות לשורות שסינון השורות אינו כולל הוסרו.` }, ...r.notes] : r.notes;
-    return { suggestions: kept, notes, unmatched };
+    let trimmedCount = 0;
+    const suggestions = kept.map((s) => {
+      const t = this.trimmed(s);
+      if (t !== s) trimmedCount++;
+      return t;
+    });
+    if (!dropped && !trimmedCount && unmatched.length === r.unmatched.length) return r;
+    const notes: Reason[] = [
+      ...(dropped ? [{ code: "source-filter/guard", text: `${dropped.toLocaleString("he")} הצעות לשורות שסינון השורות אינו כולל הוסרו.` }] : []),
+      ...(trimmedCount ? [{ code: "source-filter/range-trimmed", text: `${trimmedCount.toLocaleString("he")} טווחים קוצרו כך שייגמרו לפני השורה הראשונה שסינון השורות אינו כולל.` }] : []),
+      ...r.notes,
+    ];
+    return { suggestions, notes, unmatched };
   }
 
   /** The note a run with a filter starts with. */
