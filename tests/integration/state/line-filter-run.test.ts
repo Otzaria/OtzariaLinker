@@ -162,6 +162,41 @@ describe("citations obey the line filter too (#40 A1: the form offered it, the w
   });
 });
 
+describe("max-link footnotes steps judge the run's filter on the NOTES book, the dependent side (V7 PR2 review, finding 4)", () => {
+  // the plan writes a footnotes step base → notes (the markers are in the base); the run's filter is a statement about the dependent
+  // books, so on such a step it is the notes book's lines that may or may not carry a link — never the base's
+  const BASE_FN = (first: string) =>
+    text(`${BASE_TITLE}.txt`, [`<h1>${BASE_TITLE}</h1>`, "<h2>פרק א</h2>", `${first}אלפא בטא<sup>1</sup> גמא דלתא הא וו זין`, "כף למד מם<sup>2</sup> נון סמך עין", "<h2>פרק ב</h2>", "שין תיו אלף<sup>3</sup> בית גימל"]);
+  const NOTES_TITLE = "הערות על ספר בסיס";
+  const NOTES_FN = text(`${NOTES_TITLE}.txt`, [`<h1>${NOTES_TITLE}</h1>`, "<h2>פרק א</h2>", "<sup>1</sup> הערה אחת", "<sup>2</sup> הערה שתיים", "<h2>פרק ב</h2>", "<sup>3</sup> הערה שלוש"]);
+  async function maxLink(first: string, lineFilter?: { prefix: { preset: "square" }; mode?: "exclude" }) {
+    const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([BASE_FN(first), NOTES_FN]);
+    const scope = { kind: "source", id: store.sources.value[0]!.info.id } as const;
+    const plan = store.maxLink.plan(scope);
+    expect(plan.steps.some((s) => s.engine === "footnotes")).toBe(true);
+    const shown = await store.maxLink.run(plan, store.maxLink.scopeLabel(scope), lineFilter ? { lineFilter } : {});
+    const all = shown ? (store.suggestions.run.value!.result.suggestions as readonly Suggestion[]) : [];
+    const notes = shown ? store.suggestions.run.value!.result.notes.map((n) => n.code) : [];
+    return { footnotes: all.filter((s) => s.engine === "footnotes").map((s) => `${s.source.line}>${s.target.line}`), byHeadings: notes.includes("maxlink/notes-by-headings"), all };
+  }
+
+  it("without a filter: three notes (the case is real)", async () => {
+    expect((await maxLink("")).footnotes).toEqual(["2>2", "3>3", "5>5"]);
+  });
+
+  it('"skip the lines that start with [א]": a base line that starts with [א] keeps its note — the notes book has no such line', async () => {
+    expect((await maxLink("[א] ", { prefix: { preset: "square" }, mode: "exclude" })).footnotes).toEqual(["2>2", "3>3", "5>5"]);
+  });
+
+  it('"only lines that start with [א]" (meant for commentaries): no note line carries it, so no note is linked — and the notes are not linked by headings instead', async () => {
+    const r = await maxLink("[א] ", { prefix: { preset: "square" } });
+    expect(r.footnotes).toEqual([]);
+    expect(r.byHeadings).toBe(false);
+    expect(r.all.filter((s) => s.engine === "headings")).toEqual([]);
+  });
+});
+
 describe("dibur-hamatchil under the line filter: a בא\"ד or שם line inherits from the last INCLUDED line (V7 PR2 review, finding 2)", () => {
   // the excluded lines are another commentary interleaved in the book (issue #27): a "בא"ד" of the [א] commentary continues its own
   // previous dibur, never the excluded line between them. Words engines see an excluded line empty, and an empty line neither links

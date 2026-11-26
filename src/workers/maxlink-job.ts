@@ -246,16 +246,21 @@ export async function maxlinkJob(
   const filter = options.sourceFilter;
   // an invalid filter fails the job before anything runs: running without it would link the lines the user excluded
   if (filter !== undefined) compileForEngine(filter, "headings");
-  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }), ...(filter !== undefined && { [SOURCE_FILTER_OPTION]: filter }) });
-  /** the run's filter judged on each source book once (stage 5 of source-filter.ts: the guard on every step's result) */
+  // the filter is a statement about the DEPENDENT books of the run. A footnotes step runs base → notes (the markers are in the base), so
+  // its dependent book is the step's target: the engine does not get the filter (engineSteps would judge the base's lines), and the guard
+  // judges the notes book (V7 PR2 review, finding 4: a "[א]" filter meant for commentaries dropped every note by the base's lines)
+  const filtered = (step: PlanStep): BookRef => (step.kind === "pair" && step.engine === "footnotes" ? step.target : step.source);
+  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }), ...(filter !== undefined && engine !== "footnotes" && { [SOURCE_FILTER_OPTION]: filter }) });
+  /** the run's filter judged on each dependent book once (stage 5 of source-filter.ts: the guard on every step's result) */
   const gates = new Map<string, LineGate>();
-  const guard = async (step: PlanStep, r: EngineResult, source?: EngineBook): Promise<EngineResult> => {
+  const guard = async (step: PlanStep, r: EngineResult, ...read: EngineBook[]): Promise<EngineResult> => {
     if (filter === undefined) return r;
-    let gate = gates.get(step.source.key);
+    const book = filtered(step);
+    let gate = gates.get(book.key);
     if (!gate) {
-      gate = new LineGate(step.source.key, compileForEngine(filter, step.engine));
-      gate.book(source && source.book.key === step.source.key ? source : await load(registry, step.source, fps));
-      gates.set(step.source.key, gate);
+      gate = new LineGate(book.key, compileForEngine(filter, step.engine));
+      gate.book(read.find((x) => x.book.key === book.key) ?? (await load(registry, book, fps)));
+      gates.set(book.key, gate);
     }
     return gate.guard(r);
   };
@@ -329,8 +334,9 @@ export async function maxlinkJob(
         // the primary target of a hierarchy whose fallback is "review" (PlanChoices.targets, #45): nothing of it above "possible"
         if (step.targetRole === "primary-review")
           result = capConfidence(result, ["certain", "high"], { code: "maxlink/target-fallback", text: `השורה אינה מזכירה אף יעד בשמה, ולכן היא מקושרת ליעד הראשי "${step.target.title}" לבדיקה בלבד, לפי מדיניות היעדים שנבחרה.` });
+        // decided on what the engine found, before the guard: notes the filter excludes are not "no notes found"
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
-        result = await guard(step, result, loaded.source);
+        result = await guard(step, result, loaded.source, loaded.target);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);
       } else {
