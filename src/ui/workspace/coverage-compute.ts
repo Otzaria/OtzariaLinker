@@ -23,7 +23,8 @@ export interface FailedCount {
  */
 export type CoverageTrust = { reliable: true } | { reliable: false; kind: "failed" | "unknown"; text: string };
 export function coverageTrust(links: LinksReading | undefined): CoverageTrust {
-  if (!links || links.state === "counted" || links.state === "none") return { reliable: true };
+  // a text book has no database (#42 C14): its project count is the whole truth
+  if (!links || links.state === "counted" || links.state === "none" || links.state === "no-database") return { reliable: true };
   return { reliable: false, kind: links.state, text: linksReadingText(links) };
 }
 

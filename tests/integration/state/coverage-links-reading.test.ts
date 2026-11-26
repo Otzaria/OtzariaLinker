@@ -91,3 +91,24 @@ describe("the database's links: no links, unknown, and a failed read are three d
     expect(await state.table(["k"], { signal: ctl.signal })).toEqual([]);
   });
 });
+
+describe("a book of a text file has no database (#42 C14)", () => {
+  it("its reading says so — not 'read from the database: none'", async () => {
+    const book = { key: "t:ספר.txt", title: "ספר", origin: "otzaria", lineCount: 3 } as never;
+    const host = {
+      linkState: signal({ links: new Map() }),
+      books: signal(new Map([["t:ספר.txt", book]])),
+      sources: signal([{ info: { id: "t", kind: "text-files", label: "ספר.txt", warnings: [] }, books: [book] }]),
+      lines: { count: () => 3, learnCount: async () => 3 },
+      sameBook: (ref: { key: string }) => ref.key === "t:ספר.txt",
+      runTask: async (_label: string, run: (o: object) => Promise<unknown>) => run({}),
+      suggestions: { run: signal(null), state: signal(new Map()) },
+      quality: { report: signal(null) },
+    } as unknown as CoverageHost;
+    const service = { headings: async () => [], lines: async () => Array.from({ length: 3 }, (_, i) => ({ index: i, text: "שורה", heading: null })), existingLinks: async () => [] };
+    const s = (await new CoverageState(host, service as never).summary("t:ספר.txt"))!;
+    expect(s.links).toEqual({ state: "no-database" });
+    const { linksReadingText } = await import("../../../src/linking/coverage");
+    expect(linksReadingText(s.links!)).not.toContain("מהמסד");
+  });
+});

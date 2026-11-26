@@ -1,5 +1,5 @@
 import { signal, type ReadonlySignal, type Signal } from "@preact/signals";
-import type { SourceBook } from "../core/books";
+import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
 import { candidateLines, contentUnits, coverageCounts, coverageSummary, doubtfulLines, MAX_BOOK_LINES, type CoverageBook, type CoverageReport, type CoverageSummary, type LinksReading } from "../linking/coverage";
@@ -8,7 +8,7 @@ import type { LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { QualityState } from "./quality";
 import type { SuggestionsState } from "./suggestions";
-import type { BooksService, CallOptions } from "./services";
+import type { BooksService, CallOptions, OpenedSource } from "./services";
 
 /** re-exported for the screens (they do not import projects/) */
 export { COVERAGE_RANGES_MAX, type ProjectCoverage };
@@ -31,6 +31,8 @@ export interface CoverageHost {
   readonly suggestions: Pick<SuggestionsState, "run" | "state">;
   /** the last quality report: the links it flags are the doubtful ones (as of its last run) */
   readonly quality: Pick<QualityState, "report">;
+  /** the open sources: a book of a text-files source has no database to read links from (#42 C14); absent = unknown */
+  readonly sources?: ReadonlySignal<readonly OpenedSource[]>;
 }
 
 export interface CoverageOptions {
@@ -84,6 +86,12 @@ const isCancel = (err: unknown, signal?: AbortSignal): boolean => {
  * no links); a cancel is rethrown for the caller to treat as a cancel. `unread` (SourceBook.linksUnread): the database has a table of
  * links it cannot read — the links read are counted, but the answer is "unknown", never "none" or a count that looks complete.
  */
+/** The book comes from loose text files (no database): there are no database links of it (#42 C14). */
+function fromTextFiles(host: CoverageHost, bookKey: string): boolean {
+  const id = sourceIdOfBookKey(bookKey);
+  return host.sources?.peek().find((s) => s.info.id === id)?.info.kind === "text-files";
+}
+
 async function readDbLinks(read: () => Promise<Link[]>, signal?: AbortSignal, unread?: string): Promise<{ links: Link[]; reading: LinksReading }> {
   try {
     const links = await read();
@@ -224,7 +232,8 @@ export class CoverageState {
     const doubtful = options.includeQa === false || !report ? undefined : doubtfulLines(report.issues, owns, first.lineCount);
     let db: readonly Link[] = [];
     let reading: LinksReading = { state: "unknown", why: "not-requested" };
-    if (options.includeDb !== false) {
+    if (options.includeDb !== false && fromTextFiles(this.host, bookKey)) reading = { state: "no-database" };
+    else if (options.includeDb !== false) {
       // a failed read is part of the answer (links.state "failed"), never an empty list; a cancel answers null
       const got = await this.host.runTask("קורא את הקישורים של הספר במסד…", (opts) => readDbLinks(() => this.service.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER, opts), opts.signal, b.linksUnread));
       if (got === null) return null;
@@ -239,7 +248,7 @@ export class CoverageState {
     // only the full picture is the project's "coverage": a count without the database's links (not asked for, or the read failed), the
     // candidates or the QA, with other links or another set of unsuitable lines describes something else, and a reopened project would
     // show it as if it were the whole
-    const full = (reading.state === "counted" || reading.state === "none") && options.includeCandidates !== false && options.includeQa !== false && !options.extraLinks?.length && !options.unsuitable;
+    const full = (reading.state === "counted" || reading.state === "none" || reading.state === "no-database") && options.includeCandidates !== false && options.includeQa !== false && !options.extraLinks?.length && !options.unsuitable;
     if (full) this.remember(bookKey, book.lineCount, summary);
     return summary;
   }
