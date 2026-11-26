@@ -61,6 +61,8 @@ const MAX_TEXT_DOC = 256 * 1024 ** 2;
 const SNIFF = 64 * 1024;
 /** a ZIP is read whole into memory to be inflated, so its size is capped first */
 const MAX_ZIP = 512 * 1024 ** 2;
+/** listings of the last few books shown in the links panel of a mapped database (see fallbackListings) */
+const FALLBACK_LISTINGS = 3;
 
 export class SourceRegistry {
   private readonly sources = new Map<string, BookSource>();
@@ -78,7 +80,10 @@ export class SourceRegistry {
   private readonly identityOf = new Map<string, string>();
   private seq = 0;
   private idPrefix = "s";
-  /** listings built from existingLinks() for sources without their own (mapped databases), by book key */
+  /**
+   * listings built from existingLinks() for sources without their own (mapped databases), by book key, in LRU order and
+   * at most FALLBACK_LISTINGS of them: each holds every link of its book (Issue #42 C4), like DbBookSource's own listings
+   */
   private readonly fallbackListings = new Map<string, Promise<LinkListing>>();
   /** per source: its books by exact title (a personal database's external_link names its targets by title) */
   private readonly titleIndexes = new Map<string, Promise<Map<string, SourceBook>>>();
@@ -228,14 +233,19 @@ export class SourceRegistry {
     const s = this.of(bookKey);
     if (s.linkListing) return s.linkListing(bookKey, ctx);
     if (s.info.kind === "text-files") return "לספרים מקובצי טקסט אין קישורים קיימים במסד. קישורים שלהם נטענים מקובצי ‎_links.json.";
-    let p = this.fallbackListings.get(bookKey);
-    if (!p) {
-      const t0 = performance.now();
-      p = s.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER).then((links) => listingFromLinks(bookKey, links, Math.round(performance.now() - t0)));
+    const p = this.fallbackListings.get(bookKey);
+    if (p) {
+      // LRU: the book shown again is the last to go
+      this.fallbackListings.delete(bookKey);
       this.fallbackListings.set(bookKey, p);
-      p.catch(() => this.fallbackListings.delete(bookKey));
+      return p;
     }
-    return p;
+    const t0 = performance.now();
+    const fresh = s.existingLinks(bookKey, 0, Number.MAX_SAFE_INTEGER).then((links) => listingFromLinks(bookKey, links, Math.round(performance.now() - t0)));
+    this.fallbackListings.set(bookKey, fresh);
+    fresh.catch(() => this.fallbackListings.get(bookKey) === fresh && this.fallbackListings.delete(bookKey)); // a failed read is not cached
+    while (this.fallbackListings.size > FALLBACK_LISTINGS) this.fallbackListings.delete(this.fallbackListings.keys().next().value!);
+    return fresh;
   }
 
   /** The book with this exact title in a source another source's external_link points at (see ExternalTargetResolver). */
