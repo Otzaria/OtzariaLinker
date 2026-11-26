@@ -75,10 +75,10 @@
 | C2 | עץ B עוין | 1 | FIXED | `hostile.test.ts`: לפני `4 failed \| 4 passed` (DAG של 39 עמודים החזיר 2,323,698 שורות ב־7.8 שניות), אחרי `68 passed` |
 | C3 | מילון נשאר בבריכה אחרי כשל | 1 | FIXED | `db-qa-round2.test.ts`: לפני `2 failed`, אחרי `13 passed`. ובמיזוג: גם התנגשות מזהים בבנאי השאירה מילון במאגר. ב־`zstd.test.ts`: לפני `1 failed`, אחרי עובר |
 | C4 | `fallbackListings` בלי תקרה | 1 | FIXED | `fallback-listings.test.ts`: לפני `2 failed \| 1 passed`, אחרי `14 passed` |
-| C5 | חסימת ממשק בייבוא ושמירה | 4 | TODO | |
-| C6 | תקציב גודל | 4 | PARTIAL | נמדד ב־PR4: 2,030,858 בתים מתוך 2,097,152, נשארו 66,294 (3.2%). התקציב לא הועלה. הבנייה דטרמיניסטית (ארבע בניות, אותו hash). V7_RELEASE_READINESS §2 |
-| C7 | כיסוי 200 ספרים בחוט הראשי | 4 | TODO | |
-| C8 | `existingLinks` גדול | 4 | TODO | |
+| C5 | חסימת ממשק בייבוא ושמירה | 4 | FIXED | ייבוא בנתחים ושמירה אוטומטית בזמן פנוי, נדחסת ב־gzip. ‏235 אלף רשומות: המשימה הארוכה ביותר 1,010–2,101 ← 209–367 מ"ש. השמירה: 58MB ← 1.5MB. לפני `3 failed | 4 passed` ו־`3 failed | 5 passed`, אחרי `7 passed` ו־`49 passed`. ‏V7_PERFORMANCE |
+| C6 | תקציב גודל | 4 | FIXED | העזרה נדחסת ב־build (`text-gz`): ‏‎-94KB. התוצר: 1,993,100 בתים מתוך 2,097,152. התקציב לא הוגדל, והבניה דטרמיניסטית |
+| C7 | כיסוי 200 ספרים בחוט הראשי | 4 | PARTIAL | `coverageEnds` מה־Worker. ‏200 ספרים: 8–10 משימות ארוכות (הארוכה 2.2–2.4 שנ') ← 2 (הארוכה 412 מ"ש). heap: ‏+210MB ← ‏+49MB. נשארה משימה אחת של 412 מ"ש |
+| C8 | `existingLinks` גדול | 4 | FIXED | בראשית, 235,899 קישורים: הדף כבר לא נחסם (0 משימות ארוכות; קודם 1–1.2 שנ'), heap ב־Node: ‏+249–305 ← ‏+108–156MB. הכיסוי זהה. ‏`existingLinks` עצמו לא השתנה, והוא עדיין משמש את הקישור המרבי |
 | C9 | ביטוי חוזר בבסיס | 2 | FIXED | עם B2 (`repeatsOf`, `dh/repeated-phrase`, `dh/alt-repeat`): "ודאית" של ביטוי חוזר 115 ← 29 |
 | C10 | שער זוגות לדיבור המתחיל | 2 | FIXED | `pair-fit.test.ts`: לפני `4 failed (4)`, אחרי `4 passed`. `linking/pair-fit.ts`, ב־`maxlinkJob`; `StepResult.pairFit`, `MaxLinkJobOptions.forcedPairs`. 16 זוגות לא קשורים: 908 ← 0 "ודאית"/"גבוהה"; 37 זוגות אמיתיים `suitable`. הממשק: לא |
 | C11 | ניקוד וכיווניות בסימן | 2 | FIXED | `source-filter-bidi.test.ts`: לפני `10 failed \| 1 passed`, אחרי `11 passed` |
