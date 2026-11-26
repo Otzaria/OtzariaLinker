@@ -16,7 +16,7 @@ import { fileBlob, fingerprint } from "../../validation/env";
  * compared before and after. Prints counts and book titles only — never a line of text (docs/validation/V7_V52_VALIDATION.md).
  *
  *   OTZARIA_DB=<seforim.db> OTZARIA_PERSONAL_DB=<v52.db> OTZARIA_V52_V7=analysis|batch|all [MEASURE_OUT=file]
- *   [OTZARIA_V52_BATCH=150] [OTZARIA_V52_SEED=52] [OTZARIA_V52_STEP_S=180]
+ *   [OTZARIA_V52_BATCH=150] [OTZARIA_V52_SEED=52] [OTZARIA_V52_STEP_S=180] [OTZARIA_V52_PARTS=official|own]
  *   npx vitest run tests/integration/linking/v52-v7-validation.local.test.ts
  *
  * analysis: the books, their kinds, the links (internal = both ends in v52, external = into the official library), the flags the
@@ -31,6 +31,7 @@ const MODE = process.env.OTZARIA_V52_V7 ?? "";
 const BATCH = Number(process.env.OTZARIA_V52_BATCH ?? 150);
 const SEED = Number(process.env.OTZARIA_V52_SEED ?? 52);
 const STEP_S = Number(process.env.OTZARIA_V52_STEP_S ?? 180);
+const PARTS = process.env.OTZARIA_V52_PARTS;
 const log = (line: string) => {
   console.log(line);
   if (process.env.MEASURE_OUT) appendFileSync(process.env.MEASURE_OUT, `${line}\n`);
@@ -189,6 +190,8 @@ describe.runIf(OFFICIAL && V52 && MODE)("V7 §4.10: v52 through the tool (read-o
       ["v52 → official", pick(toOfficial, BATCH), official!.info.id],
       ["v52 → v52", pick(toOwn, BATCH), v52!.info.id],
     ] as const) {
+      // OTZARIA_V52_PARTS=official|own: one of the two runs only
+      if (PARTS && !(PARTS === "official" ? name === "v52 → official" : name === "v52 → v52")) continue;
       store.maxLink.discardJob();
       store.deleteLinks(store.allLinks.value.map((l) => l.id));
       const scope = { kind: "books", keys } as const;
