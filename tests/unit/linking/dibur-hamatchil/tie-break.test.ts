@@ -172,6 +172,14 @@ describe("the engine: a context pick past the next strong line goes back between
     expect(res.suggestions).toHaveLength(2);
   });
 
+  it("a moved place is 'ambiguous', so the short-ד\"ה cap (it reads only 'high') never sees it (V7 round 2 review, finding 10)", () => {
+    // the place moved by the order pass; its SHORT_LOCAL facts now follow the new place, but they are not read: the cap is for "high"
+    const s = byLine(res, 1);
+    expect(s.rules).toContain("dh/tie-order");
+    expect(s.confidence).toBe("ambiguous");
+    expect(s.rules.filter((r) => r.startsWith("dh/short-"))).toEqual([]);
+  });
+
   it("with the order pass off, the context pick stands", () => {
     expect(baseLine(byLine(run(comm, base, { order: false }), 1))).toBe(4);
   });
