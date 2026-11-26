@@ -46,11 +46,17 @@ const DOUBLE_Q = new Set(['"', "״", "“", "”", "″", "‟", "„"]);
 const SINGLE_Q = new Set(["'", "׳", "‘", "’", "´", "`"]);
 const PUNCT = new Set(["(", ")", "[", "]", "{", "}", ",", ".", ":", ";", "-", "–", "—", "/"]);
 const SPACE_ENTITIES = new Set(["nbsp", "ensp", "emsp", "thinsp", "#160", "#xa0"]);
+/** the vowel points (shva … qamats, dagesh, shin/sin dots, qamats qatan) */
+const NIKUD_POINT = /[ְ-ׇּׁׂ]/;
+/** the longest note mark in <sup> that is skipped (a number or a letter or two, "1", "יב", "*") */
+const MAX_NOTE_MARK = 6;
 
 /** Tokenizes one line (the anchor text). Pure. */
 export function citationTokens(html: unknown): Tok[] {
   const s = String(html ?? "");
   const out: Tok[] = [];
+  /** nikud (the vowel points, not the cantillation) somewhere in the line: a sof pasuq there ends a verse */
+  const vocalized = NIKUD_POINT.test(s);
   let glued = false;
   // current word
   let text = "";
@@ -109,7 +115,17 @@ export function citationTokens(html: unknown): Tok[] {
     if (c === "<") {
       const close = s.indexOf(">", i + 1);
       if (close < 0) break; // the generator hides the rest of the line
-      if (BREAK_TAGS.test(s.slice(i + 1, close))) space();
+      const tag = s.slice(i + 1, close);
+      if (BREAK_TAGS.test(tag)) space();
+      // "ברכות<sup>1</sup> יג:": a note's mark (a few characters in <sup>) is no word of the text — it would stand between a book's
+      // name and its place (issue #42 C21). Skipped like a tag; the offsets of every other token are untouched.
+      if (/^sup\b/i.test(tag)) {
+        const end = s.indexOf("</sup>", close + 1);
+        if (end >= 0 && end - close - 1 <= MAX_NOTE_MARK && !s.slice(close + 1, end).includes("<")) {
+          i = end + "</sup>".length - 1;
+          continue;
+        }
+      }
       i = close;
       continue;
     }
@@ -172,6 +188,14 @@ export function citationTokens(html: unknown): Tok[] {
       }
       digits += c;
       dEnd = i + 1;
+      continue;
+    }
+    // "ברכות יג׃": some books write sof pasuq for the colon of an amud (issue #42 C21). In a vocalised line it ends a verse, as
+    // it always did; elsewhere, glued to a word, it is read as ":" (one character either way, so no offset moves)
+    if (c === "׃" && start >= 0 && !pending && !vocalized) {
+      flush();
+      out.push({ kind: "punct", text: ":", key: ":", gershayim: false, gershayimAt: -1, geresh: false, rawStart: i, rawEnd: i + 1, glued: true });
+      glued = true;
       continue;
     }
     if (PUNCT.has(c)) {

@@ -26,6 +26,8 @@ export interface AddrElem {
   readonly n: number;
   /** last number of a range written "א-ג" on this element */
   readonly to?: number;
+  /** daf only: the amud the range ends on ("לא.-לב:" → to 32, toAmud 2) */
+  readonly toAmud?: 1 | 2;
   /** daf only: 1 = עמוד א, 2 = עמוד ב (from "." / ":" / ע"א / עמוד ב / a following א'/ב') */
   readonly amud?: 1 | 2;
   /** written with a marker word (פרק, סי', דף…) or a compact marker (פ"ג, ה"א, סק"ב) */
@@ -283,7 +285,8 @@ function parseAddressIn(toks: readonly Tok[], i: number, opts: { enclosed?: bool
   const strongTok = elems.some((e) => e.explicit || e.numeral.form !== "bare" || e.amud !== undefined);
   // "לקמן ה' ע"ב", "במ"ק כ' ע"ב": an amud written out (ע"א / ע"ב) makes even an everyday word a daf
   // (after a tractate's name, "ב"מ קח." is a daf: the glued side counts there)
-  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && (e.amud === undefined || (!!e.amudGlued && !dafContext)));
+  // (a range of dafim, "שבת לא.-לב:", is no everyday word: both its ends carry an amud)
+  const commonOnly = elems.every((e) => e.numeral.common && !e.explicit && e.toAmud === undefined && (e.amud === undefined || (!!e.amudGlued && !dafContext)));
   // brackets count only when they close right after the location: "(בראשית ב א)", "נדרים (כ ב)"
   // …or at a ";" between the places of a list in brackets ("(ויקרא כו; דברים כח)")
   const closed = (bracketed || !!opts.enclosed) && (isPunct(toks[to], CLOSE) || isPunct(toks[to], ";"));
@@ -408,6 +411,16 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
       }
     }
   }
+  // "שבת לא.-לב:", "דף ב ע"א - ג ע"ב": a range of dafim, each end with its amud (issue #42 C21)
+  let range: { to: number; toAmud: 1 | 2 } | null = null;
+  if (amud !== undefined && isPunct(toks[next], "-")) {
+    const end = numeralOf(toks[next + 1]);
+    const mark = end && sideMark(end, toks[next + 2], toks[next + 3]) ? ([toks[next + 2]!.text === "." ? 1 : 2, 1] as const) : end ? amudAt(toks, next + 2, true) : null;
+    if (end && mark && (end.n > num.n || (end.n === num.n && mark[0] > amud)) && end.n - num.n <= 50) {
+      range = { to: end.n, toAmud: mark[0] };
+      next += 2 + mark[1];
+    }
+  }
   const elem: AddrElem = {
     kind: marker || amud !== undefined ? "daf" : "?",
     n: num.n,
@@ -416,6 +429,7 @@ function readDaf(toks: readonly Tok[], k: number, num: Numeral, marker: boolean)
     ...(amud !== undefined && { amud }),
     ...(maybeAmud !== undefined && { maybeAmud }),
     ...(glued && { amudGlued: true }),
+    ...(range && { to: range.to, toAmud: range.toAmud }),
   };
   return { elem, next };
 }

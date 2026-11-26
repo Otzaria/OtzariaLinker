@@ -222,3 +222,59 @@ describe("C20 — a siman of a book in parts of the Shulchan Aruch: the part the
     expect(s.confidence).not.toBe("possible");
   });
 });
+
+describe("C21 — forms that were missed", () => {
+  const one = (text: string, key: string) => run(text).suggestions.filter((s) => s.target.book.key === key);
+  const lineOf = (book: { key: string }, heRef: string) => BOOKS.find((b) => b.book.key === book.key)!.refs.findIndex((r) => r.heRef === heRef);
+
+  it("'שמ\"א ג ד' outside brackets: the verse (a name that is also a numeral, so at most 'possible')", () => {
+    const [s] = one('כמו שכתוב שמ"א ג ד ועוד', B.sam1.key);
+    expect(s!.target.line).toBe(lineOf(B.sam1, "שמואל א, ג, ד"));
+    expect(s!.confidence).toBe("possible");
+    // after a place word it is a siman: "סי' שמ"א ג ד" is no book of Samuel
+    expect(one('ועיין סי\' שמ"א ג ד ושם', B.sam1.key)).toEqual([]);
+  });
+
+  it("'בראשית א.' — a chapter alone outside brackets, where the words end: the whole chapter, 'possible'", () => {
+    for (const text of ["כמו שכתוב בבראשית א. ועוד", "כמו שכתוב בראשית א; ועוד", "וכך כתוב בראשית ב"]) {
+      const [s] = one(text, B.gen.key);
+      expect(s, text).toBeDefined();
+      expect(s!.confidence).toBe("possible");
+      expect(s!.citedSpan ?? s!.target).toBeDefined();
+    }
+    // mid-sentence it is no place ("בראשית א ועוד"), nor after "פרשת"
+    expect(one("כמו שכתוב בראשית א ועוד", B.gen.key)).toEqual([]);
+    expect(one("ובפרשת בראשית א.", B.gen.key)).toEqual([]);
+  });
+
+  it("'ויקרא רבה ג': a parasha of a midrash rabbah by a bare numeral, 'possible'", () => {
+    const [s] = one("ועיין ויקרא רבה ג ושם", B.levR.key);
+    expect(s!.target.line).toBe(lineOf(B.levR, "ויקרא רבה, ג, א"));
+    expect(s!.confidence).toBe("possible");
+  });
+
+  it("'שבת לא.-לב:': a range of dafim, from amud א of לא to amud ב of לב", () => {
+    const [s] = one("ועיין שבת לא.-לב: ושם", B.shab.key);
+    expect(s!.target.line).toBe(lineOf(B.shab, "שבת, לא., א"));
+    expect(s!.citedSpan).toEqual({ line: lineOf(B.shab, "שבת, לא., א"), end: lineOf(B.shab, "שבת, לב:, ג") });
+    expect(s!.heRef2).toBe("שבת לא.-לב:");
+    // in "ציטוט בטקסט" the range is the target itself (C17)
+    const inline = run("ועיין שבת לא.-לב: ושם", { citationType: "inline-linker" }).suggestions.find((x) => x.target.book.key === B.shab.key)!;
+    expect(inline.target.end).toBe(lineOf(B.shab, "שבת, לב:, ג"));
+  });
+
+  it("'ברכות יג׃': sof pasuq written for the colon of the amud", () => {
+    const [s] = one("ועיין ברכות יג׃ ושם", B.ber.key);
+    expect(s!.target.line).toBe(lineOf(B.ber, "ברכות, יג:, א"));
+    expect(s!.confidence).toBe("certain");
+    // a vocalised verse that ends with a numeral-like word keeps its sof pasuq as the end of the verse
+    expect(one("וַיֹּאמֶר בְּרָכוֹת לֹא׃", B.ber.key)).toEqual([]);
+  });
+
+  it("'ברכות<sup>1</sup> יג:': a note's mark between the name and the place", () => {
+    const text = "ועיין ברכות<sup>1</sup> יג: ושם";
+    const [s] = one(text, B.ber.key);
+    expect(s!.target.line).toBe(lineOf(B.ber, "ברכות, יג:, א"));
+    expect(s!.confidence).toBe("certain");
+  });
+});

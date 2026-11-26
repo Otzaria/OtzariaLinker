@@ -367,7 +367,10 @@ export class CitationScanner {
       const ps = sec && !secAddr ? partSiman(toks, sec.next) : null;
       // "(קהלת רבה פרשה ז')", "בויקרא רבה סוף פ"ד", "(ויק"ר רפכ"ב)", "(ב"ר ספמ"ז)": a parasha of a Midrash Rabbah
       const rabbah = !sec && m.entry.targets.length && m.entry.targets.every((t) => isRabbah(t.book.title)) ? rabbahParsha(toks, m.to) : null;
-      const addr = rabbah || secAddr || ps || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      const parsed = rabbah || secAddr || ps || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      // "בראשית א.", "ויקרא רבה ג": one bare numeral where the words end, after a book by chapters (issue #42 C21) — a loose form
+      const single = sec ? null : singleBareAt(toks, i, m, parsed);
+      const addr = single ?? parsed;
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       // …or "ע"ז כ"ו א'": a quoted daf and a lone amud letter
@@ -376,7 +379,10 @@ export class CitationScanner {
       // "(תה' צט ז)": a Tanakh name that is also a numeral, with chapter and verse in brackets closing after them
       // …or a chapter alone written as a numeral ("(תה' נט)")
       const bracketVerse = opensBefore(toks, i) && addr.closed && (addr.elems.length === 2 || (addr.elems.length === 1 && !addr.elems[0]!.numeral.common)) && addr.elems.every((e) => e.kind === "?") && m.entry.targets.every((t) => t.collection === "tanakh");
-      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate && !bracketVerse) {
+      // "שמ"א ג ד" outside brackets (issue #42 C21): a name of three letters or more that is also a numeral, then chapter and verse
+      // as two bare numerals that are no words — not after a word that a number follows ("סי' שמ"א ג", "בשנת שמ"א")
+      const numericVerse = m.entry.numeric && !bracketVerse && m.entry.targets.every((t) => t.collection === "tanakh") && m.entry.text.replace(/["']/g, "").length >= 3 && addr.elems.length === 2 && addr.elems.every((e) => e.kind === "?" && !e.numeral.common && e.numeral.form !== "digits" && e.amud === undefined && e.maybeAmud === undefined && e.to === undefined) && !numberWordBefore(toks, i);
+      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate && !bracketVerse && !numericVerse) {
         this.drop("numeric-name");
         continue;
       }
@@ -408,6 +414,8 @@ export class CitationScanner {
       if (cands.length && cands.every((c) => c.collection === "tur") && elems.some((e) => e.kind === "seif")) readAs = "tur-seif";
       if (ps && addr === ps) readAs = "part-siman";
       if (rabbah && addr === rabbah) readAs = "rabbah-parsha";
+      if (numericVerse) readAs = "numeric-name-verse";
+      if (single) readAs = "single-bare";
       // "ברכות פרק בתרא דף נ"ו", "במסכת כתובות פרק בתרא": a chapter by an ordinal word is the Gemara's
       if (elems[0]!.ordinal && cands.some((x) => x.collection === "bavli") && !qualifierBefore(toks, i)) cands = cands.filter((x) => x.collection === "bavli");
       // "ובמדרש רבה [ויקרא פכ"ב]", "ברבות [בראשית פי"א]", "ובמד"ר [במדבר פי"ב]": the midrash on that book, not the book
@@ -1882,6 +1890,47 @@ function sectionAt(toks: readonly Tok[], at: number): { part: string; next: numb
     if (names.includes(one)) return { part, next: i + 1 };
   }
   return null;
+}
+
+/** words a number follows ("סי' שמ"א", "בשנת שמ"א", "דף", "אות"): a name that is also a numeral after one of them is that number */
+const NUMBER_WORD_BEFORE = /^[ובלדהמש]{0,2}(?:סי'|סימן|סימנים|ס"ק|סק'|סע'|סעי'|סעיף|דף|ד'|פרק|פ'|פר'|הלכה|הל'|אות|עמוד|עמ'|תשובה|תשו'|שנת|שנה|כלל|שער|רמז|מצוה|מצות|משנה|מאמר|פסקה|אופן|חלק|ח')$/;
+const numberWordBefore = (toks: readonly Tok[], i: number): boolean => {
+  const prev = before(toks, i, 1);
+  return prev?.kind === "word" && NUMBER_WORD_BEFORE.test(wordShape(prev));
+};
+
+/** a word for a parasha before a name: "בפרשת בראשית א" is the parasha, not the book */
+const PARSHA_BEFORE = /^[ובלד]{0,2}(?:פרשת|פרשה|פרש'|פ'|פר')$/;
+
+/**
+ * "בראשית א.", "כמו שכתוב בראשית ב" (at the line's end), "ויקרא רבה ג" (issue #42 C21): ONE bare numeral after the name of a book of the
+ * Tanakh or of a midrash rabbah — its chapter (parasha), a whole unit. parseAddress does not take a single bare numeral outside brackets
+ * as a place ("שמות ה'", "בראשית ברא"); this reads it only where the words end (punctuation or the line's end), or before any word after
+ * a midrash rabbah, whose two-word name is no phrase of prose; never after a word for a parasha, never a numeral that is also a word,
+ * never a title that is one ("שמות", "דברים"). With the glued "." parseAddress read as an amud ("בראשית א." — daf א), the period is the
+ * sentence's. A loose form: engine.ts scores it "possible" (PENALTY.looseForm).
+ */
+function singleBareAt(toks: readonly Tok[], i: number, m: AliasMatch, parsed: Address | null): Address | null {
+  const ts = m.entry.targets;
+  if (!ts.length || m.entry.numeric || opensBefore(toks, i)) return null;
+  const tanakh = ts.every((t) => t.collection === "tanakh");
+  const rabbah = ts.every((t) => isRabbah(t.book.title));
+  if ((!tanakh && !rabbah) || ts.some((t) => COMMON_TITLES.has(t.book.title))) return null;
+  const prev = before(toks, i, 1);
+  if (prev?.kind === "word" && PARSHA_BEFORE.test(wordShape(prev))) return null;
+  const num = numeralOf(toks[m.to]);
+  if (!num || num.common || num.form === "digits" || num.n > 150) return null;
+  if (parsed) {
+    const e = parsed.elems[0]!;
+    if (!(parsed.elems.length === 1 && e.amudGlued && e.amud === 1 && !e.explicit && e.to === undefined && parsed.to === m.to + 2 && !parsed.closed)) return null;
+  } else {
+    const after = toks[m.to + 1];
+    const ends = !after || (after.kind === "punct" && ";:)],.".includes(after.text) && !(after.text === "," && numeralOf(toks[m.to + 2])));
+    const word = rabbah && after?.kind === "word" && !after.gershayim && !after.geresh && !numeralOf(after);
+    if (!ends && !word) return null;
+  }
+  if (isDate(toks, m.to + 1)) return null;
+  return { elems: [{ kind: "?", n: num.n, explicit: false, numeral: num }], from: m.to, to: m.to + 1, bracketed: false, closed: false, evidence: "medium" };
 }
 
 /**

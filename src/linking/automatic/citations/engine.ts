@@ -181,6 +181,11 @@ const PENALTY = {
    * restart in each part, and only one part's was found — at most "possible" (a book by headings already pays 0.1)
    */
   partUndecided: 0.06,
+  /**
+   * loose forms read in the V7 round (issue #42 C21): one bare numeral where the words end ("בראשית א.", "ויקרא רבה ג"), a name
+   * that is also a numeral outside brackets ("שמ"א ג ד") — each was no place before, for a reason (prose writes them): "possible"
+   */
+  looseForm: 0.16,
 } as const;
 
 export interface Pending {
@@ -767,6 +772,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
   if (c.rule === "dibur-no-commentator") s -= PENALTY.diburNoCommentator;
   if (c.quantityLike) s -= PENALTY.quantityLike;
+  if (c.rule === "single-bare" || c.rule === "numeric-name-verse") s -= PENALTY.looseForm;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
@@ -847,7 +853,9 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
-  "dibur-no-commentator": "אחרי המקום כתוב ד\"ה בלי שם של מפרש: המילים הן של פירוש כלשהו על הדף, ולא כתוב איזה. הקישור הוא לדף עצמו, ולכן הוא גס (לכל היותר \"אפשרית\"); אם תדעו מי המפרש, קשרו לפירוש שלו",
+  "single-bare": "אחרי שם של ספר בתנ\"ך או של מדרש רבה נכתב מספר אחד בלבד, בלי סימן ובלי סוגריים, במקום שהמשפט נגמר בו: הפרק (הפרשה) כולו. צורה רופפת, ולכן לכל היותר \"אפשרית\"",
+  "numeric-name-verse": "שם הספר הוא גם מספר (\"שמ\"א\"), ואחריו שני מספרים בלי סוגריים: פרק ופסוק. צורה רופפת, ולכן לכל היותר \"אפשרית\"",
+  "dibur-no-commentator":"אחרי המקום כתוב ד\"ה בלי שם של מפרש: המילים הן של פירוש כלשהו על הדף, ולא כתוב איזה. הקישור הוא לדף עצמו, ולכן הוא גס (לכל היותר \"אפשרית\"); אם תדעו מי המפרש, קשרו לפירוש שלו",
   "responsa-named": "שם המחבר ומילה לתשובות (\"בתשו'\", \"שו\"ת\") לפני הסימן: ספר התשובות שלו בספרייה",
   "responsa-author": "שם המחבר לפני הסימן, וספר התשובות הוא החיבור היחיד שלו בספרייה",
   "implicit-previous": "נכתב מקום בסוגריים בלי שם ספר, ולכן הוא נקרא בספר של ההפניה שלפניו (כמו \"שם\")",
