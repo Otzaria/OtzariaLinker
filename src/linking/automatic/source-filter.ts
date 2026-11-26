@@ -193,9 +193,10 @@ export function applySourceFilter(book: EngineBook, filter: CompiledSourceFilter
  * in every one of them. The stages, each in one place:
  *   (1) permitted lines   LineGate.judge — decided once per line, on the original text (headings and blank lines are never a filtered line's
  *                         own: in "include" mode they are not permitted to carry a link, in "exclude" mode they are);
- *   (2) preparation       the same call returns the line as the engine reads it — a words engine (dibur-hamatchil, pattern, citations) sees
- *                         an excluded line empty, so it cannot match noise; a structure engine (headings, footnotes) sees every line, because
- *                         its numbering and windows run through them, and only its suggestions are judged;
+ *   (2) preparation       the same call returns the line as the engine reads it — a words engine (dibur-hamatchil, pattern) sees an
+ *                         excluded line empty, so it cannot match noise; a structure engine (headings, footnotes) sees every line, because
+ *                         its numbering and windows run through them, and only its suggestions are judged; citations read every line
+ *                         too, because "שם" on an included line refers to what an excluded line cited (V7 PR2 review, finding 2);
  *   (3) the engines       unchanged;
  *   (4) the merge         unchanged (state/maxlink.ts, linking/merge.ts): it only combines what the engines proposed;
  *   (5) the guard         LineGate.guard — every suggestion whose line in the filtered book is not permitted is dropped, whichever engine or

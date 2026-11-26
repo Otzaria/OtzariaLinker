@@ -39,10 +39,11 @@ const MAX_PAGES = 50;
  * Keep the signature: the max-linking orchestrator calls it as is.
  */
 export async function citationsJob(registry: SourceRegistry, source: BookRef, allOptions: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
-  // the run's line filter (issue #27, findings #40 A1; source-filter.ts LineGate): a reference on an excluded line is not read (the line is
-  // empty for the scan, like for any words engine), and the guard drops whatever still comes from one
+  // the run's line filter (issue #27, findings #40 A1; source-filter.ts LineGate): an excluded line is still READ, as context — a "שם" or
+  // a bare "פרק ג" on the next included line refers to the place the excluded line cited (V7 PR2 review, finding 2: blanking it sent
+  // "[ב] (שם, ג)" after "א) (בראשית ב, ב)" to בראשית א, ג at "high") — and the guard drops every suggestion and unmatched line of it
   const { [SOURCE_FILTER_OPTION]: rawFilter, ...options } = allOptions;
-  const gate = rawFilter === undefined ? null : new LineGate(source.key, compileForEngine(rawFilter, "citations"));
+  const gate = rawFilter === undefined ? null : new LineGate(source.key, compileForEngine(rawFilter, "citations"), false);
   const result = await citationsRun(registry, source, options, ctx, gate);
   if (!gate) return result;
   const guarded = gate.guard(result);

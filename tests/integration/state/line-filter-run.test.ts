@@ -141,4 +141,52 @@ describe("citations obey the line filter too (#40 A1: the form offered it, the w
     expect(await store.suggestions.runCitations(citing, { ...options, noGate: true })).toBe(true);
     expect(commentaryLines(store, citing)).toEqual([1, 3]);
   });
+
+  // V7 PR2 review, finding 2: an excluded line is not linked, but it is still read: "שם" on the next included line refers to the
+  // place the excluded line cited (the reader reads it), not to the last place on an included line
+  it('"שם" after a citation on an excluded line: the excluded line is the antecedent, and is not linked', async () => {
+    const IBID = text("חיבור.txt", ["<h1>חיבור</h1>", "[א] כמו שנאמר (בראשית א, א) וזה פשוט", "א) ועוד שם (בראשית ב, ב) רעש", "[ב] וכן (שם, ג) ודוק"]);
+    const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([DB, IBID]);
+    const citing = [...store.books.value.values()].find((b) => b.title === "חיבור")!.key;
+    const placeOf = (line: number) => {
+      const s = (store.suggestions.run.value!.result.suggestions as readonly Suggestion[]).find((x) => x.source.book.key === citing && x.source.line === line)!;
+      return { heRef: s.heRef2, confidence: s.confidence };
+    };
+    expect(await store.suggestions.runCitations(citing, { noGate: true })).toBe(true);
+    const unfiltered = placeOf(3);
+    expect(unfiltered.heRef).toMatch(/ב, ג/);
+    expect(await store.suggestions.runCitations(citing, { noGate: true, sourceFilter: { prefix: { preset: "square" } } })).toBe(true);
+    expect(commentaryLines(store, citing)).toEqual([1, 3]);
+    expect(placeOf(3)).toEqual(unfiltered);
+  });
+});
+
+describe("dibur-hamatchil under the line filter: a בא\"ד or שם line inherits from the last INCLUDED line (V7 PR2 review, finding 2)", () => {
+  // the excluded lines are another commentary interleaved in the book (issue #27): a "בא"ד" of the [א] commentary continues its own
+  // previous dibur, never the excluded line between them. Words engines see an excluded line empty, and an empty line neither links
+  // nor breaks the chain; the guard drops nothing here because nothing is proposed on an excluded line.
+  const DH_COMM = text(`${COMM_TITLE}.txt`, [
+    `<h1>${COMM_TITLE}</h1>`,
+    "<h2>פרק א</h2>",
+    "[א] אלפא בטא גמא: פירוש על הדברים האלה כאן",
+    "א) כף למד מם נון: שורת רעש שאינה צריכה להיכנס",
+    "[ב] בא\"ד והוא המשך הפירוש",
+  ]);
+  it("the בא\"ד line follows line 2 (base line 2), not the excluded line 3 (base line 3)", async () => {
+    const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([BASE, DH_COMM]);
+    const key = (t: string) => [...store.books.value.values()].find((b) => b.title === t)!.key;
+    const comm = key(COMM_TITLE);
+    const baseLineOf = (line: number) => {
+      const s = (store.suggestions.run.value!.result.suggestions as readonly Suggestion[]).find((x) => (x.source.book.key === comm ? x.source.line : x.target.line) === line && (x.source.book.key === comm || x.target.book.key === comm));
+      return s ? (s.source.book.key === comm ? s.target.line : s.source.line) : null;
+    };
+    expect(await store.suggestions.runEngine("dibur-hamatchil", comm, key(BASE_TITLE), { sourceFilter: { prefix: { preset: "square" } } })).toBe(true);
+    expect(commentaryLines(store, comm)).toEqual([2, 4]);
+    expect(baseLineOf(4)).toBe(baseLineOf(2));
+    expect(baseLineOf(2)).toBe(2);
+    const inherited = (store.suggestions.run.value!.result.suggestions as readonly Suggestion[]).find((x) => x.target.book.key === comm && x.target.line === 4)!;
+    expect(inherited.rules).toContain("dh/inherit-baad");
+  });
 });
