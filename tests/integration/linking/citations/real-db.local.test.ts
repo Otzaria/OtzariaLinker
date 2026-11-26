@@ -547,12 +547,12 @@ describe.runIf(path)("citations engine vs the citation links of the real seforim
 });
 
 /**
- * The forms added in V4, V5 and cite6 (docs/AUTOMATION_ENGINE.md §6.3), by the rule a suggestion carries. They are
+ * The forms added in V4, V5, cite6 and V7 (docs/AUTOMATION_ENGINE.md §6.3), by the rule a suggestion carries. They are
  * tallied apart from the forms the floors were set on: LINKER barely links most of them (a place in
  * brackets with no book, responsa by their author, the Zohar's pages…), so their strict precision says
  * little — they are hand-checked instead, and must agree with the database where it has an opinion.
  */
-const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid", "commentator-ibid", "rambam-topic-known", "rambam-hilchot", "context-daf", "chapter-name-other", "sk-siman-before", "dalet-four", "tur-seif", "part-siman", "rabbah-parsha", "yalkut-remez", "yalkut-parsha", "commentator-after-base"];
+const NEW_FORMS = ["implicit-previous-far", "implicit-previous", "implicit-context", "responsa-named", "responsa-author", "rambam-topic-abbrev", "rambam-topic-word", "rambam-named", "named-level", "via-pages", "dibur-context", "dibur-here", "ibid-amud", "named-bare", "midrash-rabbah", "title-commentator", "commentator-named", "ibid-far", "ibid-v4", "part-book", "author-part", "marker-v4", "chapter-number", "sk-here", "sk-ibid", "rema-ibid", "commentator-ibid", "rambam-topic-known", "rambam-hilchot", "context-daf", "chapter-name-other", "sk-siman-before", "dalet-four", "tur-seif", "part-siman", "rabbah-parsha", "yalkut-remez", "yalkut-parsha", "commentator-after-base", "dibur-no-commentator", "single-bare", "numeric-name-verse"];
 function newForm(rules: readonly string[]): string | null {
   for (const f of NEW_FORMS) if (rules.some((r) => r.startsWith(`citations.${f}`))) return f;
   return null;
