@@ -3,6 +3,7 @@ import type { BookRef } from "../core/links/model";
 import { combineFingerprints } from "../core/text/fingerprint";
 import { ENGINES, type EngineId, type Suggestion } from "./automatic";
 import { sanitizeStoredOptions } from "./automatic/option-specs";
+import { compileSourceFilter, parseSourceFilter, type SourceFilter } from "./automatic/source-filter";
 import type { StepResult } from "./maxlink-report";
 import { PAIR_ENGINES, type MaxLinkPlan, type PairEngineId, type PlanChoices, type PlanStep, type RelationKind, type UserPair } from "./plan";
 
@@ -55,6 +56,8 @@ export interface JobRecord {
   /** the engines left ticked (absent: all) */
   engines?: EngineId[];
   engineOptions?: Partial<Record<EngineId, Record<string, unknown>>>;
+  /** the line filter of the run (issue #27, findings #40 A1): which lines of each source book may carry a link, for every engine */
+  lineFilter?: SourceFilter;
   /** the label of the source chosen for the bases, when a base was open twice */
   preferBase?: string;
   /** the user's explicit pairs and per-pair methods (PlanChoices), by title: a resumed job plans the same */
@@ -154,7 +157,7 @@ export function runOrder(titles: readonly string[], steps: ReadonlyMap<string, r
 }
 
 /** A new job of a plan: a book with steps waits; one without is "not planned", with the planner's reason. */
-export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "sources" | "engines" | "engineOptions" | "preferBase" | "choices">, now = Date.now()): JobRecord {
+export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "sources" | "engines" | "engineOptions" | "lineFilter" | "preferBase" | "choices">, now = Date.now()): JobRecord {
   const by = stepsByBook(plan);
   const books: JobBook[] = plan.books.map((row) => {
     const steps = by.get(row.book.key) ?? [];
@@ -167,13 +170,15 @@ export function jobFromPlan(plan: MaxLinkPlan, meta: Pick<JobRecord, "scope" | "
 
 /**
  * What a book's result depends on besides the texts: its steps (engine, kind, the other book, the
- * plan's options for the pair) and the user's settings of those engines. A change of any of them runs
- * the book again even when no text changed.
+ * plan's options for the pair), the user's settings of those engines and the run's line filter. A change of
+ * any of them runs the book again even when no text changed (a result found under another filter is never reused).
  */
-export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRecord["engineOptions"]): string {
+export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRecord["engineOptions"], lineFilter?: SourceFilter | null): string {
   const parts = steps.map((s) => `${s.engine}|${s.kind}|${s.kind === "pair" ? s.target.title : ""}|${s.kind === "pair" && s.options ? JSON.stringify(s.options) : ""}|${s.kind === "pair" && s.titleGate ? "gate" : ""}${s.kind === "pair" && s.ambiguousBase ? "|amb" : ""}${s.kind === "pair" && s.titleForced ? "|forced" : ""}`).sort();
   const engines = [...new Set(steps.map((s) => s.engine))].sort();
-  return JSON.stringify([parts, engines.map((e) => engineOptions?.[e] ?? null)]);
+  const sig = [parts, engines.map((e) => engineOptions?.[e] ?? null)];
+  // no filter: the signature of a job recorded before the filter was the run's, so its books are still recognised as unchanged
+  return JSON.stringify(lineFilter ? [...sig, { lineFilter: [lineFilter.prefix, lineFilter.mode ?? "include", lineFilter.strip ?? null] }] : sig);
 }
 
 /**
@@ -181,14 +186,14 @@ export function stepsSignature(steps: readonly PlanStep[], engineOptions?: JobRe
  * steps' signature. Undefined when one of the texts has no fingerprint (unreadable): such a book is
  * never skipped as unchanged.
  */
-export function bookFingerprint(steps: readonly PlanStep[], fps: Readonly<Record<string, string>>, engineOptions?: JobRecord["engineOptions"]): string | undefined {
+export function bookFingerprint(steps: readonly PlanStep[], fps: Readonly<Record<string, string>>, engineOptions?: JobRecord["engineOptions"], lineFilter?: SourceFilter | null): string | undefined {
   const source = steps[0]?.source;
   if (!source || !fps[source.key]) return undefined;
   const others = [...new Set(steps.flatMap((s) => (s.kind === "pair" ? [s.target.key] : [])))];
   if (others.some((k) => !fps[k])) return undefined;
   const titleOf = new Map(steps.flatMap((s) => (s.kind === "pair" ? [[s.target.key, s.target.title] as const] : [])));
   const bases = others.map((k) => `${titleOf.get(k)}=${fps[k]}`).sort();
-  return combineFingerprints([fps[source.key]!, ...bases, stepsSignature(steps, engineOptions)]);
+  return combineFingerprints([fps[source.key]!, ...bases, stepsSignature(steps, engineOptions, lineFilter)]);
 }
 
 /** Every book key a book's fingerprint reads. */
@@ -295,6 +300,16 @@ function storedEngineOptions(stored: object): NonNullable<JobRecord["engineOptio
   return out;
 }
 
+/**
+ * The run's line filter read back from storage: a well-formed one whose expression passes the guard. A damaged one is NOT dropped quietly —
+ * the job would then go on without it and link the lines the user excluded — the whole record is (null).
+ */
+function storedLineFilter(raw: unknown): { lineFilter?: SourceFilter } | null {
+  if (raw === undefined) return {};
+  const f = parseSourceFilter(raw);
+  return f && compileSourceFilter(f).ok ? { lineFilter: f } : null;
+}
+
 /** PlanChoices read back from storage: only well-formed entries survive (a damaged one plans as if never chosen). */
 function parseChoices(raw: unknown): { choices?: PlanChoices } {
   if (!raw || typeof raw !== "object") return {};
@@ -338,6 +353,8 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
     if (r?.v !== 1 || typeof r.id !== "string" || !Array.isArray(r.books) || !Array.isArray(r.sources)) return null;
     const states: JobState[] = ["running", "paused", "cancelled", "done"];
     const statuses = new Set<JobBookStatus>(["pending", "done", "no-match", "failed", "unchanged", "not-planned"]);
+    const lineFilter = storedLineFilter(r.lineFilter);
+    if (!lineFilter) return null;
     const books = r.books.filter((b): b is JobBook => !!b && typeof b.title === "string" && statuses.has(b.status) && typeof b.engines === "object" && b.engines !== null);
     return {
       v: 1,
@@ -346,6 +363,7 @@ export function parseJobRecord(text: string | null | undefined): JobRecord | nul
       sources: r.sources.filter((s): s is string => typeof s === "string"),
       ...(Array.isArray(r.engines) && { engines: r.engines.filter((e): e is EngineId => ENGINES.some((x) => x.id === e)) }),
       ...(r.engineOptions && typeof r.engineOptions === "object" && !Array.isArray(r.engineOptions) && { engineOptions: storedEngineOptions(r.engineOptions) }),
+      ...lineFilter,
       ...(typeof r.preferBase === "string" && { preferBase: r.preferBase }),
       ...parseChoices(r.choices),
       // a job that was running when the tab closed is paused: nothing runs until the user says so

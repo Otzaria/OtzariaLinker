@@ -3,8 +3,8 @@ import type { SourceBook } from "../core/books";
 import type { Link } from "../core/links/model";
 import { baseTitleKey, declaredBaseTitle } from "../core/links/titles";
 import { validateLink, type ValidationContext } from "../core/links/validate";
-import type { EngineId } from "../linking/automatic";
-import { ENGINES } from "../linking/automatic";
+import type { EngineId, SourceFilter } from "../linking/automatic";
+import { compileSourceFilter, ENGINES, parseSourceFilter } from "../linking/automatic";
 import { notesBaseTitle, PAIR_ENGINES, pairMethodKey, singleBookEngines, type MaxLinkPlan, type PairControl, type PairEngineId, type Relation, type UserPair } from "../linking/plan";
 import { qaAction, redundantDuplicates, type QaCategory, type QaReport } from "../linking/qa";
 import type { ExchangeState, ExportBundle } from "./exchange";
@@ -377,6 +377,8 @@ export interface GuidedRecord {
   pairMethods?: Record<string, string[]>;
   /** the controls of single pairs (switched off, link type, confidence threshold); absent in older records */
   pairControls?: Record<string, PairControl>;
+  /** the line filter of the run (issue #27, findings #40 A1): which lines of the books may carry a link, for every method; absent in older records */
+  lineFilter?: SourceFilter;
   links: number;
   /** the result was downloaded: nothing to continue */
   done: boolean;
@@ -420,6 +422,9 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
   try {
     const r = JSON.parse(text) as Partial<GuidedRecord>;
     if (r?.v !== 1 || !isGuidedStep(r.step) || !Array.isArray(r.sources)) return null;
+    // a damaged filter is not dropped quietly (the continued flow would link the lines the user excluded): the record is
+    const lineFilter = r.lineFilter === undefined ? undefined : parseSourceFilter(r.lineFilter);
+    if (lineFilter === null || (lineFilter && !compileSourceFilter(lineFilter).ok)) return null;
     const sources = r.sources
       .filter((s): s is GuidedRecord["sources"][number] => !!s && typeof s.label === "string")
       .map((s) => ({ label: s.label, kind: String(s.kind ?? ""), books: Number(s.books) || 0, ...(Array.isArray(s.files) && { files: s.files.filter((f): f is string => typeof f === "string").slice(0, 50) }) }));
@@ -432,6 +437,7 @@ export function parseGuidedRecord(text: string | null | undefined): GuidedRecord
       ...(Array.isArray(r.methods) && r.methods.some((e) => typeof e === "string") && { methods: r.methods.filter((e): e is string => typeof e === "string" && ENGINES.some((x) => x.id === e)) }),
       ...(r.pairMethods && typeof r.pairMethods === "object" && Object.keys(cleanPairMethods(r.pairMethods)).length > 0 && { pairMethods: cleanPairMethods(r.pairMethods) }),
       ...(r.pairControls && typeof r.pairControls === "object" && Object.keys(cleanPairControls(r.pairControls)).length > 0 && { pairControls: cleanPairControls(r.pairControls) }),
+      ...(lineFilter && { lineFilter }),
       links: Number(r.links) || 0,
       done: r.done === true,
       savedAt: Number(r.savedAt) || 0,
@@ -489,6 +495,11 @@ export class GuidedFlowState {
   readonly pairMethods = signal<Readonly<Record<string, readonly PairEngineId[]>>>({});
   /** the controls of single pairs by pairMethodKey (advanced): a pair switched off, its link type, its confidence threshold; none = automatic */
   readonly pairControls = signal<Readonly<Record<string, PairControl>>>({});
+  /**
+   * The line filter of the run (issue #27, findings #40 A1): "only the lines that start with [א]", for every method and every pair of the run
+   * (null = every line). Kept in the saved flow (GuidedRecord.lineFilter) and given to the job, which keeps it too (JobRecord.lineFilter).
+   */
+  readonly lineFilter = signal<SourceFilter | null>(null);
   /** a flow an earlier session left unfinished, offered on the home screen and in step 1 */
   readonly saved = signal<GuidedRecord | null>(null);
   /** where a continued flow had got to: step 1 leads back there once its books are open again */
@@ -585,6 +596,7 @@ export class GuidedFlowState {
       this.methods.value = null;
       this.pairMethods.value = {};
       this.pairControls.value = {};
+      this.lineFilter.value = null;
       this.resumeTo.value = null;
       this.saved.value = null;
       this.bundle.value = null;
@@ -629,6 +641,7 @@ export class GuidedFlowState {
       this.methods.value = r.methods?.length ? new Set(r.methods as EngineId[]) : null;
       this.pairMethods.value = (r.pairMethods ?? {}) as Record<string, readonly PairEngineId[]>;
       this.pairControls.value = r.pairControls ?? {};
+      this.lineFilter.value = r.lineFilter ?? null;
       this.repoScope.value = null;
       this.bookSources.value = [];
       this.resumeTo.value = r.step;
@@ -703,6 +716,17 @@ export class GuidedFlowState {
     this.pairControls.value = next;
   }
 
+  /** The run's line filter (null: every line). An invalid one is refused with the reason, and the filter stays as it was. */
+  setLineFilter(filter: SourceFilter | null): string | null {
+    if (filter) {
+      const spec = parseSourceFilter(filter);
+      const c = spec ? compileSourceFilter(spec) : null;
+      if (!spec || !c?.ok) return c && !c.ok ? c.reason : "הגדרת סינון השורות אינה תקינה: צריך סימן מוכר או ביטוי רגולרי.";
+      this.lineFilter.value = spec;
+    } else this.lineFilter.value = null;
+    return null;
+  }
+
   setPreferSource(id: string): void {
     this.preferLabel = undefined;
     this.preferSource.value = id;
@@ -735,7 +759,8 @@ export class GuidedFlowState {
     if (!plan || !scope) return false;
     this.step.value = "run";
     const prefer = this.preferSource.peek() || (this.preferLabel ? this.host.sources.peek().find((s) => s.info.label === this.preferLabel)?.info.id : undefined);
-    return this.host.maxLink.run(plan, this.host.maxLink.scopeLabel(scope), prefer ? { preferSource: prefer } : {});
+    const lineFilter = this.lineFilter.peek();
+    return this.host.maxLink.run(plan, this.host.maxLink.scopeLabel(scope), { ...(prefer && { preferSource: prefer }), ...(lineFilter && { lineFilter }) });
   }
 
   /** "Approve all N certain" (the same action as the suggestions table's button). */
@@ -835,6 +860,7 @@ export class GuidedFlowState {
       ...(this.methods.value && { methods: [...this.methods.value] }),
       ...(Object.keys(this.pairMethods.value).length && { pairMethods: Object.fromEntries(Object.entries(this.pairMethods.value).map(([k, v]) => [k, [...v]])) }),
       ...(Object.keys(this.pairControls.value).length && { pairControls: { ...this.pairControls.value } }),
+      ...(this.lineFilter.value && { lineFilter: this.lineFilter.value }),
       links: this.facts.value.links,
       done: this.downloaded.value !== null,
       savedAt: Date.now(),

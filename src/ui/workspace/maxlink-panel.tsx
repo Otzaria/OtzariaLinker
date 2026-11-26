@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { rovingKeys, rovingTabIndex } from "../keyboard";
-import { ENGINES, type EngineId } from "../../linking/automatic";
+import { ENGINES, runLineFilter, type EngineId } from "../../linking/automatic";
 import { defaultFormValues, ENGINE_OPTION_SPECS, isEssential, toEngineOptions, type FormValues, type OptionsCheck } from "../../linking/automatic/option-specs";
 import type { ReportCounts, ReportRow } from "../../linking/maxlink-report";
 import { AUTO_EVIDENCE_BOOKS, EVIDENCE_BOOKS, type MaxLinkScope } from "../../state/maxlink";
@@ -70,7 +70,9 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
     for (const e of engines) if (!off.has(e.id)) out.set(e.id, toEngineOptions(e.id, formValues[e.id] ?? defaultFormValues(e.id), advanced ? "all" : "essential"));
     return out;
   }, [advanced, engines.map((e) => e.id).join(), off, formValues]);
-  const invalid = [...checks.values()].some((c) => Object.keys(c.errors).length > 0);
+  // the line filter is the run's (findings #40 A1): chosen in one engine's settings, it applies to every engine; two different ones block the run
+  const lineFilter = useMemo(() => runLineFilter(Object.fromEntries([...checks].map(([e, c]) => [e, c.options]))), [checks]);
+  const invalid = [...checks.values()].some((c) => Object.keys(c.errors).length > 0) || !lineFilter.ok;
 
   const start = async () => {
     if (!plan || !scope) return;
@@ -202,6 +204,10 @@ export function MaxLinkForm({ onDone, onCancel }: { onDone: () => void; onCancel
       <p class="muted" style="margin:0;font-size:var(--fs-sm)">
         הכלי רק מציע. שום קישור לא נוצר בלי אישור שלכם, ו"אישור כל הוודאיות" מאשר רק הצעות ודאיות.
       </p>
+      {lineFilter.ok && lineFilter.filter && (
+        <p class="muted" role="status" style="margin:0;font-size:var(--fs-sm)">סינון השורות חל על כל השיטות של ההרצה: שורה שהסינון אינו כולל לא תקבל הצעה מאף שיטה.</p>
+      )}
+      {!lineFilter.ok && <p class="warn-text" role="alert" style="margin:0">{lineFilter.reason}</p>}
       <div class="row">
         <button class="btn filled" disabled={!plan?.steps.length || !!store.task.value || invalid} onClick={start} title={invalid ? "יש הגדרה לא תקינה בהגדרות השיטות" : undefined}>
           <Icon name="oz_links" size={18} />

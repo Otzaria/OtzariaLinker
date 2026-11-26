@@ -3,7 +3,7 @@ import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/bo
 import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
-import type { EngineId, EngineResult } from "../linking/automatic";
+import type { EngineId, EngineResult, SourceFilter } from "../linking/automatic";
 import type { LineFate } from "../matching/line-diff";
 import type { BookSearchResult } from "../core/text/find";
 import type { MaxLinkJobResult } from "../linking/maxlink-report";
@@ -75,7 +75,7 @@ export interface BooksService {
    * Runs the steps of a max-link plan in the worker (workers/maxlink-job.ts). Optional so that
    * services without it (older test fakes) still type-check; max-link then reports it is unavailable.
    */
-  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>>; sefariaOwned?: readonly string[] }, opts?: CallOptions): Promise<MaxLinkJobResult>;
+  runMaxLink?(steps: PlanStep[], options: { engineOptions?: Partial<Record<string, Record<string, unknown>>>; sefariaOwned?: readonly string[]; sourceFilter?: SourceFilter }, opts?: CallOptions): Promise<MaxLinkJobResult>;
   /** The fingerprints of books' text (core/text/fingerprint.ts), by key: the batch job skips unchanged books by them. Optional like runMaxLink. */
   fingerprints?(bookKeys: string[], opts?: CallOptions): Promise<Record<string, string>>;
 }

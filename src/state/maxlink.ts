@@ -2,7 +2,7 @@ import { pushTo } from "../core/collections";
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import type { BookRef } from "../core/links/model";
-import type { EngineId, Reason } from "../linking/automatic";
+import { runLineFilter, type EngineId, type Reason, type SourceFilter } from "../linking/automatic";
 import { bookFingerprint, failBook, fingerprintKeys, finishBook, jobCsv, jobFromPlan, jobTotals, parseBookResult, parseJobRecord, runOrder, stableId, stepsByBook, withStableIds, type BookResult, type JobBook, type JobRecord, type JobState, type StoredStep } from "../linking/batch-job";
 import { buildReport, MAXLINK_PROGRESS_UNIT, reportCsv, type MaxLinkJobResult, type MaxLinkReport, type MaxLinkRunInfo, type StepOutcome } from "../linking/maxlink-report";
 import { applyPairMinimums, linePairKey, mergeSuggestions, type MergedSuggestion, type MergeItem } from "../linking/merge";
@@ -45,6 +45,11 @@ export interface MaxLinkHost {
 export interface MaxLinkRunOptions {
   /** per-engine options (advanced mode) */
   engineOptions?: Partial<Record<EngineId, Record<string, unknown>>>;
+  /**
+   * The line filter of the run (issue #27, findings #40 A1): which lines of each source book may carry a link, for EVERY engine of the run.
+   * A filter a form put under one engine (engineOptions[engine].sourceFilter) is lifted to here (runLineFilter); two different ones refuse the run.
+   */
+  lineFilter?: SourceFilter | null;
   /** the source the plan took the bases from when a base is open in several: a resumed job plans the same */
   preferSource?: string;
 }
@@ -254,12 +259,16 @@ export class MaxLinkState {
       this.host.notify("warning", "אין מה להריץ: לא נמצא אף ספר שאפשר לקשר אוטומטית.", plan.books.filter((b) => b.skipped).map((b) => `${b.book.title}: ${b.skipped}`));
       return false;
     }
+    const lifted = runLineFilter(options.engineOptions, options.lineFilter);
+    if (!lifted.ok) return void this.host.notify("error", lifted.reason), false;
+    const engineOptions = lifted.engineOptions as Partial<Record<EngineId, Record<string, unknown>>>;
     const preferBase = options.preferSource ? this.host.sources.value.find((s) => s.info.id === options.preferSource)?.info.label : undefined;
     const job = jobFromPlan(plan, {
       scope: scopeLabel,
       sources: [...new Set(plan.books.map((b) => this.labelOfKey(b.book.key)).filter(Boolean))],
       engines: Object.keys(plan.perEngine) as EngineId[],
-      ...(options.engineOptions && Object.keys(options.engineOptions).length && { engineOptions: options.engineOptions }),
+      ...(Object.keys(engineOptions).length && { engineOptions }),
+      ...(lifted.filter && { lineFilter: lifted.filter }),
       ...(preferBase && { preferBase }),
       // the books by title only: session keys are not kept in a job (a resumed job plans from the titles)
       ...(plan.choices && { choices: { ...plan.choices, ...(plan.choices.pairs && { pairs: plan.choices.pairs.map(({ dependantKey: _d, baseKey: _b, ...rest }) => rest) }) } }),
@@ -442,7 +451,7 @@ export class MaxLinkState {
     const decisions = this.decisionsByTitle();
     this.setBooks((b) => {
       if (!finished.has(b.title)) return b;
-      const fp = bookFingerprint(steps.get(b.title)!, fps, job.engineOptions);
+      const fp = bookFingerprint(steps.get(b.title)!, fps, job.engineOptions, job.lineFilter);
       if (fp && fp === b.fingerprint) return skip ? { ...b, status: "unchanged" } : b;
       changed++;
       this.results.delete(b.title);
@@ -502,6 +511,7 @@ export class MaxLinkState {
     });
     const t0 = Date.now();
     const engineOptions = job.engineOptions;
+    const sourceFilter = job.lineFilter;
     const sefariaOwned = this.host.sefariaOwnedKeys?.();
     let lost = false;
     await this.host.runTask(
@@ -517,7 +527,7 @@ export class MaxLinkState {
           const at = settled * UNIT;
           try {
             // a pause or stop hands back what the book's engines found so far (keepPartial): shown as partial
-            const res = await run(own, { ...(engineOptions && { engineOptions }), ...(sefariaOwned && { sefariaOwned }) }, { signal: ctl.signal, keepPartial: true, onProgress: (d, n) => opts.onProgress?.(at + (n > 0 ? Math.min(UNIT - 1, Math.floor((d / n) * UNIT)) : 0), of * UNIT) });
+            const res = await run(own, { ...(engineOptions && { engineOptions }), ...(sefariaOwned && { sefariaOwned }), ...(sourceFilter && { sourceFilter }) }, { signal: ctl.signal, keepPartial: true, onProgress: (d, n) => opts.onProgress?.(at + (n > 0 ? Math.min(UNIT - 1, Math.floor((d / n) * UNIT)) : 0), of * UNIT) });
             if (res.stopped) {
               this.takePartial(title, own, res);
               break;
@@ -603,7 +613,7 @@ export class MaxLinkState {
     this.results.set(title, result);
     const i = job.books.findIndex((b) => b.title === title);
     const done = stored.map((s) => ({ engine: s.engine, ...(s.item.error !== undefined && { error: s.item.error }), suggestions: s.item.result?.suggestions.length ?? 0 }));
-    this.setBook(title, finishBook(job.books[i]!, done, ms, bookFingerprint(steps, res.fingerprints ?? {}, job.engineOptions)));
+    this.setBook(title, finishBook(job.books[i]!, done, ms, bookFingerprint(steps, res.fingerprints ?? {}, job.engineOptions, job.lineFilter)));
     void this.kv?.set(resultKey(job.id, i), JSON.stringify(result)).catch(() => {
       /* storage full: the book runs again after a reload (ensurePlan) */
     });

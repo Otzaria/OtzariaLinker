@@ -3,7 +3,7 @@ import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection
 import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
 import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
-import { capSpanned, runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { capSpanned, compileForEngine, LineGate, runEngineSliced, SOURCE_FILTER_OPTION, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
 import { titleFit, titleGateAdvice, type TitleFitReport, type TitleGateAdvice } from "../linking/title-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
@@ -37,6 +37,11 @@ export interface MaxLinkJobOptions {
   engineOptions?: Partial<Record<string, Record<string, unknown>>>;
   /** keys of the books the library treats as Sefaria's (core/links/sefaria-owned.ts), given to every engine */
   sefariaOwned?: readonly string[];
+  /**
+   * The line filter of the run (issue #27, findings #40 A1; linking/automatic/source-filter.ts): given to every engine of every step, and
+   * checked again on what each step returns, whichever path produced it.
+   */
+  sourceFilter?: unknown;
   /**
    * A time budget for each step: a step that runs longer is stopped with what it found (marked `stopped`)
    * and the job goes on to the next one — unlike a cancel, which stops the job. The app does not set it;
@@ -244,7 +249,22 @@ export async function maxlinkJob(
   const partLinks = new Map<string, Map<string, number[]>>();
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
-  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }) });
+  const filter = options.sourceFilter;
+  // an invalid filter fails the job before anything runs: running without it would link the lines the user excluded
+  if (filter !== undefined) compileForEngine(filter, "headings");
+  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }), ...(filter !== undefined && { [SOURCE_FILTER_OPTION]: filter }) });
+  /** the run's filter judged on each source book once (stage 5 of source-filter.ts: the guard on every step's result) */
+  const gates = new Map<string, LineGate>();
+  const guard = async (step: PlanStep, r: EngineResult, source?: EngineBook): Promise<EngineResult> => {
+    if (filter === undefined) return r;
+    let gate = gates.get(step.source.key);
+    if (!gate) {
+      gate = new LineGate(step.source.key, compileForEngine(filter, step.engine));
+      gate.book(source && source.book.key === step.source.key ? source : await load(registry, step.source, fps));
+      gates.set(step.source.key, gate);
+    }
+    return gate.guard(r);
+  };
   const items: StepResult[] = [];
   /** the fingerprint of every book read (MaxLinkJobResult.fingerprints) */
   const fps = new Map<string, string>();
@@ -276,7 +296,7 @@ export async function maxlinkJob(
       if (step.kind === "pair" && step.relation.through) {
         loaded = null;
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks, fps);
+        result = await guard(step, await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks, fps));
       } else if (step.kind === "pair") {
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
@@ -307,13 +327,14 @@ export async function maxlinkJob(
         if (!skipped && fit && advice && advice.action !== "run") result = titleAdvice(result, fit, advice, step.titleForced === true, loaded.source.book.title, loaded.target.book.title);
         if (step.ambiguousBase) result = ambiguousBaseCap(result, step.target.title);
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
+        result = await guard(step, result, loaded.source);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);
       } else {
         loaded = null;
         const run = runners[step.engine];
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);
-        result = await run(registry, step.source, optionsOf(step.engine), inner);
+        result = await guard(step, await run(registry, step.source, optionsOf(step.engine), inner));
       }
       const cut = ctx.signal?.aborted === true;
       items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...((cut || overBudget()) && { stopped: true }) });
