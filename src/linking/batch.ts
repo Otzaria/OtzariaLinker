@@ -95,6 +95,16 @@ export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, name
       pool = same;
     }
   }
+  /*
+   * Under the loose key (another spelling, a volume suffix folded away) the hits may be DIFFERENT books — "… חלק א" and "… חלק ב",
+   * or two titles that differ by more than a mater lectionis — and not editions of one book. Editions share their exact key; books
+   * that meet only under the loose one are as ambiguous as any two others (titles.ts looseTitleKey), so no edition rule (the
+   * dependant's own source, the official library) and no preferred source may choose between them (V7 v52 validation §5).
+   */
+  if (spelled && new Set(pool.map((b) => baseTitleKey(b.title))).size > 1)
+    return {
+      reason: `השם "${named ?? k}" מתאים, בכתיב אחר, לכמה ספרים שונים: ${[...new Set(pool.map((b) => `"${b.title}"`))].join(", ")}. לא ברור על איזה מהם הספר כתוב, ולכן הוא לא זווג. קשרו את הזוג ידנית, עם ספר הבסיס הנכון.`,
+    };
   const editions = pool;
   /** the rule that chose among the editions, when one did (not the user, not evidence) */
   let rule: string | undefined;
