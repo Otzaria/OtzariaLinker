@@ -1,6 +1,4 @@
-import { createRequire } from "node:module";
 import { zlibSync } from "fflate";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { mappingProblems, type DbMapping } from "../../../src/core/db-mapping";
 import { MappedDbReader } from "../../../src/database/generic/mapped-reader";
@@ -8,6 +6,7 @@ import { previewSchema } from "../../../src/database/generic/preview";
 import { blobKind, GenericTextCodec } from "../../../src/database/generic/text-codec";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Review C14: 0x78 followed by a byte that makes the 16-bit header divisible by 31 is the zlib
@@ -39,8 +38,7 @@ describe("text BLOBs that start like a zlib header (review C14)", () => {
 
 describe("a BLOB text column of such values, end to end (review C14)", () => {
   it("is previewed as text, the mapping is not blocked, and the lines read back", async () => {
-    const require = createRequire(import.meta.url);
-    const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+        const SQL = await loadSqlJs();
     const db = new SQL.Database();
     db.run("CREATE TABLE t (book TEXT, n INTEGER, body BLOB)");
     const lines = ["x marks the spot", "x^2 + 1 = y", "x} closes it"];

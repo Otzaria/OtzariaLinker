@@ -1,8 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { constants, zstdCompressSync, zstdDecompressSync } from "node:zlib";
-import initSqlJs from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LinkerError } from "../../../src/core/errors";
 import { stripNikud } from "../../../src/core/text/hebrew";
@@ -17,15 +15,15 @@ import {
 } from "../../../src/database/compression/zstd";
 import { detectKind } from "../../../src/sources/detect";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /* Real data: tests/fixtures/db/seforim-v7-mini.db (scripts/fixtures/make_mini_db.py) carries the
    official dictionary and real compressed rows. Node's zlib (zstd) makes frames for edge cases. */
-const require = createRequire(import.meta.url);
 let dict: Uint8Array;
 let rows: { id: number; content: Uint8Array | string }[];
 
 beforeAll(async () => {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database(readFileSync("tests/fixtures/db/seforim-v7-mini.db"));
   dict = db.exec("SELECT dict FROM zstd_dict")[0]!.values[0]![0] as Uint8Array;
   rows = db.exec("SELECT lc.id, lc.content FROM line_content lc JOIN line l ON l.id = lc.id WHERE l.bookId = 1 ORDER BY l.lineIndex")[0]!

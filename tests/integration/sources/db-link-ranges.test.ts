@@ -1,22 +1,20 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { MAX_BOOK_LINES } from "../../../src/core/limits";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { DbBookSource } from "../../../src/sources/db/db-source";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Issue #41 C1: a range end read from a database nobody vouches for (link_range.endLineIndex) reached the loops as it
  * was — 20,000,000 cost 400+ MB in the max-link job, 2^31 would be tens of GB. The real slice of the library
  * (tests/fixtures/db/seforim-v7-mini.db) with the end of a few of its own ranges overwritten through sql.js.
  */
-const require = createRequire(import.meta.url);
 const BYTES = new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"));
 
 /** the slice with the given link_range rows' endLineIndex replaced; returns which links were changed */
 async function hostile(values: unknown[]) {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database(BYTES);
   const rows = db.exec(`SELECT r.linkId, r.side, l.sourceBookId FROM link_range r JOIN link l ON l.id = r.linkId ORDER BY r.linkId, r.side LIMIT ${values.length}`)[0]!.values as [number, number, number][];
   expect(rows).toHaveLength(values.length);

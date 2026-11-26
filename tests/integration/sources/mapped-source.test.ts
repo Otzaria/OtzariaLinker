@@ -65,8 +65,8 @@ describe("SourceRegistry — databases that need a mapping", () => {
 
 describe("a database whose tables are all still in its -wal file", () => {
   it("is refused with the WAL reason, not just 'no tables'", async () => {
-    const initSqlJs = (await import("sql.js")).default;
-    const SQL = await initSqlJs();
+    const { loadSqlJs } = await import("../../support/sql-js");
+    const SQL = await loadSqlJs();
     const db = new SQL.Database();
     db.run("PRAGMA user_version = 1"); // an empty schema, but a real header page
     const bytes = db.export();

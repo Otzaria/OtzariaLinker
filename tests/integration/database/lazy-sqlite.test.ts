@@ -1,20 +1,19 @@
-import { createRequire } from "node:module";
-import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import type { Database, SqlJsStatic } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { parseCreateTable } from "../../../src/database/sqlite/lazy/ddl";
 import type { SqlValue } from "../../../src/database/sqlite/lazy/record";
 import { SqliteFile, SqliteFormatError } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * The lazy reader is checked against SQLite itself (sql.js): the same file, read both ways, must
  * give identical rows. Databases are generated with several page sizes and both text encodings,
  * enough rows for multi-level b-trees, and payloads large enough to spill into overflow pages.
  */
-const require = createRequire(import.meta.url);
 let SQL: SqlJsStatic;
 beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  SQL = await loadSqlJs();
 });
 
 // The comments contain commas on purpose: v3 split on them and renamed columns (TD-H5).

@@ -1,18 +1,17 @@
-import { createRequire } from "node:module";
-import initSqlJs, { type SqlJsStatic } from "sql.js";
+import type { SqlJsStatic } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { decodeRecord, readVarint } from "../../../src/database/sqlite/lazy/record";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Review C19: a 9-byte varint is a signed 64-bit two's-complement value. Negative rowids are legal
  * in SQLite (always 9 bytes on disk) and used to come back as 18446744073709552000.
  */
-const require = createRequire(import.meta.url);
 let SQL: SqlJsStatic;
 beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  SQL = await loadSqlJs();
 });
 
 /** SQLite's varint encoding of a signed 64-bit value. */

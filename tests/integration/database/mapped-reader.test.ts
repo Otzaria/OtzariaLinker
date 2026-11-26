@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { gzipSync } from "fflate";
-import initSqlJs, { type SqlJsStatic } from "sql.js";
+import type { SqlJsStatic } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { guessMapping } from "../../../src/core/db-guess";
 import { mappingProblems, ROWID, type DbMapping } from "../../../src/core/db-mapping";
@@ -10,16 +9,16 @@ import { previewSchema } from "../../../src/database/generic/preview";
 import { blobKind, GenericTextCodec } from "../../../src/database/generic/text-codec";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Generic (non-Otzaria) databases read through a mapping: the fixtures of
  * scripts/fixtures/make_generic_dbs.py, plus databases generated here with sql.js for the cases a
  * fixture would make too large (50,000 lines) or that must be corrupted on purpose.
  */
-const require = createRequire(import.meta.url);
 let SQL: SqlJsStatic;
 beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  SQL = await loadSqlJs();
 });
 
 const fixture = (name: string) => SqliteFile.open(bytesSource(new Uint8Array(readFileSync(`tests/fixtures/db/generic/${name}`))));

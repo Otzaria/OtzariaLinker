@@ -1,11 +1,10 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Product audit F1, F2, F12 end to end, with the audit's own inputs (scripts/audit/make_inputs.py):
@@ -13,7 +12,6 @@ import { registryService } from "../../support/books-service";
  * book; the official database's "בראשית" is. The engines, the builder, the quality check and the
  * export decide it by one rule (core/links/sefaria-titles.ts).
  */
-const require = createRequire(import.meta.url);
 const GEN1 = ["בראשית ברא אלהים את השמים ואת הארץ.", "והארץ היתה תהו ובהו וחשך על פני תהום ורוח אלהים מרחפת על פני המים.", "ויאמר אלהים יהי אור ויהי אור.", "וירא אלהים את האור כי טוב ויבדל אלהים בין האור ובין החשך."];
 const DH = ["בראשית ברא", "תהו ובהו", "יהי אור", "כי טוב"];
 const HEB = ["א", "ב", "ג", "ד"];
@@ -26,7 +24,7 @@ const MINI = { path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/
 
 /** a personal database in the Otzaria schema (v5), as make_inputs.py builds it: source "אישי", no Sefaria books */
 async function personalDb(name: string, books: [string, string[]][]) {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database();
   db.exec(readFileSync("tests/fixtures/schemas/v5.sql", "utf8"));
   db.run("insert into source(id,name) values(1,'אישי')");

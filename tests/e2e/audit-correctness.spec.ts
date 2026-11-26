@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import initSqlJs from "sql.js";
 import { expect, test, type Page } from "@playwright/test";
 import { distUrl, watchPage } from "./helpers";
+import { loadSqlJs } from "../support/sql-js";
 
 /*
  * The correctness findings of the product audit (docs/reviews/PRODUCT_AUDIT.md), through the built
@@ -13,7 +12,6 @@ import { distUrl, watchPage } from "./helpers";
  *   F9  — when every link is held back the export dialog says so, and offers private use;
  *   F12 — a personal database in the Otzaria schema is labelled "מסד אישי", not "מסד אוצריא".
  */
-const require = createRequire(import.meta.url);
 const nl = String.fromCharCode(10);
 const BASE = ["<h1>בראשית</h1>", "<h2>פרק א</h2>", "בראשית ברא אלהים את השמים ואת הארץ.", "והארץ היתה תהו ובהו."];
 const COMM = ["<h1>ביאור חדש על בראשית</h1>", "<h2>פרק א</h2>", "בראשית ברא - ביאור.", "תהו ובהו - ביאור."];
@@ -60,7 +58,7 @@ test("F2 + F9: a link to the user's own בראשית is held back for the librar
 
 test("F12: a personal database in the Otzaria schema is labelled personal", async ({ page }) => {
   const seen = watchPage(page);
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database();
   db.exec(readFileSync(resolve("tests/fixtures/schemas/v5.sql"), "utf8"));
   db.run("insert into source(id,name) values(1,'אישי')");

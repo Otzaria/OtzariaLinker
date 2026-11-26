@@ -1,14 +1,12 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { LineContentCodec } from "../../../src/database/compression/zstd";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { decodeRecord, readVarint } from "../../../src/database/sqlite/lazy/record";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
 import { DbBookSource } from "../../../src/sources/db/db-source";
+import { loadSqlJs } from "../../support/sql-js";
 
-const require = createRequire(import.meta.url);
 
 /* Regression tests for the security review (2026-11-11): hostile inputs must fail fast and clearly. */
 const open = (f: string) => DbBookSource.open("h", f, bytesSource(new Uint8Array(readFileSync(`tests/fixtures/db/hostile/${f}`))));
@@ -67,7 +65,7 @@ describe("hostile b-trees fail fast (Issue #41 C2)", () => {
   const PAGE = 1024;
   /** a real database: a table of 2,000 short rows (a two-level b-tree) and one row large enough for an overflow chain */
   async function built() {
-    const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+    const SQL = await loadSqlJs();
     const db = new SQL.Database();
     db.run(`PRAGMA page_size = ${PAGE}`);
     db.run("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
