@@ -481,7 +481,7 @@ function Decide({ s, state, what }: { s: Suggestion; state: SuggestionState; wha
   };
   return (
     <span class="decide">
-      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
+      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reset([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
         <Icon name="oz_check" size={18} />
       </button>
       <button class="icon-btn" data-decide="reject" aria-pressed={state === "rejected"} onClick={(e) => decide(e, () => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id])))} title="דחייה" aria-label={`דחיית ${what}`}>

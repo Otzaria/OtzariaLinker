@@ -428,9 +428,19 @@ export class SuggestionsState {
     this.commit(label, removed.map((id) => ({ id, before: links.get(id)! })), { add: this.keysOf(ids) });
   }
 
-  /** Back to "pending": forgets the rejection (undoable). */
+  /**
+   * Back to "pending", whatever was decided (#41 B22): an approval's links are removed and a rejection is forgotten, in ONE undoable
+   * step. Never a rejection — taking an approval back is not saying no. Pending and "exists" ones are left as they are.
+   */
   reset(ids: readonly string[]): void {
-    this.commit(ids.length === 1 ? "החזרת הצעה להמתנה" : `החזרת ${ids.length.toLocaleString("he")} הצעות להמתנה`, [], { remove: this.keysOf(ids) });
+    const st = this.state.value;
+    const decided = ids.filter((id) => st.get(id) === "approved" || st.get(id) === "rejected");
+    if (!decided.length) return;
+    const { links } = this.host.linkState.value;
+    const want = new Set(decided);
+    const removed = (this.run.value?.result.suggestions ?? []).filter((s) => want.has(s.id)).flatMap((s) => recordsOf(s).map((r) => recordLinkId(s, r.line))).filter((x) => (links.get(x)?.status ?? "deleted") !== "deleted");
+    const n = decided.length;
+    this.commit(n === 1 ? "החזרת הצעה להמתנה" : `החזרת ${n.toLocaleString("he")} הצעות להמתנה`, removed.map((id) => ({ id, before: links.get(id)! })), { remove: this.keysOf(decided) });
   }
 
   private keysOf(ids: readonly string[]): string[] {
