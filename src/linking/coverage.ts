@@ -164,10 +164,15 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
   const first = new Int32Array(n).fill(-1);
   const starts = new Uint8Array(n);
   const places = new Map<string, number>();
-  const spans: PlaceSpan[] = [];
-  // the compact ends' places are places 0..P-1 (no key built for them); a Link's place that is one of them gets its id
+  // the compact ends' places are places 0..P-1, read from their arrays (no key, no object built for them: בראשית has ~200k);
+  // a Link's place that is one of them gets its id, any other one P, P+1, … (`extra`)
   const ends = book.ends;
-  if (ends) for (let p = 0; p < ends.placeTitle.length; p++) spans.push({ book: ends.titles[ends.placeTitle[p]!]!, start: ends.placeLine[p]!, end: Math.max(ends.placeLine[p]!, ends.placeEnd[p]!) });
+  const P = ends ? ends.placeTitle.length : 0;
+  const extra: PlaceSpan[] = [];
+  const titleOf = (id: number): string => (id < P ? ends!.titles[ends!.placeTitle[id]!]! : extra[id - P]!.book);
+  const startOf = (id: number): number => (id < P ? ends!.placeLine[id]! : extra[id - P]!.start);
+  const endOf = (id: number): number => (id < P ? Math.max(ends!.placeLine[id]!, ends!.placeEnd[id]!) : extra[id - P]!.end);
+  const spanAt = (id: number): PlaceSpan => (id < P ? { book: titleOf(id), start: startOf(id), end: endOf(id) } : extra[id - P]!);
   let compact: Map<string, Map<number | string, number>> | null = null;
   const placeOf = (s: LinkSide): number => {
     const k = placeKey(s);
@@ -175,8 +180,8 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
     if (id === undefined) {
       if (ends) id = (compact ??= indexPlaces(ends)).get(s.book.title)?.get(endsPlaceKey(s.line, s.end ?? s.line));
       if (id === undefined) {
-        id = spans.length;
-        spans.push(spanOf(s));
+        id = P + extra.length;
+        extra.push(spanOf(s));
       }
       places.set(k, id);
     }
@@ -204,7 +209,7 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
       const place = placeOf(other);
       cover(mine.line, place, true);
       if (book.units && (book.units.get(mine.line) ?? 1) > 1 && mine.line >= 0 && mine.line < n) {
-        const entry: UnitEntry = { anchor: mine === l.source && l.anchor ? l.anchor.rawStart : null, place: spans[place]! };
+        const entry: UnitEntry = { anchor: mine === l.source && l.anchor ? l.anchor.rawStart : null, place: spanAt(place) };
         const list = unitEntries.get(mine.line);
         if (list) list.push(entry);
         else unitEntries.set(mine.line, [entry]);
@@ -221,7 +226,7 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
       const place = ends.place[k]!;
       cover(line, place, true);
       if (book.units && (book.units.get(line) ?? 1) > 1 && line >= 0 && line < n) {
-        const entry: UnitEntry = { anchor: null, place: spans[place]! };
+        const entry: UnitEntry = { anchor: null, place: spanAt(place) };
         const list = unitEntries.get(line);
         if (list) list.push(entry);
         else unitEntries.set(line, [entry]);
@@ -231,7 +236,20 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
     }
   // a line with two place KEYS is "multiple" only when they are two different PLACES (a coarse span and a line inside it are one)
   const differentPlaces = new Set<number>();
-  for (const [line, ids] of several) if (placeCount([...ids].map((id) => spans[id]!)) > 1) differentPlaces.add(line);
+  // placeCount > 1, without building the spans: another book says yes at once; one book's spans are sorted and swept
+  const twoPlaces = (set: ReadonlySet<number>): boolean => {
+    const ids = [...set];
+    const t0 = titleOf(ids[0]!);
+    for (const id of ids) if (titleOf(id) !== t0) return true;
+    ids.sort((a, b) => startOf(a) - startOf(b) || endOf(a) - endOf(b));
+    let reach = endOf(ids[0]!);
+    for (const id of ids) {
+      if (startOf(id) > reach) return true;
+      reach = Math.max(reach, endOf(id));
+    }
+    return false;
+  };
+  for (const [line, ids] of several) if (twoPlaces(ids)) differentPlaces.add(line);
   const out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     if (book.headings.has(i) || book.unsuitable?.has(i)) out[i] = NOT_SUITABLE;

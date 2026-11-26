@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { coverageEndsOf } from "../../../src/core/links/coverage-ends";
+import { CoverageEndsBuilder, coverageEndsOf } from "../../../src/core/links/coverage-ends";
 import type { BookRef, Link, LinkSide } from "../../../src/core/links/model";
-import { contentUnits, coverageOfLines, coverageSummary, type CoverageBook } from "../../../src/linking/coverage";
+import { contentUnits, coverageCounts, coverageOfLines, coverageSummary, type CoverageBook } from "../../../src/linking/coverage";
 
 /*
  * #42 C7, C8: the database's links of a book reach the coverage rules as compact ends (core/links/coverage-ends.ts) instead of
@@ -53,6 +53,16 @@ describe("compact ends are counted exactly as the same links (#42 C7, C8)", () =
       { numRuns: 2000 },
     );
   });
+
+  it("a book the size of בראשית (235,000 ends over 1,584 lines, to 300 books) is counted on the page in well under 2 s", () => {
+    // generous on purpose (35-100 ms on the development machine): it catches a return to per-place objects and keys, not noise
+    const b = new CoverageEndsBuilder();
+    for (let i = 0; i < 235_000; i++) b.add(i % 1584, i % 1584, `book ${i % 300}`, (i * 7) % 5000, (i * 7) % 5000);
+    const t0 = performance.now();
+    const c = coverageCounts([], { owns, lineCount: 1584, headings: new Set(), ends: b.build() });
+    expect(performance.now() - t0).toBeLessThan(2_000);
+    expect(c.byBucket.multiple).toBe(1584);
+  }, 30_000);
 
   it("the ends keep one entry per end in the book, the links read, and one place per (title, lines)", () => {
     const ls: Link[] = [
