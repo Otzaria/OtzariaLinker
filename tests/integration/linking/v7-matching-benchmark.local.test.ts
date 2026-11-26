@@ -7,6 +7,8 @@ import { linePairKey, mergeSuggestions, type MergeItem, type MergedSuggestion } 
 import { planMaxLink, type PlanStep } from "../../../src/linking/plan";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { maxlinkJob } from "../../../src/workers/maxlink-job";
+import { runDiburHamatchilEngine } from "../../../src/linking/automatic/dibur-hamatchil";
+import type { EngineBook } from "../../../src/linking/automatic/types";
 
 /*
  * The V7 matching benchmark (docs/validation/V7_MATCHING_BENCHMARK.md): headings and dibur-hamatchil on
@@ -23,10 +25,10 @@ import { maxlinkJob } from "../../../src/workers/maxlink-job";
  *   heldout   — a fixed rule over the database: every book with a declared base (book_base_text) whose title is
  *               "<X> על <base title>", 300–6,000 lines, base under 40,000 lines, at least 50 of its lines linked to the
  *               base in the database, ordered by an FNV-1a hash of "<commentary>><base>", the first 12 not in `tune`;
- *   noheadings — the same rule and order as heldout but any title, up to 20,000 lines and a base up to 60,000 (without the 12 held-out
- *               pairs), only commentaries with at most two heading lines (the
- *               ד"ה engine searches the whole base for them: #41 B2, #42 C9), the first 16; every other one (by that order) is
- *               the half the caps were calibrated on ("tune"), the rest the half they were checked on ("heldout");
+ *   noheadings — the next 16 pairs of the held-out rule and order, the ד"ה engine alone on the commentary WITHOUT its heading lines
+ *               (as a plain text file without headings: the engine searches the whole base for every line; #41 B2, #42 C9 —
+ *               the database has almost no commentary with a declared base and no headings). Every other pair (by that order)
+ *               is the half the caps were calibrated on ("tune"), the rest the half they were checked on ("heldout");
  *   unrelated — pairs that are NOT commentary and base: named same-genre neighbours, and each held-out commentary
  *               against the base of the next held-out pair (rotation). Nothing there is a correct pair.
  * "Right"/"wrong" is AGREEMENT WITH THE DATABASE: the suggested place (line or range) holds a line the database
@@ -103,15 +105,15 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         return gold;
       };
 
-      /** the declared pairs in hash order; `loose`: any title and up to 20,000 lines (the no-headings set, whose books are rarely "X על Y") */
-      const candidates = (loose = false): [string, string][] => {
+      /** the declared "X על Y" pairs in hash order */
+      const candidates = (): [string, string][] => {
         const tuned = new Set(TUNE.map(([c, b]) => `${c}>${b}`));
         const cands: [string, string][] = [];
         for (const c of books) {
-          if (!c.bases?.length || (!loose && !c.title.includes(" על ")) || (c.lineCount ?? 0) < 300 || (c.lineCount ?? 0) > (loose ? 20000 : 6000)) continue;
+          if (!c.bases?.length || !c.title.includes(" על ") || (c.lineCount ?? 0) < 300 || (c.lineCount ?? 0) > 6000) continue;
           for (const bk of c.bases) {
             const b = byKey.get(bk);
-            if (!b || (!loose && !c.title.endsWith(` על ${b.title}`)) || (b.lineCount ?? Infinity) > (loose ? 60000 : 40000)) continue;
+            if (!b || !c.title.endsWith(` על ${b.title}`) || (b.lineCount ?? Infinity) > 40000) continue;
             if (!tuned.has(`${c.title}>${b.title}`)) cands.push([c.title, b.title]);
           }
         }
@@ -128,20 +130,21 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         return out;
       };
 
-      /** the first 16 candidates after the held-out ones whose commentary has no heading line (by its text, not by any engine) */
+      /** the 16 candidates after the 12 held-out ones (the same rule and order) */
       const noHeadings = async (): Promise<[string, string][]> => {
         const taken = new Set((await heldout()).map((p) => p.join(">")));
         const out: [string, string][] = [];
-        for (const p of candidates(true)) {
+        for (const p of candidates()) {
           if (out.length >= 16) break;
           if (taken.has(p.join(">"))) continue;
-          const c = byTitle.get(p[0])!;
-          const lines = await reg.lines(c.key, 0, Number.MAX_SAFE_INTEGER);
-          // the book's title and an introduction may be headings; a third heading line divides the text
-          if (lines.filter((l) => (l.heading !== null && l.heading !== undefined) || /^s*<h[1-6]/i.test(l.text)).length > 2) continue;
-          if ((await goldOf(c, byTitle.get(p[1])!)).size >= 50) out.push(p);
+          if ((await goldOf(byTitle.get(p[0])!, byTitle.get(p[1])!)).size >= 50) out.push(p);
         }
         return out;
+      };
+      /** a book as the engines read it (maxlink-job.ts load); `dropHeadings`: without its heading lines, as a plain text file without headings would be */
+      const engineBook = async (bk: SourceBook, dropHeadings = false): Promise<EngineBook> => {
+        const lines = (await reg.lines(bk.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef }));
+        return { book: ref(bk), lines: dropHeadings ? lines.filter((l) => l.heading === null && !/^\s*<h[1-6]/i.test(l.text)) : lines };
       };
       let pairs: [string, string][];
       if (ONLY) pairs = ONLY;
@@ -161,9 +164,20 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
           console.log(`skipped (not in the database): ${ct} > ${bt}`);
           continue;
         }
+        const t0 = performance.now();
+        let items: MergeItem[];
+        let steps: PlanStep[] = [];
+        let planned = false;
+        let res: { items: readonly { result?: { notes: readonly { code: string }[] }; error?: string }[]; dbLinkKeys: readonly string[] };
+        if (SET === "noheadings") {
+          // #41 B2 / #42 C9: the ד"ה engine alone, on the commentary without its headings — it searches the whole base for every line
+          const r = runDiburHamatchilEngine(await engineBook(c, true), await engineBook(b));
+          items = r.suggestions.map((suggestion) => ({ suggestion, focus: c.key }));
+          res = { items: [{ result: r }], dbLinkKeys: (await reg.existingLinks(c.key, 0, Number.MAX_SAFE_INTEGER)).map((l) => linePairKey(l)) };
+        } else {
         const plan = planMaxLink({ selected: [c.key], library: books });
-        let steps: PlanStep[] = plan.steps.filter((s) => s.kind === "pair" && s.source.key === c.key && s.target.key === b.key && !s.relation.through && (s.engine === "headings" || s.engine === "dibur-hamatchil"));
-        const planned = steps.length > 0;
+        steps = plan.steps.filter((s) => s.kind === "pair" && s.source.key === c.key && s.target.key === b.key && !s.relation.through && (s.engine === "headings" || s.engine === "dibur-hamatchil"));
+        planned = steps.length > 0;
         if (!planned)
           steps = (["headings", "dibur-hamatchil"] as const).map((engine) => ({
             id: `bench:${engine}:${c.key}>${b.key}`,
@@ -175,10 +189,11 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
             why: "benchmark",
             ...(engine === "headings" && { titleGate: true as const }),
           }));
-        const t0 = performance.now();
-        const res = await maxlinkJob(reg, steps, {}, {});
+        const job = await maxlinkJob(reg, steps, {}, {});
+        res = job;
+        items = job.items.flatMap((it) => (it.result?.suggestions ?? []).map((suggestion) => ({ suggestion, focus: c.key })));
+        }
         const ms = Math.round(performance.now() - t0);
-        const items: MergeItem[] = res.items.flatMap((it) => (it.result?.suggestions ?? []).map((suggestion) => ({ suggestion, focus: c.key })));
         const db = new Set(res.dbLinkKeys);
         const merged = mergeSuggestions(items, { reference: db, existing: (s) => (db.has(linePairKey(s)) ? "db" : null) });
         const gold = await goldOf(c, b);
@@ -204,7 +219,7 @@ describe.runIf(path && OUT)("V7 matching benchmark on the real seforim.db (read-
         // the ד"ה suggestions by search window, quoted words and how often the quoted words stand in the base (#41 B2, #42 C9)
         const dhWords: Tally = {};
         {
-          const norm = (t: string) => t.replace(/<[^>]+>/g, " ").replace(/[֑-ׇ]/g, "").replace(/[^א-תs]/g, " ").replace(/s+/g, " ").trim();
+          const norm = (t: string) => t.replace(/<[^>]+>/g, " ").replace(/[֑-ׇ]/g, "").replace(/[^א-ת\s]/g, " ").replace(/\s+/g, " ").trim();
           const baseLines = await reg.lines(b.key, 0, Number.MAX_SAFE_INTEGER);
           const byIndex = new Map(baseLines.map((l) => [l.index, l.anchorText] as const));
           const all = ` ${baseLines.map((l) => norm(l.anchorText)).join(" | ")} `;

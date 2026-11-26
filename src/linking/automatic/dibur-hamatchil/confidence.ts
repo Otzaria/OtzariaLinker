@@ -88,6 +88,38 @@ export function matchConfidence(inp: ConfidenceInputs): number {
   return toP(z - rungPenalty);
 }
 
+/** What the placement of one ד"ה rests on, beyond the match itself (#41 B2, #42 C9). */
+export interface PlacementEvidence {
+  /** words of the ד"ה that matched (a unique anchor: its words) */
+  readonly words: number;
+  /** the search window is the whole base: no heading of the commentary narrowed it (dh/window-book) */
+  readonly wholeBook: boolean;
+  /** other lines of the window that hold the same words as the place chosen */
+  readonly repeats: number;
+}
+
+/**
+ * The highest confidence the evidence allows when the search window is the WHOLE base, with the rule that capped it, or
+ * null. The calibrated probability measures how well the words match, not how many places they would match: a word or
+ * two, or a phrase that stands in other lines, found without a heading that narrows the search, is placed by the order of
+ * the walk. Findings #41 B2 (one word, whole base, "high": 52 right / 21 wrong; three words 313 / 5) and #42 C9 (a repeated
+ * phrase of three words at "high" 19 / 4; a phrase found once 280 / 0). Calibrated on the tuning half of the V7 benchmark's
+ * no-headings set (docs/validation/V7_MATCHING_BENCHMARK.md §3): one word "high" 167/180 (92.8%; repeated 30/37), two words
+ * 646/663 (97.4%), a repeated phrase of three words 57/60 at "high" — so:
+ *   - one word → "possible";
+ *   - two words → "high" at most;
+ *   - a phrase that stands in other lines of the base → "high" at most (never "certain"), the other lines as alternatives.
+ * Inside a heading's window none of this applies: there the rivals are near, and the search meets them (a repeated phrase at
+ * "certain" in a heading window: 38/38 in the same benchmark).
+ */
+export function evidenceCap(e: PlacementEvidence): { cap: "high" | "possible"; rule: string } | null {
+  if (!e.wholeBook) return null;
+  if (e.words <= 1) return { cap: "possible", rule: "dh/short-whole-book" };
+  if (e.repeats > 0) return { cap: "high", rule: "dh/repeated-phrase" };
+  if (e.words === 2) return { cap: "high", rule: "dh/short-whole-book" };
+  return null;
+}
+
 /** An inherited link (בא"ד / שם): the parent's claim, weakened once per hop. */
 export function inheritedConfidence(parent: number | null, depth: number): number {
   const p = parent && parent > 0 ? parent : CONF.INHERIT_FALLBACK;

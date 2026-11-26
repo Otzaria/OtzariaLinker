@@ -26,6 +26,7 @@ import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, 
 import { idfFactors, STOP_WORDS, wordWeight } from "../../../matching/word-weights";
 import {
   capSpanned,
+  CONFIDENCE_LABELS,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -38,7 +39,7 @@ import {
   type Reason,
   type Suggestion,
 } from "../types";
-import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
+import { evidenceCap, inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
 import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
@@ -185,6 +186,8 @@ const NAMES_MIN = 5;
 const NAMES_SHARE = 0.05;
 /** a tie looks at this many places of the ranking (the winner and its rivals) */
 const TIE_MAX = 8;
+/** a phrase as consecutive whole words anywhere in a line (repeatsOf) */
+const ANYWHERE: SearchSpec = { ...STRICT_SPEC, requireTargetStart: false, shallowLimit: Number.MAX_SAFE_INTEGER };
 
 /** A placement of one commentary line on the base, before it is shaped into a Suggestion. */
 interface Placement {
@@ -813,6 +816,31 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     return { pos: best.pos, line: bLines[best.pos]!.index, run, exact: false, matchedWeight: sim * ww, windowWeight: ww, rank: sim * ww, lineTokens: bTokens[best.pos]!.length, contLine: null, lemmaHead: false };
   };
 
+  /**
+   * Other lines of the window that hold the words the candidate matched, as written there (search keys, consecutive):
+   * at most REPEATS_MAX of them. The phases search near the previous match first and stop at a verbatim hit, so a phrase
+   * that also stands elsewhere often never meets its rivals; counted here once, on the inverted index of its rarest word
+   * (#42 C9: three words at "high", 19 right / 4 wrong when the phrase repeats in the base, 280 / 0 when it does not).
+   */
+  const REPEATS_MAX = 3;
+  const repeatsOf = (c: Cand, window: SearchWindow): number[] => {
+    const toks = bTokens[c.pos]!.slice(c.run.tgtStart, Math.min(c.run.tgtEnd, c.lineTokens));
+    if (!toks.length) return [];
+    const ix = keyIndex ?? buildIndex();
+    let holders: readonly number[] | undefined;
+    for (const t of toks) {
+      const h = ix.get(t.key) ?? [];
+      if (!holders || h.length < holders.length) holders = h;
+    }
+    const out: number[] = [];
+    for (const p of positionsIn(window.from, window.to, holders)) {
+      if (p === c.pos || qualifyingOccurrence(toks, bTokens[p]!, ANYWHERE) < 0) continue;
+      out.push(bLines[p]!.index);
+      if (out.length >= REPEATS_MAX) break;
+    }
+    return out;
+  };
+
   const evidenceOf = (c: Cand, runnerUp: number): MatchEvidence => ({
     matchedWeight: c.matchedWeight,
     windowWeight: c.windowWeight,
@@ -988,7 +1016,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       win = chosen.c;
       tie = { cands: tied.map((x, j) => ({ ...tc[j]!, part: matchPart(x.c, ex, prevIn) })), chosen: k, why: k ? "context" : null };
     }
-    const score = chosen.score;
+    let score = chosen.score;
     const alternatives = scored
       .filter((x) => x !== chosen)
       .map((x) => ({ line: x.c.line, score: x.score }))
@@ -1027,6 +1055,30 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     else if (window.kind === "unit") reasons.push(r("dh/window-unit", `החיפוש הוגבל לשורה הממוספרת שהכותרת בפירוש מציינת (${window.label})`));
     else if (window.kind === "page") reasons.push(r("dh/window-page", `החיפוש הוגבל לעמוד "${window.label}", לפי סימני העמודים שבספר הבסיס`));
     else reasons.push(r("dh/window-book", "החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש"));
+    // #41 B2, #42 C9: what the evidence allows beyond the match itself — a word or two found in the whole base, or a
+    // phrase that stands in other lines of the window, is placed by the walk's order, not by the words
+    let repeats: number[] = [];
+    if (confidence === "certain" || confidence === "high") {
+      repeats = uniqueN || window.kind !== "book" ? [] : repeatsOf(win, window);
+      const words = uniqueN || win.run.srcUsed;
+      const cap = evidenceCap({ words, wholeBook: window.kind === "book", repeats: repeats.length });
+      const lowers = cap !== null && (confidence === "certain" || cap.cap === "possible");
+      if (lowers) {
+        confidence = cap.cap;
+        score = Math.min(score, (cap.cap === "high" ? thresholds.certain : thresholds.high) - 0.01);
+      }
+      const label = CONFIDENCE_LABELS[confidence];
+      if (cap?.rule === "dh/short-whole-book" && lowers) {
+        rules.push(cap.rule);
+        warnings.push(r(cap.rule, `הדיבור המתחיל קצר (${words === 1 ? "מילה אחת" : `${words} מילים`}) ונמצא בחיפוש בכל ספר הבסיס, בלי כותרת שמצמצמת את החיפוש. מילים כאלה נמצאות במקומות רבים, והמקום נבחר לפי סדר ההתקדמות של הפירוש, ולכן הוודאות הוגבלה ל"${label}".`));
+      }
+      // a phrase that stands elsewhere too: said, and its other places offered, even when the level was already below the cap
+      if (repeats.length) {
+        rules.push("dh/repeated-phrase");
+        const where = repeats.length >= REPEATS_MAX ? `ב־${REPEATS_MAX} שורות נוספות לפחות` : repeats.length === 1 ? "בשורה נוספת" : `ב־${repeats.length} שורות נוספות`;
+        warnings.push(r("dh/repeated-phrase", `המילים שנמצאו מופיעות כלשונן גם ${where} בספר הבסיס (${repeats.map((l) => `שורה ${l + 1}`).join(", ")}), והמקום נבחר לפי סדר ההתקדמות של הפירוש. לכן ההצעה אינה "ודאית" (היא "${label}"), והמקומות האחרים מוצגים כמועמדים חלופיים.`));
+      }
+    }
     const common = { reasons, rules, warnings };
     const part = tie ? tie.cands[tie.chosen]!.part : matchPart(win, ex, prevIn);
     const placed: Placement = {
@@ -1044,7 +1096,13 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       depth: 0,
       ...(tie ? { tie: { ...tie, common } } : {}),
     };
-    return withMatch(placed, common, part, tie);
+    const out = withMatch(placed, common, part, tie);
+    // the other lines that hold the same words are its alternatives, saying why they were not chosen
+    if (!repeats.length) return out;
+    const why = r("dh/alt-repeat", "אותן מילים מופיעות גם כאן, כלשונן; המקום שנבחר הוא זה שמתאים לסדר ההתקדמות של הפירוש");
+    const known = out.alternatives.map((a) => (repeats.includes(a.line) ? { ...a, why } : a));
+    const extra = repeats.filter((l) => l !== out.base && !out.alternatives.some((a) => a.line === l)).map((line) => ({ line, score, why }));
+    return { ...out, alternatives: [...known, ...extra] };
   };
 
   /**
