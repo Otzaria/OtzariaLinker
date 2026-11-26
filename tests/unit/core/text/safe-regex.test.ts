@@ -55,3 +55,15 @@ describe("bounded quantifiers cannot bypass the ReDoS guard (QA round 2, A)", ()
     for (const good of ["\d{1,4}", "[א-ת]{1,6}\s{1,3}\d{1,4}\.x{0,2}"]) expect(checkCustomPattern(good).ok, good).toBe(true);
   });
 });
+
+describe("a large required repetition counts its work (V7 PR1 review, finding 1)", () => {
+  it("is refused: `a{1,8}a{1,8}a{10000}b` passed the guard and ran 156 s on a 20,000-char line", async () => {
+    const { checkCustomPattern } = await import("../../../../src/core/text/safe-regex");
+    for (const p of ["a{1,8}a{1,8}a{10000}b", "a{1,8}a{10000}b", "a{10000,10008}b", "a{1,8}a{1,8}a{5000}b"])
+      expect(checkCustomPattern(p).ok, p).toBe(false);
+  });
+  it("small fixed counts stay allowed", async () => {
+    const { checkCustomPattern } = await import("../../../../src/core/text/safe-regex");
+    for (const p of [String.raw`\d{4}`, String.raw`[א-ת]{2,3}\.`, "(?:ab){3}c", String.raw`^\((\d{1,3})\)`]) expect(checkCustomPattern(p).ok, p).toBe(true);
+  });
+});

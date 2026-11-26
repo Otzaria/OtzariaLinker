@@ -408,16 +408,19 @@ class Cost {
         const fixed = fixedChars(n.node);
         if (fixed && fixed.length) {
           const choices = n.max - n.min + 1;
-          if (choices === 1) return 1 + k;
+          // the required copies are work on every path that reaches them: `a{10000}` reads 10,000 characters each time it is
+          // tried (V7 PR1 review: `a{1,8}a{1,8}a{10000}b` passed as cost 200 and ran 156 s on a 20,000-character line)
+          const own = Math.max(1, n.min * fixed.length);
+          if (choices === 1) return own + k;
           // a shorter choice leaves another repetition next; when the rest cannot start with one, every
           // choice but the longest fails within the rest's signature
           if (!exact) {
             const restSig = this.sig(rest);
             const body: Sig = { sets: fixed.slice(0, SIG_DEPTH).map((c) => [c]), probes: [] };
             const d = divergence(body, restSig);
-            if (d >= 0) return (choices - 1) * (1 + restSig.probes[d]!) + 1 + k;
+            if (d >= 0) return (choices - 1) * (own + restSig.probes[d]!) + own + k;
           }
-          return choices * (1 + k);
+          return choices * (own + k);
         }
         return this.repCost(n, n.min, n.max, k, rest, exact);
       }
