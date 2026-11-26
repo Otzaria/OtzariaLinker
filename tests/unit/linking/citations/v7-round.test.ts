@@ -156,3 +156,26 @@ describe("C18 — a link to a unit starts at its first line of content, not at i
     expect(s.target.line).toBe(5);
   });
 });
+
+describe("C19 — the anchor: the commentator's name is in it, an unmatched bracket never is", () => {
+  // anchors are written only where the record may carry one: "ציטוט בטקסט" here (every target of the fixture is Sefaria's)
+  const anchorOf = (text: string, key?: string) => {
+    const s = run(text, { citationType: "inline-linker" }).suggestions.find((x) => !key || x.target.book.key === key)!;
+    return text.slice(s.anchor!.rawStart, s.anchor!.rawEnd);
+  };
+  it.each([
+    ['ועיין רשב"ם בבא בתרא קכא. ושם', 'רשב"ם בבא בתרא קכא.'],
+    ["ועיין תוס' ברכות ב. ושם", "תוס' ברכות ב."],
+    ["ועיין בתוס' ברכות ב. ושם", "בתוס' ברכות ב."],
+    ['ועיין (רשב"ם בבא בתרא קכא.) ושם', 'רשב"ם בבא בתרא קכא.'],
+    ['ועיין רשב"ם (בבא בתרא קכא.) ושם', 'רשב"ם (בבא בתרא קכא.)'],
+    ["ועיין תוס' (ברכות ב.) ושם", "תוס' (ברכות ב.)"],
+  ])("%s → %s", (text, want) => expect(anchorOf(text)).toBe(want));
+
+  it.each([
+    ["ועיין ברכות (יג: ושם) ועוד", "ברכות (יג: ושם)"],
+    ['ועיין ברכות (דף יג: ע"ש) ושם', 'ברכות (דף יג: ע"ש)'],
+    ["ועיין ברכות [יג: ושם ועוד הרבה מאד מאד", "ברכות"],
+    ["ועיין ברכות (דף יג:) ושם", "ברכות (דף יג:)"],
+  ])("%s → %s (a bracket in the anchor is closed in it)", (text, want) => expect(anchorOf(text, B.ber.key)).toBe(want));
+});

@@ -1540,6 +1540,8 @@ export class CitationScanner {
     let alsoBase: readonly AliasTarget[] | null = null;
     let alsoBaseRule = "title-commentator-base";
     let diburWords: readonly string[] | null = c.dh ?? null;
+    /** where the anchor starts: the commentator's name right before the place, when the citation was moved to him (issue #42 C19) */
+    let spanFrom = c.from;
     if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
       if (qualifier && !candidates.some((x) => x.collection === qualifier)) candidates = [...candidates, ...this.siblings(candidates, qualifier)];
@@ -1575,11 +1577,13 @@ export class CitationScanner {
         movedFrom = candidates;
         candidates = moved;
         commentator = who;
+        if (commentatorBefore(toks, c.from)) spanFrom = nameStart(toks, c.from, commentatorBeforeAt(toks, c.from), 1);
       } else if (!named && (lib = this.libraryCommentaryBefore(toks, c.from, candidates)) !== null) {
         // "ובאוה"ח [שמות ג, ד]", "ובגו"א [ויקרא פ"א]": a commentary's name in the library, on the cited book
         movedFrom = candidates;
         candidates = lib.targets;
         commentator = lib.name;
+        spanFrom = nameStart(toks, c.from, beforeIndex(toks, c.from, 1), lib.name.split(" ").length);
         rule = rule ?? "commentator-named";
         if (dh) diburWords = diburWordsAt(toks, c.to);
       } else if (dh && !named) {
@@ -1608,12 +1612,19 @@ export class CitationScanner {
         if (moved.length) {
           candidates = moved;
           commentator = rc;
+          // the name as written, one or two words ("המל"מ", "לחם משנה"), after an honorific between it and the place
+          let at = beforeIndex(toks, c.from, 1);
+          if (at >= 0 && HONORIFICS.has(wordShape(toks[at]!))) at = beforeIndex(toks, c.from, 2);
+          const two = at > 0 && toks[at - 1]?.kind === "word" && RAMBAM_COMMENTATORS.some(([n]) => n.includes(" ") && n.endsWith(wordShape(toks[at]!)));
+          spanFrom = nameStart(toks, c.from, at, two ? 2 : 1);
         }
       }
     }
     candidates = [...candidates].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
-    const first = toks[c.from]!;
-    const lastTok = toks[c.to - 1]!;
+    // the anchor: from the commentator's name (if any) to the end of the place, with no bracket left open or closed alone in it
+    const span = balancedSpan(toks, spanFrom, c.to);
+    const first = toks[span.from]!;
+    const lastTok = toks[span.to - 1]!;
     const cit: Citation = {
       seq: this.seq++,
       line,
@@ -1648,7 +1659,8 @@ export class CitationScanner {
     }
     this.last = { c: cit, line, elems: c.elems };
     if (c.elems[0] && (c.elems[0].kind === "daf" || c.elems[0].amud !== undefined) && (cit.movedFrom ?? cit.candidates).some((x) => x.collection === "bavli" && !x.book.title.includes(" על "))) this.lastTalmud = { c: cit, line };
-    return c.to;
+    // the anchor may have taken the rest of a bracket the place opened ("ברכות (יג: ושם)"): those words are not read again
+    return Math.max(c.to, span.to);
   }
 
   /**
@@ -1971,6 +1983,76 @@ function qualifierBefore(toks: readonly Tok[], i: number): Collection | undefine
     if (q) return q;
   }
   return undefined;
+}
+
+/** the index of the word commentatorBefore() read, or -1 */
+function commentatorBeforeAt(toks: readonly Tok[], i: number): number {
+  const t = before(toks, i, 1);
+  if (t?.kind === "word" && !t.gershayim && !t.geresh && POSITION_BEFORE.test(t.text)) return beforeIndex(toks, i, 2);
+  return beforeIndex(toks, i, 1);
+}
+
+/**
+ * Where the anchor of a citation moved to a commentator starts (issue #42 C19): at his name, `words` words that END at toks[at],
+ * when only words, brackets and commas lie between it and the place at toks[from] (beforeIndex). Before, "תוס' ברכות ב." held the
+ * name when the database's name for the book began with it ("תוס' ברכות"), and "רשב"ם בבא בתרא קכא." did not: the name is now
+ * always in it. A name not found right there leaves the anchor on the place.
+ */
+function nameStart(toks: readonly Tok[], from: number, at: number, words: number): number {
+  if (at < 0 || at >= from) return from;
+  const start = at - (words - 1);
+  if (start < 0) return from;
+  for (let k = start; k <= at; k++) if (toks[k]!.kind !== "word") return from;
+  return start;
+}
+
+/** the bracket pairs an anchor keeps balanced */
+const CLOSER: Readonly<Record<string, string>> = { "(": ")", "[": "]", "{": "}" };
+/** how many tokens past the place an anchor may reach for the bracket the place opened */
+const MAX_BRACKET_REACH = 4;
+
+/**
+ * The anchor's tokens with every bracket in them closed in them (issue #42 C19): "ברכות (יג:" — the place opened a bracket and the
+ * citation ends before its close — reaches the close when it is a few tokens on ("ברכות (דף יג: ע"ש)"), and otherwise stops before
+ * the bracket ("ברכות"); a close with no open in the span takes its open right before the span, or is left out.
+ */
+function balancedSpan(toks: readonly Tok[], from: number, to: number): { from: number; to: number } {
+  const open: number[] = [];
+  let end = to;
+  let start = from;
+  for (let k = from; k < end; k++) {
+    const t = toks[k]!;
+    if (t.kind !== "punct") continue;
+    if (CLOSER[t.text]) open.push(k);
+    else if (Object.values(CLOSER).includes(t.text)) {
+      const o = open.at(-1);
+      if (o !== undefined && CLOSER[toks[o]!.text] === t.text) open.pop();
+      else if (k === start && start > 0 && toks[start - 1]?.kind === "punct" && CLOSER[toks[start - 1]!.text] === t.text) start--;
+      else if (k === start) start++;
+      else {
+        end = k;
+        break;
+      }
+    }
+  }
+  while (open.length) {
+    const o = open.pop()!;
+    const want = CLOSER[toks[o]!.text]!;
+    let close = -1;
+    for (let k = end; k < Math.min(toks.length, end + MAX_BRACKET_REACH); k++) {
+      const t = toks[k]!;
+      if (t.kind === "punct" && t.text === want) {
+        close = k;
+        break;
+      }
+      if (t.kind === "punct" && CLOSER[t.text]) break;
+    }
+    if (close >= 0 && !open.length) end = close + 1;
+    else end = o;
+  }
+  // a span that kept nothing but brackets is the place as read
+  if (end <= start || !toks.slice(start, end).some((t) => t.kind !== "punct")) return { from, to };
+  return { from: start, to: end };
 }
 
 function commentatorBefore(toks: readonly Tok[], i: number): string | undefined {
