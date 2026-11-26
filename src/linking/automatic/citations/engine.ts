@@ -171,6 +171,11 @@ const PENALTY = {
    * linked, a coarse target — at most "possible", like a unit cited by name
    */
   diburNoCommentator: 0.16,
+  /**
+   * "הוריות 10 סעיפים" (issue #41 B8): one bare Arabic number between a name that is also a word and a Hebrew word — as often a count
+   * of that word as an address; at most "possible"
+   */
+  quantityLike: 0.16,
 } as const;
 
 export interface Pending {
@@ -704,6 +709,7 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (t.otherWork) s -= PENALTY.otherWork;
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
   if (c.rule === "dibur-no-commentator") s -= PENALTY.diburNoCommentator;
+  if (c.quantityLike) s -= PENALTY.quantityLike;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
@@ -876,6 +882,10 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   }
   if (c.evidence === "medium") warnings.push({ code: "citations/bare-numbers", text: "המקום כתוב במספרים בלי סימן (פרק, סימן, דף) ובלי גרשיים" });
   if (c.numericName) warnings.push({ code: "citations/numeric-name", text: `השם "${c.name}" יכול להיקרא גם כמספר` });
+  if (c.quantityLike) {
+    rules.push("citations.quantity-like");
+    warnings.push({ code: "citations/quantity-like", text: "המקום הוא מספר אחד בספרות, בלי סימן ובלי סוגריים, ואחריו מילה: ייתכן שזו כמות (\"10 סעיפים\") ולא מקום. בדקו לפני שאתם מאשרים" });
+  }
   if (c.elems.some((e) => e.numeral.common && !e.explicit)) warnings.push({ code: "citations/common-word-number", text: "אחד המספרים הוא גם מילה רגילה" });
   if (t.collection === "other" && !r.daf && c.elems.some((e) => e.kind === "?")) warnings.push({ code: "citations/generic-book", text: "הספר אינו מהקבצים המוכרים (תנ\"ך, ש\"ס, רמב\"ם, שולחן ערוך), והמספרים הותאמו לרמות הספר לפי הסדר" });
   if (anchored) {

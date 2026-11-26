@@ -47,3 +47,23 @@ describe("B7 — a ד\"ה with no commentator's name still links the daf", () =>
     expect(s.target.book.key).toBe(B.tosBer.key);
   });
 });
+
+describe("B8 — a bare Arabic number between a book's name and a Hebrew noun is a quantity, not an address", () => {
+  it.each([
+    ["הוריות 10 סעיפים", B.hor],
+    ["יהושע 9 דברים", B.josh],
+    ["נדרים 50 אחוז", B.ned],
+    ["ביצה 12 גרם", B.bei],
+    ["מגילה 25 מילים", B.meg],
+  ] as const)("%s: at most possible", (text, book) => {
+    const r = run(`כתוב ${text} ועוד`);
+    const to = r.suggestions.filter((x) => x.target.book.key === book.key);
+    for (const s of to) expect(s.confidence).toBe("possible");
+  });
+
+  it("the same number with a place word, in brackets or with a second number keeps its confidence (control)", () => {
+    expect(run("ועיין יהושע פרק 9 ושם").suggestions[0]!.confidence).toBe("certain");
+    expect(run("ועיין (יהושע 9) ושם").suggestions[0]!.confidence).not.toBe("possible");
+    expect(run("כמו שנאמר יהושע 9, 2 ועוד").suggestions[0]!.confidence).not.toBe("possible");
+  });
+});

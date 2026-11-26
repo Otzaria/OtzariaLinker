@@ -75,6 +75,8 @@ export interface Citation {
   readonly rule?: string;
   /** the chapter was written as an ordinal word ("בפרק קמא דסנהדרין") */
   readonly ordinal?: true;
+  /** one bare Arabic number and a plain Hebrew word after it ("הוריות 10 סעיפים"): maybe a count, not an address */
+  readonly quantityLike?: true;
 }
 
 /** A chapter or parsha cited by its name. */
@@ -1525,6 +1527,10 @@ export class CitationScanner {
     // "אם ישב בסוכה ח' ימים", "עד שבועות מ"ד ימים": numbers followed by what they count are a quantity, not a place
     const lastElem = c.elems.at(-1);
     if (!c.bracketed && lastElem && !lastElem.explicit && lastElem.amud === undefined && countedAt(toks, c.to)) return this.drop("quantity");
+    // "הוריות 10 סעיפים", "נדרים 50 אחוז": ONE bare Arabic number, no place word, no bracket, and a plain Hebrew word right after it —
+    // more often a count of that word than an address (issue #41 B8); the list of counted words above cannot hold every noun, so it is
+    // kept, at "possible" at most (engine.ts PENALTY.quantityLike)
+    const quantityLike = !c.bracketed && c.elems.length === 1 && !!lastElem && lastElem.numeral.form === "digits" && !lastElem.explicit && lastElem.amud === undefined && lastElem.maybeAmud === undefined && plainWordAt(toks, c.to);
     let candidates = c.candidates;
     let movedFrom = c.movedFrom;
     const qualifier = qualifierBefore(toks, c.from);
@@ -1630,6 +1636,7 @@ export class CitationScanner {
       ...(c.ordinal && { ordinal: true }),
       ...(c.internal && { internal: c.internal }),
       ...(commentator && diburWords?.length && { dh: diburWords }),
+      ...(quantityLike && { quantityLike: true as const }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -2338,6 +2345,14 @@ function quantifierBefore(toks: readonly Tok[], i: number): boolean {
 const COUNTED: ReadonlySet<string> = new Set(["ימים", "יום", "יומין", "שנים", "שנה", "שנין", "שעות", "חדשים", "חודשים", "פעמים", "אמות", "דורות", "אלף", "אלפים", "מאות", "רבוא", "זוז", "זוזים", "מנה", "סלעים"]);
 
 const countedAt = (toks: readonly Tok[], i: number): boolean => toks[i]?.kind === "word" && COUNTED.has(toks[i]!.text);
+/**
+ * A word at toks[i] that may be what a number counts ("סעיפים", "אחוז", "גרם"): no quote marks (not "ד"ה", "ע"א"), not a word with
+ * the conjunction ו ("ושם", "ועוד": the sentence goes on after a citation), not a place word or a function word ("שם", "כי", "על").
+ */
+const plainWordAt = (toks: readonly Tok[], i: number): boolean => {
+  const t = toks[i];
+  return t?.kind === "word" && !t.gershayim && !t.geresh && !t.text.startsWith("ו") && !/^(?:שם|עמוד|דף|סעיף|הלכה|פסוק|משנה|כי|אשר|של|על|אל|עם|הוא|היא|הם|כמו|גם|אבל|אך|רק|כן|לא|ע|עי|עיין|ראה)$/.test(t.text);
+};
 
 /** a part's name alone ("או"ח", "חושן משפט") */
 const isSaPartAlone = (name: string): boolean => Object.values(SA_PARTS).some((names) => names.includes(normTitle(name)));
