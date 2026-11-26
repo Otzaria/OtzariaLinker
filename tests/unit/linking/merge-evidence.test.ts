@@ -87,6 +87,20 @@ describe("merge — containment that the headings themselves produced is not evi
     expect(mergeSuggestions([H(5, 15, "high"), D(5, 15, "high", "heading")]).suggestions[0]!.confidence).toBe("certain");
   });
 
+  // V7 PR2 review, finding 3: containment counted an inheriting line (window not known) as dependent, the exact agreement did not
+  it("an exact agreement with a ד\"ה line that inherits its place (בא\"ד, שם, a paragraph of the item) is one piece of evidence: no step up", () => {
+    const inheriting = (rule: string, conf: Confidence): MergeItem => ({
+      suggestion: sg("dibur-hamatchil", side(B, 15), side(C, 5), conf, { declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 9 }, rules: [rule] }),
+      focus: C.key,
+    });
+    for (const rule of ["dh/inherit-baad", "dh/inherit-sham", "dh/inherit-item"]) {
+      expect(mergeSuggestions([H(5, 15, "possible"), inheriting(rule, "possible")]).suggestions[0]!.confidence, rule).toBe("possible");
+      const s = mergeSuggestions([H(5, 15, "high"), inheriting(rule, "high")]).suggestions[0]!;
+      expect(s.confidence, rule).toBe("high");
+      expect(s.rules, rule).toContain("maxlink/agree-dependent");
+    }
+  });
+
   it("records the provenance of every piece of evidence, and whether it was counted", () => {
     const s = mergeSuggestions([H(5, 10, "high", 20), D(5, 15, "possible", "heading")]).suggestions[0]!;
     expect(s.evidence).toEqual(

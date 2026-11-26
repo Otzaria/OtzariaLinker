@@ -258,8 +258,14 @@ function basisOf(s: Suggestion): EvidenceBasis {
  * The source of a piece of evidence for an EXACT agreement: a ד"ה searched only inside the numbered line a heading names
  * says what the heading says (its window is that line), so with the headings engine it is one source, not two.
  * A ד"ה searched in a whole section picks its line by the words — a second source next to the heading's number.
+ * A line whose window is not known (בא"ד, שם, a paragraph of the item: it inherits its place, it was not searched) is dependent here
+ * as it is for containment (independentOf), or a headings line and an inheriting line on the same place would rise a step
+ * (V7 PR2 review, finding 3).
  */
-const agreementSource = (x: Raw): string => (basisOf(x.s) === "words-in-unit" || basisOf(x.s) === "structure" ? "structure" : x.s.engine);
+const agreementSource = (x: Raw): string => {
+  const basis = basisOf(x.s);
+  return basis === "words-in-unit" || basis === "words-unknown-window" || basis === "structure" ? "structure" : x.s.engine;
+};
 
 /**
  * The precise line `x` is evidence about the coarse range `around` only when it was found without it: a search of the
@@ -585,9 +591,17 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     rules.push("maxlink/agree", ...g.engines.map((e) => `maxlink/engine:${e}`));
     reasons.push(r("maxlink/agree", `${g.engines.length} שיטות הגיעו לאותו קישור: ${g.engines.map(engineTitle).join(", ")}.`));
     if (!support && g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE).length > 1) {
-      // one source twice is not two: a ד"ה searched only in the line the heading names
+      // one source twice is not two: a ד"ה searched only in the line the heading names, or a line that inherits its place
       rules.push("maxlink/agree-dependent");
-      reasons.push(r("maxlink/agree-dependent", "דיבור המתחיל חיפש רק בתוך השורה הממוספרת שהכותרת בפירוש מציינת, ולכן ההסכמה עם שיטת הכותרות אינה ראיה שנייה, והוודאות לא עלתה."));
+      const inherits = g.exact.some((x) => basisOf(x.s) === "words-unknown-window");
+      reasons.push(
+        r(
+          "maxlink/agree-dependent",
+          inherits
+            ? 'שורת דיבור המתחיל לא חופשה לפי המילים שלה: היא יורשת את המקום של שורה קודמת (בא"ד, שם, המשך של קטע), ולכן ההסכמה עם שיטת הכותרות אינה ראיה שנייה, והוודאות לא עלתה.'
+            : "דיבור המתחיל חיפש רק בתוך השורה הממוספרת שהכותרת בפירוש מציינת, ולכן ההסכמה עם שיטת הכותרות אינה ראיה שנייה, והוודאות לא עלתה.",
+        ),
+      );
     }
   }
   for (const x of g.exact) evidence.push({ engine: x.s.engine, role: x === g.rep ? "representative" : "agrees", confidence: x.s.confidence, basis: basisOf(x.s), width: widthOf(x.oSpan), counted: x === g.rep || !!support?.includes(x) });
