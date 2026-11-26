@@ -51,4 +51,13 @@ describe("ref_2 of a submission on more chunks than the cache holds (V7 §4.10)"
     expect(plan.heldBack.filter((h) => h.problems.some((p) => p.code === "sefaria/ref2-required"))).toHaveLength(0);
     expect(store.allLinks.value.filter((l) => l.ref2 === "Genesis 1:1")).toHaveLength(500);
   });
+
+  it("the links table's bulk \"fix the Sefaria refs\" fills every one of them too", async () => {
+    const store = new AppStore(service, { save: () => {} }, loadPreferences(null));
+    await store.openFiles([{ path: "x.db", blob: new Blob([]) }]);
+    const links = Array.from({ length: 500 }, (_, k) => link(k));
+    store.linkState.value = commit(store.linkState.value, "test", addChanges(links));
+    expect(await store.fixes.fixRefs(links.map((l) => l.id))).toBe(500);
+    expect(store.allLinks.value.filter((l) => l.ref2 === "Genesis 1:1")).toHaveLength(500);
+  });
 });
