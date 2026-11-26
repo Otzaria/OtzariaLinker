@@ -3,7 +3,7 @@ import { useStore } from "../context";
 import { fromDataTransfer, pickFiles } from "../files";
 import { Icon, type IconName } from "../icons/icon";
 import { ltr } from "../shell/file-name";
-import { OTZARIA_DB_DIR, OTZARIA_DB_FILE, otzariaDbCopyNotice, otzariaDbCopyText } from "./otzaria-db-path";
+import { OTZARIA_DB_DIR, OTZARIA_DB_DIR_USER, OTZARIA_DB_FILE, OTZARIA_DB_WHERE, otzariaDbCopyNotice, otzariaDbCopyText } from "./otzaria-db-path";
 
 /*
  * Adding a source is first-class: a folder, files, a database (the Otzaria one or a personal one),
@@ -30,12 +30,12 @@ export const SOURCE_OPTIONS: readonly SourceOption[] = [
 /** The browser cannot open a path by itself: where the Otzaria database is, and how to pick it. */
 export function OtzariaDbHint({ compact }: { compact?: boolean }) {
   const store = useStore();
-  const copy = async () => {
+  const copy = async (install: "all" | "user" = "all") => {
     try {
-      await navigator.clipboard.writeText(otzariaDbCopyText());
+      await navigator.clipboard.writeText(otzariaDbCopyText(install));
       store.notify("success", otzariaDbCopyNotice());
     } catch {
-      store.notify("info", `לא הצלחתי להעתיק. התיקייה: ${OTZARIA_DB_DIR}. בחרו בה את הקובץ בשם seforim.`);
+      store.notify("info", `לא הצלחתי להעתיק. התיקייה: ${otzariaDbCopyText(install)}. בחרו בה את הקובץ בשם seforim.`);
     }
   };
   return (
@@ -56,10 +56,21 @@ export function OtzariaDbHint({ compact }: { compact?: boolean }) {
             </span>
           ))}
         </bdi>
-        <button class="btn text small" onClick={copy} title="העתקת נתיב התיקייה, כדי להדביק אותו בחלון הבחירה">
+        <button class="btn text small" onClick={() => copy("all")} title="העתקת נתיב התיקייה, כדי להדביק אותו בחלון הבחירה">
           <Icon name="fl_copy" size={14} />
           העתקה
         </button>
+        {/* #16: Otzaria installed for one user keeps the library in the user's profile (app_paths.dart getDefaultLibraryPath) */}
+        {!compact && (
+          <div class="muted">
+            אוצריא שהותקנה רק למשתמש שלכם: <bdi dir="ltr" class="path">{OTZARIA_DB_DIR_USER}</bdi>{" "}
+            <button class="btn text small" onClick={() => copy("user")} title="העתקת נתיב התיקייה של התקנה למשתמש אחד">
+              <Icon name="fl_copy" size={14} />
+              העתקה
+            </button>
+            {" "}{OTZARIA_DB_WHERE}
+          </div>
+        )}
         {!compact && (
           <div class="muted">
             הדפדפן לא פותח נתיב בעצמו: לחצו "מסד נתונים", הדביקו את נתיב התיקייה בשדה "שם הקובץ" ולחצו Enter, ובתיקייה בחרו את הקובץ בשם <bdi dir="ltr">seforim</bdi> (<bdi dir="ltr">{OTZARIA_DB_FILE}</bdi>). התיקייה ProgramData מוסתרת בסייר הקבצים, אבל הדבקת הנתיב עובדת.
