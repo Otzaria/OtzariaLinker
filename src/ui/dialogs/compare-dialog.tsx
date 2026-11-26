@@ -90,7 +90,7 @@ export function CompareDialog({ onClose }: { onClose: () => void }) {
             <ul class="cmp-sets">
               {sets.map((s) => (
                 <li key={s.id}>
-                  <b>{fname(s.name)}</b> <span class="muted">{s.links.length.toLocaleString("he")} קישורים{s.skipped ? ` (ועוד ${s.skipped.toLocaleString("he")} שאינם יכולים להיות בקובץ: זיהוי אוטומטי וספריא)` : ""}</span>
+                  <b>{fname(s.name)}</b> <span class="muted">{s.links.length.toLocaleString("he")} קישורים{s.skipped ? ` (ועוד ${s.skipped.toLocaleString("he")} שאינם יכולים להיות בקובץ: זיהוי אוטומטי וספריא)` : ""}{s.unreadable ? ` (ועוד ${s.unreadable.toLocaleString("he")} רשומות פגומות שלא נקראו ולא מושוות)` : ""}</span>
                   {s.id !== PROJECT_SET && (
                     <button class="icon-btn" title="הסרה מההשוואה" aria-label={`הסרת ${s.name}`} onClick={() => c.forget(s.id)}>
                       <Icon name="fl_dismiss" size={16} />

@@ -42,7 +42,11 @@ export interface LinkSet {
   readonly text?: string;
   /** database links left out: the LINKER layer and Sefaria↔Sefaria links, which no links file can hold */
   readonly skipped?: number;
+  /** a file: records the parser could not decode — not in `links`, so not compared (said, never silent: V7 §1.7) */
+  readonly unreadable?: number;
 }
+
+const recordsCount = (n: number) => (n === 1 ? "רשומה אחת" : `${n.toLocaleString("he")} רשומות`);
 
 export const PROJECT_SET = "project";
 export const DB_SET = "db";
@@ -79,7 +83,15 @@ export class LinkCompareState {
       const src = this.ref(title);
       const n = this.seq++;
       const links = parsed.records.map((r, i) => recordToLink(r, i, src, (t) => this.host.resolveTitle(t), `cmp:${n}:${i}`).link);
-      added.push({ id: `file:${n}`, kind: "file", title, name, links, text: f.text });
+      // a record the parser cannot decode is not in the set: count it and say so, or the comparison would be silent about it
+      const bad = [...new Set(parsed.issues.filter((i) => i.index >= 0 && i.level === "error").map((i) => i.index))];
+      if (bad.length)
+        this.host.notify(
+          "warning",
+          `"${name}": ${recordsCount(bad.length)} בקובץ ${bad.length === 1 ? "פגומה ולא נקראה, ולכן לא הושוותה" : "פגומות ולא נקראו, ולכן לא הושוו"}. אוצריא הייתה דוחה את הקובץ כולו כמו שהוא; תקנו אותן בקובץ וטענו אותו שוב.`,
+          bad.slice(0, 200).map((i) => `רשומה ${i + 1}: ${parsed.issues.filter((x) => x.index === i && x.level === "error").map((x) => x.message).join(" ")}`),
+        );
+      added.push({ id: `file:${n}`, kind: "file", title, name, links, text: f.text, ...(bad.length && { unreadable: bad.length }) });
     }
     if (added.length) this.sets.value = [...this.sets.value, ...added];
     return added.map((s) => s.title);
@@ -180,6 +192,11 @@ export class LinkCompareState {
         return void this.host.notify("error", `בפרויקט יש עותק ערוך של קובץ הקישורים של "${title}". כדי לא לדרוס אותו, בחרו את "הפרויקט" כעותק המועדף.`), null;
       changes.push(...held.map((l) => ({ id: l.id, before: l })));
       if (held.length) this.host.notify("info", `העותק הקודם של קובץ הקישורים של "${title}" (${linksCount(held.length)}, בלי שינויים) הוחלף בעותק המועדף.`);
+      if (pref.unreadable)
+        this.host.notify(
+          "warning",
+          `${recordsCount(pref.unreadable)} ${pref.unreadable === 1 ? "פגומה" : "פגומות"} בעותק המועדף, "${pref.name}", ${pref.unreadable === 1 ? "לא נקראה, ולכן אינה" : "לא נקראו, ולכן אינן"} בקובץ הקישורים של "${title}" שבפרויקט: בייצוא הקובץ ייכתב ${pref.unreadable === 1 ? "בלעדיה" : "בלעדיהן"}. אם ${pref.unreadable === 1 ? "היא נחוצה" : "הן נחוצות"}, תקנו את הקובץ וטענו אותו שוב.`,
+        );
       const base = merge.entries.filter((e) => e.base).map((e, i) => ({ ...e.link, id: `file:${title}#m${n}:${i}`, origins: e.origins }));
       changes.push(...addChanges(base));
       files.push(fileChange(s, title, { title, records: pref.links.length, hash: fileFingerprint(pref.text ?? ""), verified: true, layout: detectLayout(pref.text ?? "") }));
