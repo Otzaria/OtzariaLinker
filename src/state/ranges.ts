@@ -1,7 +1,8 @@
 import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
-import { applyRangeEdit, fillRanges, rangeMarkers, suggestEnd, trimBefore, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
+import { validateLink, type ValidationContext } from "../core/links/validate";
+import { applyRangeEdit, cancelContinuationEdit, fillRanges, planContinuation, rangeMarkers, suggestEnd, trimBefore, type ContinueMode, type ContinuePlan, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
 import { commit, linksCount, type Change, type LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { BooksService, CallOptions } from "./services";
@@ -27,6 +28,14 @@ export interface RangesHost {
   isSefariaOwned?(book: { readonly title: string; readonly key?: string }): boolean;
   /** what the export is for: a submission to the library refuses a range on a Sefaria side */
   readonly exportPurpose?: ReadonlySignal<"submission" | "private">;
+  /** the export's rules (validate.ts) as the store sees them: whether a range is accepted for a link (#44) */
+  validation?(): ValidationContext;
+  /** a fresh id for a link the user makes */
+  newLinkId?(): string;
+  /** heRef_2 the builder would give a target line */
+  autoHeRef?(t: { bookKey: string; line: number }): string;
+  /** true for a link the open database already holds (the same two lines) */
+  inDatabase?(l: Link): boolean;
 }
 
 export class RangesState {
@@ -108,6 +117,73 @@ export class RangesState {
     return n;
   }
 
+  /**
+   * "This passage continues the previous one" (V7 §2.13, issue #44): the PREVIEW of what marking `line` as the
+   * continuation of the passage before it would do (linking/ranges.ts planContinuation). Nothing changes until
+   * `applyContinue`. A range is extended only where the export accepts it for that link — the same validateLink the
+   * check and the export run, so a Sefaria side of a submission or a one-line type gets an independent link instead.
+   * Null: the book is not open.
+   */
+  async planContinue(bookKey: string, side: RangeSide, line: number, mode: ContinueMode = "extend"): Promise<ContinuePlan | null> {
+    const book = await this.book(bookKey);
+    if (!book) return null;
+    let seq = 0;
+    const ctx = this.host.validation?.();
+    return planContinuation(this.links(), book, side, line, {
+      mode,
+      newId: () => this.host.newLinkId?.() ?? `c:${Date.now().toString(36)}:${(++seq).toString(36)}`,
+      rangeRefused: ctx ? (before, after) => newError(before, after, ctx) : undefined,
+      exists: this.host.inDatabase ? (l) => this.host.inDatabase!(l) : undefined,
+      heRef2: this.host.autoHeRef ? (l) => this.host.autoHeRef!({ bookKey, line: l }) : undefined,
+    });
+  }
+
+  /**
+   * Applies a previewed continuation as ONE undoable step. A heading between the two passages is a structural boundary:
+   * without `crossHeading` nothing changes, and the user is told why (null). Returns the number of links made or changed.
+   */
+  applyContinue(plan: ContinuePlan, opts: { crossHeading?: boolean } = {}): number | null {
+    if (plan.refused) {
+      this.host.notify("info", plan.refused === "heading-line" ? "השורה היא שורת כותרת, ואוצריא משמיטה קישור אליה. בחרו את שורת התוכן שאחריה." : "אין קישור בשורות שלפני השורה הזו בצד הזה, ולכן אין ממה להמשיך. צרו קישור לקטע הקודם, ואז סמנו את ההמשך.");
+      return null;
+    }
+    if (plan.headings.length && !opts.crossHeading) {
+      this.host.notify("warning", `בין הקטע הקודם (שורה ${plan.fromLine! + 1}) לשורה ${plan.line + 1} יש כותרת (שורה ${plan.headings.map((h) => h + 1).join(", ")}), כלומר יחידה אחרת. כדי להמשיך בכל זאת, אשרו את המעבר בתצוגה המקדימה.`);
+      return null;
+    }
+    const s = this.host.linkState.value;
+    const changes: Change[] = [];
+    for (const it of plan.items) {
+      if (!it.after) continue;
+      // the preview may be older than the project: a link changed since is not overwritten
+      if (it.action === "extend" && s.links.get(it.prev.id) !== it.prev) continue;
+      if (it.action === "copy" && s.links.has(it.after.id)) continue;
+      changes.push(it.action === "extend" ? { id: it.prev.id, before: it.prev, after: it.after } : { id: it.after.id, after: it.after });
+    }
+    if (!changes.length) {
+      this.host.notify("info", "לא נוצר ולא השתנה אף קישור: כל הקישורים של הקטע הקודם כבר מגיעים לשורה הזו, או שקישור כזה כבר קיים.");
+      return 0;
+    }
+    this.host.linkState.value = commit(s, `המשך לקטע הקודם (${linksCount(changes.length)})`, changes);
+    this.host.notify("success", `השורה ${plan.line + 1} סומנה כהמשך של שורה ${plan.fromLine! + 1} (${linksCount(changes.length)}).`, undefined, { label: "ביטול", run: () => this.host.undo() });
+    return changes.length;
+  }
+
+  /** Cancels the continuation of these links (an extended range shrinks back, a copy is removed), as one undoable step. */
+  cancelContinuation(ids: readonly string[]): number {
+    const s = this.host.linkState.value;
+    const changes: Change[] = [];
+    for (const id of ids) {
+      const l = s.links.get(id);
+      if (!l || l.status === "deleted") continue;
+      const after = cancelContinuationEdit(l);
+      if (after === undefined) continue;
+      changes.push(after === null ? { id, before: l } : { id, before: l, after });
+    }
+    if (changes.length) this.host.linkState.value = commit(s, `ביטול ההמשך לקטע הקודם (${linksCount(changes.length)})`, changes);
+    return changes.length;
+  }
+
   private links(): Link[] {
     return [...this.host.linkState.value.links.values()];
   }
@@ -115,4 +191,10 @@ export class RangesState {
   private toChanges(edits: readonly RangeEdit[]): Change[] {
     return edits.map((e) => ({ id: e.link.id, before: e.link, after: applyRangeEdit(e.link, e.side, e.after) }));
   }
+}
+
+/** The first ERROR the export gives the extended link that it did not give the link before (null: none), in the user's words. */
+function newError(before: Link, after: Link, ctx: ValidationContext): string | null {
+  const had = new Set(validateLink(before, ctx).filter((p) => p.severity === "error").map((p) => p.code));
+  return validateLink(after, ctx).find((p) => p.severity === "error" && !had.has(p.code))?.message ?? null;
 }

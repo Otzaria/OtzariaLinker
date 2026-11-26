@@ -1,6 +1,6 @@
 import type { AltTocBook, AltTocEntry, AltTocOrigin, AltTocStructure } from "../core/alt-toc/model";
 import { parseSavedDbMappings, type SavedDbMapping } from "../core/db-mapping";
-import type { BookOrigin, BookRef, Link, LinkMatched, LinkSide } from "../core/links/model";
+import type { BookOrigin, BookRef, Link, LinkContinuation, LinkMatched, LinkSide } from "../core/links/model";
 import { NUMERIC_KEYS } from "../formats/links-json/layout";
 
 /*
@@ -338,6 +338,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
   if (a !== undefined && (!a || !isInt(a.rawStart) || (a.rawEnd !== undefined && !isInt(a.rawEnd)) || (a.label !== undefined && !str(a.label)))) return null;
   if (l.keyOrder !== undefined && !(Array.isArray(l.keyOrder) && l.keyOrder.every(str))) return null;
   const matched = rebuildMatched(l.matched);
+  const continued = rebuildContinued(l.continued);
   const pass = l.passthrough as unknown;
   if (pass !== undefined && (typeof pass !== "object" || pass === null || Array.isArray(pass))) return null;
   return {
@@ -352,6 +353,7 @@ function rebuildLink(l: StoredLink, bind: (b: StoredBook) => BookRef): Link | nu
     ...(str(l.ref2) && { ref2: l.ref2 }),
     ...(a && { anchor: { rawStart: a.rawStart as number, ...(a.rawEnd !== undefined && { rawEnd: a.rawEnd as number }), ...(a.label !== undefined && { label: a.label as string }), ...(str(a.contentHash) && { contentHash: a.contentHash }) } }),
     ...(matched && { matched }),
+    ...(continued && { continued }),
     ...(pass !== undefined && { passthrough: copyData(pass as Record<string, unknown>) }),
     ...(l.keyOrder !== undefined && { keyOrder: [...l.keyOrder] }),
     ...(l.typeNull === true && { typeNull: true }),
@@ -376,6 +378,23 @@ function rebuildMatched(raw: unknown): LinkMatched | undefined {
   const source = span((raw as Record<string, unknown>).source);
   const target = span((raw as Record<string, unknown>).target);
   return source || target ? { ...(source && { source }), ...(target && { target }) } : undefined;
+}
+/**
+ * Where a link continues the previous passage from (issue #44), optional and only a note, like `matched`: a damaged one
+ * is dropped and the link stays. Added to version 1 without a bump.
+ */
+function rebuildContinued(raw: unknown): LinkContinuation | undefined {
+  const c = raw as Record<string, unknown> | null | undefined;
+  if (!c || typeof c !== "object" || Array.isArray(c)) return undefined;
+  if ((c.kind !== "copy" && c.kind !== "extend") || (c.side !== "source" && c.side !== "target") || !isInt(c.fromLine)) return undefined;
+  return {
+    kind: c.kind,
+    side: c.side,
+    fromLine: c.fromLine,
+    ...(c.kind === "copy" && str(c.from) && c.from.length <= 200 && { from: c.from }),
+    ...(c.kind === "extend" && isInt(c.baseEnd) && { baseEnd: c.baseEnd }),
+    ...(c.kind === "extend" && c.baseStatus === "existing" && { baseStatus: "existing" as const }),
+  };
 }
 function copyData(o: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

@@ -1555,7 +1555,13 @@ export class AppStore {
     this.linkState.value = commit(this.linkState.value, label, changes);
   }
 
-  private newLinkId(): string {
+  /** true for a link the open database already holds on the same two lines (the ranges module's "continue", #44) */
+  inDatabase(l: Link): boolean {
+    return this.dbLinks.matchDb(l) !== null;
+  }
+
+  /** a fresh id for a link the user makes (the builder; the ranges module's "continue", #44) */
+  newLinkId(): string {
     return `u:${Date.now().toString(36)}:${(++this.linkSeq).toString(36)}`;
   }
 }

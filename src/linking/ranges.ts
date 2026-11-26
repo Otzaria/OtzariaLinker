@@ -1,3 +1,4 @@
+import { linePairIdentity } from "../core/links/equality";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
 
 /*
@@ -141,4 +142,139 @@ export function applyRangeEdit(l: Link, side: RangeSide, end: number | undefined
   const { end: _drop, ...rest } = cur;
   const next: LinkSide = end !== undefined && end > cur.line ? { ...rest, end } : rest;
   return { ...l, [side]: next, status: l.status === "existing" ? "edited" : l.status };
+}
+
+/* ---------------- "this passage continues the previous one" (V7 §2.13, issue #44) ---------------- */
+
+/** "extend": a range over the new line where the export allows one (else a copy); "copy": always an independent link. */
+export type ContinueMode = "extend" | "copy";
+
+export interface ContinueItem {
+  /** a link of the previous passage */
+  readonly prev: Link;
+  readonly action: "extend" | "copy" | "skip";
+  /** skip: "covered" (it already reaches the line) or "duplicate" (the copy is a link already there); copy: "range-refused" */
+  readonly why?: "covered" | "duplicate" | "range-refused";
+  /** range-refused: what the export says about the range (validate.ts) */
+  readonly detail?: string;
+  /** the changed link (extend, same id) or the new one (copy) */
+  readonly after?: Link;
+}
+
+export interface ContinuePlan {
+  readonly side: RangeSide;
+  /** the line that continues the previous passage (0-based) */
+  readonly line: number;
+  /** the previous passage: the last line before `line` that a link of this side covers; null when refused */
+  readonly fromLine: number | null;
+  /** heading lines between the two: a structural boundary that needs the user's explicit confirmation */
+  readonly headings: readonly number[];
+  /** "heading-line": the line is a heading (Otzaria drops a link to it); "no-previous": no link before it on this side */
+  readonly refused?: "heading-line" | "no-previous";
+  readonly items: readonly ContinueItem[];
+}
+
+export interface ContinueOptions {
+  readonly mode?: ContinueMode;
+  /** a new link id for each copy */
+  readonly newId: () => string;
+  /** null when the export accepts the extended link as it accepted it before; else what it says about the range */
+  readonly rangeRefused?: (before: Link, after: Link) => string | null;
+  /** true for a link that is already there outside `links` (the open database's links) */
+  readonly exists?: (l: Link) => boolean;
+  /** heRef_2 of a copy whose TARGET is the continuing line (the passage book is the link's target) */
+  readonly heRef2?: (line: number) => string;
+}
+
+const coverEnd = (s: LinkSide) => (s.end !== undefined && s.end > s.line ? s.end : s.line);
+
+/**
+ * The plan for "line `line` continues the previous passage" (pure; nothing changes until the store applies it).
+ * The previous passage is the last line before `line` that a live link of this side covers; every link that covers
+ * it is inherited: its range is extended over the new line (`mode` "extend", when the export accepts a range for that
+ * link — `rangeRefused` — and it is not a read-only database link), or it is copied to the new line as an independent
+ * link with the same other side, type and label. A link that already reaches the line is left alone, and a copy that
+ * would duplicate a link already there (equality.ts, "same lines"; also `exists`) is not made. Headings between the
+ * two lines are reported, never crossed silently: the caller asks for a confirmation.
+ */
+export function planContinuation(links: Iterable<Link>, book: RangeBook, side: RangeSide, line: number, options: ContinueOptions): ContinuePlan {
+  const mode = options.mode ?? "extend";
+  const all = [...links].filter(live);
+  const refused = (why: ContinuePlan["refused"]): ContinuePlan => ({ side, line, fromLine: null, headings: [], refused: why, items: [] });
+  if (book.headings.has(line)) return refused("heading-line");
+  const mine = all.filter((l) => book.owns(sideOf(l, side).book) && sideOf(l, side).line < line);
+  if (!mine.length) return refused("no-previous");
+  const fromLine = Math.max(...mine.map((l) => Math.min(coverEnd(sideOf(l, side)), line - 1)));
+  const prevs = mine
+    .filter((l) => sideOf(l, side).line <= fromLine && fromLine <= coverEnd(sideOf(l, side)))
+    .sort((a, b) => sideOf(a, side).line - sideOf(b, side).line || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const headings = [...book.headings].filter((h) => h > fromLine && h < line).sort((a, b) => a - b);
+
+  // the one equality rule (core/links/equality.ts): the same two lines, in any direction and of any type
+  const pairs = new Set(all.map((l) => linePairIdentity(l)));
+  const items: ContinueItem[] = [];
+  for (const prev of prevs) {
+    const s = sideOf(prev, side);
+    if (coverEnd(s) >= line) {
+      items.push({ prev, action: "skip", why: "covered" });
+      continue;
+    }
+    let detail: string | undefined;
+    if (mode === "extend" && prev.provenance !== "db") {
+      const before = prev.continued?.kind === "extend" && prev.continued.side === side ? prev.continued : undefined;
+      const baseEnd = before ? before.baseEnd : isRangeSide(s) ? s.end : undefined;
+      const baseStatus = before ? before.baseStatus : prev.status === "existing" ? "existing" : undefined;
+      const after: Link = {
+        ...applyRangeEdit(prev, side, line),
+        continued: { kind: "extend", side, fromLine: before ? before.fromLine : fromLine, ...(baseEnd !== undefined && { baseEnd }), ...(baseStatus && { baseStatus }) },
+      };
+      const why = options.rangeRefused?.(prev, after) ?? null;
+      if (why === null) {
+        items.push({ prev, action: "extend", after });
+        continue;
+      }
+      detail = why;
+    }
+    const copy = continuationCopy(prev, side, line, fromLine, options);
+    const key = linePairIdentity(copy);
+    if (pairs.has(key) || options.exists?.(copy)) {
+      items.push({ prev, action: "skip", why: "duplicate" });
+      continue;
+    }
+    pairs.add(key);
+    items.push({ prev, action: "copy", after: copy, ...(detail !== undefined && { why: "range-refused" as const, detail }) });
+  }
+  return { side, line, fromLine, headings, items };
+}
+
+const isRangeSide = (s: LinkSide) => s.end !== undefined && s.end > s.line;
+
+/** An independent link for the continuing line: the other side, the type and the label of `prev`; nothing of its record's shape. */
+function continuationCopy(prev: Link, side: RangeSide, line: number, fromLine: number, options: ContinueOptions): Link {
+  const here: LinkSide = { book: sideOf(prev, side).book, line };
+  return {
+    id: options.newId(),
+    status: "new",
+    provenance: "user",
+    source: side === "source" ? here : prev.source,
+    target: side === "target" ? here : prev.target,
+    declaredType: prev.declaredType,
+    // heRef_2 and ref_2 describe the target: kept while it is the same; ref_1 describes the source line
+    heRef2: side === "target" ? (options.heRef2?.(line) ?? prev.heRef2) : prev.heRef2,
+    ...(side === "source" && prev.ref2 !== undefined && { ref2: prev.ref2 }),
+    ...(side === "target" && prev.ref1 !== undefined && { ref1: prev.ref1 }),
+    continued: { kind: "copy", side, fromLine, from: prev.id },
+  };
+}
+
+/**
+ * What cancelling a link's continuation makes of it: an extended link gets back the range (and the untouched status) it
+ * had before the first continuation; a copy is removed (null); a link with no continuation is not touched (undefined).
+ */
+export function cancelContinuationEdit(l: Link): Link | null | undefined {
+  const c = l.continued;
+  if (!c) return undefined;
+  if (c.kind === "copy") return null;
+  const { continued: _c, ...rest } = applyRangeEdit(l, c.side, c.baseEnd);
+  return { ...rest, status: c.baseStatus ?? rest.status };
 }

@@ -52,6 +52,13 @@ export function LinkItem({ l, row, top, selected, onSelect }: { l: Link; row?: T
         <span class="sr-only">{details.join(", ")}</span>
         {row?.problem && <span class={`lt-${row.problem}`}>{row.problem === "error" ? "שגיאה" : "אזהרה"}</span>}
       </div>
+      {/* where a continuation was inherited from (#44), and its cancel: one undoable step */}
+      {l.continued && l.status !== "deleted" && (
+        <div class="continued" onClick={(e) => e.stopPropagation()}>
+          {l.continued.kind === "copy" ? `הועתק מהקטע הקודם (שורה ${l.continued.fromLine + 1})` : `הטווח הורחב כהמשך של שורה ${l.continued.fromLine + 1}`}{" "}
+          <button class="adv-link" onClick={() => store.ranges.cancelContinuation([l.id])}>ביטול ההמשך</button>
+        </div>
+      )}
       <div class="acts" onClick={(e) => e.stopPropagation()}>
         {pending ? null : l.status === "deleted" ? (
           <button class="icon-btn" onClick={() => store.restoreLinks([l.id])} title="שחזור" aria-label="שחזור">
