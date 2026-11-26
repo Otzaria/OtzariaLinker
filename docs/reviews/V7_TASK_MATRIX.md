@@ -76,7 +76,7 @@
 | C3 | מילון נשאר בבריכה אחרי כשל | 1 | FIXED | `db-qa-round2.test.ts`: לפני `2 failed`, אחרי `13 passed`. ובמיזוג: גם התנגשות מזהים בבנאי השאירה מילון במאגר. ב־`zstd.test.ts`: לפני `1 failed`, אחרי עובר |
 | C4 | `fallbackListings` בלי תקרה | 1 | FIXED | `fallback-listings.test.ts`: לפני `2 failed \| 1 passed`, אחרי `14 passed` |
 | C5 | חסימת ממשק בייבוא ושמירה | 4 | TODO | |
-| C6 | תקציב גודל | 4 | TODO | |
+| C6 | תקציב גודל | 4 | PARTIAL | נמדד ב־PR4: 2,030,858 בתים מתוך 2,097,152, נשארו 66,294 (3.2%). התקציב לא הועלה. הבנייה דטרמיניסטית (ארבע בניות, אותו hash). V7_RELEASE_READINESS §2 |
 | C7 | כיסוי 200 ספרים בחוט הראשי | 4 | TODO | |
 | C8 | `existingLinks` גדול | 4 | TODO | |
 | C9 | ביטוי חוזר בבסיס | 2 | FIXED | עם B2 (`repeatsOf`, `dh/repeated-phrase`, `dh/alt-repeat`): "ודאית" של ביטוי חוזר 115 ← 29 |
@@ -102,7 +102,7 @@
 | C29 | מקרי קצה בפתיחת מקורות | 1 | PARTIAL | עותק זהה בשם אחר, וקובץ ריק: תוקנו (`open-twice.test.ts`: לפני `2 failed \| 8 passed`, אחרי `10 passed`; ‏`registry.test.ts`: לפני `1 failed`, אחרי עובר). נשארו: הקובץ "B" בדיאלוג ההשוואה, ו־Esc באשף המיפוי (PR3) |
 | C30 | IndexedDB: הבטחה דחויה במטמון, `onblocked` | 1 | FIXED | `tests/unit/app/idb-store.test.ts`: לפני `3 failed`, אחרי `3 passed` |
 | C31 | פעולות שקטות | 3 | FIXED | מחיקה עם "ביטול" מוגן, "(לא נדרש)" אחרי רענון (`guided-flow.test.ts`: לפני `1 failed \| 10 passed`), ותג ספירה בכפתור הייצוא ב־360px (ניגודיות 4.5:1) |
-| C32 | גרסה alpha בהגדרות | 4 | TODO | |
+| C32 | גרסה alpha בהגדרות | 4 | PARTIAL | הגרסה באה מ־`package.json` בזמן הבנייה, ולכן אין שינוי קוד. מה הבעלים קובע בזמן השחרור, וההמלצה (`4.0.0-beta.1` ואחריה `4.0.0`): `docs/release/V7_RELEASE_READINESS.md` §5, §8. הגרסה בענף לא שונתה |
 
 ## 4. Issues ודרישות נוספות
 

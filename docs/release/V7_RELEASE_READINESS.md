@@ -1,0 +1,327 @@
+<div dir="rtl">
+
+# V7 — מוכנות לשחרור
+
+המסמך של PR4 ב־V7 (מפרט §4.18, §4.20, §4.21, ‏C32): התלויות וה־PRs של Dependabot, הבנייה וההפצה, קישור ההורדה,
+טיוטת Release Notes, הוראות מיזוג ושחרור, והמלצה על מספר הגרסה. **שום דבר לא פורסם:** לא נוצר tag, לא נוצר Release,
+לא מוזג אף PR, ולא נדחף אף ענף. כל מה שכתוב כאן כ"הורץ" הורץ ב־2026-11-26 על Windows 11, ‏Node 24.19.0, ‏npm 11.17.0.
+
+הבסיס: `v7/03-wip` ב־`e9bdad1`. ה־commits של PR4 עליו:
+
+| commit | מה |
+|---|---|
+| `6ceb564` | `tests/support/sql-js.ts`: עזר אחד להפעלת sql.js בבדיקות, שמתאים גם ל־@types/sql.js 1.4 וגם ל־1.16 (Dependabot #35) |
+| `40cd31d` | כפתור ההורדה מציג את הגרסה שהוא מוריד, וגרסת pre-release מסומנת "גרסת פיתוח" (#26) |
+| `1a42994` | הודעת הרישיון של `@preact/signals-core`, שנכלל בתוצר דרך `@preact/signals`, ובדיקה שמשווה את הרשימה ל־`package-lock.json` |
+| (המסמך הזה) | `docs/audit/V7_LEGACY_PARITY.md` ו־`docs/release/V7_RELEASE_READINESS.md` |
+
+## 1. תלויות (§4.18)
+
+### 1.1 ה־PRs הפתוחים של Dependabot
+
+כל ה־PRs נפתחו ב־2026-11-22 מול `main` ‏(`9123d3f`). ה־head של כל אחד נבדק מול ה־API הציבורי של GitHub, והוא זהה לענף
+`origin/dependabot/...` שבמאגר. "CI ב־GitHub" הוא תוצאת ה־check runs של ה־head (‏`check` = typecheck, בדיקות, build, E2E
+בשלושה דפדפנים ובנייה חוזרת; `visual` = ההשוואה החזותית).
+
+ה־PRs של npm נבדקו גם כאן: כל אחד ב־worktree זמני נפרד, ‏`npm ci && npm run typecheck && npx vitest run --maxWorkers=4`,
+ול־#35 ול־#37 גם `npm run build`.
+
+| PR | שינוי | סיכון לפי ה־changelog | CI ב־GitHub | הרצה מקומית | המלצה |
+|---|---|---|---|---|---|
+| #31 | `actions/upload-artifact` 4 → 7 | v6: ריצה על Node 24, ודרוש runner ‏2.327.1 ומעלה (ה־runners של GitHub עומדים בזה). v7: מעבר ל־ESM, בלי שינוי בקלט | `check` ✓ · `visual` ✓ | לא רלוונטי (workflow בלבד) | **למזג.** ה־CI של ה־PR עצמו מריץ את שלוש ההעלאות של `ci.yml` |
+| #32 | `actions/setup-node` 4 → 7 | v7: ESM, הוסר `NODE_AUTH_TOKEN` מדומה (לא בשימוש כאן), יציאות חדשות של מטמון. הקלט שלנו (`node-version: 24`, ‏`cache: npm`) לא השתנה | ✓ · ✓ | לא רלוונטי | **למזג.** נוגע גם ב־`pages.yml` וב־`release.yml`, שה־CI של PR לא מריץ. אחרי המיזוג: הרצה ידנית של Pages (`workflow_dispatch`) |
+| #33 | `actions/checkout` 4 → 7 | v6.1: ברירת מחדל בטוחה יותר ל־`pull_request_target` (לא בשימוש כאן). v7: ESM | ✓ · ✓ | לא רלוונטי | **למזג**, עם אותה בדיקה של Pages. `pages.yml` עושה checkout ל־`head_sha` של `workflow_run`, ולא נבדק אם השינוי נוגע גם בזה |
+| #34 | `actions/upload-pages-artifact` 3 → 5 | v4: **קבצים שמתחילים בנקודה לא נכללים** ב־artifact. ‏`_site/.nojekyll` ייעלם, אבל פרסום דרך Actions לא מריץ Jekyll, ולכן אין לזה השפעה | ✓ · ✓ | לא רלוונטי | **למזג יחד עם #36**, ולבדוק בפרסום ידני ש־`index.html`, ‏`OtzariaLinker.html`, ‏`SHA256SUMS` ו־`v3.html` באתר. ‏`pages-artifact.spec.ts` מוצא את הצעד לפי `- uses: actions/upload-pages-artifact`, ולכן לא נשבר |
+| #35 | `sql.js` 1.16.0 → 1.17.0, ‏`@types/sql.js` 1.4.11 → 1.16.0 (בבדיקות בלבד, לא בתוצר) | 1.17: קודי שגיאה של SQLite, קבועים, ‏BigInt נקשר כ־INTEGER של 64 ביט, ושדה `exports` (עם `./dist/*`). ‏@types 1.16: **`useOldExtensionFunctions` הוא שדה חובה** ב־`SqlJsConfig` | `check` ✗ (typecheck) · `visual` ✓ | על ה־head של ה־PR: typecheck נכשל, 21 שגיאות TS2741 ב־21 קבצים. ‏`Tests 1 failed \| 2590 passed \| 75 skipped (2666)`, והכשל הוא בדיקת הזמן של `personal-csv.test.ts` בזמן עומס (לבדה: `3 passed`). build עבר | **לחכות, ואז למזג.** אחרי שמחסנית V7 תמוזג, `6ceb564` נמצא ב־`main`. אז מבקשים `@dependabot rebase`, וה־CI אמור לעבור. נבדק: על העץ של PR4 עם sql.js 1.17.0 ו־@types 1.16.0 (התקנה זמנית, ‏`--no-save`), ‏typecheck: לפני העזר 25 שגיאות, אחריו 0. ‏vitest: `Test Files 240 passed \| 17 skipped (257)`, ‏`Tests 2709 passed \| 76 skipped (2785)` |
+| #36 | `actions/deploy-pages` 4 → 5 | v5: ריצה על Node 24 | ✓ · ✓ | לא רלוונטי | **למזג יחד עם #34**, ולבדוק בפרסום ידני |
+| #37 | `@playwright/test` 1.65.0 → 1.65.1 | שני תיקוני באגים (מחלקה עם decorator, עמודות תחת Bun), ‏Chromium ‏159.0.8154.6 | ✓ · ✓ (ה־visual רץ על ה־headless shell החדש) | typecheck עבר. ‏`Tests 1 failed \| 2590 passed \| 75 skipped (2666)`: בדיקת הזמן של `link-diff.test.ts` (‏3357ms מול סף 3000ms) בזמן עומס. לבדה: `13 passed`. build עבר. ה־E2E לא הורץ מקומית על הגרסה החדשה; ב־CI עבר | **למזג** |
+| #38 | `vitest` 5.1.0 → 5.1.1 | תיקוני באגים (fixtures, ‏`--shard`, ‏`--bail`, מטמון) | ✓ · ✓ | `Test Files 223 passed \| 16 skipped (239)`, ‏`Tests 2591 passed \| 75 skipped (2666)` | **למזג** |
+| #39 | `fast-check` 4.10.2 → 4.10.3 | תיקונים ב־regex arbitraries ובמתזמן. אותו `FC_SEED` עשוי לייצר מקרים אחרים | ✓ · ✓ | `Tests 2591 passed \| 75 skipped (2666)` | **למזג** |
+
+**סדר מומלץ:** קודם מחסנית V7 (§4). אחר כך #38, #39 ו־#37; אחר כך #35 אחרי `@dependabot rebase`; ובסוף ה־actions:
+#31, #32 ו־#33, ואז #34 ו־#36 יחד, ומיד אחריהם פרסום ידני של Pages ובדיקה שהאתר תקין. אחרי כל המיזוגים, לפני ה־tag:
+`npm run check` מלא על `main`. כך הגרסה שתשוחרר נבנית ונבדקת עם הכלים המעודכנים, וה־PRs של V7 לא זזים בזמן הסקירה.
+אף PR לא מוזג בעבודה הזו.
+
+### 1.2 ביקורת ופגיעויות
+
+| פקודה | תוצאה |
+|---|---|
+| `npm audit --omit=dev` | `found 0 vulnerabilities` |
+| `npm audit` | `found 0 vulnerabilities` |
+
+### 1.3 תלויות שלא בשימוש
+
+נבדק לפי ייבוא בפועל (`src`, ‏`tests`, ‏`build`, ‏`scripts` וקובצי הקונפיגורציה). כל החבילות בשימוש:
+`preact` (41 קבצים), ‏`@preact/signals` (27), ‏`fflate` (52), ‏`zstd-wasm-decoder` (2), ‏`fast-check` (22), ‏`sql.js` (דרך
+`tests/support/sql-js.ts`, וייבוא טיפוסים), ‏`vite-plugin-singlefile` (‏`vite.config.ts`), ‏`@types/node` (‏`tsconfig.json`
+‏`types`), ‏`vite`, ‏`vitest`, ‏`typescript`, ‏`@playwright/test`. **אין תלות מיותרת.**
+
+### 1.4 רישיונות של מה שנכלל בתוצר
+
+החבילות שאינן dev ב־`package-lock.json`, כולן ברשימת `licenseNotice` ב־`vite.config.ts` (‏`tests/unit/license-notice.test.ts`):
+
+| חבילה | גרסה | רישיון | תואם GPL-3 |
+|---|---|---|---|
+| `preact` | 11.2.0 | MIT | כן |
+| `@preact/signals` | 2.11.4 | MIT | כן |
+| `@preact/signals-core` | 1.14.5 | MIT | כן. **ההודעה שלו חסרה בתוצר עד `1a42994`** |
+| `fflate` | 0.8.3 | MIT | כן |
+| `zstd-wasm-decoder` | 0.2.3 | ‏(Apache-2.0 OR MIT) AND BSD-3-Clause | כן (MIT או Apache-2.0, ו־BSD-3) |
+
+בנוסף, בראש התוצר: Otzaria Icons ‏(GPL-3.0), ‏Fluent UI System Icons ‏(MIT), ‏Frank Ruehl CLM ‏(GPL-2.0 עם חריג הגופנים)
+ו־Noto Rashi Hebrew ‏(OFL 1.1).
+
+## 2. בנייה והפצה (§4.20)
+
+| בדיקה | תוצאה |
+|---|---|
+| **בנייה דטרמיניסטית** | ב־`40cd31d`: ארבע בניות מ־`dist` ריק, שתיים ב־worktree הזה ושתיים ב־worktree נקי אחר (`npm ci` בנפרד). כולן `dff297d0…0edd2`. ב־`1a42994`: שתי בניות, שתיהן `a4c6f17e…0428`. **הבנייה דטרמיניסטית.** הקובץ מטמיע את ה־commit ואת התאריך שלו (`build/plugins/build-info.ts`), ולכן לכל commit hash אחר. עץ עם שינויים שלא נשמרו מקבל `-dirty` ו־hash אחר |
+| **גודל מול התקציב** | ב־`1a42994`: ‏**2,030,858 בתים**. התקציב (`BUDGET` ב־`scripts/package-release.mjs`) הוא 2,097,152. **נשארו 66,294 בתים (3.2%).** הבסיס `e9bdad1` שוקל 2,029,105. ‏PR4 הוסיף 1,753 בתים: 618 לגרסה בכפתור ההורדה (`40cd31d`: ‏2,029,723), ו־1,135 להודעת הרישיון של `@preact/signals-core`. התקציב לא שונה |
+| **אין רשת ואין CDN** | הסריקה של `scripts/package-release.mjs` עברה בכל בנייה. כתובות `http(s)` בקובץ: מרחבי שמות של XML ‏(w3.org), הרישיונות (gnu.org, ‏apache.org), וארבע כתובות של המאגר ב־GitHub (המאגר, ‏Issues, ‏Releases ותיקיית המסמכים ב־tag של הגרסה). אלה קישורי ניווט, ולא טעינה |
+| **CSP** | `default-src 'none'; … connect-src blob: data:` |
+| **גופנים, אייקונים ו־WASM מוטמעים** | שני `@font-face` עם `url(data:font/ttf…)`. האייקונים הם נתיבי SVG בקוד (`src/ui/icons/icon-data.ts`), בלי פונט אייקונים. ה־WASM של zstd מוטמע כ־base64 (‏`build/plugins/wasm-base64.ts`) |
+| **הודעות רישיון** | בראש הקובץ: GPL-3.0-or-later, ההודעות של ארבעת הנכסים הגרפיים, והרישיון המלא של חמש החבילות (§1.4) |
+| **נפתח מ־`file://` בלי רשת** | `tests/e2e/offline-single-file.spec.ts` "the single HTML file starts offline from file://…", בשלושת הדפדפנים. כל בדיקות ה־E2E רצות עם `offline: true`, ו־`watchPage` (`tests/e2e/helpers.ts`) מכשיל כל בקשה שאינה `file:`, ‏`data:` או `blob:`. תוצאות ההרצה: §2.1 |
+
+### 2.1 בדיקות שהורצו על PR4
+
+| בדיקה | תוצאה |
+|---|---|
+| `npm run typecheck` | עבר |
+| `npx vitest run --maxWorkers=4` (‏unit, ‏integration, ‏contract) על `6ceb564` | `Tests 1 failed \| 2708 passed \| 76 skipped (2785)`. הכשל: יחס הזמנים ב־`quadratic.test.ts` ("citation tokens of a line of '&'", ‏9.6 מול 8) בזמן עומס. לבדה: `3 passed` |
+| `tests/unit/ui/offline-download.test.ts` | לפני התיקון `3 failed`, אחריו, עם `release-asset-name` ו־`architecture`: `12 passed` |
+| `tests/unit/license-notice.test.ts` | לפני `1 failed` (חסר `@preact/signals-core`), אחרי `1 passed` |
+| `npm run test:legacy` | `2 passed (9.1s)` (‏Chrome, ‏Edge). הפירוט ב־[`V7_LEGACY_PARITY.md`](../audit/V7_LEGACY_PARITY.md) §2 |
+| `npx playwright test` (‏Chrome, ‏Edge, ‏Firefox) על `1a42994` | `20 failed \| 3 skipped \| 351 passed (16.6m)`. הרצה חוזרת של ה־20 (`--last-failed --workers=2`): `3 failed \| 17 passed`. ה־17 היו timeouts וסגירת הקשר בזמן עומס, רובם ב־Firefox, כמו ב־baseline (המטריצה §0) |
+| שלושת הכשלים שנשארו | `new-screens-audit.spec.ts` "360x640 › alt_toc dialog" בשלושת הדפדפנים: `3.94:1 (need 4.5) span.cnt "1" fg=rgb(255, 255, 255) bg=rgb(156,123,68)`. זה המונה על כפתור "ייצוא" במסך צר, מ־`b9efa35` (PR3, ‏C31). **הכשל קיים כבר בבסיס:** על `e9bdad1`, בלי השינויים של PR4: `1 failed \| 1 passed` עם אותו ערך. צריך לתקן ב־PR3 |
+
+### 2.2 קובצי ההפצה
+
+`npm run build` כותב שלושה קבצים ל־`dist/`, ו־`release.yml` מעלה אותם ל־Release:
+
+| קובץ | גודל | SHA-256 ב־`1a42994` |
+|---|---|---|
+| `OtzariaLinker.html` | 2,030,858 | `a4c6f17e98a2e8b4e3a416546639ae91a2093f13bbdd0ef665fdbbb4173d0428` |
+| `OtzariaLinker-4.0.0-alpha.0.html` | 2,030,858 | `a4c6f17e98a2e8b4e3a416546639ae91a2093f13bbdd0ef665fdbbb4173d0428` (אותם בתים) |
+| `SHA256SUMS` | 184 | `2acc0d554c36fe2309458a24ce4a68615fb55759a43598e9fd7e6754db9a9ba3` |
+
+הקבצים של השחרור עצמו ייבנו מה־tag, עם הגרסה החדשה ועם ה־commit שלו, ולכן ה־hash שלהם יהיה אחר. ‏`release.yml` בונה פעמיים
+ומשווה לפני ההעלאה (‏[`RELEASE_PROCESS.md`](../RELEASE_PROCESS.md) §3).
+
+## 3. קישור ההורדה (§4.21, ‏Issue #26)
+
+יש שלוש דרכים לקבל את הכלי, והן לא אותה גרסה:
+
+| מה | איפה | מה הוא מוריד | מצב היום |
+|---|---|---|---|
+| **הגרסה היציבה האחרונה** | `https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html` | הנכס `OtzariaLinker.html` של ה־Release האחרון **שאינו pre-release** | 404. ‏"latest" הוא v3, ואין לו נכס בשם הזה (‏RELEASE_PROCESS §5א) |
+| **גרסה מסוימת** | `OtzariaLinker-<version>.html` ו־`SHA256SUMS` בדף ה־Release שלה | בדיוק הגרסה שבשם | אין עדיין Release של 4.x |
+| **גרסת הפיתוח** | הכפתור "הורדת הכלי לעבודה בלי אינטרנט" באתר של GitHub Pages | `OtzariaLinker.html` שמתפרסם עם הדף, מה־commit האחרון ב־`main` שה־CI שלו עבר | עובד. הכפתור מופיע רק כשהכלי נפתח מ־http(s) |
+
+**האם הכפתור יכול להוביל בשקט לגרסה ישנה?** לא. הוא קישור יחסי לקובץ באותו פרסום כמו הדף (`src/ui/shell/offline-download.tsx`),
+ו־`tests/e2e/pages-artifact.spec.ts` בונה את `_site` לפי שורות ה־`cp` של `pages.yml`, מגיש אותו ב־http ומוודא שההורדה זהה
+בבתים לתוצר ושה־hash שלה הוא זה שב־`SHA256SUMS`. הכפתור **לא** מפנה ל־`releases/latest`, בכוונה: היום הכתובת מחזירה 404,
+ואחרי שתהיה גרסה יציבה היא עלולה להיות **ישנה** מהדף שפתוח. שם הנכס אחיד ב־`release.yml`, ב־`pages.yml` ובקוד
+(`tests/unit/release-asset-name.test.ts`).
+
+**מה תוקן (`40cd31d`):** הכפתור לא אמר איזו גרסה הוא מוריד, ולכן גרסת הפיתוח מ־`main` נראתה כמו גרסה שפורסמה. עכשיו הכפתור
+מציג "(גרסת פיתוח 4.0.0-alpha.0)" לגרסת pre-release, ו"(גרסה 4.0.0)" לגרסה יציבה. ב־tooltip מופיעים גם ה־commit
+וההפניה לדף ה־Releases. ה־README מתאר את שלוש הדרכים. הבדיקה: `tests/unit/ui/offline-download.test.ts`, שנכשלה לפני התיקון
+(‏`3 failed`).
+
+**לא אומת:** האתר החי. ההתנהגות נבדקה מול `_site` שנבנה כמו ב־`pages.yml` ומוגש מקומית.
+
+## 4. מיזוג ארבעת ה־PRs
+
+### 4.1 המחסנית
+
+| PR | ענף | הבסיס |
+|---|---|---|
+| PR1 | `v7/01-data-integrity-security` | `main` |
+| PR2 | `v7/02-linking-correctness` | PR1 |
+| PR3 | `v7/03-…` (היום `v7/03-wip`) | PR2 |
+| PR4 | הענף של המסמך הזה | PR3 |
+
+**המצב היום (2026-11-26), שצריך לסדר לפני פתיחת ה־PRs:** `v7/03-wip` ו־PR4 יוצאים מ־`ae88360`, שהוא ראש PR1 **לפני** סבב
+הסקירה שלו. הם עוד לא בנויים על `v7/02-linking-correctness` (‏`bf327d3`), ולא כוללים את שבעת ה־commits של סבב הסקירה של PR1
+(‏`f84b30d`–`109df08`). מסדרים כך (מראש PR3 ואחריו PR4, כל ענף על הקודם):
+
+```
+git rebase --onto v7/02-linking-correctness ae88360 v7/03-wip
+git rebase --onto v7/03-wip e9bdad1 <ענף PR4>
+```
+
+ואז מריצים שוב `npm run check`.
+
+### 4.2 מיזוג רגיל (Merge commit)
+
+ממזגים לפי הסדר: PR1, ‏PR2, ‏PR3, ‏PR4. אחרי כל מיזוג משנים את הבסיס של ה־PR הבא ל־`main` (בעמוד ה־PR: **Edit** ליד
+הכותרת, ובוחרים `main`; או `gh pr edit <מספר> --base main`). ה־commits של ה־PR הקודם כבר נמצאים ב־`main` כמו שהם, ולכן
+ה־diff של ה־PR הבא נשאר רק השינויים שלו, בלי rebase. אם בהגדרות המאגר מופעל "Automatically delete head branches",
+‏GitHub משנה את הבסיס ל־`main` בעצמו כשענף הבסיס נמחק.
+
+### 4.3 מיזוג Squash (או Rebase)
+
+ב־Squash ה־commits של PR1 **לא** נכנסים ל־`main` כמו שהם, אלא commit אחד חדש. ל־PR2 עדיין יש את ה־commits הישנים של PR1,
+ולכן אחרי שינוי הבסיס ל־`main` הוא יראה אותם שוב, ולעיתים עם התנגשויות. לכן, לפני כל מיזוג, **שומרים את ה־SHA של ראש
+הענף שממוזג.** אחרי המחיקה של הענף אין לו שם.
+
+PR1:
+
+```
+git fetch origin
+OLD1=$(git rev-parse origin/v7/01-data-integrity-security)   # לפני המיזוג
+# ממזגים את PR1 ב־Squash, ואז:
+git fetch origin
+git rebase --onto origin/main "$OLD1" v7/02-linking-correctness
+git push --force-with-lease origin v7/02-linking-correctness
+gh pr edit <PR2> --base main      # או Edit בעמוד ה־PR
+```
+
+PR2 ו־PR3 באותה דרך:
+
+```
+OLD2=$(git rev-parse origin/v7/02-linking-correctness)       # אחרי ה־rebase שלמעלה, לפני מיזוג PR2
+# ממזגים את PR2 ב־Squash:
+git fetch origin
+git rebase --onto origin/main "$OLD2" <ענף PR3>
+git push --force-with-lease origin <ענף PR3>
+gh pr edit <PR3> --base main
+
+OLD3=$(git rev-parse origin/<ענף PR3>)
+# ממזגים את PR3 ב־Squash:
+git fetch origin
+git rebase --onto origin/main "$OLD3" <ענף PR4>
+git push --force-with-lease origin <ענף PR4>
+gh pr edit <PR4> --base main
+# ממזגים את PR4
+```
+
+כמה דברים שכדאי לדעת:
+- `git rebase --onto origin/main OLD X` לוקח רק את ה־commits ש־X הוסיף מעל OLD, ושם אותם על `main`.
+- אם GitHub כבר שינה את הבסיס ל־`main` (מחיקה אוטומטית של הענף), עדיין צריך את ה־rebase. בלעדיו ה־diff כולל את PR1 שוב.
+- `--force-with-lease`, לא `--force`, כדי לא לדרוס דחיפה של מישהו אחר.
+- אחרי כל rebase ה־CI רץ שוב על ה־PR. ממזגים רק כשהוא ירוק.
+- ב־"Rebase and merge" ה־SHAs משתנים גם כן. הדרך זהה לזו של Squash.
+
+## 5. השחרור, אחרי אישור הבעלים
+
+1. בוחרים את מספר הגרסה (§7). בענף קצר: `npm version 4.0.0-beta.1 --no-git-tag-version` (משנה את `package.json`
+   ואת `package-lock.json`), ו־commit בשם `chore(release): 4.0.0-beta.1`. מיזוג ל־`main`, ומחכים ל־CI ירוק.
+2. בודקים: ‏`npm ci && npm run check` על `main`. ההגדרות בכלי מציגות `OtzariaLinker 4.0.0-beta.1 · <commit>`.
+3. ב־GitHub: ‏**Releases → Draft a new release**. ‏Tag חדש בשם `v4.0.0-beta.1` **בדיוק** (‏`release.yml` נכשל אם ה־tag אינו
+   `v` + הגרסה שב־`package.json`), ‏Target ‏`main`. הכותרת והטקסט: §6. מסמנים **Set as a pre-release**. ‏**Publish release**.
+4. ה־workflow ‏`Release` בונה מה־tag, מריץ typecheck, בדיקות, build ו־E2E, בונה שוב ומשווה את ה־hash, ומעלה את
+   `OtzariaLinker.html`, ‏`OtzariaLinker-4.0.0-beta.1.html` ו־`SHA256SUMS`. אם הוא נכשל, ל־Release אין קבצים: מתקנים
+   ומריצים שוב (‏RELEASE_PROCESS §5).
+5. מורידים את `OtzariaLinker-4.0.0-beta.1.html`, משווים ל־`SHA256SUMS` (`Get-FileHash … -Algorithm SHA256`), ופותחים
+   בלחיצה כפולה בלי רשת. קישורי העזרה למסמכים יעבדו עכשיו: הם מפנים ל־`blob/v4.0.0-beta.1/docs/`.
+6. **גרסה יציבה** (`4.0.0`): אותם שלבים, בלי "pre-release", ועם **Set as the latest release**. אחר כך בודקים
+   `curl -sIL https://github.com/Otzaria/OtzariaLinker/releases/latest/download/OtzariaLinker.html` (צריך 200), ומוחקים
+   מה־README את ההסבר שהקישור הקבוע עוד לא עובד (RELEASE_PROCESS §5א).
+
+## 6. טיוטת Release Notes
+
+> **מנהל הקישורים של אוצריא 4.0.0-beta.1**
+>
+> סבב V7: שלמות נתונים ואבטחה, נכונות הקישור האוטומטי, וליטוש הממשק. אין שינוי בפורמט של `_links.json`, ופרויקטים
+> שמורים של 4.0 נפתחים כמו קודם.
+>
+> **להורדה:** `OtzariaLinker-4.0.0-beta.1.html` (קובץ אחד, כ־2MB, עובד בלי אינטרנט). ה־SHA-256 ב־`SHA256SUMS`.
+
+### 6.1 Changelog, לפי תחום
+
+נאסף מ־`git log 9123d3f..HEAD` של הענף הזה, ובנוסף מה־commits של PR1 (סבב הסקירה) ושל PR2, שעוד לא בבסיס שלו (§4.1).
+המזהים: ממצאים ב־Issues ‏#40 (A), ‏#41 (B) ו־#42 (C), וסעיפי מפרט V7.
+
+**שלמות נתונים ושמירה (PR1)**
+- ספר אישי לא נקשר יותר לספר רשמי באותו שם כשפרויקט נפתח: הקישור הוא לפי כותרת, מקור ותווית המקור (B18; ‏`69c44ce`, ‏`afff4c2`).
+- שמירה אוטומטית נפרדת לכל חלון, ועבודה שלא נשמרה לא נדרסת כשנפתח פרויקט: היא עוברת לתור השחזור (B17, B21, C30; ‏`b112d6f`, ‏`cc6e159`, ‏`b3c725c`).
+- השוואה ומיזוג: "זהה" מול "שקול", שינוי ref מול שינוי תצוגה, רשומה שלא נקראה מדווחת, ומיזוג לא מכניס רשומה שנייה לאותן שתי שורות (§1.7, ‏#15; ‏`9ab1723`–`114a9a3`).
+- לכל קישור יש תוצאת ייצוא אחת מפורשת, והייצוא מראה כמה רשומות היו בכל קובץ שמוחלף (§1.9; ‏`baa4b37`, ‏`ebf826f`, ‏`70f3d30`).
+- ייצוא בלי מה לכתוב אומר את זה (C24; ‏`a33cbad`).
+- מה שבדיקה חיה באוצריא 0.9.98.3 הראתה: ספר יעד אישי חסר ו־`INLINE_LINKER` פוסלים את כל הקובץ (§4.8; ‏`ae88360`), ו־`INLINE_LINKER` אינו "סוג לא מוכר" בייבוא (C22; ‏`3bff08b`).
+
+**מסדים ומקורות (PR1)**
+- מסד מזוהה לפי התוכן שלו ולפי זמן השינוי, לא לפי השם; קובץ טקסט ריק מקבל אזהרה (C29, §1.6; ‏`27a7873`, ‏`3909c8e`).
+- מילון zstd קשור למסד ול־SHA-256 שלו, לא ל־dictID; מילונים משתחררים כשהפתיחה נכשלת (B19, C3; ‏`271c398`, ‏`cffb58a`, ‏`b0da838`). נבדק גם מול v52 (‏`f84b30d`).
+- `user_link` של `user_books.db` נקרא, ולא מדווח כאפס קישורים (B20; ‏`db17ad6`).
+- קצה טווח עצום לא נפרש שורה אחר שורה, ועץ B שמגיע לעמוד פעמיים נדחה (C1, C2; ‏`86a6225`, ‏`1f95fa2`). מטמון הרשימות מוגבל לשלוש (C4; ‏`418c531`).
+- CR בודד בספר טקסט מקבל אזהרה אחת, ומעבר שורה בשדה של CSV אישי נחסם (B10, C23; ‏`9af89d3`, ‏`823146a`).
+
+**אבטחה (PR1)**
+- ZIP bomb נעצר בתוך חתיכה של 16KiB (B15; ‏`ce59b6b`).
+- ביטוי רגולרי של המשתמש מוגבל לפי עלות ה־backtracking, לא רק לפי הצורה (B16; ‏`72d9b61`, ‏`488de08`).
+
+**קישור אוטומטי ומראי מקומות (PR2)**
+- מסנן השורות חל על כל השיטות (A1); סימן עם סימן כיווניות או ניקוד מזוהה (C11); מוחקים רק את התווים הגלויים של הסימן (B3).
+- מראי מקומות: דף עם סימן עמוד פותח את השער (B6); ד"ה בלי שם מפרש מקבל "אפשרי" (B7); מספר ערבי לפני מילה עברית הוא לכל היותר "אפשרי" (B8); עוגנים לספר ממסד אישי (B9); טווח פסוקים (C17); יחידה שלמה מהשורה הראשונה של התוכן (C18); כלל עוגן אחד (C19); סימן בשולחן ערוך לפי החלק של ההקשר (C20); צורות שהסקירה מצאה שחסרות (C21).
+
+**ממשק (PR3)**
+- שם הספר קריא בראש הקורא (A2, ‏#24; ‏`3d70c68`); ריבוי בעברית ("ספר אחד", "קישור אחד") (B27; ‏`35459f3`).
+- המפרידים אומרים את הערך שלהם (C26; ‏`ffcd14d`); כל פקד במגע הוא לפחות 44px (C27; ‏`c07244b`).
+- הכיסוי לא סופר הצעה ממתינה כקישור (B14; ‏`10e46b2`); ספר טקסט "אין מסד" (C14; ‏`b02c9c3`); "כיסוי הספר" פותח את הכיסוי (B26; ‏`43d68e8`).
+- שם קובץ הפרויקט כולל תאריך ושעה (C28; ‏`0a028a8`); מסד או ZIP פגומים נקראים בשמם (B24; ‏`f50abe7`).
+- העזרה כוללת את מדריך פתרון התקלות, ואומרת אילו קישורים צריכים רשת (B28, §3.21; ‏`2b7e4e3`).
+- מחיקת קישורים אומרת מה נמחק, עם "ביטול" (C31; ‏`ba0c09b`, ‏`b9efa35`); סוג הקשר בדיבור המתחיל (B5, ‏#26; ‏`aed12cc`); ניתוח המאגר אומר למה הוא מחכה (B25; ‏`e9bdad1`).
+
+**שחרור והפצה (PR4)**
+- כפתור ההורדה מציג את הגרסה, ומסמן גרסת פיתוח (#26, §4.21; ‏`40cd31d`).
+- הודעת הרישיון של `@preact/signals-core` בתוצר, ובדיקה שלא תחסר חבילה (§4.20; ‏`1a42994`).
+- הבדיקות מפעילות את sql.js דרך עזר אחד, כדי ש־Dependabot #35 יוכל להיכנס (§4.18; ‏`6ceb564`).
+
+### 6.2 שדרוג
+
+- **מגרסה 3:** אין שדרוג במקום. הקובץ החדש הוא כלי אחר, וגרסה 3 נשארת ב־`legacy/` ובאתר (`v3.html`). ההגדרות של גרסה 3
+  (‏`localStorage`, ‏`otzaria-linker/settings/v2`) לא עוברות. מה שהשתנה מגרסה 3: [`V7_LEGACY_PARITY.md`](../audit/V7_LEGACY_PARITY.md).
+- **מ־4.0.0-alpha.0:** מורידים את הקובץ החדש ופותחים. אם בדפדפן שמורה עבודה של חלון קודם, היא מוצעת לשחזור: השמירה
+  האוטומטית הישנה, במפתח אחד, עוברת לתור השחזור (B17). פרויקטים שמורים נפתחים (פורמט 1, ‏`StoredBook.source` הוא שדה רשות
+  חדש). קובצי `_links.json` לא השתנו.
+- מסדים נפתחים לקריאה בלבד, כמו קודם. אין צורך לסגור את אוצריא, אבל מסד ש־`-wal` שלו עוד לא מוזג מקבל הודעה.
+
+## 7. מגבלות ידועות
+
+מ־[`QA_V7_PR1.md`](../reviews/QA_V7_PR1.md) §4, מ־[`V7_TASK_MATRIX.md`](../reviews/V7_TASK_MATRIX.md) ומהבדיקה של PR4:
+
+- **`user_link`:** שורה ששני הצדדים שלה מחוץ ל־`user_books.db` לא מוצגת. שני ספרים אישיים באותה כותרת ובלי קטגוריה: הכלי
+  בוחר את הראשון. נבדק רק מול fixtures שנבנו מה־DDL האמיתי.
+- **ביטול באמצע פריסת ZIP** נבדק רק בין חתיכות, כי הפריסה סינכרונית.
+- **B21:** פתיחת פרויקט מעל עבודה שלא נשמרה לא נחסמת בדיאלוג. העבודה נשמרת בצד ומוצעת לשחזור.
+- **§1.5 ו־§1.8:** מטריצת הסכמות ההיסטוריות לא נבנתה מחדש, ולא הייתה השוואה מחודשת מול SeforimLibrary.
+- **בדיקות זמן תחת עומס:** `personal-csv.test.ts`, ‏`link-diff.test.ts`, ‏`quadratic.test.ts` ו־`bulk-approve.test.ts`
+  נכשלות לפעמים כשהמכונה עמוסה, ועוברות כשהן רצות לבד. הן לא שונו.
+- **פערים מול גרסה 3** (הפירוט ב־V7_LEGACY_PARITY §3.1): קישור כפול לא נחסם ביצירה, בעריכה ובשחזור, אלא רק מסומן בבקרה
+  ובייצוא. אין בדיקה לקישור של שורה לעצמה. אין בחירה לא רציפה ויצירה מרובה. אין הקלדה של סוף טווח. אין "איפוס מלא" ואין
+  הסרה של ספר יחיד. אין איתור כותרת בכל הספרים. 42 תגי `<select>` מובנים. ‏CSS הצפיפות לא מופעל. אין reduced-motion
+  ו־print. ההגדרות של גרסה 3 לא עוברות. לכידת העוגן מהמסך בלי שום בדיקה.
+- **קישורי העזרה למסמכים** מפנים ל־`blob/v<version>/docs/`. בבנייה של Pages מ־`main`, הגרסה היא `4.0.0-alpha.0`, ואין tag
+  כזה, ולכן הקישורים האלה מחזירים 404 עד שה־tag של הגרסה קיים. העזרה עצמה מוטמעת ועובדת בלי רשת.
+- **הקישור הקבוע** `releases/latest/download/OtzariaLinker.html` מחזיר 404 עד הגרסה היציבה הראשונה של 4.x (§3).
+- **ה־workflows** (`pages.yml`, ‏`release.yml`) נבדקו בקריאה ובבדיקות שקוראות אותם, לא בהרצה ב־GitHub.
+- **ה־E2E** לא הורץ מקומית על Playwright 1.65.1 (#37); ב־CI של ה־PR הוא עבר.
+- **ניגודיות:** המונה על כפתור "ייצוא" במסך צר (‏360px) הוא 3.94:1 במקום 4.5:1 (`new-screens-audit.spec.ts`, ‏alt_toc dialog,
+  נכשל בשלושת הדפדפנים). נכנס ב־`b9efa35` (PR3), וצריך לתקן אותו שם לפני המיזוג.
+- ממצאים של #40–#42 שעוד בסטטוס `TODO` במטריצה הם של PR2 ו־PR3, ומעודכנים בענפים שלהם.
+
+## 8. מספר הגרסה (C32)
+
+**ההמלצה: `4.0.0-beta.1`, כ־pre-release. ואחריה `4.0.0`, יציבה.**
+
+- אף גרסה של 4.x לא פורסמה, ואין tag. ‏`4.0.0-alpha.0` הוא הערך ההתחלתי של השכתוב, ולא שם של שחרור. גרסה שמתפרסמת
+  לראשונה למשתמשים, אחרי סבב תיקונים שלם, צריכה מספר משלה.
+- **למה לא `4.0.0` מיד:** ב־V7_LEGACY_PARITY יש פערים מול גרסה 3 שעוד לא הוכרעו (§7). חלקם, כמו הכפילות שלא נחסמת, עשויים
+  להוביל לשינוי קוד. גם הבדיקה של Pages אחרי המיזוג של ה־actions, והבדיקה החיה באוצריא של PR4, עוד לא נעשו. ‏`beta` אומר
+  "היכולות במקום, מחכים למשוב", ו־semver ממיין אותה לפני `4.0.0`.
+- **למה לא `rc`:** ‏`rc` הוא הצהרה שאין שינויים מתוכננים חוץ מתיקוני באגים. כל עוד הפערים מול גרסה 3 פתוחים, זה לא נכון.
+- **למה לא `alpha.1`:** ה־API של הפורמט והפרויקט יציב, והכלי עבר בדיקות חיות באוצריא. מבחינת המשתמש זה כבר לא alpha.
+- **הגרסה היציבה `4.0.0`** פותרת את Issue #26 עד הסוף: רק Release שאינו pre-release הופך ל־"latest", ורק אז הקישור הקבוע
+  עובד. מפרסמים אותה כשהפערים של §7 הוכרעו (תוקנו, או נרשמו כהחלטה), ושבוע או שבועיים אחרי beta בלי באג חוסם.
+
+**C32, מה לקבוע בזמן השחרור:** ההגדרות מציגות `OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}` (‏`src/ui/shell/app-bar.tsx`),
+והגרסה באה מ־`package.json` בזמן הבנייה (`vite.config.ts` → `build/plugins/build-info.ts`). לכן **לא משנים קוד**: בזמן
+השחרור מריצים `npm version 4.0.0-beta.1 --no-git-tag-version` (ואחר כך `4.0.0`) כמו ב־§5. אותו ערך קובע גם את שם הקובץ
+`OtzariaLinker-<version>.html`, את ה־tag שה־workflow דורש, את קישורי העזרה ל־tag, ואת התווית בכפתור ההורדה ("גרסת פיתוח"
+לכל גרסה עם מקף, ו"גרסה 4.0.0" ליציבה). **בענף הזה הגרסה נשארת `4.0.0-alpha.0`**: השינוי שלה הוא החלטה של הבעלים.
+
+</div>
