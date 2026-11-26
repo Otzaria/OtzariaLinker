@@ -80,8 +80,10 @@ export interface MergeEvidence {
 /**
  * A coarser range of another engine around a precise line raises it ("possible" → "high", never higher) only when the
  * precise line was found independently of that range AND the range is at most this many lines: landing inside a whole
- * siman (dozens of lines) by chance is not unlikely enough to be evidence. Calibrated on the V7 matching benchmark
- * (docs/validation/V7_MATCHING_BENCHMARK.md), tuning pairs only.
+ * siman (dozens of lines) by chance is not unlikely enough to be evidence. NOT calibrated: the V7 matching benchmark
+ * (docs/validation/V7_MATCHING_BENCHMARK.md) has almost no whole-base ד"ה inside a headings range (a commentary with headings
+ * is searched inside them). 20 is the widest span written line by line on a Sefaria base (SPAN_EACH_LINE_MAX) and the bound of
+ * "high" for a headings range (headings/consistency.ts RANGE_WIDTH).
  */
 export const CONTAINMENT_MAX_WIDTH = 20;
 
@@ -299,7 +301,6 @@ function supportLevel(g: Group): number {
   if (level === POSSIBLE && g.consistent.some((x) => confirms(g, x))) level = rank("high");
   return level;
 }
-
 
 /**
  * Who wins a conflict at one position (the sides are pairwise in conflict), or null. Measured on the
