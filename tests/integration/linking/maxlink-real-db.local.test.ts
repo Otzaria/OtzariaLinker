@@ -23,7 +23,8 @@ const path = process.env.OTZARIA_DB;
 const LOG = process.env.MAXLINK_LOG;
 const log = (line: string) => LOG && appendFileSync(LOG, `${new Date().toISOString().slice(11, 19)} ${line}
 `);
-const BASES = (process.env.MAXLINK_BASES ?? "ברכות").split(",").map((s) => s.trim()).filter(Boolean);
+// ";" separates the bases when one has a comma in its title ("שולחן ערוך, אורח חיים")
+const BASES = (process.env.MAXLINK_BASES ?? "ברכות").split(process.env.MAXLINK_BASES?.includes(";") ? ";" : ",").map((s) => s.trim()).filter(Boolean);
 
 /** Just what the registry and the lazy reader call on a Blob: size, slice, arrayBuffer. */
 function fileBlob(fd: number, from = 0, to = fstatSync(fd).size): Blob {
@@ -83,7 +84,7 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
         for (const k of res.dbLinkKeys) {
           const [a, b] = k.split("|") as [string, string];
           for (const [x, y] of [[a, b], [b, a]] as const) {
-            if (!y.startsWith(`${base!.key}#`)) continue;
+            if (!y.startsWith(`${base!.title}#`)) continue; // dbLinkKeys are linePairKey: book TITLES
             const set = dbByLine.get(x) ?? new Set<number>();
             set.add(Number(y.slice(y.indexOf("#") + 1)));
             dbByLine.set(x, set);
@@ -97,7 +98,7 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
           for (const s of list) {
             const [f, o] = s.source.book.key === s.focus ? [s.source, s.target] : [s.target, s.source];
             if (o.book.key !== base!.key) continue;
-            const known = dbByLine.get(`${f.book.key}#${f.line}`);
+            const known = dbByLine.get(`${f.book.title}#${f.line}`);
             if (!known) continue;
             const end = o.end ?? o.line;
             if ([...known].some((l) => l >= o.line && l <= end)) agree++;
@@ -119,7 +120,7 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
             const s = it.suggestion;
             if (s.engine !== engine || s.confidence !== level) continue;
             const [f, o] = s.source.book.key === it.focus ? [s.source, s.target] : [s.target, s.source];
-            const known = o.book.key === base!.key ? dbByLine.get(`${f.book.key}#${f.line}`) : undefined;
+            const known = o.book.key === base!.key ? dbByLine.get(`${f.book.title}#${f.line}`) : undefined;
             if (!known) continue;
             const end = o.end ?? o.line;
             if ([...known].some((l) => l >= o.line && l <= end)) agree++;
@@ -142,7 +143,7 @@ describe.runIf(path)("max-link on the real seforim.db (read-only)", () => {
         };
         for (const s of merged.suggestions) {
           const [f, o] = s.source.book.key === s.focus ? [s.source, s.target] : [s.target, s.source];
-          const known = o.book.key === base!.key ? dbByLine.get(`${f.book.key}#${f.line}`) : undefined;
+          const known = o.book.key === base!.key ? dbByLine.get(`${f.book.title}#${f.line}`) : undefined;
           const ok = (x: typeof o, span?: { line: number; end: number }) => (known ? [...known].some((l) => l >= (span?.line ?? x.line) && l <= (span?.end ?? x.end ?? x.line)) : null);
           const w = spanOf(s, s.focus);
           if (s.engines.length === 1 && s.members.some((m) => m.suggestion.engine !== s.engine && spanOf(m.suggestion, s.focus) > w)) {
