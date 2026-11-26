@@ -11,6 +11,7 @@
  * Never writes. A database in WAL mode is reported, because uncheckpointed changes in the -wal
  * file are invisible to a page reader.
  */
+import { LinkerError } from "../../../core/errors";
 import type { ByteSource } from "./byte-source";
 import { autoIndexes, indexDef, parseCreateIndex, parseCreateTable, type IndexDef, type TableDef } from "./ddl";
 import { compareValues, decodeRecord, readVarint, type SqlValue, type TextEncodingId } from "./record";
@@ -66,6 +67,40 @@ export class SqliteFormatError extends Error {
   override readonly name = "SqliteFormatError";
 }
 
+const corrupt = (what: string) => new LinkerError("db/corrupt", `המסד פגום (${what}). אי אפשר לקרוא אותו בבטחה.`);
+
+/** pages a walk remembers in a Set before it switches to a bitmap of the whole file (one bit per page) */
+const WALK_SET_PAGES = 4096;
+
+/**
+ * The pages one walk of a b-tree entered. In a sound b-tree every page has one parent, so a walk enters each page at
+ * most once and never more pages than the file has. A page entered twice is a shared child (a DAG) or a cycle: walked
+ * as it is, a few pages whose cells all point at the same child cost K^depth visits — a 24 KB file took 59 s (Issue #41
+ * C2). The depth limit alone (MAX_BTREE_DEPTH) stops a cycle, not a DAG.
+ */
+class Walk {
+  private readonly few = new Set<number>();
+  private bits: Uint8Array | null = null;
+  private entered = 0;
+  constructor(private readonly pageCount: number) {}
+
+  enter(no: number): void {
+    if (++this.entered > this.pageCount + 1) throw corrupt("עץ העמודים מוביל ליותר עמודים משיש בקובץ");
+    if (this.bits) {
+      const [i, m] = [no >>> 3, 1 << (no & 7)];
+      if (this.bits[i]! & m) throw corrupt(`עמוד ${no} מופיע פעמיים באותו עץ`);
+      this.bits[i]! |= m;
+      return;
+    }
+    if (this.few.has(no)) throw corrupt(`עמוד ${no} מופיע פעמיים באותו עץ`);
+    this.few.add(no);
+    if (this.few.size <= WALK_SET_PAGES) return;
+    this.bits = new Uint8Array((this.pageCount >>> 3) + 2);
+    for (const n of this.few) this.bits[n >>> 3]! |= 1 << (n & 7);
+    this.few.clear();
+  }
+}
+
 export class SqliteFile {
   private readonly cache = new Map<number, Uint8Array>();
   private cacheBytes = 0;
@@ -93,7 +128,10 @@ export class SqliteFile {
     const changeCounter = dv.getUint32(24);
     const validFor = dv.getUint32(92);
     const declaredPages = dv.getUint32(28);
-    const pageCount = declaredPages && changeCounter === validFor ? declaredPages : Math.floor(src.size / pageSize);
+    // never more pages than the file holds: every size limit is checked against this count, and a hostile header could
+    // declare 2^31 pages to let a record "of" gigabytes through to the allocation (Issue #41 C2)
+    const inFile = Math.floor(src.size / pageSize);
+    const pageCount = declaredPages && changeCounter === validFor ? Math.min(declaredPages, inFile) : inFile;
     const enc = dv.getUint32(56) || 1;
     if (enc < 1 || enc > 3) throw new SqliteFormatError(`קידוד טקסט לא מוכר במסד (${enc}).`);
     const header: SqliteHeader = {
@@ -161,12 +199,12 @@ export class SqliteFile {
   async getMany(t: TableInfo, rowids: Iterable<number>): Promise<Map<number, Row>> {
     const ids = [...new Set(rowids)].sort((a, b) => a - b);
     const out = new Map<number, Row>();
-    if (ids.length) await this.collectRows(t, t.rootPage, ids, 0, ids.length, out);
+    if (ids.length) await this.collectRows(t, t.rootPage, ids, 0, ids.length, out, this.walk());
     return out;
   }
 
-  private async collectRows(t: TableInfo, pageNo: number, ids: number[], lo: number, hi: number, out: Map<number, Row>, depth = 0): Promise<void> {
-    const page = await this.page(pageNo, depth);
+  private async collectRows(t: TableInfo, pageNo: number, ids: number[], lo: number, hi: number, out: Map<number, Row>, walk: Walk, depth = 0): Promise<void> {
+    const page = await this.page(pageNo, depth, walk);
     if (page.type === PageType.TableLeaf) {
       let k = lo;
       for (const off of page.cells) {
@@ -189,10 +227,10 @@ export class SqliteFile {
       const [key] = readVarint(page.data, off + 4);
       let j = k;
       while (j < hi && ids[j]! <= key) j++;
-      if (j > k) await this.collectRows(t, readU32(page.data, off), ids, k, j, out, depth + 1);
+      if (j > k) await this.collectRows(t, readU32(page.data, off), ids, k, j, out, walk, depth + 1);
       k = j;
     }
-    if (k < hi) await this.collectRows(t, page.rightChild, ids, k, hi, out, depth + 1);
+    if (k < hi) await this.collectRows(t, page.rightChild, ids, k, hi, out, walk, depth + 1);
   }
 
   // ---- table access ----------------------------------------------------------------------
@@ -249,12 +287,12 @@ export class SqliteFile {
     if (prefixes.some((p) => p.length !== prefixes[0]!.length)) throw new Error("all prefixes of one seek must have the same length");
     const keys = dedupeSorted(prefixes, this.header.encoding);
     const out: SqlValue[][] = [];
-    if (keys.length) await this.seekManyInner(root, keys, 0, keys.length, out);
+    if (keys.length) await this.seekManyInner(root, keys, 0, keys.length, out, this.walk());
     return out;
   }
 
-  private async seekManyInner(pageNo: number, keys: SqlValue[][], lo: number, hi: number, out: SqlValue[][], depth = 0): Promise<void> {
-    const page = await this.page(pageNo, depth);
+  private async seekManyInner(pageNo: number, keys: SqlValue[][], lo: number, hi: number, out: SqlValue[][], walk: Walk, depth = 0): Promise<void> {
+    const page = await this.page(pageNo, depth, walk);
     const leaf = page.type === PageType.IndexLeaf;
     const enc = this.header.encoding;
     if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
@@ -276,11 +314,11 @@ export class SqliteFile {
       const rec = await record(i);
       let j = lo;
       while (j < hi && comparePrefix(rec, keys[j]!, enc) >= 0) j++; // keys[lo..j) are <= this entry
-      if (!leaf && j > lo) await this.seekManyInner(readU32(page.data, page.cells[i]!), keys, lo, j, out, depth + 1);
+      if (!leaf && j > lo) await this.seekManyInner(readU32(page.data, page.cells[i]!), keys, lo, j, out, walk, depth + 1);
       if (j > lo && comparePrefix(rec, keys[j - 1]!, enc) === 0) out.push(rec);
       while (lo < j && comparePrefix(rec, keys[lo]!, enc) > 0) lo++; // keys below this entry are finished
     }
-    if (!leaf && lo < hi) await this.seekManyInner(page.rightChild, keys, lo, hi, out, depth + 1);
+    if (!leaf && lo < hi) await this.seekManyInner(page.rightChild, keys, lo, hi, out, walk, depth + 1);
   }
 
   /**
@@ -320,8 +358,9 @@ export class SqliteFile {
     }
     if (depth === 0) return 1;
     let total = 0;
+    const walk = this.walk();
     const visit = async (no: number, level: number): Promise<void> => {
-      const pg = await this.page(no, level);
+      const pg = await this.page(no, level, walk);
       if (pg.type !== PageType.TableInterior && pg.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${no} אינו בעומק הצפוי בעץ — המסד פגום.`);
       if (level === depth - 1) total += pg.cells.length + 1;
       else for (const child of [...pg.cells.map((off) => readU32(pg.data, off)), pg.rightChild]) await visit(child, level + 1);
@@ -333,8 +372,8 @@ export class SqliteFile {
 
   // ---- b-tree walking --------------------------------------------------------------------
 
-  private async *walkTable(pageNo: number, from: number | null, to: number | null, depth = 0): AsyncGenerator<{ rowid: number; values: SqlValue[] }> {
-    const page = await this.page(pageNo, depth);
+  private async *walkTable(pageNo: number, from: number | null, to: number | null, walk = this.walk(), depth = 0): AsyncGenerator<{ rowid: number; values: SqlValue[] }> {
+    const page = await this.page(pageNo, depth, walk);
     if (page.type === PageType.TableLeaf) {
       for (const off of page.cells) {
         const [size, n1] = readVarint(page.data, off);
@@ -351,20 +390,20 @@ export class SqliteFile {
       const child = readU32(page.data, off);
       const [key] = readVarint(page.data, off + 4); // every rowid in `child` is <= key
       if (from !== null && key < from) continue;
-      yield* this.walkTable(child, from, to, depth + 1);
+      yield* this.walkTable(child, from, to, walk, depth + 1);
       if (to !== null && key >= to) return;
     }
-    yield* this.walkTable(page.rightChild, from, to, depth + 1);
+    yield* this.walkTable(page.rightChild, from, to, walk, depth + 1);
   }
 
   /** In-order walk of an index b-tree; with a prefix, only matching records and only the pages that can hold them. */
   private async *walkIndex(pageNo: number, prefix: SqlValue[] | null): AsyncGenerator<SqlValue[]> {
-    const state = { done: false };
+    const state = { done: false, walk: this.walk() };
     yield* this.walkIndexInner(pageNo, prefix, state);
   }
 
-  private async *walkIndexInner(pageNo: number, prefix: SqlValue[] | null, state: { done: boolean }, depth = 0): AsyncGenerator<SqlValue[]> {
-    const page = await this.page(pageNo, depth);
+  private async *walkIndexInner(pageNo: number, prefix: SqlValue[] | null, state: { done: boolean; walk: Walk }, depth = 0): AsyncGenerator<SqlValue[]> {
+    const page = await this.page(pageNo, depth, state.walk);
     const leaf = page.type === PageType.IndexLeaf;
     const enc = this.header.encoding;
     if (!leaf && page.type !== PageType.IndexInterior) throw new SqliteFormatError(`עמוד ${pageNo} אינו עמוד אינדקס.`);
@@ -404,13 +443,19 @@ export class SqliteFile {
 
   // ---- pages and payloads ----------------------------------------------------------------
 
+  /** a fresh record of the pages one walk enters (see Walk) */
+  private walk(): Walk {
+    return new Walk(this.header.pageCount);
+  }
+
   /**
    * `depth` = distance from the root. SQLite itself refuses b-trees deeper than 20; a page that
    * points back up the tree (a cycle) would otherwise be walked forever (security review #2).
    */
-  private async page(no: number, depth = 0): Promise<Page> {
+  private async page(no: number, depth = 0, walk?: Walk): Promise<Page> {
     if (depth > MAX_BTREE_DEPTH) throw new SqliteFormatError("עץ העמודים במסד עמוק מדי או מכיל מעגל — המסד פגום.");
     if (no < 1 || no > Math.max(this.header.pageCount, 1) + 1) throw new SqliteFormatError(`הפניה לעמוד ${no} שאינו קיים — ייתכן שהמסד פגום.`);
+    walk?.enter(no);
     const data = await this.rawPage(no);
     const h = no === 1 ? 100 : 0;
     const type = data[h] as PageType;
@@ -457,8 +502,14 @@ export class SqliteFile {
     out.set(page.subarray(at, at + local));
     let filled = local;
     let next = readU32(page, at + local);
+    // one payload's chain never visits a page twice: a "next" that points back is read as the same page again and again,
+    // and its bytes become the record (Issue #41 C2). The chain is at most size / (U - 4) pages long.
+    const chain = new Set<number>();
     while (filled < size) {
       if (!next) throw new SqliteFormatError("שרשרת עמודי ההמשך קטועה — ייתכן שהמסד פגום.");
+      if (next > Math.max(this.header.pageCount, 1) + 1) throw corrupt(`עמוד המשך ${next} מחוץ לקובץ`); // the bound page() takes
+      if (chain.has(next)) throw corrupt(`שרשרת עמודי ההמשך חוזרת לעמוד ${next}`);
+      chain.add(next);
       const ov = await this.rawPage(next);
       const take = Math.min(U - 4, size - filled);
       out.set(ov.subarray(4, 4 + take), filled);
