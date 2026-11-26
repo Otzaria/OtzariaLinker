@@ -158,6 +158,53 @@ describe("the runner on a repository shaped like zmanenu-library", { timeout: 60
     expect(internal.records.every((x) => x.path_2 === "ביאור על ספר לדוגמה.txt")).toBe(true);
     expect(rep.external).toMatchObject({ mode: "target-library" });
   });
+
+  // V7 round 2, item 9: a file in the zmanenu format is kept aside (not loaded into the project), so the links its book_2 records
+  // already say were made again — written in the other book's file (a reverse duplicate), or as a path_2 record beside a book_2 one,
+  // or as a target_library record with heRef_2 beside one that says the same official line by line_index_2.
+  it("a link the repository's book_2 / target_library records already say is not written again, in any direction or form", async () => {
+    const root = fresh("zm-dup");
+    const repo = join(root, "zmanenu");
+    cpSync(ZMANENU, repo, { recursive: true });
+    // the commentary's own file, in the zmanenu format: base line 3 ↔ commentary line 3 by book_2 (the run writes that pair from
+    // the base, the other way), line 4 ↔ 4 by path_2 (no different from a loaded file, but this file is never loaded)
+    writeFileSync(
+      join(repo, "source/links/ביאור על ספר לדוגמה_links.json"),
+      `${JSON.stringify(
+        [
+          { line_index_1: 3, line_index_2: 3, book_2: "ספר לדוגמה", "Conection Type": "source" },
+          { line_index_1: 4, line_index_2: 4, path_2: "ספר לדוגמה.txt", "Conection Type": "reference" },
+        ],
+        null,
+        2,
+      )}\n`,
+    );
+    // verse 2 (commentary line 6) by the official line (1-based 4 = בראשית, א, ב), not by heRef
+    const berFile = join(repo, "source/links/ביאור לדוגמה על בראשית_links.json");
+    const ber = JSON.parse(readFileSync(berFile, "utf8")) as unknown[];
+    writeFileSync(berFile, `${JSON.stringify([...ber, { line_index_1: 6, target_library: "official", book_2: "בראשית", line_index_2: 4, "Conection Type": "source" }], null, 2)}\n`);
+
+    const out = fresh("zm-dup-out");
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--out", out, ...HIGH]);
+    expect(r.err).toBe("");
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(readFileSync(join(out, REPORT_JSON), "utf8")) as RunReport;
+    expect(rep.appendedOnly.sort()).toEqual(["source/links/ביאור לדוגמה על בראשית_links.json", "source/links/ביאור על ספר לדוגמה_links.json"]);
+
+    const base = parseLinksJson(readFileSync(join(out, "source/links/ספר לדוגמה_links.json"), "utf8"));
+    const pairs = base.records.map((x) => `${x.line_index_1}:${x.line_index_2}`);
+    expect(pairs).not.toContain("3:3");
+    expect(pairs).not.toContain("4:4");
+    expect(base.records).toHaveLength(28);
+
+    const added = (JSON.parse(readFileSync(berFile.replace(repo, out), "utf8")) as Record<string, unknown>[]).slice(3);
+    expect(added.map((x) => x.line_index_1)).not.toContain(6);
+    expect(added).toHaveLength(8);
+    expect(rep.external.written).toBe(8);
+    // the two internal pairs, verse 2 by line, and verse 1 by heRef (the fixture's own record, which appendRecords also kept out)
+    expect(rep.alreadyInRepository).toBe(4);
+    expect(readFileSync(join(out, REPORT_TXT), "utf8")).toMatch(/כבר כתובים ברשומות של המאגר: 4/);
+  });
 });
 
 describe("the runner refuses what would overwrite or write into the repository", { timeout: 60_000 }, () => {

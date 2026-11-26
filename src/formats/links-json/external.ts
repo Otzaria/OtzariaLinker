@@ -2,6 +2,8 @@ import { CONNECTION_TYPE_KEY } from "./record";
 import { detectLayout, stringifyElement, stringifyInLayout, DEFAULT_LAYOUT } from "./layout";
 import type { BookRef, Link, LinkSide } from "../../core/links/model";
 import { isRange } from "../../core/links/model";
+import { linePairIdentity } from "../../core/links/equality";
+import { titleFromPath2 } from "../../core/links/titles";
 
 /*
  * Links from a book of a personal library to a book of the OFFICIAL library, as the zmanenu-library source format writes them
@@ -88,6 +90,58 @@ export function externalRecords(links: readonly Link[], ctx: ExternalContext): E
     else out.byTitle.set(mine.book.title, [rec]);
   }
   return out;
+}
+
+/**
+ * What the records of a repository's links file already link (V7 round 2, item 9). A file in the zmanenu format (book_2 or
+ * target_library records) is not loaded into the project — the official format would drop those records — so neither the
+ * suggestions' "already exists" nor the export sees its links, and a run made them again: in the other book's file (a reverse
+ * duplicate), as a path_2 record beside a book_2 one, or as a heRef_2 record beside a line_index_2 one. They are read here as
+ * "the same lines" (core/links/equality.ts linePairIdentity: by title, either direction, any type — the one rule, not a second):
+ *   • a record inside the repository: line_index_1 of the file's book ↔ line_index_2 of book_2 (or path_2's title, cut at its last dot
+ *     as the official generator does);
+ *   • a target_library record to the official library ("official", "רשמי", or "any"/"כל", which tries the official library first):
+ *     by line when it gives line_index_2, and by the official line's heRef when it gives heRef_2 (`officialRefKey`). Its book_2 (or
+ *     path_2) is the official title as it is (Otzaria/zmanenu-library docs/format.md, "target_library").
+ * Ranges and anchors are not part of the identity, as in equality.ts. A record without a usable line is not a link and is skipped;
+ * one for another library is not the official library's and is skipped.
+ */
+export interface RecordedLinks {
+  /** linePairIdentity of every link the records say */
+  readonly pairs: Set<string>;
+  /** officialRefKey of every target_library record that names the official line by heRef_2 */
+  readonly officialRefs: Set<string>;
+}
+
+const OFFICIAL_NAMES = new Set(["official", "רשמי", "any", "כל"]);
+
+/** A repository book's line and an official line named by its heRef. */
+export const officialRefKey = (title: string, line: number, officialTitle: string, heRef: string): string => JSON.stringify([title, line, officialTitle, heRef.trim()]);
+
+export function recordedLinks(title: string, text: string, into: RecordedLinks = { pairs: new Set(), officialRefs: new Set() }): RecordedLinks {
+  let data: unknown;
+  try {
+    data = JSON.parse(text.replace(/^﻿/, ""));
+  } catch {
+    return into;
+  }
+  if (!Array.isArray(data)) return into;
+  const line = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v >= 1 ? v - 1 : null);
+  const side = (t: string, l: number): LinkSide => ({ book: { key: "", title: t, origin: "unknown" }, line: l });
+  for (const r of data) {
+    if (!r || typeof r !== "object" || Array.isArray(r)) continue;
+    const rec = r as Record<string, unknown>;
+    const own = line(rec.line_index_1);
+    if (own === null) continue;
+    const lib = typeof rec.target_library === "string" ? rec.target_library.trim().toLowerCase() : null;
+    if (lib !== null && !OFFICIAL_NAMES.has(lib)) continue;
+    const other = typeof rec.book_2 === "string" ? rec.book_2 : typeof rec.path_2 === "string" ? (lib === null ? titleFromPath2(rec.path_2) : rec.path_2) : null;
+    if (!other?.trim()) continue;
+    const at = line(rec.line_index_2);
+    if (at !== null) into.pairs.add(linePairIdentity({ source: side(title, own), target: side(other, at) }));
+    if (lib !== null && typeof rec.heRef_2 === "string" && rec.heRef_2.trim()) into.officialRefs.add(officialRefKey(title, own, other, rec.heRef_2));
+  }
+  return into;
 }
 
 const recordKey = (r: Record<string, unknown>): string => JSON.stringify([r.line_index_1, r.target_library, r.book_2, r.heRef_2 ?? null, r.line_index_2 ?? null]);

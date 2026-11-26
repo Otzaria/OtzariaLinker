@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { appendRecords, externalRecords } from "../../../src/formats/links-json/external";
+import { linePairIdentity } from "../../../src/core/links/equality";
+import { appendRecords, externalRecords, officialRefKey, recordedLinks } from "../../../src/formats/links-json/external";
 import { parseLinksJson } from "../../../src/formats/links-json/parse";
 
 /*
@@ -82,5 +83,34 @@ describe("appendRecords", () => {
     expect(JSON.parse(appendRecords("[]", [rec]).text)).toEqual([rec]);
     const compact = appendRecords('[{"line_index_1":1}]', [rec]).text;
     expect(compact).toBe(`[{"line_index_1":1},${JSON.stringify(rec)}]`);
+  });
+});
+
+// V7 round 2, item 9: the links a kept-aside zmanenu file already says, as "the same lines" (core/links/equality.ts)
+describe("recordedLinks", () => {
+  const side = (title: string, line: number) => ({ book: { key: "", title, origin: "unknown" as const }, line });
+  const pair = (a: string, la: number, b: string, lb: number) => linePairIdentity({ source: side(a, la), target: side(b, lb) });
+
+  it("book_2 and path_2 records inside the repository, official records by line and by heRef; another library's and broken records are not links", () => {
+    const text = JSON.stringify([
+      { line_index_1: 3, line_index_2: 5, book_2: "ספר", "Conection Type": "source" },
+      { line_index_1: 4, line_index_2: 6, path_2: "תיקייה/ספר אחר.txt", "Conection Type": "reference" },
+      { line_index_1: 7, target_library: "רשמי", book_2: "בראשית", line_index_2: 4, "Conection Type": "source" },
+      { line_index_1: 8, target_library: "official", book_2: "בראשית", heRef_2: " בראשית, א, ג ", "Conection Type": "source" },
+      { line_index_1: 9, target_library: "otzaria.other", book_2: "בראשית", line_index_2: 9, "Conection Type": "source" },
+      { line_index_1: 0, line_index_2: 2, book_2: "ספר", "Conection Type": "source" },
+      { line_index_1: 2, book_2: "ספר", "Conection Type": "source" },
+      "not a record",
+    ]);
+    const got = recordedLinks("ביאור", text);
+    expect([...got.pairs].sort()).toEqual([pair("ביאור", 2, "ספר", 4), pair("ביאור", 3, "ספר אחר", 5), pair("ביאור", 6, "בראשית", 3)].sort());
+    // either direction: the identity is unordered
+    expect(got.pairs.has(pair("ספר", 4, "ביאור", 2))).toBe(true);
+    expect([...got.officialRefs]).toEqual([officialRefKey("ביאור", 7, "בראשית", "בראשית, א, ג")]);
+  });
+
+  it("a file that is not a JSON array adds nothing", () => {
+    expect(recordedLinks("x", "{").pairs.size).toBe(0);
+    expect(recordedLinks("x", "{}").pairs.size).toBe(0);
   });
 });

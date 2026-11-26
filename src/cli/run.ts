@@ -3,7 +3,9 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { booksService } from "../app/books-service";
 import { sourceIdOfBookKey } from "../core/books";
 import { LinkerError } from "../core/errors";
-import { appendRecords, externalRecords } from "../formats/links-json/external";
+import { linePairIdentity } from "../core/links/equality";
+import type { Link } from "../core/links/model";
+import { appendRecords, externalRecords, officialRefKey, recordedLinks, type RecordedLinks } from "../formats/links-json/external";
 import { parseLinksJson } from "../formats/links-json/parse";
 import { detectRepoLayout, filterBooks, nextCsvFolders, type RepoLayout } from "../headless/repo-layout";
 import type { Confidence, EngineId } from "../linking/automatic";
@@ -69,6 +71,11 @@ export interface RunReport {
   existingLinksFiles: number;
   /** existing files the official format cannot read whole (zmanenu target_library/book_2 records): appended to, never rewritten */
   appendedOnly: string[];
+  /**
+   * approved links that the records of those files already say (the same two lines, either direction, any type; or the same official
+   * line by heRef_2): not written, so the repository does not get a duplicate (V7 round 2, item 9)
+   */
+  alreadyInRepository: number;
   plan: { steps: number; perEngine: Record<string, number> };
   suggestions: { total: number; approved: number; minConfidence: Confidence; byConfidence: Partial<Record<Confidence, number>> };
   links: { internal: number; external: number };
@@ -115,6 +122,9 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
     if (parsed.generatorRejectsFile) keptAside.set(title, { path: f.path, text, records: countRecords(text) });
     else imports.push(await repo.input(f.path));
   }
+  // what the records kept aside already link: never loaded, so the run compares its approved links with them here
+  const recorded: RecordedLinks = { pairs: new Set(), officialRefs: new Set() };
+  for (const [title, aside] of keptAside) recordedLinks(title, aside.text, recorded);
 
   const g = store.guided;
   g.start();
@@ -138,7 +148,12 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
   // which links are the repository's own and which reach the official library
   const isRepo = (key: string) => repoSources.has(sourceIdOfBookKey(key));
   const isLibrary = (key: string) => store.isLibrarySource(sourceIdOfBookKey(key));
-  const made = store.allLinks.value.filter((l) => l.status === "new" && l.provenance === "auto");
+  const approvedLinks = store.allLinks.value.filter((l) => l.status === "new" && l.provenance === "auto");
+  // a link a kept-aside record already says (book_2, path_2 or target_library by line): taken out before anything is written
+  const recordedAgain = approvedLinks.filter((l) => recorded.pairs.has(linePairIdentity(l)));
+  if (recordedAgain.length) store.deleteLinks(recordedAgain.map((l) => l.id));
+  let alreadyInRepository = recordedAgain.length;
+  const made = approvedLinks.filter((l) => !recordedAgain.includes(l));
   const internal = made.filter((l) => isRepo(l.source.book.key) && isRepo(l.target.book.key));
   const external = made.filter((l) => !internal.includes(l) && (isRepo(l.source.book.key) || isRepo(l.target.book.key)) && (isLibrary(l.source.book.key) || isLibrary(l.target.book.key)));
 
@@ -166,10 +181,18 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
           await store.lines.load(side.book.key, side.line, side.line);
           heRefs.set(`${side.book.key}#${side.line}`, store.lines.peek(side.book.key, side.line)?.heRef ?? null);
         }
-    zmanenuExternal = externalRecords(external, {
+    // a link to the official line a target_library record already names by heRef_2
+    const heRefOf = (s: Link["source"]) => heRefs.get(`${s.book.key}#${s.line}`) ?? null;
+    const byRef = external.filter((l) => {
+      const [mine, other] = isRepo(l.source.book.key) ? [l.source, l.target] : [l.target, l.source];
+      const ref = heRefOf(other);
+      return !!ref && recorded.officialRefs.has(officialRefKey(mine.book.title, mine.line, other.book.title, ref));
+    });
+    alreadyInRepository += byRef.length;
+    zmanenuExternal = externalRecords(external.filter((l) => !byRef.includes(l)), {
       isRepo: (b) => isRepo(b.key),
       isOfficial: (b) => isLibrary(b.key),
-      heRefOf: (s) => heRefs.get(`${s.book.key}#${s.line}`) ?? null,
+      heRefOf,
     });
     extReport.skipped = tally(zmanenuExternal.skipped.map((s) => s.text));
   }
@@ -216,6 +239,7 @@ export async function runRepository(o: RunOptions): Promise<{ report: RunReport;
     duplicateTitles: layout.duplicateTitles,
     existingLinksFiles: layout.linksFiles.length,
     appendedOnly: [...keptAside.values()].map((a) => a.path),
+    alreadyInRepository,
     plan: { steps: plan?.steps.length ?? 0, perEngine: { ...(plan?.perEngine ?? {}) } },
     suggestions: { total, approved, minConfidence, byConfidence },
     links: { internal: internal.length, external: external.length },
@@ -310,7 +334,8 @@ export function reportText(r: RunReport): string {
   L.push(`מסד אוצריא: ${r.db ?? "— (רק קישורים בתוך המאגר)"}`);
   L.push(`ספרים: ${r.books.selected} נבחרו מתוך ${r.books.total}. קובצי קישורים קיימים במאגר: ${r.existingLinksFiles}.`);
   if (r.duplicateTitles.length) L.push(`לא קושרו, כי כמה קבצים יוצרים אותו שם ספר: ${r.duplicateTitles.map((d) => `"${d.title}" (${d.paths.join(", ")})`).join("; ")}.`);
-  if (r.appendedOnly.length) L.push(`קבצים שיש בהם רשומות שהפורמט הרשמי אינו קורא (target_library, book_2): הרשומות החדשות נוספות אחרי הקיימות, שנשארות כמו שהן; רק רשומה זהה לגמרי מזוהה ככפולה (ההצעות לא הושוו לקישורים שברשומות האלה), ולכן בדקו כפילויות לפני commit: ${r.appendedOnly.join(", ")}.`);
+  if (r.appendedOnly.length) L.push(`קבצים שיש בהם רשומות שהפורמט הרשמי אינו קורא (target_library, book_2): הרשומות החדשות נוספות אחרי הקיימות, שנשארות כמו שהן: ${r.appendedOnly.join(", ")}.`);
+  if (r.appendedOnly.length || r.alreadyInRepository) L.push(`קישורים שאושרו ולא נכתבו, כי הם כבר כתובים ברשומות של המאגר: ${r.alreadyInRepository} (אותן שתי שורות בכל כיוון ובכל סוג, או אותה שורה רשמית לפי heRef_2).`);
   L.push(`תוכנית: ${r.plan.steps} שלבים (${Object.entries(r.plan.perEngine).map(([e, n]) => `${e}: ${n}`).join(", ") || "—"}).`);
   L.push(`הצעות: ${r.suggestions.total}; אושרו ${r.suggestions.approved} (מרמת "${CONF_TEXT[r.suggestions.minConfidence]}" ומעלה).`);
   L.push(`קישורים: ${r.links.internal} בתוך המאגר, ${r.links.external} אל הספרייה הרשמית (${EXT_TEXT[r.external.mode]}: נכתבו ${r.external.written}).`);
