@@ -5,6 +5,7 @@ import { CONFIDENCE_LABELS, type SourceFilter } from "../../linking/automatic";
 import { LINE_FILTER_CHOICES } from "../../linking/automatic/option-specs";
 import { notesBaseTitle, pairMethodKey, type PairControl, type PairEngineId, type PlanStep, type PlanUnsuitable } from "../../linking/plan";
 import { durationText } from "../../state/guided-flow";
+import { SourceFilterPreviewBox } from "../workspace/source-filter-preview";
 import { TypeOptions } from "../workspace/type-options";
 import type { TitleFitReport } from "../../linking/title-fit";
 import { useStore } from "../context";
@@ -139,6 +140,8 @@ export function PairChoices() {
           </select>
           <span class="muted">הסינון חל על כל השיטות ועל כל הזוגות: שורה שאינו כולל לא תקבל הצעה.</span>
         </label>
+        {/* #42 C16: the same preview as in the pair, batch and max-link forms — which lines of a book the filter lets in, before the run */}
+        <SourceFilterPreviewBox engine={forceDh ? "dibur-hamatchil" : "headings"} books={[...new Set(pairs.map((p) => p.dependant.key))]} filter={g.lineFilter.value} />
         {forceDh && (
           <p class="pair-force-note warn-text" role="status">
             דיבור המתחיל ירוץ במקום שיטת הכותרות בכל הזוגות, גם היכן שהכותרות מתאימות; הערות שוליים ומראי מקומות ממשיכים לרוץ כרגיל. הוא איטי יותר, ושורות בלי ד"ה ברור יקבלו הצעות חלשות. בדקו את ההצעות בקפידה.

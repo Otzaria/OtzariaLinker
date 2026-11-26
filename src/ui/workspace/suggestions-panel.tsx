@@ -97,6 +97,7 @@ export function SuggestionsPanel() {
           ))}
         </ul>
       )}
+      {!run.batch && !run.maxlink && (run.engine === "dibur-hamatchil" || run.engine === "headings") && run.result.suggestions.length > 0 && <UnreferencedTargetsView key={run.at} title={run.result.suggestions[0]!.target.book.title} />}
       {/* a stopped run keeps what it found, says so, and runs again whole on request (#41 B11, V7 §3.16) */}
       {run.partial && (
         <ul class="problems" style="padding:0 6px 6px">
@@ -136,6 +137,53 @@ export function SuggestionsPanel() {
 }
 
 /** After max-link, one line instead of four summaries: how many books, the job's state, and the report on request. */
+const UNREF_SHOWN = 200;
+
+/**
+ * Version 3's "יעדים בלי הפניה" (F-102): the target's lines, between the first and the last a suggestion points at,
+ * that none points at — a commentary's match may be missing there. Read when opened; each line opens in its reader.
+ */
+function UnreferencedTargetsView({ title }: { title: string }) {
+  const store = useStore();
+  const [data, setData] = useState<Awaited<ReturnType<typeof store.suggestions.unreferencedTargets>> | undefined>(undefined);
+  const side = (key: string) => (store.view.source.value === key ? "source" : "target");
+  return (
+    <details
+      class="unref"
+      onToggle={(e) => {
+        if ((e.currentTarget as HTMLDetailsElement).open && data === undefined) void store.suggestions.unreferencedTargets().then(setData);
+      }}
+    >
+      <summary>שורות ב"{title}" שאף הצעה לא מפנה אליהן</summary>
+      <div class="unref-body">
+        {data === undefined ? (
+          <p class="muted">קורא את הכותרות של "{title}"…</p>
+        ) : !data ? (
+          <p class="muted">אין רשימה להרצה הזו.</p>
+        ) : !data.lines.length ? (
+          <p class="muted">כל שורות התוכן של "{data.title}" בין שורה {(data.from + 1).toLocaleString("he")} לשורה {(data.through + 1).toLocaleString("he")} מקבלות הפניה.</p>
+        ) : (
+          <>
+            <p class="muted">
+              ב"{data.title}", בין שורה {(data.from + 1).toLocaleString("he")} לשורה {(data.through + 1).toLocaleString("he")}: {data.lines.length.toLocaleString("he")} שורות תוכן בלי הפניה (כותרות לא נספרות). אולי חסרה שם התאמה. לחצו על שורה כדי לראות אותה.
+            </p>
+            <ul class="unref-list" aria-label="שורות בלי הפניה">
+              {data.lines.slice(0, UNREF_SHOWN).map((l) => (
+                <li key={l}>
+                  <button class="chip" onClick={() => store.reveal(side(data.bookKey), data.bookKey, l)} aria-label={`שורה ${l + 1} ב${data.title}`}>
+                    {(l + 1).toLocaleString("he")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {data.lines.length > UNREF_SHOWN && <p class="muted">מוצגות {UNREF_SHOWN} הראשונות מתוך {data.lines.length.toLocaleString("he")}.</p>}
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function MaxLinkSummary({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const store = useStore();
   const job = store.maxLink.job.value;

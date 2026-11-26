@@ -21,6 +21,7 @@ import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
+import { isReadFailure, unreadableReason } from "./read-failure";
 import { loneCrMessage, TextFilesSource, type TextFile } from "./text/text-source";
 
 /*
@@ -113,8 +114,16 @@ export class SourceRegistry {
     const loneCr: string[] = [];
     for (const f of files) {
       signal?.throwIfAborted();
-      const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, all, notUtf8, signal, loneCr);
+      let head: Uint8Array;
+      try {
+        head = new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer());
+      } catch (err) {
+        // one file the browser cannot read (locked, only in the cloud, gone) is skipped with the reason; the rest of the drop opens (F-012)
+        if (signal?.aborted) throw err;
+        result.skipped.push({ path: f.path, reason: unreadableReason(err) });
+        continue;
+      }
+      await this.route(f, detectKind(head, f.path), result, all, notUtf8, signal, loneCr);
     }
     // a text book already open (the same file or folder picked again, F-016) is not opened again. From the check to add() the
     // code is synchronous, so a drop of the same files that overlaps this one sees them taken.
@@ -628,5 +637,6 @@ function documentText(bytes: Uint8Array): string {
 }
 
 function reasonOf(err: unknown, fallback: string): string {
+  if (isReadFailure(err)) return unreadableReason(err);
   return err instanceof LinkerError ? err.message : `${fallback} (${err instanceof Error ? err.message : String(err)})`;
 }

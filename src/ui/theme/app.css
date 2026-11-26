@@ -736,4 +736,63 @@ main.guided .bulk-approve { margin: 0; }
   .variant-choice .chip { min-height: 44px; }
   .builder :is(.range-end, .anchor-label) input { min-height: 44px; box-sizing: border-box; }
   .builder .range-settings label.check, .builder .range-settings > summary { min-height: 44px; align-items: center; }
+  .log-dialog .chip, .heading-search .chip { min-height: 44px; }
+}
+
+/* ---------- V7 parity: the log, the full reset, removing a book, heading search (F-137, F-028, F-035, F-139) ---------- */
+dialog.log-dialog { width: min(980px, calc(100vw - 32px)); }
+.log-dialog .filters { padding: 0; }
+.log-dialog .chip, .heading-search .chip { min-height: 24px; }
+.log-list { max-height: min(60vh, 560px); overflow: auto; border: 1px solid var(--outline-variant); border-radius: var(--radius); background: var(--surface-container-lowest); font-size: var(--fs-sm); }
+.log-list > p { margin: 0; padding: 10px 12px; }
+.log-row { display: grid; grid-template-columns: auto 4.5em 1fr; gap: 2px 10px; padding: 4px 10px; border-block-end: 1px solid var(--outline-variant); }
+.log-row .t { font-family: var(--font-mono); color: var(--on-surface-variant); }
+.log-row .lv { font-weight: 600; }
+.log-row.warn .lv { color: var(--on-warning-container); }
+.log-row.warn { background: color-mix(in srgb, var(--warning-container) 45%, transparent); }
+.log-row.error .lv { color: var(--error); }
+.log-row.error { background: color-mix(in srgb, var(--error-container) 35%, transparent); }
+.log-row.debug { color: var(--on-surface-variant); }
+.log-row .msg { min-width: 0; overflow-wrap: anywhere; }
+.log-row .area { color: var(--on-surface-variant); font-size: 11px; }
+.log-row .data { display: block; color: var(--on-surface-variant); font-size: 11px; overflow-wrap: anywhere; }
+.menu .item.danger { color: var(--error); }
+/* a long menu (the settings, with the density and the reset) scrolls inside itself: at 200% zoom its last items were out of reach */
+.menu-pop { max-block-size: calc(100dvh - 64px); overflow-y: auto; overscroll-behavior: contain; }
+details.unref { margin: 0 6px 6px; font-size: var(--fs-sm); }
+.unref-body { padding: 4px 0; }
+.unref-body > p { margin: 4px 0; }
+.unref-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: 9.5em; overflow: auto; }
+.unref-list .chip { min-height: 24px; min-width: 32px; }
+@media (pointer: coarse) { .unref-list .chip { min-height: 44px; min-width: 44px; } }
+.book-search:has(> .icon-btn) { grid-template-columns: 1fr auto; align-items: center; }
+dialog.heading-search { width: min(820px, calc(100vw - 32px)); }
+.heading-search .filters { padding: 0; }
+.hs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.hs-list li { display: flex; align-items: center; gap: 6px; }
+.hs-list .hs-open { flex: 1; min-width: 0; justify-content: flex-start; white-space: normal; text-align: start; flex-wrap: wrap; gap: 2px 8px; }
+.hs-list .hs-book { font-weight: 600; }
+.hs-list .side-btn { flex: none; font-size: 11px; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--outline-variant); background: var(--surface); cursor: pointer; min-height: 24px; }
+@media (pointer: coarse) { .hs-list .side-btn { min-height: 44px; min-width: 44px; } }
+dialog.reset-dialog { width: min(560px, calc(100vw - 32px)); }
+.notice-inline { padding: 8px 12px; border-radius: var(--radius); background: var(--warning-container); color: var(--on-warning-container); }
+.book-list .side-btn.rm { color: var(--on-surface-variant); display: inline-grid; place-items: center; padding: 2px 6px; }
+.book-list .side-btn.rm:hover { color: var(--error); border-color: var(--error); }
+/* with a mouse the ✕ takes no room until the row is pointed at or reached by Tab (the names stay readable in a narrow list);
+   a finger sees it always (the 44px rule below) */
+@media (pointer: fine) {
+  .book-list li:not(:hover):not(:focus-within) .side-btn.rm { inline-size: 0; min-inline-size: 0; padding-inline: 0; border-width: 0; margin-inline-start: -4px; overflow: hidden; }
+}
+
+/* F-134: no motion for those who asked the system for none. The line flash stays a cue, without the fade. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  .ln.flash { animation: flash-still 1.2s steps(1, end); }
+}
+@keyframes flash-still { from, to { background: var(--highlight); } }
+
+/* F-134: a printout is the texts, not the controls (as version 3: not a goal, but not broken) */
+@media print {
+  .app-bar, .notices, .drop-veil, .workspace .grip, .reader-tools, .side-panel { display: none !important; }
+  body { background: none; }
 }
