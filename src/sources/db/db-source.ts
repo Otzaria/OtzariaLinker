@@ -490,7 +490,10 @@ export class DbBookSource implements BookSource {
         ...(b && b.isBaseBook !== null && { isBaseBook: b.isBaseBook }),
       };
     };
-    const end = (e: DbLinkRow["source"]) => ({ book: ref(e.bookId), line: e.lineIndex, ...(e.endIndex !== undefined && e.endIndex > e.lineIndex && { end: e.endIndex }) });
+    const end = (e: DbLinkRow["source"]) => {
+      const last = rangeEnd(e.lineIndex, e.endIndex, this.booksById.get(e.bookId)?.totalLines ?? null);
+      return { book: ref(e.bookId), line: e.lineIndex, ...(last !== undefined && { end: last }) };
+    };
     return {
       id: `${this.info.id}:link:${r.id}`,
       status: "existing",
@@ -532,6 +535,18 @@ export function isLibraryDb(kind: string, label: string, books: Iterable<Pick<Db
   if (/^seforim\.db$/i.test(label)) return true;
   for (const b of books) if (b.source && /sefaria/i.test(b.source)) return true;
   return false;
+}
+
+/**
+ * The end of a stored range as a link may carry it, or undefined (no range). link_range.endLineIndex comes from a database
+ * nobody vouches for, and every loop over a range walks to it (Issue #41 C1: 20,000,000 cost 400+ MB in the max-link job).
+ * Only a whole line number past a whole start is an end (an end that is not after its start is ignored, AGENTS §3); one
+ * no book can reach (MAX_BOOK_LINES) is dropped, and one past the book's declared length is clamped to its last line.
+ */
+export function rangeEnd(line: number, end: number | undefined, totalLines: number | null): number | undefined {
+  if (end === undefined || !Number.isInteger(line) || line < 0 || !Number.isInteger(end) || end <= line || end >= MAX_BOOK_LINES) return undefined;
+  const last = totalLines !== null && totalLines > 0 ? Math.min(end, totalLines - 1) : end;
+  return last > line ? last : undefined;
 }
 
 interface ResolvedTarget {
