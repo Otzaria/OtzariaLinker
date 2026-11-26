@@ -65,3 +65,24 @@ describe("the layout follows the window's width (V5 UX audit U14, owner's choice
     expect(prefs.layout.value).toEqual(PRESETS.four);
   });
 });
+
+describe("the range settings v3 had (F-055 rangeAutoEnd, F-079 rangeEndBasis, F-083 rangeTrimPrevious)", () => {
+  it("defaults as V7 behaved: 'until the next' stops at a link or a heading, no automatic range, the previous range is cut", () => {
+    const prefs = loadPreferences(memory());
+    expect(prefs.rangeEndBasis.value).toBe("auto");
+    expect(prefs.rangeAutoEnd.value).toEqual({ source: false, target: false });
+    expect(prefs.rangeTrimPrevious.value).toBe(true);
+  });
+
+  it("are kept for the next session; a value that is not one of them falls back to the default", () => {
+    const s = memory();
+    const prefs = loadPreferences(s);
+    prefs.rangeEndBasis.value = "headings";
+    prefs.rangeAutoEnd.value = { source: false, target: true };
+    prefs.rangeTrimPrevious.value = false;
+    const next = loadPreferences(s);
+    expect([next.rangeEndBasis.value, next.rangeAutoEnd.value, next.rangeTrimPrevious.value]).toEqual(["headings", { source: false, target: true }, false]);
+    const bad = loadPreferences(memory({ "otzaria-linker:prefs:v1": JSON.stringify({ rangeEndBasis: "chapters", rangeAutoEnd: { source: 1 }, rangeTrimPrevious: "no" }) }));
+    expect([bad.rangeEndBasis.value, bad.rangeAutoEnd.value, bad.rangeTrimPrevious.value]).toEqual(["auto", { source: false, target: false }, true]);
+  });
+});

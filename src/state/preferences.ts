@@ -1,4 +1,5 @@
 import { batch, effect, signal, type Signal } from "@preact/signals";
+import type { MarkerBasis } from "../linking/ranges";
 
 /*
  * User preferences and the workspace layout (ADR 0005). Kept in localStorage — a per-browser
@@ -34,6 +35,12 @@ export interface Preferences {
   createMode: Signal<CreateMode>;
   suggestionsView: Signal<SuggestionsView>;
   layout: Signal<Layout>;
+  /** v3's rangeEndBasis (F-079): where the builder's "until the next" stops — a link or a heading, a link, a heading, the book's end */
+  rangeEndBasis: Signal<MarkerBasis>;
+  /** v3's rangeAutoEnd (F-055), per side: a new pick on that side runs by itself until the line before the next marker */
+  rangeAutoEnd: Signal<{ source: boolean; target: boolean }>;
+  /** v3's rangeTrimPrevious (F-083): a new link cuts the range of an earlier link it falls inside (same undo step) */
+  rangeTrimPrevious: Signal<boolean>;
   /**
    * Session only, never saved: the user chose a preset or changed the layout (hid or showed a panel,
    * moved a border or a panel) in this session. Until then a window narrower than NARROW_WIDTH gets the
@@ -66,6 +73,9 @@ export function loadPreferences(storage: Storage | null = safeStorage()): Prefer
     // a narrow window starts on "two texts and a side panel" through fitLayoutToWidth, which keeps
     // this layout to return to when the window is made wide
     layout: signal(pick(saved.layout, isLayout, structuredClone(PRESETS.four))),
+    rangeEndBasis: signal(pick(saved.rangeEndBasis, (x) => x === "auto" || x === "links" || x === "headings" || x === "book", "auto" as MarkerBasis)),
+    rangeAutoEnd: signal(pick(saved.rangeAutoEnd, isSides, { source: false, target: false })),
+    rangeTrimPrevious: signal(pick(saved.rangeTrimPrevious, (x) => typeof x === "boolean", true)),
     layoutChosen: signal(false),
     layoutAuto: signal(null),
   };
@@ -134,6 +144,11 @@ export function movePanel(layout: Layout, id: PanelId, delta: -1 | 1): Layout {
   if (!shown.includes(id) || !other) return layout;
   const order = layout.order.map((p) => (p === id ? other : p === other ? id : p));
   return { ...layout, order };
+}
+
+function isSides(x: unknown): boolean {
+  const s = x as { source: unknown; target: unknown } | null;
+  return !!s && typeof s === "object" && typeof s.source === "boolean" && typeof s.target === "boolean";
 }
 
 const PANELS: readonly PanelId[] = ["sources", "source", "target", "side"];

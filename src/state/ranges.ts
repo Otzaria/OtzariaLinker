@@ -2,7 +2,7 @@ import type { ReadonlySignal, Signal } from "@preact/signals";
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { validateLink, type ValidationContext } from "../core/links/validate";
-import { applyRangeEdit, cancelContinuationEdit, fillRanges, planContinuation, rangeMarkers, suggestEnd, trimBefore, type ContinueMode, type ContinuePlan, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
+import { applyRangeEdit, cancelContinuationEdit, fillRanges, planContinuation, rangeMarkers, suggestEnd, trimBefore, type ContinueMode, type ContinuePlan, type MarkerBasis, type RangeBook, type RangeEdit, type RangeSide } from "../linking/ranges";
 import { commit, linksCount, type Change, type LinkState } from "./history";
 import type { LineStore } from "./lines";
 import type { BooksService, CallOptions } from "./services";
@@ -61,11 +61,14 @@ export class RangesState {
     return { owns: (ref) => this.host.sameBook(ref, bookKey), lineCount: b.lineCount ?? this.host.lines.count(bookKey) ?? 0, headings };
   }
 
-  /** The builder's "until the next link": the end for a range starting at `start` (null: the book is not open). */
-  async suggestEnd(bookKey: string, side: RangeSide, start: number, editing?: string): Promise<number | null> {
+  /**
+   * The builder's "until the next link": the end for a range starting at `start` (null: the book is not open). `basis`
+   * is v3's rangeEndBasis (F-079): what the range stops before; "book" runs it to the book's last line.
+   */
+  async suggestEnd(bookKey: string, side: RangeSide, start: number, editing?: string, basis: MarkerBasis = "auto"): Promise<number | null> {
     const book = await this.book(bookKey);
     if (!book || book.lineCount <= 0) return null;
-    return suggestEnd(start, rangeMarkers(this.links(), book, side, "auto", editing), book);
+    return suggestEnd(start, rangeMarkers(this.links(), book, side, basis, editing), book);
   }
 
   /**

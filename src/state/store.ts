@@ -13,7 +13,9 @@ import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
+import { anchorLabelFromHeRef, anchorLabelProblem, replaceAnchorLabel } from "../core/text/anchor-label";
 import type { EngineId } from "../linking/automatic";
+import type { MarkerBasis } from "../linking/ranges";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
 import { addChanges, altTocChange, booksCount, booksOpened, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
@@ -58,9 +60,17 @@ export interface Pick {
   bookKey: string;
   line: number;
   end?: number;
+  /**
+   * Several separate lines picked with Ctrl/Cmd (v3 F-046/F-061): sorted, at least two, the first is `line`; never with
+   * `end` or `anchor`. The builder makes one link from each of them to the other side (one undoable step).
+   */
+  lines?: readonly number[];
   /** word anchor on this line, in RAW offsets of the line's anchor text, with the words for display */
   anchor?: RawAnchor & { text: string };
 }
+
+/** At most this many separate lines are picked with Ctrl/Cmd: each becomes a link, all in one step. */
+export const MAX_PICKED_LINES = 200;
 
 export type NoticeKind = "info" | "success" | "warning" | "error";
 export interface Notice {
@@ -196,17 +206,31 @@ export class AppStore {
   readonly allLinks = computed(() => [...this.linkState.value.links.values()]);
   readonly dirty = computed(() => this.linkState.value.revision !== this.savedRevision.value);
 
-  /** The link the builder would create right now, or null while something is missing. */
-  readonly draft = computed<Link | null>(() => this.composeDraft(this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined));
+  /**
+   * Every link the builder would create right now: one, or one per line picked with Ctrl/Cmd on one side (v3 F-046/F-061).
+   * Empty while something is missing, and when several lines are picked on BOTH sides (draftProblems says why).
+   */
+  readonly drafts = computed<Link[]>(() => {
+    const s = this.pick.source.value;
+    const t = this.pick.target.value;
+    if (!s || !t || (s.lines && t.lines)) return [];
+    const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    const one = (p: Pick, line: number): Pick => ({ bookKey: p.bookKey, line });
+    if (!edited && s.lines) return s.lines.map((i) => this.composeDraft(undefined, one(s, i), t)!);
+    if (!edited && t.lines) return t.lines.map((i) => this.composeDraft(undefined, s, one(t, i))!);
+    const d = this.composeDraft(edited);
+    return d ? [d] : [];
+  });
+  /** The link the builder would create right now (the first, when several lines are picked), or null while something is missing. */
+  readonly draft = computed<Link | null>(() => this.drafts.value[0] ?? null);
 
   /**
    * The link the builder's picks and fields make. `base`: the link being edited, whose other fields (its imported
    * record's text, key order, file position, continuation…) the edit keeps; without it, a link made from scratch —
-   * what a new link and a copy saved "as an additional link" get (V7 PR3/PR4 review, finding 3).
+   * what a new link and a copy saved "as an additional link" get (V7 PR3/PR4 review, finding 3). `s`/`t`: one line of
+   * several picked ones (drafts); by default the picks.
    */
-  private composeDraft(base: Link | undefined): Link | null {
-    const s = this.pick.source.value;
-    const t = this.pick.target.value;
+  private composeDraft(base: Link | undefined, s: Pick | null = this.pick.source.value, t: Pick | null = this.pick.target.value): Link | null {
     if (!s || !t) return null;
     this.lines.tick.value; // heRef depends on loaded lines
     const source: LinkSide = { book: this.refOf(s.bookKey), line: s.line, ...(s.end !== undefined && s.end > s.line && { end: s.end }) };
@@ -216,7 +240,13 @@ export class AppStore {
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
     const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
     const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
-    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) };
+    // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3); the automatic one carries
+    // the label the user gave the anchor (v3 F-075; a typed one was rewritten by setAnchorLabel)
+    const typed = this.draftHeRef.value?.trim() ? this.draftHeRef.value : null;
+    const heRef2 = typed ?? (s.anchor?.label ? replaceAnchorLabel(this.autoHeRef(t), s.anchor.label) : this.autoHeRef(t));
+    // the anchor's label is what the generator will read from heRef_2 (Generator.kt:2425) — never one the file does not carry
+    const label = s.anchor ? anchorLabelFromHeRef(heRef2) : null;
+    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(label && { label }) };
     // the engine's matched words stay with the side the user did not change (issue #11)
     const matched = base && matchedAfterEdit(base, source, target, anchor);
     const d: Link = {
@@ -224,8 +254,7 @@ export class AppStore {
       source,
       target,
       declaredType: this.draftType.value,
-      // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
-      heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
+      heRef2,
       ...(anchor && { anchor }),
       ...(matched && { matched }),
       ...(ref1 && { ref1 }),
@@ -236,11 +265,22 @@ export class AppStore {
     return base ? dropStalePipelineFields(base, d).link : d;
   }
   readonly draftProblems = computed<Problem[]>(() => {
-    const d = this.draft.value;
+    if (this.pick.source.value?.lines && this.pick.target.value?.lines) {
+      const r = this.roles.value;
+      return [{ code: "builder/multi-both-sides", severity: "error", message: `נבחרו כמה שורות גם ב${r.source.name.replace(/^ה/, "")} וגם ב${r.target.name.replace(/^ה/, "")}. בחרו כמה שורות רק בצד אחד, ושורה אחת (או טווח) בצד השני: מכל שורה ייווצר קישור אליה.` }];
+    }
+    const ds = this.drafts.value;
+    const d = ds[0];
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
     // the library's rules are checked at export (purpose); here they warn, so a link is never blocked from being made
     const { linksFile: _f, ...ctx } = this.validation();
     if (!d) return [];
+    if (ds.length > 1) {
+      // one link per picked line: each is checked, and a problem is said once (its text names the line)
+      const seen = new Map<string, Problem>();
+      for (const x of ds) for (const p of validateLink(x, { ...ctx, purpose: "private" })) if (!seen.has(`${p.code}\n${p.message}`)) seen.set(`${p.code}\n${p.message}`, p);
+      return [...seen.values()];
+    }
     const out = validateLink(d, { ...ctx, purpose: "private" });
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (base) {
@@ -591,10 +631,35 @@ export class AppStore {
   pickLine(side: Side, bookKey: string, line: number, extend = false): void {
     const cur = this.pick[side].value;
     if (extend && cur && cur.bookKey === bookKey) {
+      // after Ctrl/Cmd: one range over every picked line and the clicked one
       const lo = Math.min(cur.line, line);
-      const hi = Math.max(cur.end ?? cur.line, line, cur.line);
+      const hi = Math.max(cur.end ?? cur.line, line, cur.line, cur.lines?.at(-1) ?? cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
+    this.afterPick(side, bookKey);
+    if (!extend) this.autoRangeEnd(side, bookKey, line);
+  }
+
+  /**
+   * Ctrl/Cmd+click (v3 F-046/F-061): the line joins the picked lines of that side, or leaves them. A range picked before
+   * becomes its lines, as in v3. Another book, or a link open for editing (an edit is one link), picks the line alone.
+   */
+  toggleLine(side: Side, bookKey: string, line: number): void {
+    const cur = this.pick[side].value;
+    if (this.editing.value || !cur || cur.bookKey !== bookKey) return this.pickLine(side, bookKey, line);
+    const set = new Set(cur.lines ?? Array.from({ length: (cur.end ?? cur.line) - cur.line + 1 }, (_, k) => cur.line + k));
+    if (!set.delete(line)) set.add(line);
+    if (set.size > MAX_PICKED_LINES) {
+      this.notify("warning", `אפשר לבחור עד ${MAX_PICKED_LINES} שורות נפרדות בבת אחת. צרו את הקישורים של השורות שכבר נבחרו, ואז בחרו את הבאות.`);
+      return;
+    }
+    const lines = [...set].sort((a, b) => a - b);
+    this.pick[side].value = !lines.length ? null : lines.length === 1 ? { bookKey, line: lines[0]! } : { bookKey, line: lines[0]!, lines };
+    this.afterPick(side, bookKey);
+  }
+
+  /** What a new pick on `side` changes besides the pick: refs that no longer fit, the active side, the automatic type. */
+  private afterPick(side: Side, bookKey: string): void {
     if (side === "source" && this.editing.value) {
       // a new source line makes the old ref_1 wrong — the sync would move the link back to it (B2)
       const edited = this.linkState.value.links.get(this.editing.value);
@@ -646,6 +711,88 @@ export class AppStore {
     });
   }
 
+  /* ---------------- the builder's range and anchor (v3 F-054, F-055, F-075, F-079) ---------------- */
+
+  private autoEndJob: Promise<void> = Promise.resolve();
+  /** Settles once the automatic range end of the last pick (rangeAutoEnd) is set — "click" mode creates after it. */
+  whenPicked(): Promise<void> {
+    return this.autoEndJob;
+  }
+
+  /** v3's rangeAutoEnd (F-055), per side: a new line picked there runs until the line before the next marker (rangeEndBasis). */
+  private autoRangeEnd(side: Side, bookKey: string, line: number): void {
+    if (!this.prefs.rangeAutoEnd.peek()[side] || this.editing.peek()) return;
+    this.autoEndJob = (async () => {
+      const end = await this.ranges.suggestEnd(bookKey, side, line, undefined, this.prefs.rangeEndBasis.peek());
+      const cur = this.pick[side].peek();
+      // only the pick it was asked for, as it was: a Shift range, Ctrl lines or an anchor made since are the user's own
+      if (end === null || end <= line || !cur || cur.bookKey !== bookKey || cur.line !== line || cur.end !== undefined || cur.lines || cur.anchor) return;
+      this.pick[side].value = { bookKey, line, end };
+    })();
+  }
+
+  /**
+   * The range end typed in the builder (v3 "עד שורה", F-054), 0-based; an end not after the start, or null, removes the
+   * range. An end past the book is refused with the reason. False when nothing changed.
+   */
+  setRangeEnd(side: Side, end: number | null): boolean {
+    const cur = this.pick[side].value;
+    if (!cur || cur.anchor || cur.lines) return false;
+    const count = this.books.value.get(cur.bookKey)?.lineCount ?? this.lines.count(cur.bookKey);
+    if (end !== null && count !== undefined && end >= count) {
+      this.notify("warning", `בספר יש ${count.toLocaleString("he")} שורות, ולכן הטווח לא שונה. כתבו מספר שורה עד ${count.toLocaleString("he")}.`);
+      return false;
+    }
+    this.pick[side].value = { bookKey: cur.bookKey, line: cur.line, ...(end !== null && end > cur.line && { end }) };
+    return true;
+  }
+
+  /**
+   * "Until the next" (v3 F-054): the picked line's range runs to the line before the next marker of that side — what a
+   * marker is, is v3's rangeEndBasis (F-079, a preference); `basis` "book" is v3's "until the end of the book". False when
+   * nothing changed (the user is told why).
+   */
+  async untilNext(side: Side, basis: MarkerBasis = this.prefs.rangeEndBasis.peek()): Promise<boolean> {
+    const pick = this.pick[side].peek();
+    if (!pick || pick.anchor || pick.lines) return false;
+    const end = await this.ranges.suggestEnd(pick.bookKey, side, pick.line, this.editing.peek() ?? undefined, basis);
+    const cur = this.pick[side].peek();
+    // the pick may have moved while the headings were read
+    if (!cur || cur.bookKey !== pick.bookKey || cur.line !== pick.line) return false;
+    if (end === null) return (this.notify("warning", "אורך הספר עדיין לא ידוע, ולכן אי אפשר להציע סוף לטווח."), false);
+    if (end <= pick.line) {
+      const why = basis === "book" ? "השורה הזו היא השורה האחרונה בספר (או שאחריה רק כותרות)" : basis === "links" ? "השורה הבאה כבר מתחילה קישור" : basis === "headings" ? "השורה הבאה היא כותרת" : "השורה הבאה כבר מתחילה קישור או כותרת";
+      return (this.notify("info", `${why}, ולכן אין טווח להציע.`), false);
+    }
+    this.pick[side].value = { bookKey: pick.bookKey, line: pick.line, end };
+    return true;
+  }
+
+  /** v3's "עד הסוף" (F-055): the picked line's range runs to the book's last line (stepping back from a heading). */
+  rangeToEnd(side: Side): Promise<boolean> {
+    return this.untilNext(side, "book");
+  }
+
+  /**
+   * The label of the picked anchor (v3's "סמן" dialog, F-075): Otzaria shows it in the text, and the file carries it as
+   * " אות X" at the end of heRef_2, where the generator reads it. Empty removes it. A label the generator would not read is
+   * refused with the reason. False when nothing changed.
+   */
+  setAnchorLabel(label: string): boolean {
+    const s = this.pick.source.value;
+    if (!s?.anchor) return false;
+    const v = label.trim();
+    const why = anchorLabelProblem(v);
+    if (why) return (this.notify("warning", why), false);
+    batch(() => {
+      const { label: _old, ...a } = s.anchor!;
+      this.pick.source.value = { ...s, anchor: { ...a, ...(v && { label: v }) } };
+      // a reference the user typed keeps its words; only its label changes
+      if (this.draftHeRef.value?.trim()) this.draftHeRef.value = replaceAnchorLabel(this.draftHeRef.value, v);
+    });
+    return true;
+  }
+
   /** heRef_2 when the user did not type one: the database's reference, else "<title> <headings>". */
   autoHeRef(t: Pick): string {
     const book = this.books.value.get(t.bookKey);
@@ -694,35 +841,39 @@ export class AppStore {
       const before = this.linkState.value.links.get(this.editing.value);
       if (!before) return null;
       const after: Link = { ...d, status: before.status === "existing" ? "edited" : before.status };
-      this.apply("עריכת קישור", [{ id: before.id, before, after }, ...this.trimAround(after, before.id)]);
+      this.apply("עריכת קישור", [{ id: before.id, before, after }, ...this.trimAround([after], before.id)]);
       this.clearPicks();
       return after;
     }
-    const link: Link = { ...d, id: this.newLinkId(), status: "new", provenance: "user" };
-    this.apply("יצירת קישור", [...addChanges([link]), ...this.trimAround(link)]);
+    // several lines picked with Ctrl/Cmd: a link from each, all in ONE undoable step (v3 F-061, AGENTS §2.5)
+    const made: Link[] = (copy ? [d] : this.drafts.value).map((x) => ({ ...x, id: this.newLinkId(), status: "new", provenance: "user" }));
+    this.apply(made.length === 1 ? "יצירת קישור" : `יצירת ${linksCount(made.length)}`, [...addChanges(made), ...this.trimAround(made)]);
     batch(() => {
       this.pick.target.value = null;
       this.draftHeRef.value = null;
       this.draftRef2.value = "";
-      // keep the source pick only when it was a range/anchor the user may link again; else advance to the next line
+      // keep the source pick only when it was a range/anchor/several lines the user may link again; else advance to the next line
       const s = this.pick.source.value;
       // (a copy keeps it: its point is another target for the same source)
-      if (s && !s.anchor && s.end === undefined && !opts.asNew) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+      if (s && !s.anchor && !s.lines && s.end === undefined && !opts.asNew) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
     });
-    return link;
+    return made[0]!;
   }
 
   /**
-   * v3's "trim the previous range" (F-064): a range of another link that the new link's start falls
-   * inside is cut to end one line before it, in the same undoable step, and the user is told.
+   * v3's "trim the previous range" (F-064): a range of another link that a new link's start falls
+   * inside is cut to end one line before it, in the same undoable step, and the user is told. Several
+   * new links (Ctrl/Cmd lines) cut a range once, at the first of them. Off with v3's rangeTrimPrevious (F-083).
    */
-  private trimAround(link: Link, exclude?: string): Change[] {
+  private trimAround(links: readonly Link[], exclude?: string): Change[] {
+    if (!this.prefs.rangeTrimPrevious.peek()) return [];
     const keyOf = (ref: BookRef) => this.bookOf(ref)?.key;
     const changes: Change[] = [];
-    for (const side of ["source", "target"] as const) {
-      const key = keyOf(link[side].book);
-      if (key) changes.push(...this.ranges.trimFor(key, side, link[side].line, exclude ?? link.id).filter((c) => !changes.some((x) => x.id === c.id)));
-    }
+    for (const side of ["source", "target"] as const)
+      for (const link of [...links].sort((a, b) => a[side].line - b[side].line)) {
+        const key = keyOf(link[side].book);
+        if (key) changes.push(...this.ranges.trimFor(key, side, link[side].line, exclude ?? link.id).filter((c) => !changes.some((x) => x.id === c.id)));
+      }
     if (changes.length) this.notify("info", changes.length === 1 ? "טווח של קישור קודם קוצר כדי שלא יבלע את הקישור החדש." : `קוצרו הטווחים של ${linksCount(changes.length)} קודמים כדי שלא יבלעו את הקישור החדש.`);
     return changes;
   }
