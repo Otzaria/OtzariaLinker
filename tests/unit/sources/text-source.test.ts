@@ -36,3 +36,14 @@ describe("TextFilesSource", () => {
     expect(src.info.warnings.map((w) => w.code)).toContain("source/not-utf8");
   });
 });
+
+describe("a lone CR (#41 B10)", () => {
+  it("is a line break as in the generator, with a warning that Otzaria's personal import does not break there", async () => {
+    const src = new TextFilesSource("c", "תיקייה", [file("cr.txt", "א\rב\nג"), file("crlf.txt", "א\r\nב\nג")]);
+    expect((await src.lines("c:cr.txt")).map((l) => l.text)).toEqual(["א", "ב", "ג"]);
+    expect(src.info.warnings.map((w) => w.code)).toEqual(["source/lone-cr"]);
+    expect(src.info.warnings[0]!.message).toContain("cr.txt");
+    await src.lines("c:crlf.txt"); // CRLF alone is no reason to warn
+    expect(src.info.warnings).toHaveLength(1);
+  });
+});

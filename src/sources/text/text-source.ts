@@ -90,6 +90,10 @@ export class TextFilesSource implements BookSource {
     const decoded = decodeText(bytes);
     if (decoded.encoding !== "utf-8")
       this.info.warnings.push({ code: "source/not-utf8", message: `הקובץ "${file.path}" שמור בקידוד ${decoded.encoding} ולא UTF-8. הכלי מציג אותו נכון, אבל אוצריא קוראת כל ספר כ־UTF-8 — שמרו אותו מחדש ב־UTF-8 לפני שליחה לספרייה.` });
+    // #41 B10: the generator breaks lines at a lone CR too, but Otzaria's import of a personal book splits at "\n" only
+    // (text_book_repository.dart, range.text.split('\n')): every line_index after it would be one off there
+    if (/\r(?!\n)/.test(decoded.text))
+      this.info.warnings.push({ code: "source/lone-cr", message: `בקובץ "${file.path}" יש מעבר שורה מסוג CR בלבד (בלי LF). הכלי, כמו הספרייה, סופר אותו כשורה חדשה, אבל ייבוא של ספר אישי באוצריא לא — ושם כל מספרי השורות שאחריו יוזזו. לספר אישי: שמרו את הקובץ מחדש עם מעברי שורה רגילים (LF או CRLF) ופתחו אותו שוב.` });
     const lines = splitBookLines(decoded.text);
     if (this.cache.size >= 32) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(bookKey, lines);
