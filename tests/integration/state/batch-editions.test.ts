@@ -13,13 +13,15 @@ import { registryService } from "../../support/books-service";
  */
 const NL = String.fromCharCode(10);
 const text = (path: string, lines: readonly string[]) => ({ path, blob: new Blob([strToU8(lines.join(NL))]) });
-const base = (path: string) => text(path, ["<h1>בסיס</h1>", "<h2>פרק א</h2>", "שורה ראשונה", "<h2>פרק ב</h2>", "שורה שנייה", "<h2>פרק ג</h2>", "שורה שלישית"]);
+// Two editions: the same headings, other text (two byte-identical files are one file, opened once — V3 F-016)
+const base = (path: string, edition = "") =>
+  text(path, ["<h1>בסיס</h1>", "<h2>פרק א</h2>", `שורה ראשונה${edition}`, "<h2>פרק ב</h2>", `שורה שנייה${edition}`, "<h2>פרק ג</h2>", `שורה שלישית${edition}`]);
 const COMM = () => text("a/ביאור על בסיס.txt", ["<h1>ביאור על בסיס</h1>", "<h2>פרק א</h2>", "ביאור ראשון", "<h2>פרק ב</h2>", "ביאור שני", "<h2>פרק ג</h2>", "ביאור שלישי"]);
 
 async function opened() {
   const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
   await store.openFiles([COMM(), base("a/בסיס.txt")]);
-  await store.openFiles([base("b/בסיס.txt")]);
+  await store.openFiles([base("b/בסיס.txt", " (מהדורה ב)")]);
   return store;
 }
 
