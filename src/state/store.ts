@@ -6,7 +6,7 @@ import { keyOfRecord, readEdition, recordId, type BookRecord } from "./edition";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
-import { identicalLinkKey, linePairIdentity } from "../core/links/equality";
+import { identicalLinkKey } from "../core/links/equality";
 import { matchedAfterEdit } from "../core/links/matched";
 import type { BookOrigin, BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
@@ -100,6 +100,26 @@ const choiceKey = (title: string, origin: BookOrigin, source: string | undefined
 
 /** the builder refuses a link identical to a live one (V3 F-070/F-072/F-086; the rule: core/links/equality.ts identicalLinkKey) */
 const IDENTICAL_TEXT = "קישור זהה כבר קיים בפרויקט: אותן שורות ואותו סוג קשר, אחרי ההמרה של אוצריא (במסד שניהם היו קישור אחד). אין צורך ליצור אותו שוב. כדי לקשר אחרת, בחרו שורה אחרת או סוג קשר אחר.";
+
+/**
+ * identicalLinkKey of a link, once per link object (it runs storedForm). A Link is never changed in place — every change makes a
+ * new object — so the key of an object never goes stale.
+ */
+const identicalKeys = new WeakMap<Link, string | null>();
+function keyOfLink(l: Link): string | null {
+  let k = identicalKeys.get(l);
+  if (k === undefined) identicalKeys.set(l, (k = identicalLinkKey(l)));
+  return k;
+}
+
+/** a link's two line numbers, unordered, as one number (store.liveByLines); two pairs may share it, never one pair two keys */
+const linesKey = (l: Link): number => Math.min(l.source.line, l.target.line) * 0x4000000 + Math.max(l.source.line, l.target.line);
+
+/** the same two ends (book title and line), in either direction: linePairIdentity(a) === linePairIdentity(b), without building it */
+function sameEnds(a: Link, b: Link): boolean {
+  const eq = (x: LinkSide, y: LinkSide) => x.line === y.line && x.book.title === y.book.title;
+  return (eq(a.source, b.source) && eq(a.target, b.target)) || (eq(a.source, b.target) && eq(a.target, b.source));
+}
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -250,29 +270,48 @@ export class AppStore {
     }
     // V3 refused to make or edit into a link IDENTICAL to a live one (F-070, F-072, F-086): by the one equality rule
     const twin = this.twinOf(d, base?.id);
-    if (twin.identical) out.push({ code: "builder/identical", severity: "error", message: IDENTICAL_TEXT });
+    // an edit that keeps the link's identity adds no copy that was not there: one of two identical records of a library file
+    // (export/duplicate flags them) can still be edited, e.g. to fix its heRef_2 (V7 round 2 review, finding 8)
+    if (twin.identical && base && keyOfLink(d) === keyOfLink(base))
+      out.push({ code: "builder/identical-kept", severity: "info", message: "בפרויקט יש עוד קישור זהה לזה (שתי רשומות זהות בקובץ). העריכה מותרת, כי היא לא יוצרת העתק חדש. כדי להשאיר רק אחד, מחקו את ההעתק בלשונית הבדיקה (\"מחיקת העתקים כפולים\")." });
+    else if (twin.identical) out.push({ code: "builder/identical", severity: "error", message: IDENTICAL_TEXT });
     else if (twin.sameLines) out.push({ code: "builder/same-lines", severity: "info", message: "בין שתי השורות האלה כבר יש בפרויקט קישור מסוג אחר או בכיוון אחר. הקישור הזה יישמר בנוסף לו." });
     return out;
   });
 
   /**
+   * The live project links by their two LINE NUMBERS (lowest, highest): built once per change of the links, so the identical-
+   * link check of a draft, or of each of 10,000 links restored together, is one lookup and not a pass over the project
+   * (V7 round 2 review, findings 4, 5). A number key, not linePairIdentity: building strings for 100K links on every change
+   * cost ~60 ms; the books are compared in twinOf, only for the few links of the bucket. Deleted and database links are not in it.
+   */
+  private readonly liveByLines = computed(() => {
+    const m = new Map<number, Link[]>();
+    for (const x of this.linkState.value.links.values()) {
+      if (x.status === "deleted" || x.provenance === "db") continue;
+      const k = linesKey(x);
+      const bucket = m.get(k);
+      if (bucket) bucket.push(x);
+      else m.set(k, [x]);
+    }
+    return m;
+  });
+
+  /**
    * A live project link that is the same as `l` (other than the link `except`): IDENTICAL — one record once Otzaria stores it
    * (core/links/equality.ts identicalLinkKey, the rule of export/duplicate) — or only between the same two lines (another type
-   * or direction, linePairIdentity). Lines are compared first, so a project of 100K links costs one pass of integer compares.
+   * or direction, linePairIdentity). Only the links on the same line numbers (liveByLines) and of the same two books (sameEnds)
+   * are keyed; storedForm turns a link around but never changes its two ends, so an identical link always has them.
    * Database links are not the project's (export/in-db speaks of them).
    */
-  private twinOf(l: Link, except?: string, among: Iterable<Link> = this.linkState.value.links.values()): { identical?: Link; sameLines?: Link } {
-    const lo = Math.min(l.source.line, l.target.line);
-    const hi = Math.max(l.source.line, l.target.line);
+  private twinOf(l: Link, except?: string): { identical?: Link; sameLines?: Link } {
     let key: string | null | undefined;
-    let pair: string | undefined;
     let sameLines: Link | undefined;
-    for (const x of among) {
-      if (x.id === except || x.status === "deleted" || x.provenance === "db") continue;
-      if (Math.min(x.source.line, x.target.line) !== lo || Math.max(x.source.line, x.target.line) !== hi) continue;
-      if (key === undefined) key = identicalLinkKey(l);
-      if (key !== null && identicalLinkKey(x) === key) return { identical: x };
-      if (!sameLines && linePairIdentity(x) === (pair ??= linePairIdentity(l))) sameLines = x;
+    for (const x of this.liveByLines.value.get(linesKey(l)) ?? []) {
+      if (x.id === except || !sameEnds(x, l)) continue;
+      if (key === undefined) key = keyOfLink(l);
+      if (key !== null && keyOfLink(x) === key) return { identical: x };
+      sameLines ??= x;
     }
     return sameLines ? { sameLines } : {};
   }
@@ -970,15 +1009,18 @@ export class AppStore {
   restoreLinks(ids: readonly string[]): void {
     const s = this.linkState.value;
     const changes: Change[] = [];
+    /** the identity keys of the links this call brings back: a second deleted copy of one of them stays deleted */
+    const back = new Set<string>();
     let refused = 0;
     for (const id of ids) {
       const c = restoreChange(s, id);
       if (!c) continue;
-      const back = c.after!;
-      if (this.twinOf(back, id).identical || this.twinOf(back, id, changes.map((x) => x.after!)).identical) {
+      const key = keyOfLink(c.after!);
+      if (this.twinOf(c.after!, id).identical || (key !== null && back.has(key))) {
         refused++;
         continue;
       }
+      if (key !== null) back.add(key);
       changes.push(c);
     }
     if (changes.length) this.apply(changes.length === 1 ? "שחזור קישור" : `שחזור ${linksCount(changes.length)}`, changes);

@@ -114,6 +114,37 @@ describe("an identical link is not made again (F-070, F-072, F-086)", () => {
     expect(live(store)).toHaveLength(1);
   });
 
+  // V7 round 2 review, finding 8: a library file with two identical records (what export/duplicate flags) — editing one of them,
+  // even only to fix a typo in its heRef_2, was refused as "identical". An edit that keeps the link's identity adds no copy that
+  // was not there; an edit that BECOMES identical to another link still does.
+  it("edit: one of two identical imported records can be edited when its identity does not change", async () => {
+    const { store } = await opened();
+    const rec = { line_index_1: 2, heRef_2: "ספר ב 3", path_2: "ספר ב.txt", line_index_2: 3, "Conection Type": "reference" };
+    store.exchange.importLinksFile("ספר א_links.json", JSON.stringify([rec, rec], null, 2));
+    const [first, second] = live(store);
+    store.editInBuilder(first!.id);
+    store.draftHeRef.value = "ספר ב, שורה 3";
+    expect(codes(store)).not.toContain("error:builder/identical");
+    expect(codes(store)).toContain("info:builder/identical-kept");
+    expect(store.createFromDraft()).not.toBeNull();
+    expect(store.linkState.value.links.get(first!.id)!.heRef2).toBe("ספר ב, שורה 3");
+    expect(store.linkState.value.links.get(second!.id)!.heRef2).toBe("ספר ב 3");
+  });
+
+  it("edit: a link of an identical pair edited into a copy of a THIRD link is still refused", async () => {
+    const { store, b, make } = await opened();
+    const rec = { line_index_1: 2, heRef_2: "ספר ב 3", path_2: "ספר ב.txt", line_index_2: 3, "Conection Type": "reference" };
+    store.exchange.importLinksFile("ספר א_links.json", JSON.stringify([rec, rec], null, 2));
+    const [first] = live(store);
+    const third = make(1, 4)!;
+    store.editInBuilder(first!.id);
+    store.pickLine("target", b, 4); // now the same as `third`
+    expect(codes(store)).toContain("error:builder/identical");
+    expect(store.createFromDraft()).toBeNull();
+    expect(store.linkState.value.links.get(first!.id)!.target.line).toBe(2);
+    expect(store.linkState.value.links.get(third.id)!.target.line).toBe(4);
+  });
+
   it("imported data keeps its duplicates: flagged at export, and 'delete duplicates' removes them", async () => {
     const { store } = await opened();
     const rec = { line_index_1: 2, heRef_2: "ספר ב 3", path_2: "ספר ב.txt", line_index_2: 3, "Conection Type": "reference" };
