@@ -10,6 +10,7 @@ import type { BooksService, CallOptions, OpenedSource } from "./services";
 import type { NoticeKind, Pick as LinePick, Side, SideTab } from "./store";
 import { CHUNK, type LineStore } from "./lines";
 import { htmlToPlainText } from "../core/text/html";
+import { canonicalTypeString, parseConnectionType } from "../core/links/connection-type";
 
 /*
  * Automatic suggestions (stage 8): running an engine on a pair of books, the citations engine on one
@@ -575,6 +576,35 @@ function matchedOf(s: Suggestion, at: { source: LinkSide; target: LinkSide }): {
 
 function recordAt(s: Suggestion, line: number): { source: LinkSide; target: LinkSide } {
   return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
+}
+
+/** What the suggestions table is narrowed to (V7 §3.11); an absent key does not filter. `book` is the title of the row's target book. */
+export interface SuggestionFilter {
+  confidence?: Confidence;
+  state?: SuggestionState;
+  engine?: EngineId;
+  book?: string;
+  /** a connection type as the file writes it ("commentary") */
+  type?: string;
+}
+
+/** Every method that found a suggestion: a merged (max-link) one carries them all. */
+const enginesOf = (s: Suggestion): readonly EngineId[] => ((s as { engines?: readonly EngineId[] }).engines ?? [s.engine]);
+const typeOf = (s: Suggestion): string => canonicalTypeString(parseConnectionType(s.declaredType).type);
+
+/** Whether a suggestion passes the table's filters; `to` is the end the row shows as the target (SuggestionsState.display). */
+export function suggestionMatches(s: Suggestion, f: SuggestionFilter, state: SuggestionState, to: (s: Suggestion) => LinkSide): boolean {
+  return (!f.confidence || s.confidence === f.confidence) && (!f.state || state === f.state) && (!f.engine || enginesOf(s).includes(f.engine)) && (!f.book || to(s).book.title === f.book) && (!f.type || typeOf(s) === f.type);
+}
+
+/** The methods, target books and connection types of a run, with how many suggestions have each, most first: the choices of the filters. */
+export function suggestionFacets(list: readonly Suggestion[], to: (s: Suggestion) => LinkSide): { engines: [EngineId, number][]; books: [string, number][]; types: [string, number][] } {
+  const count = <K>(keys: (s: Suggestion) => readonly K[]): [K, number][] => {
+    const m = new Map<K, number>();
+    for (const s of list) for (const k of keys(s)) m.set(k, (m.get(k) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
+  return { engines: count(enginesOf), books: count((s) => [to(s).book.title]), types: count((s) => [typeOf(s)]) };
 }
 
 /** An engine result cut short by a cancel: the engines stop with an "engine/aborted" note and return what they found. */

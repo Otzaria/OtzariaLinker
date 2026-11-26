@@ -5,7 +5,7 @@ import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import { splitMatched } from "./matched-words";
 import type { SuggestionsView } from "../../state/preferences";
-import { placeText, type SuggestionState } from "../../state/suggestions";
+import { placeText, suggestionFacets, suggestionMatches, type SuggestionFilter, type SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
@@ -27,6 +27,15 @@ import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
  * Nothing is linked without approval; approval is one undoable action.
  */
 const STATE_LABEL: Record<SuggestionState, string> = { pending: "ממתינה", approved: "אושרה", rejected: "נדחתה", exists: "כבר קיים" };
+/** the decision keys, Latin and the Hebrew layout's same key (help §13) */
+const DECIDE_KEYS: Record<string, "approve" | "reject" | "reset"> = { a: "approve", ש: "approve", r: "reject", ר: "reject", delete: "reject", u: "reset", ו: "reset" };
+/** what each level means for the reviewer (V7 §3.11): on the level's chip and badge */
+const CONFIDENCE_HINT: Record<Exclude<Confidence, "none">, string> = {
+  certain: 'הכלי בטוח לגמרי: "אישור כל הוודאיות" מאשר רק אותן',
+  high: "סביר מאוד, אבל כדאי מבט לפני אישור",
+  possible: "ייתכן: בדקו את שני הצדדים לפני אישור",
+  ambiguous: "כמה מקומות מתאימים, או ששיטות חלוקות: בדקו גם את החלופות בכרטיס",
+};
 const VIEW_LABEL: Record<SuggestionsView, string> = { table: "טבלה", inline: "בתוך הטקסט", card: "כרטיס" };
 
 export function SuggestionsPanel() {
@@ -324,17 +333,20 @@ function TableView() {
   const run = store.suggestions.run.value!;
   const st = store.suggestions.state.value;
   const c = store.suggestions.counts.value;
-  const [conf, setConf] = useState<Confidence | "all">("all");
-  const [state, setState] = useState<SuggestionState | "all">("pending");
+  const [filter, setFilter] = useState<SuggestionFilter>({ state: "pending" });
+  const conf = filter.confidence ?? "all";
+  const state = filter.state ?? "all";
+  /** one filter changed ("" or "all": that filter off), the list from its first page */
+  const narrow = (k: keyof SuggestionFilter, v: string) => (setFilter((f) => ({ ...f, [k]: v === "all" || v === "" ? undefined : v })), setShown(PAGE));
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
   const ordered = store.suggestions.ordered.value;
   const sortOrder = store.suggestions.sortOrder.value;
-  const rows = useMemo(
-    () => ordered.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
-    [ordered, conf, state, st],
-  );
-  useEffect(() => setSel(new Set()), [conf, state, run, sortOrder]);
+  const to = (s: Suggestion) => store.suggestions.display(s).to;
+  const rows = useMemo(() => ordered.filter((s) => suggestionMatches(s, filter, st.get(s.id)!, to)), [ordered, filter, st]);
+  const facets = useMemo(() => suggestionFacets(ordered, to), [ordered]);
+  useEffect(() => setSel(new Set()), [filter, run, sortOrder]);
+  const decided = [...sel].some((id) => st.get(id) === "approved" || st.get(id) === "rejected");
   // the lines of the shown rows, for the start of each line's text (audit F17)
   useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
@@ -346,7 +358,7 @@ function TableView() {
       <div class="filters">
         {(["all", "certain", "high", "possible", "ambiguous"] as const).map((k) =>
           k === "all" || c[k] ? (
-            <button key={k} class={`chip${k !== "all" ? ` conf-${k}` : ""}`} aria-pressed={conf === k} onClick={() => (setConf(k), setShown(PAGE))}>
+            <button key={k} class={`chip${k !== "all" ? ` conf-${k}` : ""}`} aria-pressed={conf === k} onClick={() => narrow("confidence", k)} title={k === "all" ? undefined : CONFIDENCE_HINT[k]}>
               {k === "all" ? "כל הוודאויות" : CONFIDENCE_LABELS[k]} {k !== "all" && <span class="count">{c[k].toLocaleString("he")}</span>}
             </button>
           ) : null,
@@ -355,13 +367,21 @@ function TableView() {
       <div class="filters" style="padding-top:0">
         {(["pending", "approved", "rejected", "exists", "all"] as const).map((k) =>
           k === "all" || c[k] ? (
-            <button key={k} class="chip" aria-pressed={state === k} onClick={() => (setState(k), setShown(PAGE))}>
+            <button key={k} class="chip" aria-pressed={state === k} onClick={() => narrow("state", k)}>
               {k === "all" ? "הכול" : STATE_LABEL[k]} {k !== "all" && <span class="count">{c[k].toLocaleString("he")}</span>}
             </button>
           ) : null,
         )}
         <SortSelect onChange={() => setShown(PAGE)} />
       </div>
+      {/* method, target book, connection type: only where the run holds more than one */}
+      {(facets.engines.length > 1 || facets.books.length > 1 || facets.types.length > 1) && (
+        <div class="filters sug-facets" style="padding-top:0">
+          <Facet label="שיטה" all="כל השיטות" value={filter.engine} pairs={facets.engines} name={(e) => ENGINES.find((x) => x.id === e)?.title ?? e} onChange={(v) => narrow("engine", v)} />
+          <Facet label="ספר היעד" all="כל ספרי היעד" value={filter.book} pairs={facets.books} name={(b) => b} onChange={(v) => narrow("book", v)} />
+          <Facet label="סוג הקשר" all="כל הסוגים" value={filter.type} pairs={facets.types} name={(t) => typeShown(parseConnectionType(t).type)} onChange={(v) => narrow("type", v)} />
+        </div>
+      )}
       <div class="row bulk">
         <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהכלי בטוח בהן לגמרי"}>
           <Icon name="oz_link_check" size={18} />
@@ -371,6 +391,7 @@ function TableView() {
           <>
             <button class="btn tonal" onClick={() => (store.suggestions.approve([...sel]), setSel(new Set()))}>אישור {sel.size}</button>
             <button class="btn text danger" onClick={() => (store.suggestions.reject([...sel]), setSel(new Set()))}>דחייה</button>
+            {decided && <button class="btn text" onClick={() => (store.suggestions.reset([...sel]), setSel(new Set()))} title="מבטל את ההחלטה על ההצעות שנבחרו: אישור או דחייה">החזרה להמתנה</button>}
           </>
         )}
       </div>
@@ -422,12 +443,25 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
   // a merged (max-link) suggestion carries every method that found it
   const engineText = (("engines" in s && Array.isArray(s.engines) ? (s.engines as readonly string[]) : [s.engine]) as readonly string[]).map((e) => ENGINES.find((x) => x.id === e)?.title ?? e).join(" + ");
   const typeText = typeShown(parseConnectionType(s.declaredType).type);
+  // on a focused row (V7 §3.11): Enter shows it in the readers; A / R / U decide, as in the one-at-a-time views
+  const rowKey = (e: KeyboardEvent, id: string) => {
+    const act = DECIDE_KEYS[e.key.toLowerCase()] ?? (e.key === "Enter" || e.key === " " ? "show" : null);
+    if (!act) return;
+    e.preventDefault();
+    if (act === "show") return store.suggestions.show(id);
+    // a decided row may leave the filter: the focus goes on to the next one
+    const row = e.currentTarget as HTMLElement;
+    const next = (row.nextElementSibling ?? row.previousElementSibling) as HTMLElement | null;
+    if (act === "approve") store.suggestions.approve([id]);
+    else store.suggestions[act]([id]);
+    requestAnimationFrame(() => !row.isConnected && next?.isConnected && next.focus());
+  };
   return (
     <tr
       class={`st-${state}`}
       tabIndex={0}
       onClick={() => store.suggestions.show(s.id)}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.suggestions.show(s.id))}
+      onKeyDown={(e) => e.target === e.currentTarget && !e.ctrlKey && !e.metaKey && !e.altKey && rowKey(e, s.id)}
       title={[`ציון ${scorePercent(s)}`, ...s.reasons.map((r) => r.text)].join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
@@ -447,7 +481,7 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
       <td class="col-meta">{engineText}</td>
       <td class="col-meta">{typeText}</td>
       <td>
-        <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
+        <span class={`conf conf-${s.confidence}`} title={s.confidence === "none" ? undefined : CONFIDENCE_HINT[s.confidence]}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {/* the numeric score, when the list is sorted by it: inside a level the order is by this number */}
         {showScore && <span class="muted score"> {scorePercent(s)}</span>}
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
@@ -518,6 +552,8 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
       const k = e.key.toLowerCase();
       if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
       else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
+      else if (k === "u" || k === "ו") (e.preventDefault(), store.suggestions.reset([s.id]));
+      else if (k === "n" || k === "מ") (e.preventDefault(), go(1, true));
       else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
       else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
     };
@@ -578,11 +614,28 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
           <Icon name="oz_cross" size={18} />
           דחייה <kbd>R</kbd>
         </button>
+        {(state === "approved" || state === "rejected") && <button class="btn text" onClick={() => store.suggestions.reset([s.id])}>החזרה להמתנה <kbd>U</kbd></button>}
         <span class="grow" />
-        <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה</button>
+        <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה <kbd>N</kbd></button>
       </div>
       {!standalone && <p class="muted" style="margin:0;font-size:var(--fs-sm)">שני צדי ההצעה מוצגים ומסומנים בחלוניות הספרים.</p>}
     </div>
+  );
+}
+
+/** One of the table's choice filters (method, target book, type), shown only when the run holds more than one value. */
+function Facet<K extends string>({ label, all, value, pairs, name, onChange }: { label: string; all: string; value: K | undefined; pairs: [K, number][]; name: (k: K) => string; onChange: (v: string) => void }) {
+  if (pairs.length < 2) return null;
+  return (
+    <label class="sort-select">
+      <span>{label}</span>
+      <select aria-label={`סינון לפי ${label}`} value={value ?? ""} onChange={(e) => onChange(e.currentTarget.value)}>
+        <option value="">{all}</option>
+        {pairs.map(([k, n]) => (
+          <option key={k} value={k}>{name(k)} ({n.toLocaleString("he")})</option>
+        ))}
+      </select>
+    </label>
   );
 }
 

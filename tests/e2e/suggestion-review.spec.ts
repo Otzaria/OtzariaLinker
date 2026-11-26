@@ -28,6 +28,66 @@ async function headingsRun(page: Page, width = 1440, height = 900) {
   return page.getByRole("table", { name: "הצעות" });
 }
 
+test("filter by method, decide from the keyboard on a row, and take a selection back to pending (V7 §3.11)", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "קבצים", exact: true }).click();
+  // the first verses open with the verse's own words (dibur hamatchil and headings both find them), the rest only by their heading
+  const openings = ["בראשית ברא", "והארץ היתה תהו", "ויאמר אלהים יהי אור", "וירא אלהים את האור"];
+  const biur = ["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...HEB.slice(0, 8).flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `${openings[i] ? `${openings[i]} - ` : ""}ביאור לפסוק ${i + 1}`])].join("\n");
+  await (await chooser).setFiles([
+    { name: "seforim.db", mimeType: "application/octet-stream", buffer: readFileSync(resolve("tests/fixtures/db/seforim-v7-mini.db")) },
+    { name: "ביאור על בראשית.txt", mimeType: "text/plain", buffer: Buffer.from(biur) },
+  ]);
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "ביאור על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  await page.getByRole("tab", { name: /הצעות/ }).click();
+  await page.getByRole("checkbox", { name: /כל השיטות שמתאימות, מאוחדות/ }).check();
+  await page.getByRole("button", { name: "חיפוש התאמות" }).click();
+  const rows = page.getByRole("table", { name: "הצעות" }).locator("tbody tr");
+  await expect(rows.first()).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "הכול", exact: true }).click();
+  const all = await rows.count();
+
+  // two methods ran: the filter is offered (every method, and each one), and narrows to the suggestions that method found
+  const byEngine = page.getByRole("combobox", { name: "סינון לפי שיטה" });
+  await expect(byEngine.locator("option")).toHaveCount(3);
+  await byEngine.selectOption({ index: 2 });
+  const fewer = await rows.count();
+  expect(fewer).toBeGreaterThan(0);
+  expect(fewer).toBeLessThan(all);
+  await byEngine.selectOption({ index: 0 });
+  await expect(rows).toHaveCount(all);
+  // one target book: there is nothing to choose between
+  await expect(page.getByRole("combobox", { name: "סינון לפי ספר היעד" })).toHaveCount(0);
+  // each confidence chip says what the level means
+  await expect(page.locator(".filters .chip.conf-certain")).toHaveAttribute("title", /אישור כל הוודאיות/);
+
+  // the keyboard on a focused row: A approves, U takes it back, R rejects
+  const row = rows.first();
+  await row.focus();
+  await page.keyboard.press("a");
+  await expect(row).toHaveClass(/st-approved/);
+  await page.keyboard.press("u");
+  await expect(row).toHaveClass(/st-pending/);
+  await page.keyboard.press("r");
+  await expect(row).toHaveClass(/st-rejected/);
+
+  // a selection of decided rows goes back to pending in one step
+  await rows.nth(1).locator("input[type=checkbox]").check();
+  await page.getByRole("button", { name: /^אישור 1$/ }).click();
+  await rows.nth(0).locator("input[type=checkbox]").check();
+  await rows.nth(1).locator("input[type=checkbox]").check();
+  await page.getByRole("button", { name: "החזרה להמתנה" }).click();
+  await expect(rows.nth(0)).toHaveClass(/st-pending/);
+  await expect(rows.nth(1)).toHaveClass(/st-pending/);
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
 test("a second press of 'אישור' takes the approval back to pending, not to rejected (#41 B22)", async ({ page }) => {
   const seen = watchPage(page);
   const table = await headingsRun(page);

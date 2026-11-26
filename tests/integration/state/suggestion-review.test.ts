@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
+import type { BookRef } from "../../../src/core/links/model";
+import type { Suggestion } from "../../../src/linking/automatic";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { suggestionFacets, suggestionMatches, type SuggestionFilter, type SuggestionState } from "../../../src/state/suggestions";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
@@ -50,5 +53,40 @@ describe("taking a decision back (#41 B22)", () => {
     store.suggestions.reset([a!, b!, c!]);
     expect([a, b, c].map((id) => store.suggestions.state.value.get(id!))).toEqual(["pending", "pending", "pending"]);
     expect(store.linkState.value.undo.at(-1)!.label).toBe("החזרת 2 הצעות להמתנה");
+  });
+});
+
+describe("the table's filters (V7 §3.11): confidence, state, method, target book, connection type", () => {
+  const book = (key: string, title: string): BookRef => ({ key, title, origin: "otzaria" });
+  const C = book("c", "ביאור על בראשית");
+  const B = book("b", "בראשית");
+  const R = book("r", 'רש"י על בראשית');
+  const sug = (i: number, over: Partial<Suggestion> = {}): Suggestion => ({ id: `s${i}`, engine: "headings", source: { book: C, line: i }, target: { book: B, line: i }, declaredType: "commentary", heRef2: `ה ${i}`, score: 0.9, confidence: "certain", reasons: [], rules: [], alternatives: [], warnings: [], ...over });
+  const list: Suggestion[] = [
+    sug(1),
+    sug(2, { engine: "dibur-hamatchil", confidence: "possible" }),
+    sug(3, { target: { book: R, line: 3 }, declaredType: "reference" }),
+    // a merged (max-link) suggestion is found by every method it carries
+    { ...sug(4), engines: ["headings", "dibur-hamatchil"] } as Suggestion,
+  ];
+  const states = new Map<string, SuggestionState>([["s1", "approved"], ["s2", "pending"], ["s3", "pending"], ["s4", "rejected"]]);
+  const to = (s: Suggestion) => s.target;
+  const ids = (f: SuggestionFilter) => list.filter((s) => suggestionMatches(s, f, states.get(s.id)!, to)).map((s) => s.id);
+
+  it("each filter narrows, and they combine", () => {
+    expect(ids({})).toEqual(["s1", "s2", "s3", "s4"]);
+    expect(ids({ confidence: "possible" })).toEqual(["s2"]);
+    expect(ids({ state: "pending" })).toEqual(["s2", "s3"]);
+    expect(ids({ engine: "dibur-hamatchil" })).toEqual(["s2", "s4"]);
+    expect(ids({ book: 'רש"י על בראשית' })).toEqual(["s3"]);
+    expect(ids({ type: "reference" })).toEqual(["s3"]);
+    expect(ids({ engine: "headings", state: "pending" })).toEqual(["s3"]);
+  });
+
+  it("the choices of each filter are what the run holds, most first", () => {
+    const f = suggestionFacets(list, to);
+    expect(f.engines).toEqual([["headings", 3], ["dibur-hamatchil", 2]]);
+    expect(f.books).toEqual([["בראשית", 3], ['רש"י על בראשית', 1]]);
+    expect(f.types).toEqual([["commentary", 3], ["reference", 1]]);
   });
 });
