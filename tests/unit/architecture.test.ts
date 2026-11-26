@@ -19,8 +19,11 @@ const ALLOWED: Record<string, readonly string[]> = {
   state: ["core", "linking", "matching", "formats", "projects", "diagnostics"],
   ui: ["core", "state", "linking", "matching", "formats", "diagnostics"],
   app: ["core", "state", "ui", "workers", "linking", "matching", "formats", "database", "sources", "projects", "diagnostics"],
+  // the optional AI review (docs/AI_INTEGRATION.md): pure, over the engines' suggestions. No layer above lists it, so
+  // nothing of it can reach the single HTML file, which makes no network call (AGENTS.md 2.1)
+  ai: ["core", "linking"],
 };
-const PURE = new Set(["core", "matching", "linking", "formats"]);
+const PURE = new Set(["core", "matching", "linking", "formats", "ai"]);
 const FRAMEWORK = /^(preact|@preact\/)/;
 
 const SRC = resolve("src");
@@ -138,7 +141,7 @@ describe("the headless surface", () => {
       .replace(/(^|[^:\\])\/\/.*$/gm, "$1")
       .replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
 
-  it("core, matching, linking and formats use no browser global", () => {
+  it("core, matching, linking, formats and ai use no browser global", () => {
     const hits: string[] = [];
     for (const file of files(SRC)) {
       if (!PURE.has(layerOf(file))) continue;
@@ -173,5 +176,50 @@ describe("the headless surface", () => {
     expect([...layers].sort()).toEqual(["core", "linking", "matching"].filter((l) => layers.has(l)));
     expect(seen.size).toBeGreaterThan(20); // it does read the engines
     expect([...seen].some((f) => /\.tsx$/.test(f))).toBe(false);
+  });
+});
+
+/*
+ * The optional AI layer (docs/AI_INTEGRATION.md, V7 §4.17) stays out of the product: the single HTML file makes no network
+ * call (AGENTS.md 2.1). So (1) nothing the app loads — main.tsx and the worker it inlines — reaches `src/ai` through a
+ * runtime import, and (2) `src/ai` itself has no network API and names no address: a provider that talks to a service is
+ * the host's (a CLI, a plugin host), outside `src`.
+ */
+describe("the AI layer is outside the product", () => {
+  const resolveRuntime = (from: string, spec: string): string | null => {
+    const base = resolve(from, "..", spec.replace(/\?.*$/, "").replace(/\.js$/, ""));
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) if (/\.tsx?$/.test(c) && existsSync(c)) return c;
+    return null;
+  };
+
+  it("no module the app loads reaches src/ai", () => {
+    const seen = new Set<string>();
+    const walk = (file: string): void => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const s of specifiers(readFileSync(file, "utf8"))) {
+        if (s.typeOnly || !s.spec.startsWith(".")) continue;
+        const next = resolveRuntime(file, s.spec);
+        if (next) walk(next);
+      }
+    };
+    walk(resolve(SRC, "app", "main.tsx"));
+    expect(seen.has(resolve(SRC, "workers", "sources.worker.ts"))).toBe(true); // the `?worker&inline` import is followed
+    expect(seen.size).toBeGreaterThan(150);
+    expect([...seen].filter((f) => layerOf(f) === "ai").map((f) => relative(SRC, f))).toEqual([]);
+  });
+
+  it("src/ai calls no network API, names no address and loads no Node module", () => {
+    const NET = /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts)\b/;
+    const hits: string[] = [];
+    for (const file of files(resolve(SRC, "ai"))) {
+      const text = readFileSync(file, "utf8");
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+      const net = NET.exec(code);
+      if (net) hits.push(`${relative(SRC, file)}: ${net[0]}`);
+      if (/https?:\/\//.test(text)) hits.push(`${relative(SRC, file)}: an address`);
+      if (/\bfrom\s+["']node:/.test(text)) hits.push(`${relative(SRC, file)}: a Node module`);
+    }
+    expect(hits).toEqual([]);
   });
 });

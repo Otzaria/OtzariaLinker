@@ -69,7 +69,8 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 
 ### 2.6 גבולות השכבות
 נאכפים ב־`tests/unit/architecture.test.ts`: כל שכבה מייבאת רק את השכבות שמותרות לה, ו־`core`,
-`matching`, `linking`, `formats` לא מייבאות Preact. הטבלה ב־[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+`matching`, `linking`, `formats`, `ai` לא מייבאות Preact. `ai` (בדיקה אופציונלית בעזרת מודל שפה) מחוץ לתוצר: אף שכבה של
+האפליקציה לא מייבאת אותה, ואין בה קריאת רשת ([`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md)). הטבלה ב־[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 אם הבדיקה נכשלת, הזיזו את הקוד; אל תרחיבו את הטבלה בלי סיבה כתובה.
 
 ### 2.7 רישוי ושימוש חוזר

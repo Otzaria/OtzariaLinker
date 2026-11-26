@@ -118,7 +118,7 @@
 | #44 | ירושת קישור לקטע המשך | 2 | FIXED | `planContinuation`: ירושה, הרחבת טווח או עותק, עם תצוגה מקדימה, אישור לפני מעבר כותרת, ביטול ו־Undo. ‏`continuation.test.ts` (unit ו־state): לפני `22 failed`, אחרי `22 passed`. עם E2E |
 | #45 | העדפת ספר ראשי | 2 | TODO | |
 | #46 | מאגרי GitHub | 4 | TODO | |
-| #47 | AI | 4 | TODO | אופציונלי |
+| #47 | AI | 4 | PARTIAL | אופציונלי, כבוי כברירת מחדל. תשתית בלבד מחוץ לתוצר (`src/ai`: ממשק ספק, הסכמה, מגבלות ותקציב, ביטול, בודק דטרמיניסטי, ספק מדומה); ספק אמיתי, CLI וממשק — DEFERRED. [`AI_INTEGRATION.md`](../AI_INTEGRATION.md); ראיה: `tests/unit/ai/ai-review.test.ts` |
 
 ## 5. הכרעות
 
