@@ -373,7 +373,16 @@ export class ExchangeState {
       ...(csv ? csv.map((f) => ({ path: f.name, text: f.text, mime: "text/csv;charset=utf-8" })) : plan.files.map((f) => ({ path: `links/${f.name}`, text: f.text, mime: "application/json" }))),
       ...bundle.altToc.files.map((f) => ({ path: `alt_toc/${f.name}`, text: f.text, mime: "application/json" })),
     ];
-    if (!data.length) return;
+    // #42 C24: nothing to write used to return without a word (a button that did nothing)
+    if (!data.length) {
+      const held = plan.heldBack.length + bundle.altToc.heldBack.length;
+      return void host.notify(
+        "warning",
+        held
+          ? `לא נוצר קובץ: כל ${linksCount(held)} שבייצוא מוחזקים בגלל בעיות. פתחו את "בדיקה" כדי לראות מה לתקן.`
+          : "לא נוצר קובץ: אין בפרויקט קישורים חדשים, ערוכים או מחוקים לייצוא. צרו או ייבאו קישורים ונסו שוב.",
+      );
+    }
     try {
       assertSafeExportPaths(data);
       if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
