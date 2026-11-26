@@ -573,7 +573,21 @@ export class AppStore {
     });
     this.forgetEditions((key) => sourceIdOfBookKey(key) === id);
     this.lines.forgetSource(id);
+    if (this.forgetBooks((key) => sourceIdOfBookKey(key) === id)) this.notify("info", `ההצעות של הריצה האחרונה נסגרו, כי ספר שלהן היה ב"${s.info.label}". כדי לחזור אליהן, פתחו אותו שוב והריצו את החיפוש מחדש.`);
     return true;
+  }
+
+  /**
+   * What still points at books that left the tool (a book removed, a source closed): the suggestion run that touches them
+   * (approving one would link a book that is not open), the edition comparison, the headings read for them (V7 round-2
+   * review, findings 2 and 7). A max-link job is kept: it names its books by title and resumes once they are open again.
+   * True when the suggestion run was dropped.
+   */
+  private forgetBooks(gone: (bookKey: string) => boolean): boolean {
+    const r = this.relink.peek();
+    if (r && (gone(r.oldKey) || gone(r.newKey))) this.relink.value = null;
+    this.headingSearch.forget(gone);
+    return this.suggestions.forgetBooks(gone);
   }
 
   /** A task reads the open books: a book or a source must not go from under it. True (with a notice) when one runs. */
@@ -622,10 +636,12 @@ export class AppStore {
     });
     this.find.source.close();
     this.find.target.close();
+    // the run on the screen, if it touches the book, goes and does not come back with undo: the user runs it again (finding 2)
+    const runDropped = this.forgetBooks((key) => key === bookKey);
     const at = this.linkState.peek().revision;
     this.notify(
       "info",
-      `"${book.title}" הוסר מהכלי${removed ? ` יחד עם ${linksCount(removed)} שנגעו בו` : ""}${ownFile ? " ועם קובץ הקישורים שלו מהספרייה" : ""}. הקובץ במחשב לא השתנה.${kept ? ` ${kept === 1 ? "קישור אחד מקובץ הקישורים של ספר אחר נשאר" : `${linksCount(kept)} מקובצי הקישורים של ספרים אחרים נשארו`} בפרויקט, כי ${kept === 1 ? "הוא חלק" : "הם חלק"} מהקובץ ההוא ומחיקה הייתה מוחקת ${kept === 1 ? "אותו" : "אותם"} מהספרייה.` : ""} כדי להחזיר: "ביטול".`,
+      `"${book.title}" הוסר מהכלי${removed ? ` יחד עם ${linksCount(removed)} שנגעו בו` : ""}${ownFile ? " ועם קובץ הקישורים שלו מהספרייה" : ""}. הקובץ במחשב לא השתנה.${kept ? ` ${kept === 1 ? "קישור אחד מקובץ הקישורים של ספר אחר נשאר" : `${linksCount(kept)} מקובצי הקישורים של ספרים אחרים נשארו`} בפרויקט, כי ${kept === 1 ? "הוא חלק" : "הם חלק"} מהקובץ ההוא ומחיקה הייתה מוחקת ${kept === 1 ? "אותו" : "אותם"} מהספרייה.` : ""}${runDropped ? " ההצעות של הריצה האחרונה נסגרו, כי הן נגעו בו; \"ביטול\" לא מחזיר אותן — הריצו את החיפוש שוב." : ""} כדי להחזיר: "ביטול".`,
       undefined,
       // only while nothing else was done since: an undo later would take back another action
       { label: "ביטול", run: () => void (this.linkState.peek().revision === at && this.undo()) },

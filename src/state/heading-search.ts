@@ -46,6 +46,16 @@ export class HeadingSearch {
     private readonly service: Pick<BooksService, "headings">,
   ) {}
 
+  /**
+   * Forgets the headings read for the books `gone` names (a source closed, a book removed, the full reset): scope "all"
+   * holds the headings of a whole database, which must not stay in memory after it closes (V7 round-2 review, finding 7).
+   */
+  forget(gone: (bookKey: string) => boolean): void {
+    let changed = false;
+    for (const k of [...this.read.keys()]) if (gone(k)) (this.read.delete(k), (changed = true));
+    if (changed) this.status.value = null;
+  }
+
   /** The books of a scope, by key: the light one never names a database book the user does not work on. */
   booksOf(scope: HeadingScope): string[] {
     const books = this.host.books.value;
