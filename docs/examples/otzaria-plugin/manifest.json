@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "org.otzaria.linker-example",
+  "name": "מקשר (דוגמה)",
+  "version": "0.1.0",
+  "description": "דוגמה בלבד, לא לפרסום: מקשר פירוש לספר הבסיס שלו במנועי OtzariaLinker ושומר קובץ קישורים בתיקיית התוסף.",
+  "author": "OtzariaLinker",
+  "entrypoint": "main.js",
+  "headless": true,
+  "stability": "experimental",
+  "minAppVersion": "0.9.98",
+  "sdkVersion": "1.x",
+  "permissions": [
+    "app.startup_contributions",
+    "app.run_on_startup",
+    "reader.toolbar",
+    "ui.feedback",
+    "library.books.read",
+    "library.content.read",
+    "library.links.read",
+    "search.fulltext.read"
+  ],
+  "contributes": {
+    "startup": {
+      "toolbarItems": [{ "id": "link-to-base", "title": "קישור לספר הבסיס", "icon": "link_24_regular", "contexts": ["reader-text"] }]
+    }
+  }
+}

@@ -10,7 +10,7 @@ import { sourceTitleFromLinksFileName } from "../core/links/titles";
 import { linkToRecord } from "../formats/links-json/convert";
 import { recordToObject } from "../formats/links-json/serialize";
 import { addChanges, commit, deleteChange, fileChange, fileFingerprint, linksCount, type Change, type LibraryFile, type LinkState } from "./history";
-import { CHUNK, type LineStore } from "./lines";
+import type { LineStore } from "./lines";
 import type { BooksService, CallOptions, InputFile } from "./services";
 import type { ExchangeState } from "./exchange";
 import type { NoticeKind, Pick, Side } from "./store";
@@ -337,7 +337,7 @@ export class DbLinksState {
     for (const f of files) {
       const title = sourceTitleFromLinksFileName(f.path.split(/[\\/]/).at(-1) ?? f.path);
       if (!title || !want.has(title) || found.includes(title)) continue;
-      this.host.exchange.importLinksFile(f.path, await f.blob.text());
+      await this.host.exchange.importLinksFile(f.path, await f.blob.text());
       found.push(title);
     }
     if (found.length) this.dropCopiesFoundInFiles();
@@ -366,21 +366,25 @@ export class DbLinksState {
   }
 
   /**
-   * How a project link matches the database links already loaded around it (validation: "already in
-   * the database"), by the shared rule. A database link on both of the link's lines is in the chunk
-   * of either line (atLines reads both directions and coverage); both ends are tried, because one of
-   * them may be a text book (titles match, keys do not). One index per chunk, kept while the chunk
-   * is cached — never an index of everything loaded.
+   * How a project link matches the database links at its lines (validation: "already in the database"), by the shared rule:
+   * those a check read at the line (loadAround), else the chunk a view loaded. A database link on both of the link's lines is
+   * among the links of either line (atLines reads both directions and coverage); both ends are tried, because one of them may be
+   * a text book (titles match, keys do not). One index per list read, kept while the list is — never an index of everything loaded.
    */
   matchDb(l: Link): LinkMatch | null {
     this.host.lines.tick.value; // re-run when chunks arrive
     let best: LinkMatch | null = null;
     for (const end of [l.source, l.target]) {
       const b = this.host.bookOf(end.book);
-      const chunk = b && this.host.lines.existingPeek(b.key, end.line);
-      if (!chunk?.length) continue;
-      let ix = this.chunkIndexes.get(chunk);
-      if (!ix) this.chunkIndexes.set(chunk, (ix = linkMatchIndex(chunk)));
+      if (!b) continue;
+      // what a check read at this very line, else the chunk a view loaded
+      let ix = this.host.lines.existingIndexAt(b.key, end.line);
+      if (!ix) {
+        const chunk = this.host.lines.existingPeek(b.key, end.line);
+        if (!chunk?.length) continue;
+        ix = this.chunkIndexes.get(chunk);
+        if (!ix) this.chunkIndexes.set(chunk, (ix = linkMatchIndex(chunk)));
+      }
       const m = matchLink(l, ix);
       if (m === "same-link") return m;
       best ??= m;
@@ -389,17 +393,20 @@ export class DbLinksState {
   }
   private readonly chunkIndexes = new WeakMap<readonly Link[], LinkMatchIndex>();
 
-  /** Loads the database links around the given project links, so validation can match them. */
-  async loadAround(links: Iterable<Link>): Promise<void> {
+  /**
+   * Loads the database links at the lines of the given project links, so validation can match them: only those lines, not their
+   * chunks (a chunk of a heavily linked book holds tens of thousands of links; V7 §4.9). Kept for the check (LineStore.existingAtLine).
+   */
+  async loadAround(links: Iterable<Link>, signal?: AbortSignal): Promise<void> {
     const need = new Map<string, Set<number>>();
     for (const l of links) {
       if (l.status === "deleted" || l.provenance === "db" || l.provenance === "file") continue;
       for (const end of [l.source, l.target]) {
         const b = this.host.bookOf(end.book);
-        if (b) need.set(b.key, (need.get(b.key) ?? new Set()).add(Math.floor(end.line / CHUNK)));
+        if (b) need.set(b.key, (need.get(b.key) ?? new Set()).add(end.line));
       }
     }
-    for (const [key, chunks] of need) for (const c of chunks) await this.host.lines.loadExisting(key, c * CHUNK, c * CHUNK);
+    for (const [key, lines] of need) await this.host.lines.loadExistingLines(key, lines, signal);
   }
 
   forgetSummary(): void {

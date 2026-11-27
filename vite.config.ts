@@ -29,7 +29,7 @@ export default defineConfig({
     wasmBase64(),
     textGz(),
     viteSingleFile({ removeViteModuleLoader: true }),
-    licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "fflate", "zstd-wasm-decoder"] }),
+    licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "@preact/signals-core", "fflate", "zstd-wasm-decoder"] }),
   ],
   worker: { format: "iife", plugins: () => [wasmBase64()] },
   build: {

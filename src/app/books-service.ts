@@ -14,6 +14,8 @@ export function booksService(call: SourcesCall): BooksService {
     testMapping: (token, mapping, opts) => call("testMapping", [token, mapping], opts),
     lines: (key, from, to, opts) => call("lines", [key, from, to], opts),
     existingLinks: (key, from, to, opts) => call("existingLinks", [key, from, to], opts),
+    existingMatchIndexes: (key, runs, opts) => call("existingMatchIndexes", [key, runs], opts),
+    coverageEnds: (key, opts) => call("coverageEnds", [key], opts),
     close: async (id) => void (await call("close", [id])),
     runEngine: (engine, source, target, options, opts) => call("runEngine", [engine, source, target, options], opts),
     runBatch: (engine, pairs, options, opts) => call("runBatch", [engine, pairs, options], opts),

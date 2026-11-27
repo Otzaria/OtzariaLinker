@@ -1,6 +1,8 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceLine } from "../core/books";
 import type { DbMapping, MappingTest } from "../core/db-mapping";
+import type { CoverageEnds } from "../core/links/coverage-ends";
+import type { LinkMatchList } from "../core/links/equality";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult } from "../linking/automatic";
@@ -27,6 +29,10 @@ export interface SourcesApi {
   testMapping(token: string, mapping: DbMapping): MappingTest;
   lines(bookKey: string, from: number, to: number): SourceLine[];
   existingLinks(bookKey: string, from: number, to: number): Link[];
+  /** for each run [from, to] of a book's lines, the match index of its existing links: identities only, many runs in one call (V7 round 2 item 11) */
+  existingMatchIndexes(bookKey: string, runs: [number, number][]): LinkMatchList[];
+  /** a book's existing links, compact, as the coverage rules read them (#42 C7, C8); stops on a cancel */
+  coverageEnds(bookKey: string): CoverageEnds;
   close(sourceId: string): void;
   /** runs an automatic engine on two whole books (both read here, in the worker) */
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>): EngineResult;

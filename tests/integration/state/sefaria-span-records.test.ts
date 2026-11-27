@@ -1,6 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { exportAccounting } from "../../../src/formats/links-json/export";
@@ -8,6 +6,7 @@ import { tableRows } from "../../../src/state/links-table";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * A span cut on a Sefaria base, from suggestion to export (LIBRARY_BENCHMARK.md §0.8, the owner's decision
@@ -15,7 +14,6 @@ import { registryService } from "../../support/books-service";
  * short span that has a heRef — each with its own ref_2 in the export, which writes and accounts for every
  * one — rejecting (or undoing) removes them all, and a record the project already has is not written twice.
  */
-const require = createRequire(import.meta.url);
 const HEB = ["א", "ב", "ג", "ד", "ה", "ו"];
 /** פרק א: heading (1), a name line without a heRef (2), four verses with heRefs (3..6) */
 const BASE_LINES: [string, string | null][] = [
@@ -28,7 +26,7 @@ const COMM = { path: "s1/ביאור חדש על בראשית.txt", blob: new Blo
 
 /** a database in the Otzaria schema whose בראשית has heRefs; the user marks its source as the library's */
 async function baseDb() {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database();
   db.exec(readFileSync("tests/fixtures/schemas/v5.sql", "utf8"));
   db.run("insert into source(id,name) values(1,'אישי')");

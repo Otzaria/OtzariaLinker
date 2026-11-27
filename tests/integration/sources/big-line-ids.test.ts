@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Personal databases made by Personal-DB-Creator number lines `bookId * 2^20 + lineIndex + 1`, so ids go past
@@ -10,13 +9,12 @@ import { SourceRegistry } from "../../../src/sources/registry";
  * The listing held line and link ids in Int32Array and truncated them: every link of such a database lost
  * its line (-1) and could not be fetched. Real DDL (tests/fixtures/schemas/v0.sql), ids as the real file has them.
  */
-const require = createRequire(import.meta.url);
 const v0 = readFileSync("tests/fixtures/schemas/v0.sql", "utf8");
 const LINE = (book: number, i: number) => book * 2 ** 20 + i + 1;
 const BIG_LINK = 2 ** 33 + 12345;
 
 async function database(): Promise<Uint8Array> {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const d = new SQL.Database();
   d.exec(v0);
   d.exec(`INSERT INTO source(id, name) VALUES (1, 'x');

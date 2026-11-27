@@ -29,8 +29,12 @@ let reads = 0;
 const service = {
   open: async (): Promise<{ sources: OpenedSource[]; documents: []; skipped: [] }> => ({ sources: [{ info: { id: "s1", kind: "otzaria-db", label: "x.db", warnings: [] }, books }], documents: [], skipped: [] }),
   lines: async (_key: string, from: number, to: number) => (reads++, Array.from({ length: Math.min(to, N - 1) - from + 1 }, (_, i) => line(from + i))),
-  // the database already has every project link: one in each chunk of the commentary
-  existingLinks: async (key: string, from: number) => (key === "s1:1" && (from / 200) % 2 === 0 ? [dbLink(from / 400)] : []),
+  // the database already has every project link: the one at line 400k + 5 of the commentary, for any read that covers that line
+  existingLinks: async (key: string, from: number, to: number) => {
+    if (key !== "s1:1") return [];
+    const k = Math.ceil((from - 5) / 400);
+    return 400 * k + 5 <= to ? [dbLink(k)] : [];
+  },
 } as unknown as BooksService;
 const ref = (b: SourceBook): BookRef => ({ key: b.key, title: b.title, origin: b.origin });
 const linkK = (k: number): Link => ({

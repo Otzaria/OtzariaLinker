@@ -55,7 +55,8 @@ describe("coverage table of many books (the repository screen)", () => {
 
   it("is lazy and cancellable: the next book is read only when asked for, and a cancel stops at the next one", async () => {
     const { store, service, keys } = await dbStore();
-    const spy = vi.spyOn(service, "existingLinks");
+    // the table reads each book's compact ends (#42 C7, C8), one book per row asked for
+    const spy = vi.spyOn(service as Required<typeof service>, "coverageEnds");
     const it = store.coverage.rows(keys)[Symbol.asyncIterator]();
     await it.next();
     expect(spy).toHaveBeenCalledTimes(1);

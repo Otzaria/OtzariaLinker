@@ -20,7 +20,7 @@ import type { NoticeKind } from "./store";
 export interface LinkFixesHost {
   readonly linkState: Signal<LinkState>;
   readonly books: ReadonlySignal<Map<string, SourceBook>>;
-  readonly lines: Pick<LineStore, "load" | "peek" | "count">;
+  readonly lines: Pick<LineStore, "load" | "loadFacts" | "peek" | "heRefAt" | "count">;
   readonly exportPurpose: ReadonlySignal<"submission" | "private">;
   bookOf(ref: BookRef): SourceBook | undefined;
   resolveTitle(title: string): BookRef | null;
@@ -87,7 +87,8 @@ export class LinkFixes {
         opts.signal?.throwIfAborted();
         for (const side of [l.source, l.target]) {
           const b = sef(side) && host.bookOf(side.book);
-          if (b) await host.lines.load(b.key, side.line, side.line);
+          // kept with the line facts: hundreds of chunks would push the first ones out of the views' cache before they are read (V7 §4.10)
+          if (b) await host.lines.loadFacts(b.key, [side.line]);
         }
         if (++done % 200 === 0) opts.onProgress?.(done, list.length);
       }
@@ -96,7 +97,7 @@ export class LinkFixes {
     if (!ok) return 0;
     const fromLine = (side: LinkSide) => {
       const b = host.bookOf(side.book);
-      return (b && sefariaRefFromHeRef(host.lines.peek(b.key, side.line)?.heRef)) ?? undefined;
+      return (b && sefariaRefFromHeRef(host.lines.heRefAt(b.key, side.line))) ?? undefined;
     };
     const patches: [string, Patch][] = [];
     for (const l of list) {

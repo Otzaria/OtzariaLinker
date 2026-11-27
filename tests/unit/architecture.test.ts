@@ -19,8 +19,16 @@ const ALLOWED: Record<string, readonly string[]> = {
   state: ["core", "linking", "matching", "formats", "projects", "diagnostics"],
   ui: ["core", "state", "linking", "matching", "formats", "diagnostics"],
   app: ["core", "state", "ui", "workers", "linking", "matching", "formats", "database", "sources", "projects", "diagnostics"],
+  // the optional AI review (docs/AI_INTEGRATION.md): pure, over the engines' suggestions. No layer above lists it, so
+  // nothing of it can reach the single HTML file, which makes no network call (AGENTS.md 2.1)
+  ai: ["core", "linking"],
+  // the headless core and the Otzaria plugin host (docs/PLUGIN_READINESS.md): pure, like the layers it wraps
+  headless: ["core", "matching", "linking", "formats"],
+  // the folder-repository runner for Node (docs/HEADLESS.md): the app's own state and worker code without a page, never `ui`
+  // (`app` for books-service.ts only: "the plugin entry and the cli layer" below holds that, and that nothing it reaches is ui)
+  cli: ["core", "matching", "linking", "formats", "database", "sources", "workers", "state", "projects", "diagnostics", "headless", "app"],
 };
-const PURE = new Set(["core", "matching", "linking", "formats"]);
+const PURE = new Set(["core", "matching", "linking", "formats", "ai", "headless"]);
 const FRAMEWORK = /^(preact|@preact\/)/;
 
 const SRC = resolve("src");
@@ -120,6 +128,55 @@ describe("no import cycles", () => {
   it("no module reaches itself through runtime imports", () => expect(cycles).toEqual([]));
 });
 
+/** every module a file reaches through its runtime imports (type-only imports are erased and do not count) */
+function reach(entry: string): Set<string> {
+  const seen = new Set<string>();
+  const walk = (file: string): void => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    for (const s of specifiers(readFileSync(file, "utf8"))) {
+      if (s.typeOnly || !s.spec.startsWith(".")) continue;
+      const base = resolve(file, "..", s.spec.replace(/\.js$/, ""));
+      const next = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find((c) => existsSync(c));
+      if (next) walk(next);
+    }
+  };
+  walk(entry);
+  return seen;
+}
+
+/*
+ * The plugin package and the CLI (V7 §4.15, §4.16). The plugin entry is bundled into one script for an Otzaria plugin: it may
+ * reach only the pure layers (no database reader, no worker, no state, no Preact). The CLI runs the app's own state and worker code
+ * in Node, so it may reach those, but never the UI: nothing it reaches is `ui` or a .tsx file, and of `app` only books-service.ts
+ * (the one mapping BooksService ← SourcesApi). Neither is imported by the rest of src/, so the HTML build stays as it was.
+ */
+describe("the plugin entry and the cli layer", () => {
+  it("headless/plugin-entry.ts reaches only core, matching, linking, formats and headless", () => {
+    const layers = new Set([...reach(resolve(SRC, "headless", "plugin-entry.ts"))].map(layerOf));
+    expect([...layers].filter((l) => !["core", "matching", "linking", "formats", "headless"].includes(l))).toEqual([]);
+    expect(layers.has("headless") && layers.has("linking")).toBe(true);
+  });
+
+  it("cli/main.ts reaches no ui and no .tsx; of app only books-service.ts", () => {
+    const seen = [...reach(resolve(SRC, "cli", "main.ts"))];
+    expect(seen.length).toBeGreaterThan(100); // it does read the store, the registry and the engines
+    expect(seen.filter((f) => /\.tsx$/.test(f) || layerOf(f) === "ui").map((f) => relative(SRC, f))).toEqual([]);
+    expect(seen.filter((f) => layerOf(f) === "app").map((f) => relative(SRC, f).split(sep).join("/"))).toEqual(["app/books-service.ts"]);
+  });
+
+  it("nothing outside them imports headless or cli", () => {
+    const hits: string[] = [];
+    for (const file of files(SRC)) {
+      const from = layerOf(file);
+      if (from === "headless" || from === "cli") continue;
+      for (const s of specifiers(readFileSync(file, "utf8")))
+        if (s.spec.startsWith(".") && ["headless", "cli"].includes(layerOf(resolve(file, "..", s.spec)))) hits.push(relative(SRC, file));
+    }
+    expect(hits).toEqual([]);
+  });
+});
+
 /*
  * The headless surface (issue 9, docs/PLUGIN_READINESS.md). The pure layers must run where there is no page: in a Node
  * test, in a worker, in a plugin host. So (1) none of them touches a browser global in code, and (2) the adapter
@@ -138,7 +195,7 @@ describe("the headless surface", () => {
       .replace(/(^|[^:\\])\/\/.*$/gm, "$1")
       .replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
 
-  it("core, matching, linking and formats use no browser global", () => {
+  it("core, matching, linking, formats and ai use no browser global", () => {
     const hits: string[] = [];
     for (const file of files(SRC)) {
       if (!PURE.has(layerOf(file))) continue;
@@ -157,21 +214,55 @@ describe("the headless surface", () => {
   });
 
   it("linking/adapters.ts reaches only core, matching and linking through its runtime imports", () => {
+    const seen = reach(resolve(SRC, "linking", "adapters.ts"));
+    const layers = new Set([...seen].map(layerOf));
+    expect([...layers].sort()).toEqual(["core", "linking", "matching"].filter((l) => layers.has(l)));
+    expect(seen.size).toBeGreaterThan(20); // it does read the engines
+    expect([...seen].some((f) => /\.tsx$/.test(f))).toBe(false);
+  });
+});
+
+/*
+ * The optional AI layer (docs/AI_INTEGRATION.md, V7 §4.17) stays out of the product: the single HTML file makes no network
+ * call (AGENTS.md 2.1). So (1) nothing the app loads — main.tsx and the worker it inlines — reaches `src/ai` through a
+ * runtime import, and (2) `src/ai` itself has no network API and names no address: a provider that talks to a service is
+ * the host's (a CLI, a plugin host), outside `src`.
+ */
+describe("the AI layer is outside the product", () => {
+  const resolveRuntime = (from: string, spec: string): string | null => {
+    const base = resolve(from, "..", spec.replace(/\?.*$/, "").replace(/\.js$/, ""));
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) if (/\.tsx?$/.test(c) && existsSync(c)) return c;
+    return null;
+  };
+
+  it("no module the app loads reaches src/ai", () => {
     const seen = new Set<string>();
     const walk = (file: string): void => {
       if (seen.has(file)) return;
       seen.add(file);
       for (const s of specifiers(readFileSync(file, "utf8"))) {
         if (s.typeOnly || !s.spec.startsWith(".")) continue;
-        const base = resolve(file, "..", s.spec.replace(/\.js$/, ""));
-        const next = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find((c) => existsSync(c));
+        const next = resolveRuntime(file, s.spec);
         if (next) walk(next);
       }
     };
-    walk(resolve(SRC, "linking", "adapters.ts"));
-    const layers = new Set([...seen].map(layerOf));
-    expect([...layers].sort()).toEqual(["core", "linking", "matching"].filter((l) => layers.has(l)));
-    expect(seen.size).toBeGreaterThan(20); // it does read the engines
-    expect([...seen].some((f) => /\.tsx$/.test(f))).toBe(false);
+    walk(resolve(SRC, "app", "main.tsx"));
+    expect(seen.has(resolve(SRC, "workers", "sources.worker.ts"))).toBe(true); // the `?worker&inline` import is followed
+    expect(seen.size).toBeGreaterThan(150);
+    expect([...seen].filter((f) => layerOf(f) === "ai").map((f) => relative(SRC, f))).toEqual([]);
+  });
+
+  it("src/ai calls no network API, names no address and loads no Node module", () => {
+    const NET = /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts)\b/;
+    const hits: string[] = [];
+    for (const file of files(resolve(SRC, "ai"))) {
+      const text = readFileSync(file, "utf8");
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+      const net = NET.exec(code);
+      if (net) hits.push(`${relative(SRC, file)}: ${net[0]}`);
+      if (/https?:\/\//.test(text)) hits.push(`${relative(SRC, file)}: an address`);
+      if (/\bfrom\s+["']node:/.test(text)) hits.push(`${relative(SRC, file)}: a Node module`);
+    }
+    expect(hits).toEqual([]);
   });
 });

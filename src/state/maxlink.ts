@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { pushTo } from "../core/collections";
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
@@ -272,6 +273,7 @@ export class MaxLinkState {
       ...(preferBase && { preferBase }),
       // the books by title only: session keys are not kept in a job (a resumed job plans from the titles)
       ...(plan.choices && { choices: { ...plan.choices, ...(plan.choices.pairs && { pairs: plan.choices.pairs.map(({ dependantKey: _d, baseKey: _b, ...rest }) => rest) }) } }),
+      ...this.evidenceByTitle(plan),
     });
     // the finished books of the job before, with their results in memory: reused below where nothing they depend on changed
     const prev = this.jobRestored.peek() ? null : this.job.peek();
@@ -404,7 +406,7 @@ export class MaxLinkState {
   /** The per-book report of the job as CSV. */
   saveJobReport(): void {
     const job = this.job.peek();
-    if (job) this.saver.save(`קישור-מרבי-ספרים-${new Date().toISOString().slice(0, 10)}.csv`, jobCsv(job), "text/csv;charset=utf-8");
+    if (job) this.saver.save(`קישור-מרבי-ספרים-${localDateStamp()}.csv`, jobCsv(job), "text/csv;charset=utf-8");
   }
 
   /** The titles of the job's books (the bases among them) that are not open now: they cannot run until they are. */
@@ -472,6 +474,8 @@ export class MaxLinkState {
       return false;
     }
     const prefer = job.preferBase ? this.host.sources.value.find((s) => s.info.label === job.preferBase)?.info.id : undefined;
+    // the database's links the job's plan was made with, bound to this session's books: the same plan, not one without them
+    this.restoreEvidence(job.evidence, (t) => byTitle.get(t));
     const plan = planMaxLink({ selected: keys, library: this.planLibrary(), ...(job.engines && { engines: new Set(job.engines) }), ...(prefer && { preferSource: prefer }), ...(job.choices && { choices: job.choices }) });
     this.useSteps(plan);
     // the results kept, bound to this session's books by title
@@ -537,6 +541,32 @@ export class MaxLinkState {
     // rejectionKey: "<engine>|<title>#<line>…><title>#<line>…"
     for (const k of this.host.linkState.value.rejected) for (const t of new Set(k.match(/[^|>@<*]+(?=#\d)/g) ?? [])) add(t);
     return out;
+  }
+
+  /** The evidence a plan's books were planned with (the books and the bases its steps name), by titles: kept in the job. */
+  private evidenceByTitle(plan: MaxLinkPlan): { evidence?: LinkedEvidence[] } {
+    const keys = new Set([...plan.books.map((b) => b.book.key), ...plan.steps.flatMap((s) => (s.kind === "pair" ? [s.source.key, s.target.key] : [s.source.key]))]);
+    const out: LinkedEvidence[] = [];
+    for (const list of this.evidence.value.values())
+      for (const e of list) if (keys.has(e.dependant) || keys.has(e.base)) out.push({ ...e, dependant: this.host.refOf(e.dependant).title, base: this.host.refOf(e.base).title });
+    return out.length ? { evidence: out } : {};
+  }
+
+  /** A job's evidence (by titles) bound to this session's books and added to what was gathered here; titles not open are left out. */
+  private restoreEvidence(list: readonly LinkedEvidence[] | undefined, keyOf: (title: string) => string | undefined): void {
+    if (!list?.length) return;
+    const next = new Map(this.evidence.value);
+    let added = 0;
+    for (const e of list) {
+      const dependant = keyOf(e.dependant);
+      const base = keyOf(e.base);
+      if (!dependant || !base) continue;
+      const have = next.get(dependant) ?? [];
+      if (have.some((x) => x.base === base && x.kind === e.kind)) continue;
+      next.set(dependant, [...have, { ...e, dependant, base }]);
+      added++;
+    }
+    if (added) this.evidence.value = next;
   }
 
   /** The open books as the planner reads them (with the database's evidence gathered so far). */
@@ -625,7 +655,10 @@ export class MaxLinkState {
       this.job.value = { ...j, state, ms: j.ms + (Date.now() - t0) };
     });
     this.saveNow();
-    const shown = this.publish();
+    // the worker was replaced: the finished books' results name its sources, which are gone (AppStore.workerLost cleared the run so
+    // that no suggestion of them can be approved — a link to a key no source will have again). They are kept, bound to the books by
+    // title when the job resumes over the books opened again (ensurePlan), and shown then.
+    const shown = lost ? false : this.publish();
     const t = jobTotals(this.job.peek()!);
     const failed = t.byStatus.failed;
     if (state !== "done")
@@ -782,6 +815,6 @@ export class MaxLinkState {
 
   saveReport(): void {
     const rep = this.report.value;
-    if (rep) this.saver.save(`קישור-מרבי-${new Date().toISOString().slice(0, 10)}.csv`, reportCsv(rep), "text/csv;charset=utf-8");
+    if (rep) this.saver.save(`קישור-מרבי-${localDateStamp()}.csv`, reportCsv(rep), "text/csv;charset=utf-8");
   }
 }

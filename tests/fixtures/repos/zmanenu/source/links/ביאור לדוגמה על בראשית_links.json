@@ -1,0 +1,15 @@
+[
+  {
+    "line_index_1": 2,
+    "line_index_2": 2,
+    "book_2": "ספר לדוגמה",
+    "Conection Type": "reference"
+  },
+  {
+    "line_index_1": 4,
+    "target_library": "official",
+    "book_2": "בראשית",
+    "heRef_2": "בראשית, א, א",
+    "Conection Type": "source"
+  }
+]

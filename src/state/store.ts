@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { embeddedLibraryLinkFiles } from "../core/links/library-link-files";
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
@@ -496,21 +497,22 @@ export class AppStore {
     }
     // one document that fails (a hostile file deep enough to overflow a reader…) must not lose the
     // rest of the drop: each is imported on its own, a failure is a notice (security review A7)
-    const each = (kind: string, run: (path: string, text: string) => void) => {
+    // a big links file is imported in slices (exchange.importLinksFile, #42 C5): waited for, so the documents keep their order
+    const each = async (kind: string, run: (path: string, text: string) => void | Promise<void>) => {
       for (const d of res.documents)
         if (d.kind === kind)
           try {
-            run(d.path, d.text);
+            await run(d.path, d.text);
           } catch (err) {
             this.log.error("open", "document failed", { kind, error: String((err as Error)?.name ?? err) });
             this.notify("error", `"${d.path}" לא נטען: ${(err as Error)?.message ?? String(err)}. שאר הקבצים נטענו.`);
           }
     };
-    each("links-json", (p, t) => this.exchange.importLinksFile(p, t));
-    each("links-csv", (p, t) => this.exchange.importLinksCsv(p, t));
-    each("records", (p, t) => this.exchange.offerRecords(p, t));
-    each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
-    each("project", (p, t) => this.openProject(p, t));
+    await each("links-json", (p, t) => this.exchange.importLinksFile(p, t));
+    await each("links-csv", (p, t) => this.exchange.importLinksCsv(p, t));
+    await each("records", (p, t) => this.exchange.offerRecords(p, t));
+    await each("alt-toc-json", (p, t) => this.altToc.importFile(p, t));
+    await each("project", (p, t) => this.openProject(p, t));
     if (res.needsMapping?.length) await this.offerMappings(res.needsMapping); // after projects: they may hold the mapping
     for (const d of res.dictionaries ?? [])
       this.notify("info", `נטען מילון דחיסה ${d.id} (${d.path}). ספרים במסדים פתוחים שדחוסים בו ייקראו עכשיו.`);
@@ -1614,7 +1616,7 @@ export class AppStore {
   saveLineMapping(): void {
     const r = this.relink.value;
     if (!r) return;
-    this.saver.save(`מיפוי-שורות-${new Date().toISOString().slice(0, 10)}.csv`, lineMappingCsv(r.rows, r.diff), "text/csv");
+    this.saver.save(`מיפוי-שורות-${localDateStamp()}.csv`, lineMappingCsv(r.rows, r.diff), "text/csv");
   }
 
   /** Applies chosen items of the relink plan as ONE undoable action. */
@@ -1658,7 +1660,7 @@ export class AppStore {
     const ok = await this.runTask(label, async (opts) => {
       this.lines.beginCheck();
       // database links around the project's own links: validation reports "already in the database"
-      await this.dbLinks.loadAround(this.allLinks.value);
+      await this.dbLinks.loadAround(this.allLinks.value, opts.signal);
       // the length of each book the saved project recorded, so a changed book is said (export/book-changed)
       // and their editions, so a book whose text changed with the same count is said too (V7 §1.1)
       await Promise.all(
@@ -2178,12 +2180,24 @@ export class AppStore {
     /** the revision last written: the state changes without a new revision (books bound to links) are not written again */
     let written = this.linkState.peek().revision;
     let reported = false;
+    /*
+     * The write waits for a moment the page is idle (#42 C5: serializing 100,000 links and handing them to IndexedDB took a
+     * ~300 ms task 1.5 s after each edit, wherever the user was in the middle of typing or scrolling). requestIdleCallback
+     * with a timeout, so a busy page still saves within a few seconds; without it (Node, old browsers) at once.
+     */
+    const g = globalThis as { requestIdleCallback?: (cb: () => void, o: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    let idle: number | undefined;
+    const whenIdle = (run: () => void) => {
+      if (typeof g.requestIdleCallback !== "function") return run();
+      if (idle !== undefined) g.cancelIdleCallback?.(idle);
+      idle = g.requestIdleCallback(() => ((idle = undefined), run()), { timeout: AUTOSAVE_IDLE_TIMEOUT_MS });
+    };
     const stop = effect(() => {
       const rev = this.linkState.value.revision;
       if (first) return void (first = false);
       clearTimeout(timer);
       this.autosave.value = "pending";
-      timer = setTimeout(() => {
+      timer = setTimeout(() => whenIdle(() => {
         const ls = this.linkState.peek();
         if (ls.revision === written) return void (this.autosave.value = "saved");
         written = ls.revision;
@@ -2202,7 +2216,7 @@ export class AppStore {
             reported = true;
           },
         );
-      }, delayMs);
+      }), delayMs);
       void rev;
     });
     /*
@@ -2292,7 +2306,7 @@ export class AppStore {
       },
       () => {},
     );
-    return () => (clearTimeout(timer), stop(), (this.recoveryQueue = null));
+    return () => (clearTimeout(timer), idle !== undefined && g.cancelIdleCallback?.(idle), stop(), (this.recoveryQueue = null));
   }
 
   /* ---------------- notices and tasks ---------------- */
@@ -2397,6 +2411,8 @@ export const isKnownType = (raw: string): boolean => parseConnectionType(raw).kn
 const MAX_RECOVERY_OFFERS = 3;
 /** the browser autosave's key; each window writes `<key>:w:<window id>` (startAutosave) */
 export const AUTOSAVE_KEY = "autosave:v1";
+/** the longest an autosave waits for an idle moment of the page before it writes anyway (startAutosave) */
+export const AUTOSAVE_IDLE_TIMEOUT_MS = 3000;
 
 /** The window the autosave runs in (main.tsx: a Web Locks lock per window). */
 export interface AutosaveWindow {

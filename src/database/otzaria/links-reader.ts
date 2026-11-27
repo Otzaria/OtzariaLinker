@@ -48,6 +48,10 @@ export interface BookLinkRows {
   ownLine: Float64Array;
   /** 0-based line at the OTHER end, from link.targetLineIndex, for the rows where the listed book is the stored source (-1: not known) */
   otherLine: Int32Array;
+  /** line id at the OTHER end (the coverage's compact read finds a source's line index by it, #42 C8) */
+  otherLineId: Float64Array;
+  /** link.targetLineIndex of every row, as the full read (rows()) takes it; NaN when the table has no such column */
+  targetIndex: Float64Array;
   /** "index": through the book indexes of `link`; "scan": a full scan (the database has no such index) */
   method: "index" | "scan";
 }
@@ -128,6 +132,8 @@ export class DbLinksReader {
       type: new Uint8Array(rows.length),
       ownLine: new Float64Array(rows.length),
       otherLine: new Int32Array(rows.length).fill(-1),
+      otherLineId: new Float64Array(rows.length),
+      targetIndex: new Float64Array(rows.length).fill(NaN),
       method,
     };
     rows.forEach(({ id, v }, i) => {
@@ -138,8 +144,34 @@ export class DbLinksReader {
       out.other[i] = Number(v[isOut ? tb : sb]);
       out.type[i] = CONNECTION_TYPES.indexOf(this.typeOf(name));
       out.ownLine[i] = Number(v[isOut ? sl : tl]);
+      out.otherLineId[i] = Number(v[isOut ? tl : sl]);
+      if (tliAt >= 0) out.targetIndex[i] = Number(v[tliAt]);
       if (isOut && tliAt >= 0 && v[tliAt] !== null && v[tliAt] !== undefined) out.otherLine[i] = Number(v[tliAt]);
     });
+    return out;
+  }
+
+  /** lineIndex of each line id (from the line table, as rows() reads both ends); a missing line is absent */
+  async lineIndexes(lineIds: Iterable<number>): Promise<Map<number, number>> {
+    const li = col(this.t.line, "lineIndex");
+    const out = new Map<number, number>();
+    for (const [id, r] of await this.file.getMany(this.t.line, lineIds)) out.set(id, Number(r.values[li] ?? -1));
+    return out;
+  }
+
+  /** The stored range ends (link_range.endLineIndex) of the given links, by link id: [source side, target side] (#42 C8). */
+  async rangeEnds(linkIds: readonly number[]): Promise<Map<number, [number | undefined, number | undefined]>> {
+    const out = new Map<number, [number | undefined, number | undefined]>();
+    if (!this.ix.range || !this.t.range || !linkIds.length) return out;
+    const recs = await this.file.seekIndexMany(this.ix.range, linkIds.map((id) => [id]));
+    const got = await this.file.getMany(this.t.range, recs.map((r) => Number(r.at(-1))));
+    const [linkId, side, end] = ["linkId", "side", "endLineIndex"].map((n) => col(this.t.range!, n));
+    for (const r of got.values()) {
+      const id = Number(r.values[linkId!]);
+      const e = out.get(id) ?? [undefined, undefined];
+      e[Number(r.values[side!]) === 1 ? 1 : 0] = Number(r.values[end!]);
+      out.set(id, e);
+    }
     return out;
   }
 
@@ -168,8 +200,36 @@ export class DbLinksReader {
     return this.rows(linkIds);
   }
 
-  private async rows(linkIds: Set<number>): Promise<DbLinkRow[]> {
+  /**
+   * atLines() for many lines at once, for identities only (V7 round 2 item 11): the same links, found through the same indexes
+   * (start line, end line, link_coverage), with the requested lines each link was found by — so a caller can split one read into
+   * the runs it was asked for — and without anchors, range ends or suppressed sides (no part of a link's identity: equality.ts).
+   * Null without the line indexes (atLines() would scan the whole table; the caller reads run by run instead).
+   */
+  async atLinesBare(lineIds: Iterable<number>, signal?: AbortSignal): Promise<{ rows: DbLinkRow[]; foundBy: Map<number, number[]> } | null> {
+    if (!this.indexed) return null;
+    // a cancel is seen between the reads (each one ordered walk), not inside one (V7 round 2 review, finding 11)
+    const step = () => signal?.throwIfAborted();
+    step();
+    const keys = [...new Set(lineIds)].sort((a, b) => a - b).map((id) => [id]);
+    const foundBy = new Map<number, number[]>();
+    const add = (linkId: number, lineId: number) => {
+      const at = foundBy.get(linkId);
+      if (at) at.push(lineId);
+      else foundBy.set(linkId, [lineId]);
+    };
+    for (const rec of await this.file.seekIndexMany(this.ix.out!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    step();
+    for (const rec of await this.file.seekIndexMany(this.ix.in!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    step();
+    if (this.ix.coverage) for (const rec of await this.file.seekIndexMany(this.ix.coverage, keys)) add(Number(rec[1]), Number(rec[0]));
+    step();
+    return { rows: await this.rows(new Set(foundBy.keys()), false, signal), foundBy };
+  }
+
+  private async rows(linkIds: Set<number>, details = true, signal?: AbortSignal): Promise<DbLinkRow[]> {
     const links = await this.file.getMany(this.t.link, linkIds);
+    signal?.throwIfAborted();
     const L = (n: string) => col(this.t.link, n);
     const [sb, tb, sl, tl, tli, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("targetLineIndex"), L("connectionTypeId"), L("connectionType")];
 
@@ -200,7 +260,7 @@ export class DbLinksReader {
         suppressedSides: [],
       });
     }
-    await this.attachDetails(out);
+    if (details) await this.attachDetails(out);
     return out.sort((a, b) => a.id - b.id);
   }
 

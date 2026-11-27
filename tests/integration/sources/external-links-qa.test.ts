@@ -1,21 +1,19 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import type { DbLinkSummary } from "../../../src/core/links/db-links";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * QA of the external_link reader (#13): rows the base fixture does not hold, added to a copy of it in memory
  * with sql.js (the DDL stays the real v52 one; rows are placeholders). See external-links.test.ts for the rules.
  */
-const require = createRequire(import.meta.url);
 const FIXTURE = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 const OFFICIAL = () => ({ path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) });
 const ROW = "INSERT INTO external_link (sourceBookId, sourceLineIndex, targetSource, targetTitle, targetRef, targetLineIndex, connectionType) VALUES (?, ?, ?, ?, ?, ?, ?)";
 
 async function variant(sql: (run: (q: string, args?: unknown[]) => void) => void): Promise<{ path: string; blob: Blob }> {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const d = new SQL.Database(FIXTURE);
   sql((q, args = []) => void d.run(q, args as never));
   const bytes = d.export();

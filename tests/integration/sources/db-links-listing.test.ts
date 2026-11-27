@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { strToU8 } from "fflate";
-import initSqlJs, { type Database } from "sql.js";
+import type { Database, SqlJsStatic } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CONNECTION_TYPES } from "../../../src/core/links/connection-type";
 import type { DbLinkQuery, DbLinkSummary } from "../../../src/core/links/db-links";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * A book's database links, listed through the registry (stage 10), on the REAL schema-7 slice
@@ -13,14 +13,13 @@ import { SourceRegistry } from "../../../src/sources/registry";
  * on the same bytes. Then the older layouts: schema 0 (real DDL from tests/fixtures/schemas/v0.sql)
  * and a database with no link table at all.
  */
-const require = createRequire(import.meta.url);
 const BYTES = new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"));
-let SQL: Awaited<ReturnType<typeof initSqlJs>>;
+let SQL: SqlJsStatic;
 let db: Database;
 let reg: SourceRegistry;
 let sid: string;
 beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  SQL = await loadSqlJs();
   db = new SQL.Database(BYTES);
   reg = new SourceRegistry();
   const res = await reg.open([{ path: "seforim.db", blob: new Blob([BYTES]) }]);

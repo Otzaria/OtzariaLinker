@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import type { DbLinkFlag, DbLinkSummary } from "../../../src/core/links/db-links";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Per-link flags of a personal database's external_link rows (#13, "limitations" of PR1): what a reader should know
@@ -12,14 +11,13 @@ import { SourceRegistry } from "../../../src/sources/registry";
  * (tests/fixtures/db/pdc-personal-mini.db); the real-data case (6,522 links to a title two books share, 162 of them
  * past the end of the personal book) is in external-links-real-db.local.test.ts.
  */
-const require = createRequire(import.meta.url);
 const FIXTURE = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 const OFFICIAL = () => ({ path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) });
 const ROW = "INSERT INTO external_link (sourceBookId, sourceLineIndex, targetSource, targetTitle, targetRef, targetLineIndex, connectionType) VALUES (?, ?, ?, ?, ?, ?, ?)";
 const lid = (book: number, i: number) => book * 2 ** 20 + i + 1; // the real database's line id rule
 
 async function variant(sql?: (run: (q: string, args?: unknown[]) => void) => void) {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const d = new SQL.Database(FIXTURE);
   sql?.((q, args = []) => void d.run(q, args as never));
   const bytes = d.export();

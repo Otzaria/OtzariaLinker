@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import type { DbLinkSummary } from "../../../src/core/links/db-links";
 import type { Link } from "../../../src/core/links/model";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Issue #41 B20 (V7 spec §1.4): Otzaria's user_books.db keeps the user's personal links in `user_link`. The tool detected the table
@@ -16,7 +15,6 @@ import { SourceRegistry } from "../../../src/sources/registry";
  * slug (sourceDb/targetDb); lines are 0-based; *End are inclusive 0-based range ends; anchorStart/anchorEnd are the source line's raw
  * offsets as the native links file wrote them. Rows are placeholders.
  */
-const require = createRequire(import.meta.url);
 type Db = { run: (sql: string, params?: (string | number | null)[]) => unknown; exec: (sql: string) => unknown };
 const USER_BOOKS = readFileSync("tests/fixtures/schemas/user-books.sql", "utf8");
 const AT_USER_LINK = USER_BOOKS.indexOf("CREATE TABLE IF NOT EXISTS user_link");
@@ -27,7 +25,7 @@ const USER_LINK_V1 = readFileSync("tests/fixtures/schemas/user-books-user-link-v
 const V0 = readFileSync("tests/fixtures/schemas/v0.sql", "utf8");
 const PDC = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 
-const sql = () => initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+const sql = () => loadSqlJs();
 const blob = (d: { export(): Uint8Array; close(): void }) => {
   const bytes = d.export();
   d.close();

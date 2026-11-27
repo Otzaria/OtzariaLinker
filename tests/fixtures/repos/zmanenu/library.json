@@ -1,0 +1,7 @@
+{
+  "library_id": "otzaria.zmanenu-fixture",
+  "library_name": "מחברי זמננו (בדיקה)",
+  "library_folder": "מחברי זמננו",
+  "description": "fixture of tests/fixtures/repos",
+  "db_file_name": "zmanenu.db"
+}

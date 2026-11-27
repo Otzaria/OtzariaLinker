@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * #13, a database with BOTH a `link` table and `external_link`: it used to be read through `link` alone, and the
@@ -10,14 +9,13 @@ import { SourceRegistry } from "../../../src/sources/registry";
  * `:ext:<rowid>`) and provenance "db". Real DDL: the `link` family from tests/fixtures/schemas/v0.sql, `external_link`
  * and `schema_meta` copied from the real v52 DDL (tests/fixtures/db/pdc-personal-mini.db). Rows are placeholders.
  */
-const require = createRequire(import.meta.url);
 type SqlRunner = { run: (sql: string, params?: (string | number | null)[]) => unknown };
 const v0 = readFileSync("tests/fixtures/schemas/v0.sql", "utf8");
 const FIXTURE = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 const LIB = "both-fixture";
 
 async function database(extra?: (d: SqlRunner) => void): Promise<{ path: string; blob: Blob }> {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const real = new SQL.Database(FIXTURE);
   const ddl = (t: string) => String(real.exec(`SELECT sql FROM sqlite_master WHERE name = '${t}'`)[0]!.values[0]![0]);
   const d = new SQL.Database();

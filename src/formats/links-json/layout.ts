@@ -32,7 +32,9 @@ export const DEFAULT_LAYOUT: JsonLayout = { indent: "  ", finalNewline: false, e
 const NON_ASCII_ESCAPE = /\\u(00[89a-fA-F][0-9a-fA-F]|0[1-9a-fA-F][0-9a-fA-F]{2}|[1-9a-fA-F][0-9a-fA-F]{3})/;
 
 export function detectLayout(text: string): JsonLayout {
-  const t = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  // copied only when there is something to change (a 40 MB file was copied twice for nothing, #42 C5)
+  const noBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const t = noBom.includes("\r") ? noBom.replace(/\r\n?/g, "\n") : noBom;
   const finalNewline = t.endsWith("\n");
   let escapeNonAscii: JsonLayout["escapeNonAscii"] = false;
   // escaped only if no raw non-ASCII character appears and some escape stands for one

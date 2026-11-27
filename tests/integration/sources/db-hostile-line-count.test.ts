@@ -1,20 +1,18 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { MAX_BOOK_LINES } from "../../../src/core/limits";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * QA round 2, C: `book.totalLines` is a number a database claims about itself. A hostile one (1e9) used to
  * reach callers as the book's lineCount, and they allocate arrays of that size. It is now not a line count at
  * all: the book has none (the lines themselves are counted when read) and the source carries a warning.
  */
-const require = createRequire(import.meta.url);
 const FIXTURE = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 
 async function open(totals: Record<number, number | string>) {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const d = new SQL.Database(FIXTURE);
   for (const [id, v] of Object.entries(totals)) d.run("UPDATE book SET totalLines = ? WHERE id = ?", [v, Number(id)]);
   const bytes = d.export();

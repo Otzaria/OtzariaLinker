@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { idbStore } from "../../../src/app/idb-store";
+import { COMPRESS_FROM, idbStore } from "../../../src/app/idb-store";
 
 /*
  * #42 C30 (V7 §1.2): the autosave's IndexedDB. A failed open used to stay cached — one failure (a
@@ -81,4 +81,57 @@ describe("idbStore (C30)", () => {
     await kv.set("autosave:v1:w:b", "2");
     expect((await kv.keys!()).sort()).toEqual(["autosave:v1:w:a", "autosave:v1:w:b"]);
   });
+});
+
+describe("idbStore: a big value is kept compressed (#42 C5)", () => {
+  const big = (n: number, mark = "") => mark + JSON.stringify(Array.from({ length: n }, (_, i) => ({ heRef_2: `המאיר לארץ על ארצות החיים ${i} 😀`, line_index_2: i })));
+
+  it("stored as a gzip Blob far smaller than the text, and read back exactly; a small value stays a string", async () => {
+    const fake = fakeIndexedDB([]);
+    g.indexedDB = fake.factory;
+    const kv = idbStore();
+    const text = big(40_000);
+    expect(text.length).toBeGreaterThan(COMPRESS_FROM);
+    await kv.set("autosave:v1", text);
+    const stored = fake.data.get("autosave:v1");
+    expect(stored).toBeInstanceOf(Blob);
+    expect((stored as Blob).size).toBeLessThan(text.length / 5);
+    expect(await kv.get("autosave:v1")).toBe(text);
+    await kv.set("small", "abc");
+    expect(fake.data.get("small")).toBe("abc");
+    // a value written before this change (a string) is read as it is
+    fake.data.set("old", text);
+    expect(await kv.get("old")).toBe(text);
+  }, 60_000);
+
+  it("the text is encoded in slices, with other tasks running between them", async () => {
+    const fake = fakeIndexedDB([]);
+    g.indexedDB = fake.factory;
+    const kv = idbStore();
+    let turns = 0;
+    let running = true;
+    const tick = () => {
+      turns++;
+      if (running) setTimeout(tick, 0);
+    };
+    setTimeout(tick, 0);
+    await kv.set("k", big(80_000)); // ~5M characters: about ten slices
+    running = false;
+    expect(turns).toBeGreaterThanOrEqual(3);
+  }, 60_000);
+
+  it("writes of one key land in the order they were asked for (a slow compressed write never overwrites a later one)", async () => {
+    const fake = fakeIndexedDB([]);
+    g.indexedDB = fake.factory;
+    const kv = idbStore();
+    const first = big(40_000, "1");
+    const a = kv.set("k", first);
+    const b = kv.set("k", "small and later");
+    await Promise.all([a, b]);
+    expect(await kv.get("k")).toBe("small and later");
+    const c = kv.set("k", first);
+    const d = kv.delete("k");
+    await Promise.all([c, d]);
+    expect(fake.data.has("k")).toBe(false);
+  }, 60_000);
 });

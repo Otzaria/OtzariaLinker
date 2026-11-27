@@ -1,19 +1,17 @@
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it } from "vitest";
 import { readAltToc } from "../../../src/database/otzaria/alt-toc-reader";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Review C17: the entries of a structure were collected with a spread per row — quadratic. The
  * largest structure of the real seforim.db (ערוך השולחן, Seifim) has 26,609 entries and took ~3 s.
  */
-const require = createRequire(import.meta.url);
 const ENTRIES = 30_000;
 
 async function bigStructureDb(): Promise<SqliteFile> {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database();
   // the real DDL (schema 7), including UNIQUE (bookId, key)
   db.run(`CREATE TABLE alt_toc_structure (id INTEGER PRIMARY KEY NOT NULL, bookId INTEGER NOT NULL, key TEXT NOT NULL, title TEXT, heTitle TEXT, UNIQUE (bookId, key))`);

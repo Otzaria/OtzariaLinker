@@ -11,6 +11,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/package-release.mjs",
+    "build:plugin": "vite build --config vite.plugin.config.ts",
+    "build:cli": "vite build --config vite.cli.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

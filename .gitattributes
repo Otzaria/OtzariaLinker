@@ -5,3 +5,5 @@ legacy/*.html -text
 *.png binary
 *.woff2 binary
 *.ttf binary
+# The folder-repository fixtures keep the bytes of the repositories they mirror (BOM and CRLF of links.csv).
+tests/fixtures/repos/** -text

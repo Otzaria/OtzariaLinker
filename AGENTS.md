@@ -36,7 +36,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
   `<link href>` ל־`http(s)`, `@import` ו־`url()` ל־`http(s)`, `importScripts`, קריאה חשופה ל־`fetch(`
   (שיטה בשם `fetch`, כמו `this.fetch`, מותרת), `XMLHttpRequest`, `WebSocket`, `EventSource` ו־`sendBeacon`.
   פונט או אייקון מ־CDN נתפסים רק אם הם נטענים באחד מהאופנים האלה (`@import`, `url()`, `<link>`), ופונט אייקונים
-  בכלל אינו נסרק. הסקריפט גם מכשיל תוצר מעל 1.9MiB (`BUDGET`);
+  בכלל אינו נסרק. הסקריפט גם מכשיל תוצר מעל 2MiB (`BUDGET`, ‏2,097,152 בתים);
 - ה־CSP שב־`index.html` (`default-src 'none'`, `connect-src blob: data:`);
 - כל בדיקות ה־E2E רצות עם `offline: true` ומוודאות שאין אף בקשה שאינה `file:`/`data:`/`blob:` (`tests/e2e/helpers.ts`).
 
@@ -69,7 +69,8 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 
 ### 2.6 גבולות השכבות
 נאכפים ב־`tests/unit/architecture.test.ts`: כל שכבה מייבאת רק את השכבות שמותרות לה, ו־`core`,
-`matching`, `linking`, `formats` לא מייבאות Preact. הטבלה ב־[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+`matching`, `linking`, `formats`, `ai` לא מייבאות Preact. `ai` (בדיקה אופציונלית בעזרת מודל שפה) מחוץ לתוצר: אף שכבה של
+האפליקציה לא מייבאת אותה, ואין בה קריאת רשת ([`docs/AI_INTEGRATION.md`](docs/AI_INTEGRATION.md)). הטבלה ב־[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 אם הבדיקה נכשלת, הזיזו את הקוד; אל תרחיבו את הטבלה בלי סיבה כתובה.
 
 ### 2.7 רישוי ושימוש חוזר
@@ -81,7 +82,7 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
   כך גם כותבים קוד חדש מהסוג הזה.
 - **מאגרים מחוץ לארגון Otzaria: רעיונות בלבד.** בלי קוד ובלי טבלאות נתונים.
 - מאגרי הארגון (Link-Notes, otzaria-link-generator ועוד) מותר לנייד; ציינו בהערה את המקור ואת ה־commit.
-- חבילה חדשה בתוצר: רישיון תואם GPL-3, והוספה לרשימת `licenseNotice` ב־`vite.config.ts`.
+- חבילה חדשה בתוצר: רישיון תואם GPL-3, והוספה לרשימת `licenseNotice` ב־`vite.config.ts`. ב־`dist-cli/` וב־`dist-plugin/` ההודעות נכתבות לבד (`licenseBanner`, לפי המודולים שנכנסו לחבילה), ו־`tests/unit/license-notice.test.ts` בודקת את שלוש החבילות.
 - הפרטים: [`docs/research/REUSE_MATRIX.md`](docs/research/REUSE_MATRIX.md) §0 ו־§8.
 
 ### 2.8 commits
@@ -140,6 +141,8 @@ legacy/         OtzariaLinker-v3.html (בסיס רגרסיה, byte-exact) · doc
 | state ← עולם חיצוני | `src/state/services.ts` |
 | פעולות ה־Worker | `src/workers/sources-api.ts` |
 | קובץ פרויקט | `src/projects/project-format.ts` |
+| הליבה בלי ממשק ותוסף אוצריא (`Otzaria.call`, חבילה נפרדת `dist-plugin/`) | `src/headless/core.ts`, `src/headless/otzaria-host.ts` ([`docs/PLUGIN_READINESS.md`](docs/PLUGIN_READINESS.md)) |
+| מאגר ספרים בתיקיות מ־Node (`dist-cli/linker.mjs`): זיהוי, מקום הקבצים, קריאה בלבד, כתיבה רק ל־`--out` ריקה | `src/headless/repo-layout.ts`, `src/cli/run.ts` ([`docs/HEADLESS.md`](docs/HEADLESS.md)) |
 | בדיקות חוזה על רשומות אמיתיות | `tests/contracts/`, `tests/fixtures/contracts/README.md` |
 
 ## 5. איך בודקים שינוי

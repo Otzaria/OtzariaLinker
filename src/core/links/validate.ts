@@ -227,9 +227,11 @@ export function validateLink(link: Link, ctx: ValidationContext): Problem[] {
     }
   // V7 live test 17 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md, finding א, Otzaria 0.9.98.3): a target book the user's library
   // does not have makes the personal import refuse the WHOLE links file (importFiles is atomic). The tool cannot see the user's
-  // personal folder, so the user's own text book as a target is named once per link, with the consequence.
+  // personal folder, so the user's own text book as a target is named once per link, with the consequence. Live test 22 (runs 1
+  // and 3): a target renamed after the import keeps its links under the old title — dead, "הספר לא נמצא במסד הנתונים" in the
+  // panel, and the rescan says nothing — so the same warning says not to rename it, and what to do if it was.
   if (ctx.purpose === "private" && t.book.title !== s.book.title && ctx.personalImportSide?.(t.book) === "personal")
-    add("warning", "export/private-target-must-exist", `הספר "${t.book.title}" הוא ספר שלכם. בייבוא האישי של אוצריא הוא חייב להיות כבר בתיקיית הספרים האישיים — אחרת אוצריא דוחה את כל קובץ הקישורים של "${s.book.title}", גם את הקישורים התקינים שבו. ייבאו קודם את "${t.book.title}" לאוצריא.`);
+    add("warning", "export/private-target-must-exist", `הספר "${t.book.title}" הוא ספר שלכם. בייבוא האישי של אוצריא הוא חייב להיות כבר בתיקיית הספרים האישיים — אחרת אוצריא דוחה את כל קובץ הקישורים של "${s.book.title}", גם את הקישורים התקינים שבו. ייבאו קודם את "${t.book.title}" לאוצריא. ואחרי הייבוא אל תשנו את שם הקובץ של "${t.book.title}": אוצריא שומרת את הקישורים לפי שם הספר, ואחרי שינוי שם הם נשארים בלי ספר, בלי הודעה. אם שיניתם, פתחו את הספר בכלי בשמו החדש, ייצאו שוב את הקישורים והחליפו את הקובץ הישן.`);
   if (f.uncertain) add("info", "export/base-unknown", "לא ידוע אם אחד הספרים הוא ספר בסיס, ולכן לא בטוח באיזה פאנל באוצריא הקישור יופיע.");
 
   // The generator accepts an empty heRef_2, but the library's weekly sync rejects a blank one

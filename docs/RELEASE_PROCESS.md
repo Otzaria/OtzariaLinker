@@ -39,19 +39,30 @@
 - ה־ZIP שהכלי מייצא נכתב עם תאריך שינוי קבוע, מאותה סיבה.
 - הגרסאות של כל החבילות נעולות (`.npmrc` עם `save-exact`, `package-lock.json`, `npm ci`).
 
-`ci.yml` בודק את זה בכל push ו־PR, ו־`release.yml` בודק את זה מה־tag לפני שהקבצים מועלים: בונה, שומר את
-ה־SHA-256, מוחק את `dist`, בונה שוב ומשווה (`test "$sha1" = "$sha2"`).
+`ci.yml` בודק את זה בכל push ו־PR (ה־job `reproducible`): בונה פעמיים באותו עותק (מוחק את `dist` בין השתיים) ופעם
+שלישית בעותק שני בנתיב אחר, ומשווה את שלושת ה־SHA-256 ואת `SHA256SUMS`. `release.yml` בודק את זה מה־tag לפני שהקבצים
+מועלים: בונה, שומר את ה־SHA-256, מוחק את `dist`, בונה שוב ומשווה (`test "$sha1" = "$sha2"`).
 
 ## 4. CI (`.github/workflows/ci.yml`)
 
-רץ על push ל־`main` ול־`rewrite/**`, ועל כל pull request, ב־`ubuntu-latest` עם Node 24 (כמו בפיתוח; בדיקות zstd צריכות את `zstdCompressSync` עם מילון):
+רץ על push ל־`main` ול־`rewrite/**`, ועל כל pull request, ב־`ubuntu-latest` עם Node 24 (כמו בפיתוח; בדיקות zstd צריכות את `zstdCompressSync` עם מילון).
+job לכל סוג בדיקה (V7 §4.19), כדי שריצה אדומה תגיד מה נכשל:
 
-`npm ci` → `npm run typecheck` → `npm test` (עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3) →
-`npm run build` (כולל הסריקה ותקציב הגודל, §2) → התקנת Chrome, Edge ו־Firefox (`npx playwright install
---with-deps chrome msedge firefox`) → `npx playwright test` (שלושת הדפדפנים) → בדיקת בנייה חוזרת →
-העלאת `dist/OtzariaLinker.html` וה־`SHA256SUMS` שלו כ־artifact (`OtzariaLinker-html`: מי שמוריד אותו משווה את ה־hash).
-בתחילת ה־job (אחרי `npm ci`) רץ `npm audit --omit=dev --audit-level=high` כצעד **שלא מכשיל** (`continue-on-error`): הוא מדווח על
-פגיעות ידועה בתלות של זמן ריצה (ארבע חבילות, מוצמדות), ומישהו מחליט. job נפרד, `visual`, מריץ את ההשוואה החזותית (§2א ב־[`TESTING.md`](TESTING.md)).
+| job | מה | מכשיל? |
+|---|---|---|
+| `typecheck` | `npm run typecheck` | כן |
+| `security` | `npm audit --omit=dev --audit-level=high`: פגיעות ידועה בתלות של זמן ריצה (ארבע חבילות, מוצמדות). מדווח, ומישהו מחליט (`continue-on-error`) | לא |
+| `tests` | unit, integration ו־contracts, כל אחד צעד משלו (`npx vitest run tests/<סוג>`, עם `FC_SEED` שנגזר מה־commit, [`TESTING.md`](TESTING.md) §3; כל צעד רץ גם אם הקודם נכשל), ואחריהם `scripts/ci/skipped-tests.mjs`: כל קובץ שדולג, ולמה ([`TESTING.md`](TESTING.md) §4) | כן; גם דילוג שאין לו הסבר |
+| `build` | `npm run build` (כולל סריקת הרשת ותקציב הגודל, §2); מעלה את `OtzariaLinker.html` וה־`SHA256SUMS` כ־artifact (`OtzariaLinker-html`: מי שמוריד משווה את ה־hash), ואת `dist/` ל־E2E (`e2e-dist`) | כן |
+| `reproducible` | אותו commit נבנה פעמיים בעותק אחד ופעם בעותק שני (נתיב אחר), וה־SHA-256 של שלושתם זהה. ה־build מטמיע את מזהה ה־commit (`GITHUB_SHA`) ואת תאריך ה־commit, לא "עכשיו", ולכן משווים רק בניות של אותו commit | כן |
+| `e2e` | Chrome, Edge ו־Firefox, job לכל דפדפן (`fail-fast: false`), על הקובץ ש־`build` בנה, אופליין מ־`file://`. בתוכם הנגישות (`accessibility.spec.ts`), האופליין (`offline-single-file.spec.ts`) ובסיס הרגרסיה של v3 (`legacy-baseline.spec.ts`, ב־Chrome וב־Edge) | כן |
+| `e2e-webkit` | רק כשמשתנה המאגר `E2E_WEBKIT` הוא `true`; `PW_WEBKIT=1` ([`TESTING.md`](TESTING.md) §2) | לא |
+| `visual` | ההשוואה החזותית על `windows-latest` (§2א ב־[`TESTING.md`](TESTING.md)) | כן |
+
+הבדיקות שצריכות מסד מקומי גדול **אינן** ב־CI הרגיל: הן מדולגות (ומופיעות בדוח עם המשתנה שחסר), ורצות ב־
+`.github/workflows/heavy.yml`, **ידני בלבד**, על runner שיש בו הנתונים ([`TESTING.md`](TESTING.md) §4).
+`tests/unit/ci-workflows.test.ts` קורא את הקבצים ומוודא שכל סוג בדיקה במקומו, ש־`heavy.yml` ידני בלבד, ושדוח הדילוגים
+מכשיל דילוג בלי הסבר. ה־YAML נבדק גם ב־PyYAML; אי אפשר להוכיח workflow בלי להריץ אותו ב־GitHub.
 
 **`.github/dependabot.yml`**: פעם בשבוע PR להעלאת גרסאות של חבילות npm ושל ה־actions שבשימוש. זו הצעה בלבד: ה־CI רץ עליה ואדם ממזג.
 
@@ -125,7 +136,8 @@ checkout ל־tag, `npm ci`, `npm run build`, והשוואת ה־hash.
 ## 7. רישיון בתוצר
 
 `build/plugins/license-notice.ts` כותב בראש הקובץ הבנוי את הודעת ה־GPL-3.0-or-later, קישור לקוד המקור
-ב־tag של הגרסה, ואת הרישיון המלא של כל חבילה מוטמעת (`preact`, `@preact/signals`, `fflate`,
-`zstd-wasm-decoder`). חבילה חדשה בתוצר מוסיפים לרשימה ב־`vite.config.ts`, אחרת ההודעה שלה חסרה.
+ב־tag של הגרסה, ואת הרישיון המלא של כל חבילה מוטמעת (`preact`, `@preact/signals`, `@preact/signals-core`, `fflate`,
+`zstd-wasm-decoder`). חבילה חדשה בתוצר, גם כזו שמגיעה כתלות של חבילה אחרת, מוסיפים לרשימה ב־`vite.config.ts`.
+`tests/unit/license-notice.test.ts` משווה את הרשימה לחבילות שאינן dev ב־`package-lock.json`, ונכשלת כשחסרה אחת.
 
 </div>

@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals";
 import type { SourceLine } from "../core/books";
+import { linkMatchIndex, matchIndexOf, type LinkMatchIndex } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import type { LineFacts } from "../core/links/validate";
 import type { BooksService } from "./services";
@@ -259,11 +260,27 @@ export class LineStore {
       // read at once: the chunk was just loaded (or found), and nothing ran in between to evict it
       const s = this.lines.state(bookKey, c);
       if (s?.status !== "ready") continue; // a failed chunk: its lines stay "not verified"
+      let refs = this.heRefs.get(bookKey);
       for (const i of list) {
         const l = s.items[i - c * CHUNK];
-        if (l) book.set(i, lineFacts(l));
+        if (!l) continue;
+        book.set(i, lineFacts(l));
+        if (l.heRef) (refs ??= this.heRefs.set(bookKey, new Map()).get(bookKey)!).set(i, l.heRef);
       }
     }
+  }
+
+  /**
+   * The heRef of each line a check read (loadFacts), kept like the facts: the export fills a link's Sefaria ref from it after the
+   * check has read every line, and the views' cache has dropped the first chunks by then (V7 §4.10: 44,453 of 44,975 links of a
+   * v52 run were held back for a missing ref_2 their lines' heRefs gave).
+   */
+  private readonly heRefs = new Map<string, Map<number, string>>();
+
+  /** A line's heRef: from the cache, else as the last check read it; undefined when never read (or it has none). */
+  heRefAt(bookKey: string, index: number): string | null | undefined {
+    const l = this.peek(bookKey, index);
+    return l ? l.heRef : this.heRefs.get(bookKey)?.get(index);
   }
 
   /** The facts of a line: from the cache, else as the last check read them; undefined when never read. */
@@ -272,15 +289,81 @@ export class LineStore {
     return l ? lineFacts(l) : this.facts.get(bookKey)?.get(index);
   }
 
+  /**
+   * What the database has at the very lines the checks needed (loadExistingLines), by book and line: the match index of the links
+   * read there (core/links/equality.ts), not the links themselves. "Already in the database" is decided by the links on a project
+   * link's own lines (the start lines), and a chunk of a heavily linked book holds tens of thousands of them: reading whole chunks
+   * made the check of 249 links on seforim.db take 8-9 minutes (V7 §4.9, docs/reviews/V7_PERFORMANCE.md §9). A database open in the
+   * tool never changes, so what was read is kept for the next check (QA and then the export read the same lines) until its source
+   * is closed or the worker is replaced.
+   */
+  private readonly existingLines = new Map<string, Map<number, LinkMatchIndex>>();
+
+  /**
+   * Reads the database links at those of these lines that were not read yet, one call per run of consecutive lines; each line of a
+   * run gets the run's index (a superset, which the identity match does not mind). A read that fails leaves its lines without
+   * (nothing to compare, as a failed chunk), to be tried again by the next check.
+   */
+  async loadExistingLines(bookKey: string, indexes: Iterable<number>, signal?: AbortSignal): Promise<void> {
+    let book = this.existingLines.get(bookKey);
+    if (!book) this.existingLines.set(bookKey, (book = new Map()));
+    const known = book;
+    const sorted = [...new Set(indexes)].filter((i) => !known.has(i)).sort((a, b) => a - b);
+    const runs: [number, number][] = [];
+    for (let i = 0; i < sorted.length; ) {
+      let j = i;
+      while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
+      runs.push([sorted[i]!, sorted[j]!]);
+      i = j + 1;
+    }
+    const keep = (run: readonly [number, number], ix: LinkMatchIndex) => {
+      for (let k = run[0]; k <= run[1]; k++) book.set(k, ix);
+    };
+    // every run of the book in one call that sends back only the identities (V7 round 2 item 11, V7_PERFORMANCE.md §10); a service
+    // without it, or a batch that failed, reads run by run as before
+    let batched = false;
+    if (runs.length && this.service.existingMatchIndexes) {
+      signal?.throwIfAborted();
+      try {
+        const got = await this.service.existingMatchIndexes(bookKey, runs, signal ? { signal } : undefined);
+        if (got.length === runs.length) {
+          runs.forEach((run, r) => keep(run, matchIndexOf(got[r]!)));
+          batched = true;
+        }
+      } catch {
+        signal?.throwIfAborted();
+      }
+    }
+    if (!batched)
+      for (const run of runs) {
+        signal?.throwIfAborted();
+        try {
+          keep(run, linkMatchIndex(await this.service.existingLinks(bookKey, run[0], run[1])));
+        } catch {
+          /* not compared, like a chunk that failed */
+        }
+      }
+    if (sorted.length) this.tick.value = this.tick.peek() + 1;
+  }
+
+  /** The match index of the database links read at a line by a check (loadExistingLines); undefined when none read it. */
+  existingIndexAt(bookKey: string, index: number): LinkMatchIndex | undefined {
+    return this.existingLines.get(bookKey)?.get(index);
+  }
+
   forgetAll(): void {
     this.counts.clear();
     this.facts.clear();
+    this.heRefs.clear();
+    this.existingLines.clear();
     this.lines.drop("");
     this.existing.drop("");
   }
 
   forgetSource(sourceId: string): void {
     for (const k of [...this.facts.keys()]) if (k.startsWith(`${sourceId}:`)) this.facts.delete(k);
+    for (const k of [...this.heRefs.keys()]) if (k.startsWith(`${sourceId}:`)) this.heRefs.delete(k);
+    for (const k of [...this.existingLines.keys()]) if (k.startsWith(`${sourceId}:`)) this.existingLines.delete(k);
     this.lines.drop(`${sourceId}:`);
     this.existing.drop(`${sourceId}:`);
   }

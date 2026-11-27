@@ -1,6 +1,8 @@
 import type { LibraryAltTocStructure } from "../core/alt-toc/model";
 import type { BookHeading, SourceBook, SourceInfo, SourceLine } from "../core/books";
 import type { DbMapping, MappingTest, PendingDb } from "../core/db-mapping";
+import type { CoverageEnds } from "../core/links/coverage-ends";
+import type { LinkMatchList } from "../core/links/equality";
 import type { BookRef, Link } from "../core/links/model";
 import type { DbLinkPage, DbLinkQuery, DbLinkSummary, DbLinksUnavailable } from "../core/links/db-links";
 import type { EngineId, EngineResult, SourceFilter } from "../linking/automatic";
@@ -52,6 +54,16 @@ export interface BooksService {
   testMapping?(token: string, mapping: DbMapping, opts?: CallOptions): Promise<MappingTest>;
   lines(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<SourceLine[]>;
   existingLinks(bookKey: string, from: number, to: number, opts?: CallOptions): Promise<Link[]>;
+  /**
+   * For each run [from, to] of a book's lines, the match index (core/links/equality.ts) of existingLinks(bookKey, from, to): many runs
+   * in one call, and only the identities (V7 round 2 item 11). Optional for test fakes: the check then reads existingLinks() run by run.
+   */
+  existingMatchIndexes?(bookKey: string, runs: [number, number][], opts?: CallOptions): Promise<LinkMatchList[]>;
+  /**
+   * A book's existing links as the coverage rules read them (core/links/coverage-ends.ts, #42 C7, C8): a few typed arrays
+   * instead of a Link per row. Optional for test fakes: coverage then reads existingLinks() over the whole book.
+   */
+  coverageEnds?(bookKey: string, opts?: CallOptions): Promise<CoverageEnds>;
   close(sourceId: string): Promise<void>;
   runEngine(engine: EngineId, source: BookRef, target: BookRef, options: Record<string, unknown>, opts?: CallOptions): Promise<EngineResult>;
   /** Whether a commentary's titles fit its base (linking/title-fit.ts). Optional like runMaxLink: test fakes need not implement it. */

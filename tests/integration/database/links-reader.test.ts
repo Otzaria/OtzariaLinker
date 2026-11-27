@@ -1,13 +1,12 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs, { type Database } from "sql.js";
+import type { Database } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { DbLinksReader } from "../../../src/database/otzaria/links-reader";
 import { OtzariaDbReader } from "../../../src/database/otzaria/reader";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
+import { loadSqlJs } from "../../support/sql-js";
 
 /* Existing links read by line from a real schema-7 slice, cross-checked with SQL on the same file. */
-const require = createRequire(import.meta.url);
 const BYTES = new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"));
 let links: DbLinksReader;
 let reader: OtzariaDbReader;
@@ -15,7 +14,7 @@ let db: Database;
 beforeAll(async () => {
   reader = await OtzariaDbReader.open(bytesSource(BYTES));
   links = (await DbLinksReader.open(reader.file, reader.caps))!;
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   db = new SQL.Database(BYTES);
 });
 const q = (sql: string) => (db.exec(sql)[0]?.values ?? []) as unknown[][];

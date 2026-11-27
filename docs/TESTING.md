@@ -41,6 +41,16 @@ npm run check                                       # typecheck + npm test + E2E
 `legacy-baseline.spec.ts` לא רץ ב־Firefox (`testIgnore`). כל מפרט רץ אפוא בשלושה דפדפנים; לדפדפן אחד:
 `--project=chrome`.
 
+**WebKit (Safari) — אופציונלי, כבוי.** פרויקט רביעי, `webkit`, קיים רק כש־`PW_WEBKIT=1`. הדפדפן הוא הורדה נפרדת
+(`npx playwright install --with-deps webkit`), ולא נבדק אם הקובץ היחיד עולה בו מ־`file://` (Worker קלאסי מ־`blob:`,
+WASM מוטמע). ב־CI הוא רץ רק כשמשתנה המאגר `E2E_WEBKIT` הוא `true` (Settings → Secrets and variables → Actions →
+Variables), ב־job שאינו מכשיל את הריצה (`continue-on-error`).
+
+```powershell
+npx playwright install --with-deps webkit   # הורדה; פעם אחת
+$env:PW_WEBKIT = "1"; npx playwright test --project=webkit
+```
+
 כל בדיקת E2E משתמשת ב־`watchPage` (`tests/e2e/helpers.ts`) ונכשלת על **כל** בקשה שאינה `file:`, `data:`
 או `blob:`, ועל כל שגיאה לא מטופלת בדף.
 
@@ -175,7 +185,23 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 
 הקבצים שבטבלה (`*.local.test.ts` תחת `tests/integration/`) רצים רק כשמשתנה הסביבה `OTZARIA_DB` מצביע על
 `seforim.db` (`describe.runIf`). המסד נפתח לקריאה בלבד (`openSync(path, "r")`) ואף פעם לא נכתב. בלי
-המשתנה הם מדולגים, וב־CI הם לא רצים. משתני ההרצה האחרים אופציונליים, חוץ מהמסומן.
+המשתנה הם מדולגים, וב־CI הרגיל הם לא רצים. משתני ההרצה האחרים אופציונליים, חוץ מהמסומן.
+
+**דילוג אינו שקט.** ב־CI, ה־job `tests` כותב דוח JSON לכל סוג (unit, integration, contracts), ו־
+`scripts/ci/skipped-tests.mjs` מדפיס כל קובץ שדולג, כמה בדיקות, ואיזה משתנה חסר לו (גם בסיכום של הריצה ב־Actions).
+הוא **מכשיל** את הצעד כש: קובץ `*.local.test.ts` דולג אף שכל משתני התנאי שלו מוגדרים (התנאי שלו שבור). משתני התנאי הם כל משתנה סביבה שתנאי `runIf`/`skipIf` בקובץ קורא, ישירות או דרך קבוע (`V7_PERF`, `TITLE_FIT_SAMPLE` ולא רק `OTZARIA_*`), או מה שהערת `// gated-by: A B` בקובץ מונה; דילוג כשאחד מהם חסר הוא צפוי; קובץ שאינו
+תלוי נתונים דולג בלי `.skip`/`.todo`/`skipIf`/`runIf` בקוד שלו; או דוח חסר. מקומית:
+
+```powershell
+npx vitest run tests/integration --reporter=default --reporter=json --outputFile=reports/integration.json
+node scripts/ci/skipped-tests.mjs reports/integration.json
+```
+
+**הבדיקות הכבדות ב־CI: `.github/workflows/heavy.yml`, ידני בלבד** (Actions → Heavy tests → Run workflow; לא ב־push ולא
+ב־PR). צריך runner שיש בו הנתונים (ברירת המחדל `self-hosted`; ל־runner של GitHub אין מסד), ונתיבים כקלט: `otzaria_db`
+(חובה), `personal_db`, `library`, `extra_dbs`. הקלט `suites`: `local` (קובצי `*.local.test.ts`), `validation`
+(`npm run validate:real`, §4א), `browser` (`npm run validate:browser`; צריך Chrome מותקן ב־runner) או `all`. נתיב שניתן
+ואינו קיים מכשיל מיד; אחרי הריצה אותו דוח דילוגים, והתוצאות (`reports/`, `VALIDATION_OUT`) עולות כ־artifact.
 
 | קובץ | מה הוא מודד | משתני סביבה |
 |---|---|---|
@@ -183,6 +209,7 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | `tests/integration/database/dictionary-identity-real-db.local.test.ts` | מילון הדחיסה הרשמי: טביעת האצבע הקבועה (`OFFICIAL_DICTIONARY_SHA256`), ו־400 מסגרות אמיתיות שמפוענחות במילון של המסד ובמילון שאול כמו libzstd של Node; מילון אחר עם אותו dictID לא נשאל (B19) | `OTZARIA_DB` |
 | `tests/integration/database/dictionary-collision-real-db.local.test.ts` | הרשמי ו־v52 פתוחים יחד (אותו dictID 32768, מילונים שונים), בשני הסדרים: כל מסד נקרא במילון שלו, ורק הרשמי מותר לשאילה | `OTZARIA_DB` ו־`OTZARIA_PERSONAL_DB` |
 | `tests/integration/database/alt-toc-real-db.local.test.ts` | מבני `alt_toc` של ספרים שאינם של ספריא (ספר העיטור, תרגום ותפסיר רס"ג) במסד האמיתי | `OTZARIA_DB` |
+| `tests/unit/headless/sdk-catalog.local.test.ts` | כל שיטה של ה־SDK שליבת התוסף קוראת קיימת ב־`spec.json` של אוצריא, עם ההרשאה שדוגמת התוסף מבקשת ו־`minAppVersion` שמכסה אותה; המגבלות של המתאם הן המספרים שב־README של ה־SDK ([`PLUGIN_READINESS.md`](PLUGIN_READINESS.md)) | `OTZARIA_SRC` (עותק של `Otzaria/otzaria`) |
 | `tests/integration/database/db-links-real-db.local.test.ts` | רשימת קישורי המסד של בראשית, ברכות ומשנה ברורה, עם זמנים; והשחזור של רשומות הספרייה מהמסד | `OTZARIA_DB`; הבלוק השני רק עם `OTZARIA_LIBRARY` |
 | `tests/integration/database/fix-round-measure.local.test.ts` | מדידות סבב התיקון לפני מיזוג (PR1): עלות חלוקה לטווחים ב־`external_link`, זיכרון, ביטול סריקה משותפת, מיפוי של מסד גדול, וצעד של 200 שורות על הספר הגדול של הספרייה. מדפיס מספרים מצטברים בלבד; `MEASURE_OUT=<קובץ>` מוסיף אותם גם לקובץ | `OTZARIA_PERSONAL_DB` ו־`OTZARIA_DB` |
 | `tests/integration/database/external-links-real-db.local.test.ts` | `external_link` של מסד אישי אמיתי (PDC, v52): שורות יוצאות של שלושת הספרים הגדולים והסריקה הפנימית, מול SQLite, עם זמנים | `OTZARIA_PERSONAL_DB` |
@@ -192,6 +219,9 @@ fast-check משמש איפה שיש אינווריאנטה שקל לנסח וש�
 | `tests/integration/linking/citations/real-db.local.test.ts` | מנוע מראי המקומות על מדגם של ספרים מכל הקטגוריות, מול קישורי המראי מקום שבמסד (דיוק ושחזור לפי רמת ודאות), וזמן על ספר גדול | `OTZARIA_DB`; `CITATIONS_REPORT=<קובץ.json>` (כל ההצעות ששפטו), `CITATIONS_ONLY=<שם ספר>`, `CITATIONS_SHARD=k/n` (כל n־י ספר, להרצה מקבילה; אז הספים לא נבדקים), `CITATIONS_SAMPLE=heldout`/`heldout2` (מדגם שלא כוונן עליו, בלי ספים; AUTOMATION_ENGINE §6.8) |
 | `tests/integration/linking/maxlink-real-db.local.test.ts` | קישור מרבי על ספר בסיס שלם: תכנון, הרצה, איחוד והשוואה לקישורי המסד (כמה כבר קיימים, וכמה סותרים) | `OTZARIA_DB`; `MAXLINK_BASES="ברכות,בראשית"` (ברירת מחדל: ברכות), `MAXLINK_LOG=<קובץ>` |
 | `tests/integration/live-test/bundle-real-db.local.test.ts` | לפני בדיקה בתוך אוצריא (§4ב): אף ספר של החבילה לא קיים בספרייה הרשמית, ו־`בראשית` במסד כמו שהחבילה מניחה | `OTZARIA_DB` |
+| `tests/integration/state/v7-load-staged.local.test.ts` | V7 §4.9: עומס בשלבים (10…1,000 ספרים) דרך שכבת ה־state: פתיחה, זיהוי, תכנון, קישור, איחוד, אישור, QA, ייצוא, שמירה, סגירה ופתיחה מחדש, עם זמן וזיכרון לכל שלב ([`reviews/V7_PERFORMANCE.md`](reviews/V7_PERFORMANCE.md) §9) | `OTZARIA_DB`, ‏`OTZARIA_LOAD_STAGES=10,50,…` (חובה); `OTZARIA_LOAD_SEED`, ‏`OTZARIA_LOAD_STEP_S`, ‏`MEASURE_OUT` |
+| `tests/integration/state/v7-interruptions.local.test.ts` | V7 §4.11: עבודת קישור מרבי אחת על ספרי המסד, שנעצרת בכל דרך (השהיה, עצירה, החלפת ה־Worker, מקור שאבד, קובץ שנמחק, ספר שנכשל, גבול זיכרון, טעינה מחדש) ומושווית להרצה רציפה | `OTZARIA_DB`, ‏`OTZARIA_INTERRUPT=1` (חובה); `OTZARIA_INTERRUPT_BOOKS`, ‏`OTZARIA_INTERRUPT_HEAP_MB` |
+| `tests/integration/linking/v52-v7-validation.local.test.ts` | V7 §4.10: ניתוח v52 דרך הקורא (ספרים, קישורים, דגלים, כיסוי, כותרות משותפות, גילוי ותכנון) והרצה גדולה דרך שכבת ה־state ([`validation/V7_V52_VALIDATION.md`](validation/V7_V52_VALIDATION.md)) | `OTZARIA_DB`, ‏`OTZARIA_PERSONAL_DB`, ‏`OTZARIA_V52_V7=analysis\|batch\|all` (חובה); `OTZARIA_V52_BATCH`, ‏`OTZARIA_V52_SEED`, ‏`OTZARIA_V52_STEP_S`, ‏`OTZARIA_V52_PARTS=official|own` |
 
 ```bash
 # bash
@@ -281,6 +311,7 @@ npx vitest run tests/integration/live-test/bundle.test.ts
 | Fixture | מה יש בו | איך הופק |
 |---|---|---|
 | `tests/fixtures/db/seforim-v7-mini.db` | פרוסה אמיתית של `seforim.db` (סכמה 7): בראשית, אונקלוס, ספר עם `line_note`, שורות רש"י שמקושרות לבראשית; קישורים עם עוגנים, טווחים, coverage ו־suppressed sides; מילון ה־zstd הרשמי | `scripts/fixtures/make_mini_db.py` |
+| `tests/fixtures/db/otzaria-user-books-live.db` | `user_books.db` **שאוצריא עצמה כתבה** (0.9.98.3, עותק נייד מבודד, ריצה חיה 3): 7 ספרים אישיים סינתטיים ו־28 שורות `user_link`, כולל הקישורים שנוצרו בממשק הכלי. בלי טקסט של ספרים. משמש את `user-links-otzaria-made.test.ts` | הועתק אחרי סגירת אוצריא; המקור וה־SHA-256 ב־[`README.md`](../tests/fixtures/db/README.md) |
 | `tests/fixtures/linking/footnotes/midrash-vayisau.json` | הזוג היחיד בספרייה שמקושר ב־FOOTNOTES, עם 16 הקישורים | `scripts/fixtures/make_footnotes_fixture.py` (דורש את חבילת `zstandard`) |
 | `tests/fixtures/contracts/*.json` | רשומות אמיתיות מקובצי הספרייה, עם השורות שהן הפיקו במסד | `tests/fixtures/contracts/tools/*.py`, תיעוד ב־[`README.md`](../tests/fixtures/contracts/README.md) |
 | `tests/fixtures/schemas/v0.sql` … `v7.sql` | ה־DDL של כל גרסת סכמה | [`contracts/DATABASE_SUPPORT_MATRIX.md`](contracts/DATABASE_SUPPORT_MATRIX.md) |
@@ -306,9 +337,12 @@ py -3 -I scripts/fixtures/make_wizard_dbs.py      # Python 3.14+ (zstd ב־compr
 - כל שינוי בהתנהגות מגיע עם בדיקה, באותו commit. שינוי מכוון מעדכן את הבדיקה; לא מוחקים אותה.
 - שמות הבדיקות שהועברו מגרסה 3 נשארים בעברית ובניסוח המקורי, כדי שאפשר יהיה לעקוב שאף אחת לא אבדה.
 - בזמן עבודה מריצים את הבדיקות הקשורות לשינוי; לפני PR את הכול (`npm run check`).
-- CI (`.github/workflows/ci.yml`) מריץ typecheck, `npm test` עם `FC_SEED` שנגזר מה־commit, build, E2E ב־Chrome,
-  ב־Edge וב־Firefox (`npx playwright install --with-deps chrome msedge firefox`), ובודק שבנייה חוזרת נותנת
-  אותו SHA-256. בשחרור רץ אותו רצף ([`RELEASE_PROCESS.md`](RELEASE_PROCESS.md)). ב־job נפרד, `visual`, על
-  `windows-latest`, רצה ההשוואה החזותית מול צילומי הבסיס שבמאגר, והבדל מכשיל את הריצה (§2א); בשחרור היא לא רצה.
+- CI (`.github/workflows/ci.yml`) מחולק ל־jobs לפי סוג בדיקה, כדי שריצה אדומה תגיד מה נכשל: `typecheck`; `security`
+  (`npm audit --omit=dev`, מדווח ולא מכשיל); `tests` (unit, integration ו־contracts כצעדים נפרדים עם `FC_SEED` שנגזר
+  מה־commit, ודוח הדילוגים, §4); `build` (כולל סריקת הרשת ותקציב הגודל); `reproducible` (אותו commit נבנה פעמיים
+  בתיקייה אחת ופעם בעותק שני, וה־SHA-256 זהה); `e2e` (Chrome, Edge ו־Firefox, job לכל דפדפן, על הקובץ ש־`build` בנה;
+  בתוכם גם הנגישות, האופליין ובסיס הרגרסיה של v3); `e2e-webkit` (אופציונלי, §2); ו־`visual` על `windows-latest`, מול
+  צילומי הבסיס שבמאגר, והבדל מכשיל את הריצה (§2א). הפירוט: [`RELEASE_PROCESS.md`](RELEASE_PROCESS.md) §4. בשחרור רץ
+  רצף מקביל ב־job אחד, בלי ההשוואה החזותית. הבדיקות הכבדות: `heavy.yml`, ידני (§4).
 
 </div>

@@ -57,6 +57,22 @@ describe("pairByTitle — books that share a base key (LIBRARY_BENCHMARK.md §6.
   });
 
   /*
+   * V7 §4.10, measured on v52: "עטרת צבי על הזוהר" and "שעת רצון על הזוהר" (v52, Zohar commentaries) were paired with "והזהיר"
+   * (v52, a midrash): the loose key dropped EVERY ו and י, the word-initial ו of "והזהיר" too, so it met "הזוהר" — and the rule
+   * "the dependant's own source" chose it over the official "ספר הזהר" as if the two were editions of one book. A word-initial ו or
+   * י is a consonant (a conjunction, a root letter), never a mater lectionis: only the ones inside a word are spelling.
+   */
+  it("a word-initial ו or י is not spelling: \"הזוהר\" is \"ספר הזהר\", never \"והזהיר\"", () => {
+    const zohar = [ref("s1:3025", "ספר הזהר", "otzaria"), ref("s2:6886", "והזהיר", "personal")];
+    const p = pairByTitle([ref("s2:7451", "עטרת צבי על הזוהר", "personal")], zohar)[0]!;
+    expect(p.target?.key).toBe("s1:3025");
+    expect(p.undecided ?? []).toEqual([]);
+    expect(one("פירוש על והזהיר", zohar).target?.key).toBe("s2:6886");
+    // spelling inside the words still meets: "ישעיהו"/"ישעיה", "שולחן"/"שלחן" (above)
+    expect(one("פירוש על ישעיה", [ref("d:7", "ישעיהו", "sefaria")]).target?.key).toBe("d:7");
+  });
+
+  /*
    * V7 v52 validation §5, "a finding not fixed": two DIFFERENT books that meet only under the loose key (here two volumes, "… חלק א"
    * and "… חלק ב", which the loose key folds into the book's name) are not editions of one book. The edition rules (the dependant's
    * own source, the official library over a personal copy) chose one of them anyway, as if they were. Never a guess: refused.

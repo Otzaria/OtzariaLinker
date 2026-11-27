@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef, Link, LinkSide } from "../../../../src/core/links/model";
-import { parsePersonalLinksCsv, PERSONAL_LINKS_HEADER, personalLinkRows, validatePersonalRows, writePersonalLinksCsv, type PersonalExportContext, type PersonalLinkRow } from "../../../../src/formats/personal-csv";
+import { parsePersonalLinksCsv, PERSONAL_LINKS_HEADER, personalLinkRows, personalRowKey, readPersonalRowKeys, validatePersonalRows, writePersonalLinksCsv, type PersonalExportContext, type PersonalLinkRow } from "../../../../src/formats/personal-csv";
 
 /*
  * The personal-database build's links.csv (YairDaniel11/Otzarya-Unofficial-Books: CLAUDE.md §7 and "תיעוד יצירת קישורים וסדר
@@ -192,5 +192,32 @@ describe("a line break inside a field (#42 C23)", () => {
   it("is refused: Otzaria reads the file line by line, so a quoted multi-line field would split the row", () => {
     for (const p of ["פרק א\nפסוק ב", "פרק א\rפסוק ב", "פרק א\r\n"]) expect(validatePersonalRows([row(p)]).map((x) => x.code)).toEqual(["csv/line-break"]);
     expect(validatePersonalRows([row("פרק א")])).toEqual([]);
+  });
+});
+
+// V7 round 2 review, finding 11: the runner reads a repository's existing links.csv files so that a row they hold is not written again.
+// parsePersonalLinksCsv trusts only this tool's exact header, so a file with another header gave no rows — and the duplicates were
+// written with no word. The build of Otzarya-Unofficial-Books reads its files by COLUMN NAME (csv.DictReader), so the columns a row's
+// identity needs (personalRowKey) are read by name: another order, a missing optional column, an extra one are the same rows. A file
+// without one of those columns is not a links.csv the build can read: said, with what is missing.
+describe("readPersonalRowKeys: an existing links.csv's rows by column name", () => {
+  const key = (sourceLine: number, sourceBook: string, targetBook: string, position: string) => personalRowKey({ sourceLine, sourceBook, targetBook, position });
+
+  it("this tool's header, another order, without קטגוריית_מקור, with an extra column: the same keys", () => {
+    const rows = '6,פרי חדש,כן,"שולחן ערוך, אורח חיים",סימן ב,פירוש,לא,\r\n7,פרי חדש,כן,ברכות,ב.,הפניה,לא,\r\n';
+    const own = readPersonalRowKeys(`﻿${PERSONAL_LINKS_HEADER.join(",")}\r\n${rows}`);
+    expect(own.missing).toEqual([]);
+    expect([...own.keys].sort()).toEqual([key(6, "פרי חדש", "שולחן ערוך, אורח חיים", "סימן ב"), key(7, "פרי חדש", "ברכות", "ב.")].sort());
+    const other = readPersonalRowKeys('ספר_יעד,מיקום_יעד,מקור,ספר_מקור,הערה\n"שולחן ערוך, אורח חיים",סימן ב,6,פרי חדש,x\nברכות,ב.,7,פרי חדש,\n');
+    expect(other.missing).toEqual([]);
+    expect([...other.keys].sort()).toEqual([...own.keys].sort());
+  });
+
+  it("a row without a line number or with an empty key field is no row; a header without a key column is said, with the columns", () => {
+    const r = readPersonalRowKeys("מקור,ספר_מקור,ספר_יעד,מיקום_יעד\nx,א,ב,ג\n0,א,ב,ג\n3,א,,ג\n4,א,ב\n5,א,ב,ג\n");
+    expect([...r.keys]).toEqual([key(5, "א", "ב", "ג")]);
+    expect(readPersonalRowKeys("source,book,target,place\n1,א,ב,ג\n")).toEqual({ keys: new Set(), missing: ["מקור", "ספר_מקור", "ספר_יעד", "מיקום_יעד"] });
+    expect(readPersonalRowKeys("מקור,ספר_מקור,ספר_יעד\n1,א,ב\n").missing).toEqual(["מיקום_יעד"]);
+    expect(readPersonalRowKeys("").missing).toEqual(["מקור", "ספר_מקור", "ספר_יעד", "מיקום_יעד"]);
   });
 });

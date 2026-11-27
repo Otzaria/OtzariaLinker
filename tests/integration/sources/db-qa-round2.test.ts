@@ -1,6 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { describe, expect, it, vi } from "vitest";
 import type { DbLinkSummary } from "../../../src/core/links/db-links";
 import { DictionaryPool, LineContentCodec, sharedDictionaries } from "../../../src/database/compression/zstd";
@@ -10,20 +8,20 @@ import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
 import { DbBookSource } from "../../../src/sources/db/db-source";
 import { SourceRegistry } from "../../../src/sources/registry";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * QA round 2, H: what the external_link reader and the database source answer must not depend on the order of the
  * calls or on who cancelled; and hostile or odd rows are counted and flagged, never turned into NaN or dropped
  * unseen. Rows are placeholders added to a copy of the real v52 DDL (tests/fixtures/db/pdc-personal-mini.db).
  */
-const require = createRequire(import.meta.url);
 const FIXTURE = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 const ROW = "INSERT INTO external_link (sourceBookId, sourceLineIndex, targetSource, targetTitle, targetRef, targetLineIndex, connectionType) VALUES (?, ?, ?, ?, ?, ?, ?)";
 const lid = (book: number, i: number) => book * 2 ** 20 + i + 1;
 const MAX = Number.MAX_SAFE_INTEGER;
 
 async function variant(sql?: (run: (q: string, args?: unknown[]) => void) => void) {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const d = new SQL.Database(FIXTURE);
   sql?.((q, args = []) => void d.run(q, args as never));
   const bytes = d.export();
@@ -158,7 +156,7 @@ describe("H6/H7: an external_link the reader cannot use says why", () => {
 
 describe("H8: the dictionary pool", () => {
   const dictOf = async () => {
-    const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+    const SQL = await loadSqlJs();
     const db = new SQL.Database(new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db")));
     const d = db.exec("SELECT dict FROM zstd_dict")[0]!.values[0]![0] as Uint8Array;
     db.close();

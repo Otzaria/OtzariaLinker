@@ -1,11 +1,11 @@
-import { createRequire } from "node:module";
-import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import type { Database, SqlJsStatic } from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { mappingProblems, ROWID, type DbMapping } from "../../../src/core/db-mapping";
 import { MappedDbReader } from "../../../src/database/generic/mapped-reader";
 import { previewSchema } from "../../../src/database/generic/preview";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Review C12: SQLite features a foreign (mapped) database may use, and the lazy reader used to get
@@ -13,10 +13,9 @@ import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
  * (sql.js): either the reader returns exactly what SQLite returns, or it refuses with a Hebrew
  * message. It must never return fewer rows.
  */
-const require = createRequire(import.meta.url);
 let SQL: SqlJsStatic;
 beforeAll(async () => {
-  SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  SQL = await loadSqlJs();
 });
 
 function build(sql: string, encoding?: "UTF-16le" | "UTF-16be"): Database {

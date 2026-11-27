@@ -1,6 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import initSqlJs from "sql.js";
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
 import { exportAccounting } from "../../../src/formats/links-json/export";
@@ -9,6 +7,7 @@ import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
 import { BULK_DEFAULT_LEVELS } from "../../../src/state/suggestions";
 import { registryService } from "../../support/books-service";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * Approving many suggestions together (V5 UX audit U21, the owner's decision): what a choice takes is
@@ -16,7 +15,6 @@ import { registryService } from "../../support/books-service";
  * "ambiguous" only when asked for; the approval is the ordinary one, ONE undoable step; and what was
  * approved is what the export writes and accounts for.
  */
-const require = createRequire(import.meta.url);
 const DB = { path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) };
 const heb = (n: number) => ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט", "י"][n]!;
 const text = (path: string, lines: string[]) => ({ path, blob: new Blob([strToU8(lines.join("\n"))]) });
@@ -102,7 +100,7 @@ describe("bulk approval — counted first, one undoable step", () => {
   });
 
   it("a suggestion on a Sefaria span counts once, with the records it writes", async () => {
-    const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+    const SQL = await loadSqlJs();
     const db = new SQL.Database();
     db.exec(readFileSync("tests/fixtures/schemas/v5.sql", "utf8"));
     db.run("insert into source(id,name) values(1,'אישי')");

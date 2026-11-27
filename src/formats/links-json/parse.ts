@@ -29,6 +29,23 @@ export interface ParseResult {
 }
 
 export function parseLinksJson(text: string): ParseResult {
+  const steps = parseLinksJsonSteps(text);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Records decoded between two yields of parseLinksJsonSteps, and characters of the duplicate-key scan. */
+const RECORDS_PER_STEP = 2_000;
+const SCAN_CHARS_PER_STEP = 1_000_000;
+
+/**
+ * The same parse as parseLinksJson, as a generator that yields between slices of the work (#42 C5: a file of 235,000 records
+ * was parsed in one block of 1.5–2.6 s on the page). A caller that runs it in slices gives the thread back between them; the
+ * only step that cannot be cut is JSON.parse itself. The result is the object parseLinksJson returns.
+ */
+export function* parseLinksJsonSteps(text: string): Generator<void, ParseResult, void> {
   const issues: ParseIssue[] = [];
   const file = (level: IssueLevel, code: string, message: string, detail?: string) => issues.push({ index: -1, level, code, message, ...(detail && { detail }) });
   let pipelineRejectsBytes = false;
@@ -45,12 +62,15 @@ export function parseLinksJson(text: string): ParseResult {
     file("warning", "file/trailing-newlines", "בסוף הקובץ יש יותר משורה ריקה אחת. הסנכרון השבועי של הספרייה דוחה קובץ כזה.");
     pipelineRejectsBytes = true;
   }
-  const dup = findDuplicateKey(text);
-  if (dup) {
+  const dupScan = new DuplicateKeyScan(text);
+  while (!dupScan.step(SCAN_CHARS_PER_STEP)) yield;
+  const dup = dupScan.found;
+  if (dup !== null) {
     file("warning", "file/duplicate-key", `באותה רשומה מופיע פעמיים המפתח "${dup}". רק המופע האחרון נקרא, והסנכרון השבועי דוחה קובץ כזה.`);
     pipelineRejectsBytes = true;
   }
 
+  yield; // the scan's last slice and JSON.parse are not one block
   let data: unknown;
   try {
     data = JSON.parse(text.replace(/^﻿/, ""));
@@ -71,15 +91,16 @@ export function parseLinksJson(text: string): ParseResult {
   const records: LinksRecord[] = [];
   let generatorRejectsFile = false;
   const origin = fileOrigins(text, data.length);
-  data.forEach((raw, index) => {
-    const record = decodeRecord(raw, (level, code, message) => issues.push({ index, level, code, message }));
+  for (let index = 0; index < data.length; index++) {
+    if (index && index % RECORDS_PER_STEP === 0) yield;
+    const record = decodeRecord(data[index], (level, code, message) => issues.push({ index, level, code, message }));
     if (!record) {
       generatorRejectsFile = true;
-      return;
+      continue;
     }
     record.origin = origin(index);
     records.push(record);
-  });
+  }
   if (generatorRejectsFile)
     file("error", "file/generator-rejects", "לפחות רשומה אחת לא ניתנת לפענוח, ולכן אוצריא תדלג על הקובץ כולו. תקנו את הרשומות המסומנות לפני השימוש.");
   return { records, issues, generatorRejectsFile, pipelineRejectsBytes };
@@ -276,34 +297,70 @@ function elementSpans(text: string, count: number): [number, number][] | null {
 
 /**
  * First key that appears twice in the same JSON object, or null. JSON.parse silently keeps the last
- * one; the library pipeline refuses such files (STRICT_DUPLICATE_DETECTION).
+ * one; the library pipeline refuses such files (STRICT_DUPLICATE_DETECTION). Keys are compared as
+ * spelled (escapes included).
  */
 export function findDuplicateKey(text: string): string | null {
-  const stack: (Set<string> | null)[] = [];
-  let i = 0;
-  let expectKey = false;
-  while (i < text.length) {
-    const c = text[i]!;
-    if (c === '"') {
-      let j = i + 1;
-      let s = "";
-      while (j < text.length && text[j] !== '"') {
-        if (text[j] === "\\") { s += text.slice(j, j + 2); j += 2; } else s += text[j++];
+  const scan = new DuplicateKeyScan(text);
+  while (!scan.step(Number.MAX_SAFE_INTEGER));
+  return scan.found;
+}
+
+/**
+ * findDuplicateKey, resumable: step() scans about `budget` more characters. A string is skipped with indexOf (a quote after an
+ * odd run of backslashes is escaped) and copied only when it is a key: the scan used to build every string a character at a
+ * time, the costliest part of parsing a big file (#42 C5).
+ */
+class DuplicateKeyScan {
+  found: string | null = null;
+  private i = 0;
+  private expectKey = false;
+  private readonly stack: (Set<string> | null)[] = [];
+
+  constructor(private readonly text: string) {}
+
+  /** true when the scan is over: a duplicate found, or the end of the text */
+  step(budget: number): boolean {
+    const { text, stack } = this;
+    const n = text.length;
+    let i = this.i;
+    const stop = Math.min(n, i + budget);
+    while (i < stop) {
+      const c = text.charCodeAt(i);
+      if (c === 34 /* " */) {
+        let j = text.indexOf('"', i + 1);
+        while (j > 0 && escapedAt(text, j)) j = text.indexOf('"', j + 1);
+        if (j < 0) j = n;
+        const top = stack[stack.length - 1];
+        if (this.expectKey && top) {
+          const key = text.slice(i + 1, j);
+          if (top.has(key)) {
+            this.i = n;
+            this.found = JSON.parse(`"${key}"`) as string;
+            return true;
+          }
+          top.add(key);
+          this.expectKey = false;
+        }
+        i = j + 1;
+        continue;
       }
-      const top = stack.at(-1);
-      if (expectKey && top) {
-        if (top.has(s)) return JSON.parse(`"${s}"`) as string;
-        top.add(s);
-        expectKey = false;
-      }
-      i = j + 1;
-      continue;
+      if (c === 123 /* { */) {
+        stack.push(new Set());
+        this.expectKey = true;
+      } else if (c === 91 /* [ */) stack.push(null);
+      else if (c === 125 /* } */ || c === 93 /* ] */) stack.pop();
+      else if (c === 44 /* , */) this.expectKey = stack[stack.length - 1] instanceof Set;
+      i++;
     }
-    if (c === "{") { stack.push(new Set()); expectKey = true; }
-    else if (c === "[") stack.push(null);
-    else if (c === "}" || c === "]") stack.pop();
-    else if (c === ",") expectKey = stack.at(-1) instanceof Set;
-    i++;
+    this.i = i;
+    return i >= n;
   }
-  return null;
+}
+
+/** The quote at `at` follows an odd run of backslashes: it is part of the string. */
+function escapedAt(text: string, at: number): boolean {
+  let k = at - 1;
+  while (text.charCodeAt(k) === 92 /* \ */) k--;
+  return (at - 1 - k) % 2 === 1;
 }

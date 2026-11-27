@@ -1,3 +1,4 @@
+import { placeKey as endsPlaceKey, type CoverageEnds } from "../core/links/coverage-ends";
 import type { BookRef, Link, LinkSide } from "../core/links/model";
 import type { Suggestion } from "./automatic/types";
 import type { QaIssue } from "./qa";
@@ -54,6 +55,11 @@ export interface CoverageBook {
   readonly doubtful?: ReadonlySet<number>;
   /** how many content units a line holds, only where more than one (contentUnits); a line not in the map has one */
   readonly units?: ReadonlyMap<number, number>;
+  /**
+   * More links of the book, already as compact ends (core/links/coverage-ends.ts: the database's links, read in the worker):
+   * counted exactly as the same links given as Links would be (#42 C7, C8).
+   */
+  readonly ends?: CoverageEnds;
 }
 
 /**
@@ -158,14 +164,26 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
   const first = new Int32Array(n).fill(-1);
   const starts = new Uint8Array(n);
   const places = new Map<string, number>();
-  const spans: PlaceSpan[] = [];
+  // the compact ends' places are places 0..P-1, read from their arrays (no key, no object built for them: בראשית has ~200k);
+  // a Link's place that is one of them gets its id, any other one P, P+1, … (`extra`)
+  const ends = book.ends;
+  const P = ends ? ends.placeTitle.length : 0;
+  const extra: PlaceSpan[] = [];
+  const titleOf = (id: number): string => (id < P ? ends!.titles[ends!.placeTitle[id]!]! : extra[id - P]!.book);
+  const startOf = (id: number): number => (id < P ? ends!.placeLine[id]! : extra[id - P]!.start);
+  const endOf = (id: number): number => (id < P ? Math.max(ends!.placeLine[id]!, ends!.placeEnd[id]!) : extra[id - P]!.end);
+  const spanAt = (id: number): PlaceSpan => (id < P ? { book: titleOf(id), start: startOf(id), end: endOf(id) } : extra[id - P]!);
+  let compact: Map<string, Map<number | string, number>> | null = null;
   const placeOf = (s: LinkSide): number => {
     const k = placeKey(s);
     let id = places.get(k);
     if (id === undefined) {
-      id = places.size;
+      if (ends) id = (compact ??= indexPlaces(ends)).get(s.book.title)?.get(endsPlaceKey(s.line, s.end ?? s.line));
+      if (id === undefined) {
+        id = P + extra.length;
+        extra.push(spanOf(s));
+      }
       places.set(k, id);
-      spans.push(spanOf(s));
     }
     return id;
   };
@@ -191,7 +209,7 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
       const place = placeOf(other);
       cover(mine.line, place, true);
       if (book.units && (book.units.get(mine.line) ?? 1) > 1 && mine.line >= 0 && mine.line < n) {
-        const entry: UnitEntry = { anchor: mine === l.source && l.anchor ? l.anchor.rawStart : null, place: spans[place]! };
+        const entry: UnitEntry = { anchor: mine === l.source && l.anchor ? l.anchor.rawStart : null, place: spanAt(place) };
         const list = unitEntries.get(mine.line);
         if (list) list.push(entry);
         else unitEntries.set(mine.line, [entry]);
@@ -201,9 +219,37 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
       for (let i = mine.line + 1; i <= end && i < n; i++) cover(i, place, false);
     }
   }
+  // the compact ends, as the loop above reads a Link's end (a database link has no anchor of the file's kind: its unit is its place)
+  if (ends)
+    for (let k = 0; k < ends.line.length; k++) {
+      const line = ends.line[k]!;
+      const place = ends.place[k]!;
+      cover(line, place, true);
+      if (book.units && (book.units.get(line) ?? 1) > 1 && line >= 0 && line < n) {
+        const entry: UnitEntry = { anchor: null, place: spanAt(place) };
+        const list = unitEntries.get(line);
+        if (list) list.push(entry);
+        else unitEntries.set(line, [entry]);
+      }
+      const end = ends.end[k]!;
+      for (let i = line + 1; i <= end && i < n; i++) cover(i, place, false);
+    }
   // a line with two place KEYS is "multiple" only when they are two different PLACES (a coarse span and a line inside it are one)
   const differentPlaces = new Set<number>();
-  for (const [line, ids] of several) if (placeCount([...ids].map((id) => spans[id]!)) > 1) differentPlaces.add(line);
+  // placeCount > 1, without building the spans: another book says yes at once; one book's spans are sorted and swept
+  const twoPlaces = (set: ReadonlySet<number>): boolean => {
+    const ids = [...set];
+    const t0 = titleOf(ids[0]!);
+    for (const id of ids) if (titleOf(id) !== t0) return true;
+    ids.sort((a, b) => startOf(a) - startOf(b) || endOf(a) - endOf(b));
+    let reach = endOf(ids[0]!);
+    for (const id of ids) {
+      if (startOf(id) > reach) return true;
+      reach = Math.max(reach, endOf(id));
+    }
+    return false;
+  };
+  for (const [line, ids] of several) if (twoPlaces(ids)) differentPlaces.add(line);
   const out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     if (book.headings.has(i) || book.unsuitable?.has(i)) out[i] = NOT_SUITABLE;
@@ -216,6 +262,18 @@ function bucketCodes(links: readonly Link[], book: CoverageBook): Uint8Array {
       const entries = unitEntries.get(i);
       out[i] = entries && unitCount(entries) < book.units!.get(i)! ? PARTIAL : LINKED;
     }
+  }
+  return out;
+}
+
+/** The compact places by book title and key, to find the one a Link points to (built only when Links are counted with ends). */
+function indexPlaces(ends: CoverageEnds): Map<string, Map<number | string, number>> {
+  const out = new Map<string, Map<number | string, number>>();
+  for (let p = 0; p < ends.placeTitle.length; p++) {
+    const title = ends.titles[ends.placeTitle[p]!]!;
+    let byKey = out.get(title);
+    if (!byKey) out.set(title, (byKey = new Map()));
+    byKey.set(endsPlaceKey(ends.placeLine[p]!, ends.placeEnd[p]!), p);
   }
   return out;
 }
@@ -304,7 +362,7 @@ export type CoverageReport = CoverageSummary & { readonly links: LinksReading };
  * a line of the book (`owns`), plus those of the pending suggestions (`pending`), a unit being the anchor's start when the record has one on
  * that line, else the place it points to. A unit with a link and the same unit in a pending suggestion are one.
  */
-export function contentUnits(links: readonly Link[], suggestions: readonly Suggestion[], pending: (id: string) => boolean, owns: (ref: BookRef) => boolean, lineCount: number): Map<number, number> {
+export function contentUnits(links: readonly Link[], suggestions: readonly Suggestion[], pending: (id: string) => boolean, owns: (ref: BookRef) => boolean, lineCount: number, ends?: CoverageEnds): Map<number, number> {
   const byLine = new Map<number, UnitEntry[]>();
   const add = (mine: LinkSide, other: LinkSide, anchorOwner: boolean, anchor: { rawStart: number } | undefined) => {
     if (mine.line < 0 || mine.line >= lineCount) return;
@@ -323,6 +381,17 @@ export function contentUnits(links: readonly Link[], suggestions: readonly Sugge
     if (owns(s.source.book)) add(s.source, s.target, true, s.anchor);
     if (owns(s.target.book)) add(s.target, s.source, false, undefined);
   }
+  // compact ends (the database's links): no anchor of a file, so each stands for its place
+  if (ends)
+    for (let k = 0; k < ends.line.length; k++) {
+      const line = ends.line[k]!;
+      if (line < 0 || line >= lineCount) continue;
+      const p = ends.place[k]!;
+      const entry: UnitEntry = { anchor: null, place: { book: ends.titles[ends.placeTitle[p]!]!, start: ends.placeLine[p]!, end: Math.max(ends.placeLine[p]!, ends.placeEnd[p]!) } };
+      const list = byLine.get(line);
+      if (list) list.push(entry);
+      else byLine.set(line, [entry]);
+    }
   const out = new Map<number, number>();
   for (const [line, entries] of byLine) {
     const k = unitCount(entries);
