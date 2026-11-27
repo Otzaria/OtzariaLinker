@@ -108,15 +108,16 @@ export function* engineSteps(id: EngineId, source: EngineBook, target: EngineBoo
   // range "until the next match" over a line the filter excludes is trimmed there (LineGate.rangeEnd)
   const { [SOURCE_FILTER_OPTION]: sourceFilter, sourceRange, targetRange, ...engineOptions } = options;
   const ranges = runRangeOptions(sourceRange, targetRange);
-  const ranged = (r: EngineResult): EngineResult => {
+  // "the next match" is one the guard keeps: a suggestion it drops does not end a range (V7 round 2 review, finding 10)
+  const ranged = (r: EngineResult, gate?: LineGate): EngineResult => {
     if (!ranges) return r;
     const owned = sefariaOwnedOf(options["sefariaOwned"] as readonly string[] | undefined);
-    const out = applyRunRanges(r.suggestions, { source: rangeBookOf(source, owned(source.book)), target: rangeBookOf(target, owned(target.book)) }, ranges);
+    const out = applyRunRanges(r.suggestions, { source: rangeBookOf(source, owned(source.book)), target: rangeBookOf(target, owned(target.book)) }, ranges, gate && ((s) => gate.keeps(s)));
     return { ...r, suggestions: out.suggestions, notes: [...r.notes, ...out.notes] };
   };
   if (sourceFilter === undefined) return ranged(yield* runEngineSteps(id, source, target, engineOptions, ctx));
   const gate = new LineGate(source.book.key, compileForEngine(sourceFilter, id), ENGINES.find((e) => e.id === id)?.evidence !== "structure");
-  const r = ranged(yield* runEngineSteps(id, gate.book(source), target, engineOptions, ctx));
+  const r = ranged(yield* runEngineSteps(id, gate.book(source), target, engineOptions, ctx), gate);
   const guarded = gate.guard(r);
   return { ...guarded, notes: [gate.note(), ...guarded.notes] };
 }

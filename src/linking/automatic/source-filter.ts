@@ -268,6 +268,11 @@ export class LineGate {
     return [s.source, s.target].filter((side) => side.book.key === this.bookKey).map((side) => side.line);
   }
 
+  /** Will the guard keep this suggestion: every one of its lines in the filtered book is permitted (stage 5's rule, in one place). */
+  keeps(s: Suggestion): boolean {
+    return this.linesOf(s).every((line) => this.allows(line));
+  }
+
   /**
    * The end a range of the filtered book may keep (the RANGE policy, V7 round 2): it runs from its start, which the filter permits, up to
    * the line before the first line in it that the filter EXCLUDES — trimmed, never split into pieces and never kept over that line. A cut
@@ -335,7 +340,7 @@ export class LineGate {
    * runs over an excluded line (rangeEnd), and says how many of each.
    */
   guard(r: EngineResult): EngineResult {
-    const kept = r.suggestions.filter((s) => this.linesOf(s).every((line) => this.allows(line)));
+    const kept = r.suggestions.filter((s) => this.keeps(s));
     const dropped = r.suggestions.length - kept.length;
     const unmatched = r.unmatched.filter((u) => this.allows(u.line));
     let trimmedCount = 0;
