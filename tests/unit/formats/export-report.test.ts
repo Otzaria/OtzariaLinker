@@ -81,7 +81,7 @@ describe("_report.txt", () => {
     expect(tail).toContain("בקשת משיכה");
     expect(tail).toContain("לאוצריא שלכם בלבד (הספרייה האישית):");
     expect(tail).toContain('"ייבוא נתונים"');
-    expect(tail).toContain("שימו לב: המסלול הזה נבדק בקוד של אוצריא עם קבצים מהכלי");
+    expect(tail).toContain("שימו לב: המסלול הזה נבדק בתוך אוצריא 0.9.98.3");
     expect(tail).toContain("הכלי לא כותב קישורים לתוך מסד");
     // private use puts the personal library first
     const priv = buildExportReport({ date: "d", app: "a", format: "json", links: plan, altToc, purpose: "private" });
@@ -100,6 +100,19 @@ describe("next steps after an export", () => {
     expect(csv.map((r) => r.id)).toEqual(["sefaria"]);
     expect(csv[0]!.steps.join(" ")).toContain("alt_toc/");
     expect(nextStepsText({ format: "json", purpose: "submission", altToc: false, zip: false })[0]).toBe("");
+  });
+
+  // V7 live tests (docs/reviews/V7_LIVE_OTZARIA_TESTS.md, run 1 and run 3): the personal route was used inside the open app, so it
+  // no longer says "not yet tested live"; and what the run saw goes to the user: renaming a book leaves its links dead without a
+  // message (22), an open tab keeps the old links after a rescan (finding ד), and the version does not read alt_toc files (25)
+  it("the personal route: tested inside Otzaria, renaming a book, reopening after a rescan, alt_toc not read", () => {
+    const personal = nextSteps({ format: "json", purpose: "private", altToc: false, zip: false }).find((r) => r.id === "personal")!;
+    const text = personal.steps.join(" ");
+    expect(personal.note).not.toContain("עוד לא בתוך האפליקציה");
+    expect(personal.note).toContain("0.9.98.3");
+    expect(text).toContain("אל תשנו את השם של ספר שלכם");
+    expect(text).toContain("סגרו את הספר ופתחו אותו שוב");
+    expect(personal.note).toContain("alt_toc");
   });
 });
 

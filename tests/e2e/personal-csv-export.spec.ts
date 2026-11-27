@@ -38,6 +38,11 @@ test("export: links.csv for a personal library — when to use it, the files, wh
   await expect(about).toContainText("מתי לבחור בזה");
   await expect(about).toContainText("ספרייה אישית");
   await expect(about).toContainText("הכלי לא כותב לשום מסד");
+  // V7 live test 24 (runs 1 and 3): Otzaria 0.9.98.3's own "ייבוא נתונים" takes this file, but keeps the link on the heading line
+  // of the place and shows it only from the user's book — never in the official book's commentators panel
+  await expect(about).toContainText('לא ל"ייבוא נתונים" של אוצריא');
+  await expect(about).toContainText("שורת הכותרת");
+  await expect(about).toContainText("לשימוש פרטי");
   // the file, with its rows; what the format cannot say is listed with the reason
   await expect(dialog.locator(".files")).toContainText("links.csv", { timeout: 30_000 });
   await expect(dialog.locator(".files")).toContainText("שורה אחת");

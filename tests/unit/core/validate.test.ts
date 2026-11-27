@@ -432,6 +432,14 @@ describe("private use: a target that is the user's own text book (live test 17)"
     expect(p.message).toContain("ספר אחר שלי");
     expect(p.message).toContain("כל קובץ הקישורים");
   });
+  // V7 live test 22 (run 1 and run 3): after the target book's file was renamed and the folder rescanned, Otzaria kept the links
+  // under the old title, showed "הספר לא נמצא במסד הנתונים" in the panel, and the scan said nothing about links
+  it("also says not to rename the book after the import: the links stay under the old name, dead, without a message", () => {
+    const p = validateLink(link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" }), priv).find((x) => x.code === "export/private-target-must-exist")!;
+    expect(p.message).toContain('אל תשנו את שם הקובץ של "ספר אחר שלי"');
+    expect(p.message).toContain("בלי הודעה");
+    expect(p.message).toMatch(/ייצאו שוב/);
+  });
   it("not for a library target, and not for the library purpose", () => {
     expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: SEF, line: 2 }, declaredType: "commentary", ref2: "Genesis 1:2" })])).not.toContain("warning:export/private-target-must-exist");
     expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" })], { ...ctx, personalImportSide: priv.personalImportSide })).not.toContain("warning:export/private-target-must-exist");

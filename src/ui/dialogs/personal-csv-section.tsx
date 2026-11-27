@@ -21,6 +21,13 @@ export function PersonalCsvSection({ bundle }: { bundle: PersonalCsvBundle | nul
           הוא כולל רק קישורים בין ספר שלכם לספר של המאגר הרשמי, ורק מהסוגים "פירוש" ו"תרגום". הכלי לא כותב לשום מסד: מקבלים קבצים, ובהם מתחילים את הבנייה. הפורמט נלקח מהתיעוד של בניית
           הספרייה האישית, ולא נבדק מול הבנייה עצמה.
         </p>
+        {/* V7 live test 24 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md): Otzaria 0.9.98.3's own import takes this file, but stores the link
+            on the heading line of the place and shows it only from the user's book */}
+        <p style="margin:4px 0 0">
+          <b>לא ל"ייבוא נתונים" של אוצריא.</b> אוצריא (0.9.98.3) קולטת את הקובץ הזה, אבל שומרת את הקישור על שורת הכותרת של המקום ולא על
+          השורה עצמה, והוא מופיע רק מהספר שלכם, לא בפאנל המפרשים של הספר הרשמי. כדי לראות את הקישורים באוצריא שלכם, בחרו{" "}
+          <bdi dir="ltr">_links.json</bdi> וייצאו "לשימוש פרטי".
+        </p>
       </div>
       {!bundle && <p class="muted">קורא את הכותרות והשורות של הספרים…</p>}
       {bundle && !bundle.files.length && (
