@@ -15,6 +15,7 @@ import { measure, type Measured } from "./measure";
  * heading windows at all — sequential progress through the base is all it has.
  *
  * Measured (2026-11-11): certain+high 170 right, 0 wrong, 1 unjudged; recall 170/200 = 85%.
+ * Since #41 B2 (2026-11-26) a one-word ד"ה found in the whole base is "possible" at most: recall of certain+high is 133/200.
  * The full books (real-db.local.test.ts): בראשית 99.7% / 88.5%, ברכות רש"י 98.7% / 73%,
  * ברכות תוספות 98.3% / 68%.
  */
@@ -48,7 +49,8 @@ describe('ד"ה engine on real data: רש"י על בראשית → בראשית 
   it("certain + high suggestions agree with the database's commentary links", () => {
     expect(m.gold).toBe(200);
     expect(m.precision).toBeGreaterThanOrEqual(0.97);
-    expect(m.recall).toBeGreaterThanOrEqual(0.8);
+    // one-word ד"ה lines (the fixture has no headings: the whole base is searched) are "possible" now (#41 B2), not "high"
+    expect(m.recall).toBeGreaterThanOrEqual(0.6);
   });
 
   it("both books are Sefaria books: commentary-side \"source\" records, no anchors, the database heRef as heRef_2", () => {

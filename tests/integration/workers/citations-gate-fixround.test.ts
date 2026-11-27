@@ -47,6 +47,11 @@ describe("citationsJob — the gate asks for a place, not for the name of a book
     expect(skipped(await run(["<h1>ספר</h1>", ...MENTIONS, "כמו שנאמר (בראשית א, א) ועוד"]))).toBe(false);
   });
 
+  it("a four-line book whose only form is '<book> <daf>:' runs (issue #41 B6: it was skipped before, the form being 'weak')", async () => {
+    const lines = ["<h1>ספר</h1>", "כמו שנאמר בראשית יג: ועוד", "ועיין בראשית ב. ושם", "וכן (בראשית ג:) ועוד", "ועוד בבראשית ד. ושם"];
+    expect(skipped(await run(lines))).toBe(false);
+  });
+
   it("lines that only mention a place or a source, with no number, open nothing however many there are: there is no address to link to", async () => {
     const lines = ["<h1>ספר</h1>", ...Array.from({ length: 60 }, () => "ראה בסימן ובסעיף שלמעלה ושם בגמרא")];
     expect(skipped(await run(lines))).toBe(true);

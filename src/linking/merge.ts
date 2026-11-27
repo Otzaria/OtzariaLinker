@@ -1,7 +1,7 @@
 import { pushTo } from "../core/collections";
 import { linePairIdentity } from "../core/links/equality";
 import type { LinkSide, RawAnchor } from "../core/links/model";
-import { capSpanned, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type MatchedWords, type Reason, type Suggestion } from "./automatic";
+import { capSpanned, CONFIDENCE_LABELS, CONFIDENCE_ORDER, ENGINES, type Candidate, type Confidence, type EngineId, type MatchedWords, type Reason, type Suggestion } from "./automatic";
 
 /*
  * Merging the suggestions of many engine runs into ONE list (max-link, stage 8.4). Pure, and a
@@ -52,7 +52,40 @@ export interface MergedSuggestion extends Suggestion {
   readonly members: readonly MergeItem[];
   /** the focus book of the representative (the book this link is reported under) */
   readonly focus: string;
+  /** every piece of evidence behind it, where it came from, and whether it counted toward the confidence (#41 B1) */
+  readonly evidence?: readonly MergeEvidence[];
 }
+
+/**
+ * What a piece of evidence rests on (#41 B1). A ד"ה searched inside the section the commentary's own headings name
+ * ("words-in-heading-window") or inside the one numbered line a heading names ("words-in-unit") is found there by
+ * construction: inside the headings engine's range, or on its line, it adds nothing the headings did not already say.
+ * Only a search of the whole base ("words-whole-book"), or a words engine without a structural window ("words"), is
+ * independent of the layout ("structure").
+ */
+export type EvidenceBasis = "structure" | "words-whole-book" | "words-in-heading-window" | "words-in-unit" | "words-unknown-window" | "words";
+
+export interface MergeEvidence {
+  readonly engine: EngineId;
+  /** representative: the record written; agrees: the same link from another engine; containing: a coarser range around it; inner: a finer place inside it, kept as an alternative; outweighed: the loser of a settled conflict */
+  readonly role: "representative" | "agrees" | "containing" | "inner" | "outweighed";
+  readonly confidence: Confidence;
+  readonly basis: EvidenceBasis;
+  /** lines of the other book it points at (1 for a single line) */
+  readonly width: number;
+  /** it raised or carried the confidence of this suggestion */
+  readonly counted: boolean;
+}
+
+/**
+ * A coarser range of another engine around a precise line raises it ("possible" → "high", never higher) only when the
+ * precise line was found independently of that range AND the range is at most this many lines: landing inside a whole
+ * siman (dozens of lines) by chance is not unlikely enough to be evidence. NOT calibrated: the V7 matching benchmark
+ * (docs/validation/V7_MATCHING_BENCHMARK.md) has almost no whole-base ד"ה inside a headings range (a commentary with headings
+ * is searched inside them). 20 is the widest span written line by line on a Sefaria base (SPAN_EACH_LINE_MAX) and the bound of
+ * "high" for a headings range (headings/consistency.ts RANGE_WIDTH).
+ */
+export const CONTAINMENT_MAX_WIDTH = 20;
 
 export type ExistingWhere = "db" | "project";
 
@@ -209,15 +242,69 @@ const isSingleBook = (e: EngineId) => ENGINES.find((x) => x.id === e)?.singleBoo
 /** an engine that places a line by its own words: a quote, a written reference (ENGINES[].evidence) */
 const byWords = (e: EngineId) => ENGINES.find((x) => x.id === e)?.evidence === "words";
 
+/** What a raw suggestion rests on: the ד"ה engine's own search window (dh/window-<kind>, engine.ts), or its engine's kind of evidence. */
+function basisOf(s: Suggestion): EvidenceBasis {
+  if (s.engine === "dibur-hamatchil") {
+    if (s.rules.includes("dh/window-unit") || s.rules.includes("dh/unit-label")) return "words-in-unit";
+    if (s.rules.some((x) => x === "dh/window-heading" || x === "dh/window-page" || x === "dh/window-caller")) return "words-in-heading-window";
+    if (s.rules.includes("dh/window-book")) return "words-whole-book";
+    // a line that inherits its place (בא"ד, שם), or a result without the rule: the window is not known
+    return "words-unknown-window";
+  }
+  return byWords(s.engine) ? "words" : "structure";
+}
+
 /**
- * A group's confidence before any conflict: its best member, one step up when two engines agree on the
- * exact link (each at least "possible"), "high" at most when a coarser range of another engine contains it.
+ * The source of a piece of evidence for an EXACT agreement: a ד"ה searched only inside the numbered line a heading names
+ * says what the heading says (its window is that line), so with the headings engine it is one source, not two.
+ * A ד"ה searched in a whole section picks its line by the words — a second source next to the heading's number.
+ * A line whose window is not known (בא"ד, שם, a paragraph of the item: it inherits its place, it was not searched) is dependent here
+ * as it is for containment (independentOf), or a headings line and an inheriting line on the same place would rise a step
+ * (V7 PR2 review, finding 3).
+ */
+const agreementSource = (x: Raw): string => {
+  const basis = basisOf(x.s);
+  return basis === "words-in-unit" || basis === "words-unknown-window" || basis === "structure" ? "structure" : x.s.engine;
+};
+
+/**
+ * The precise line `x` is evidence about the coarse range `around` only when it was found without it: a search of the
+ * whole base (or a words engine without a structural window) against a range of the layout. A ד"ה found inside the
+ * section the headings name is inside their range by construction; a window that is not known counts as dependent.
+ */
+const independentOf = (x: Raw, around: Raw): boolean => {
+  const bx = basisOf(x.s);
+  const ba = basisOf(around.s);
+  if (ba !== "structure" && bx !== "structure") return false; // two searches by the words: the same kind of evidence
+  if (ba === "structure") return bx === "words-whole-book" || bx === "words";
+  return bx === "structure"; // a heading's line inside a quote's span: number and words, two sources
+};
+
+const widthOf = (s: LinkSide) => endOf(s) - s.line + 1;
+
+/** a coarser range that raises the precise group: at least "high", narrow enough, and found independently of a supporting member */
+const confirms = (g: Group, around: Raw): boolean =>
+  rank(around.s.confidence) <= rank("high") && widthOf(around.oSpan) <= CONTAINMENT_MAX_WIDTH && g.exact.some((x) => rank(x.s.confidence) <= POSSIBLE && independentOf(x, around));
+
+/** the best confidence of a group's own exact members */
+const ownLevel = (g: Group) => Math.min(...g.exact.map((x) => rank(x.s.confidence)));
+
+/** two or more INDEPENDENT sources agree on the exact link, each at least "possible" (agreementSource) */
+const agreeing = (g: Group): Raw[] | null => {
+  const support = g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE);
+  return new Set(support.map(agreementSource)).size > 1 ? support : null;
+};
+
+/**
+ * A group's confidence before any conflict: its best member, one step up when two independent sources agree on the
+ * exact link (each at least "possible"), "high" at most when a narrow coarser range of another engine contains it and the
+ * precise line was found without that range (confirms; #41 B1).
  */
 function supportLevel(g: Group): number {
-  let level = Math.min(...g.exact.map((x) => rank(x.s.confidence)));
-  const support = g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE);
-  if (new Set(support.map((x) => x.s.engine)).size > 1) level = Math.max(0, Math.min(...support.map((x) => rank(x.s.confidence))) - 1);
-  if (g.consistent.length && level === POSSIBLE && g.consistent.some((x) => rank(x.s.confidence) <= rank("high"))) level = rank("high");
+  let level = ownLevel(g);
+  const support = agreeing(g);
+  if (support) level = Math.max(0, Math.min(...support.map((x) => rank(x.s.confidence))) - 1);
+  if (level === POSSIBLE && g.consistent.some((x) => confirms(g, x))) level = rank("high");
   return level;
 }
 
@@ -327,7 +414,8 @@ export function mergeSuggestions(items: readonly (MergeItem | MergedSuggestion)[
   for (const g of groups) pushTo(byPos, g.position, g);
   for (const at of byPos.values()) {
     if (at.length < 2) continue;
-    // a precise suggestion with support absorbs the coarse range around it…
+    // a precise suggestion with support absorbs the coarse range around it (which stays among its members and its
+    // alternatives, finalize; whether it raises the precise one is supportLevel's question, #41 B1)…
     for (const a of at)
       for (const b of at)
         if (a !== b && contains(a, b) && (strong(b) || !strong(a))) {
@@ -496,29 +584,67 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   const rules: string[] = [...rep.rules];
 
   let level = supportLevel(g);
+  const evidence: MergeEvidence[] = [];
+  const support = agreeing(g);
   if (g.engines.length > 1) {
     stats.agreements++;
     rules.push("maxlink/agree", ...g.engines.map((e) => `maxlink/engine:${e}`));
     reasons.push(r("maxlink/agree", `${g.engines.length} שיטות הגיעו לאותו קישור: ${g.engines.map(engineTitle).join(", ")}.`));
+    if (!support && g.exact.filter((x) => rank(x.s.confidence) <= POSSIBLE).length > 1) {
+      // one source twice is not two: a ד"ה searched only in the line the heading names, or a line that inherits its place
+      rules.push("maxlink/agree-dependent");
+      const inherits = g.exact.some((x) => basisOf(x.s) === "words-unknown-window");
+      reasons.push(
+        r(
+          "maxlink/agree-dependent",
+          inherits
+            ? 'שורת דיבור המתחיל לא חופשה לפי המילים שלה: היא יורשת את המקום של שורה קודמת (בא"ד, שם, המשך של קטע), ולכן ההסכמה עם שיטת הכותרות אינה ראיה שנייה, והוודאות לא עלתה.'
+            : "דיבור המתחיל חיפש רק בתוך השורה הממוספרת שהכותרת בפירוש מציינת, ולכן ההסכמה עם שיטת הכותרות אינה ראיה שנייה, והוודאות לא עלתה.",
+        ),
+      );
+    }
   }
+  for (const x of g.exact) evidence.push({ engine: x.s.engine, role: x === g.rep ? "representative" : "agrees", confidence: x.s.confidence, basis: basisOf(x.s), width: widthOf(x.oSpan), counted: x === g.rep || !!support?.includes(x) });
   const own = rank(rep.confidence);
+  const alternatives: Candidate[] = [];
+  const seenAlt = new Set<string>([endKey(g.rep.oEnd)]);
   if (g.consistent.length) {
     stats.consistent++;
     const ce = [...new Set(g.consistent.map((x) => x.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
+    const names = `${ce.length > 1 ? "השיטות" : "השיטה"} ${ce.map(engineTitle).join(", ")}`;
+    const widest = Math.max(...g.consistent.map((x) => widthOf(x.oSpan)));
+    const confirming = g.consistent.filter((x) => confirms(g, x));
+    const raisedBy = ownLevel(g) === POSSIBLE && !support && confirming.length > 0;
     rules.push("maxlink/consistent");
-    reasons.push(r("maxlink/consistent", `גם ${ce.length > 1 ? "השיטות" : "השיטה"} ${ce.map(engineTitle).join(", ")} ${ce.length > 1 ? "מצביעות" : "מצביעה"} על המקום הזה, בטווח רחב יותר שמכיל אותו.`));
+    const how = g.exact.some((x) => basisOf(x.s) === "words-whole-book") ? "דיבור המתחיל חיפש את המילים בכל ספר הבסיס ומצא אותן בתוך הטווח הזה" : "המקום המדויק נמצא בלי להיעזר בטווח הזה";
+    reasons.push(r("maxlink/consistent", `גם ${names} ${ce.length > 1 ? "מצביעות" : "מצביעה"} על המקום הזה, בטווח רחב יותר שמכיל אותו (עד ${widest} שורות).${raisedBy ? ` ${how}, ולכן אלה שתי ראיות בלתי תלויות, והוודאות עלתה ל"גבוהה" (לא יותר: טווח אינו מאשר שורה אחת).` : ""}`));
+    if (raisedBy) {
+      // the reason above says why it rose
+    } else if (g.consistent.every((x) => !g.exact.some((e) => independentOf(e, x)))) {
+      rules.push("maxlink/contains-dependent");
+      reasons.push(r("maxlink/contains-dependent", `המקום המדויק נמצא בחיפוש בתוך הקטע שהכותרות של הפירוש קובעות (או שהוא יורש את המקום של השורה הקודמת), ולכן העובדה שהוא בתוך הטווח של ${names} אינה ראיה נוספת, והוודאות לא עלתה. הטווח מוצג כמועמד חלופי.`));
+    } else if (g.consistent.some((x) => widthOf(x.oSpan) > CONTAINMENT_MAX_WIDTH)) {
+      rules.push("maxlink/contains-wide");
+      reasons.push(r("maxlink/contains-wide", `הטווח של ${names} רחב (${widest} שורות, יותר מ־${CONTAINMENT_MAX_WIDTH}), ולכן העובדה שהמקום בתוכו אינה מחזקת את ההצעה. הטווח מוצג כמועמד חלופי.`));
+    }
+    for (const x of [...g.consistent].sort(better)) {
+      evidence.push({ engine: x.s.engine, role: "containing", confidence: x.s.confidence, basis: basisOf(x.s), width: widthOf(x.oSpan), counted: raisedBy && confirming.includes(x) });
+      const k = endKey(x.oSpan);
+      if (seenAlt.has(k)) continue;
+      seenAlt.add(k);
+      alternatives.push({ target: x.oEnd, score: x.s.score, reasons: [r("maxlink/coarse", `הטווח שהציעה ${engineTitle(x.s.engine)} (שורות ${x.oSpan.line + 1}–${endOf(x.oSpan) + 1}), שמכיל את המקום הזה.`)] });
+    }
   }
-  const alternatives: Candidate[] = [];
-  const seenAlt = new Set<string>([endKey(g.rep.oEnd)]);
   if (g.inner.length) {
     const ie = [...new Set(g.inner.map((x) => x.s.engine))].sort((a, b) => engineRank(a) - engineRank(b));
     rules.push("maxlink/inner");
     reasons.push(r("maxlink/inner", `${ie.map(engineTitle).join(", ")} ${ie.length > 1 ? "הציעו" : "הציעה"} מקום מדויק בתוך הטווח הזה, אבל בלי ודאות; הוא מוצג כמועמד חלופי.`));
     for (const x of [...g.inner].sort(better)) {
+      evidence.push({ engine: x.s.engine, role: "inner", confidence: x.s.confidence, basis: basisOf(x.s), width: widthOf(x.oSpan), counted: false });
       const k = endKey(x.oEnd);
       if (seenAlt.has(k)) continue;
       seenAlt.add(k);
-      alternatives.push({ target: x.oEnd, score: x.s.score, reasons: [r("maxlink/inner", `הצעה של ${engineTitle(x.s.engine)}.`)] });
+      alternatives.push({ target: x.oEnd, score: x.s.score, reasons: [r("maxlink/inner", `הצעה של ${engineTitle(x.s.engine)} (${CONFIDENCE_LABELS[x.s.confidence]}).`)] });
     }
   }
   if (suspect && g.engines.length < 2 && !g.consistent.length && level < POSSIBLE) {
@@ -546,6 +672,7 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
     rules.push(g.wonBy === "candidates" ? "maxlink/multi-target-winner" : "maxlink/outweighs");
     warnings.push(r(g.wonBy === "candidates" ? "maxlink/multi-target-winner" : "maxlink/outweighs", `${g.wonBy === "candidates" ? "השורה הזו מתאימה גם לספרים אחרים שבחרתם" : "שיטות אחרות הציעו לשורה הזו יעדים אחרים"}: ${others.map((o) => `${o.engines.map(engineTitle).join(", ")} ← ${placeOf(o, g)}`).join("; ")}. ${why}, ולכן היא נבחרה. בגלל הסתירה היא לבדיקה ולא לאישור בקבוצה, והיעדים האחרים מוצגים כמועמדים חלופיים.`));
     for (const o of others) {
+      for (const x of o.exact) evidence.push({ engine: x.s.engine, role: "outweighed", confidence: x.s.confidence, basis: basisOf(x.s), width: widthOf(x.oSpan), counted: false });
       seenAlt.add(endKey(o.rep.oEnd));
       alternatives.push({ target: o.rep.oEnd, score: o.rep.s.score, reasons: [r("maxlink/outweighed", `הצעה של ${o.engines.map(engineTitle).join(", ")} (${placeOf(o, g)}), שנדחתה מפני ההצעה הזו: ${why}.`)] });
     }
@@ -597,7 +724,7 @@ function finalize(g: Group, stats: MergeStats, opts: MergeOptions, suspect: { co
   const lost = g.outweighs.flatMap((o) => [...o.exact, ...o.consistent, ...o.inner]);
   const members: MergeItem[] = [...g.exact, ...g.consistent, ...g.inner, ...lost].filter((x) => !seen.has(x.s.id) && seen.add(x.s.id)).map((x) => ({ suggestion: x.s, focus: x.focus }));
   const matched = matchedOf(g);
-  const merged: MergedSuggestion = { ...rep, ...(matched && { matched }), id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus };
+  const merged: MergedSuggestion = { ...rep, ...(matched && { matched }), id: g.id, confidence, score, reasons, warnings, rules, alternatives, engines: g.engines, members, focus: g.rep.focus, evidence };
   const where = opts.existing?.(merged) ?? null;
   if (!where) return merged;
   stats.existing++;

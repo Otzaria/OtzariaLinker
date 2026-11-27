@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { countVisibleChars, visibleUnits } from "../../../../src/core/text/offsets";
 import {
-  appRecognisesMarker, checkCustomPattern, detectMarkers, labelCommentators, leadingMarker, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT, type Marker,
+  appRecognisesMarker, bareLeadingMarker, checkCustomPattern, detectMarkers, labelCommentators, leadingMarker, parseMarkerToken, MAX_CUSTOM_REGEX_INPUT, type Marker,
 } from "../../../../src/linking/automatic/footnotes";
 
 /** What the reader sees between the anchor offsets, counted the generator's way. */
@@ -139,6 +139,28 @@ describe("leadingMarker: how a note line opens", () => {
   it("with an explicit style the marker must come first", () => {
     expect(leadingMarker("<sup>3</sup> הערה", "sup")?.key).toBe("3");
     expect(leadingMarker("הערה <sup>3</sup>", "sup")).toBeNull();
+  });
+});
+
+/*
+ * #41 B12, V7 §2.11: a note line of the v52 shape "12 text" (a number, a space, the text; no tag, dot or bracket). It is a CANDIDATE
+ * only: prose opens with a number too, so the engine accepts it only where it continues the notes' series (engine.test.ts).
+ */
+describe("bareLeadingMarker: a note line that opens with a bare number and a space", () => {
+  it.each([
+    ["12 הערה", "12"], ["1000 הערה", "1000"], ["  3 הערה", "3"], ["1 ראה ברכות ב.", "1"], ["יב הערה", "12"], ["א ראה שם", "1"], ['קכ"ג הערה', "123"], ["טו הערה", "15"],
+  ])("%s → %s", (line, key) => expect(bareLeadingMarker(line)?.key).toBe(key));
+  it.each([
+    ["12הערה"], ["12"], ["הערה 12"], ["זה הדבר"], ["לא כן"], ["כי טוב"], ["לו יצויר"], ["מה טובו"], ["(12) הערה"], ["12. הערה"], ["<sup>1</sup> הערה"], ["אמר רבי"],
+  ])("%s → none", (line) => expect(bareLeadingMarker(line)).toBeNull());
+  it("the span is the number, as the generator counts it", () => {
+    const m = bareLeadingMarker("<span>12</span> הערה")!;
+    expect(m.key).toBe("12");
+    expect(shownByGenerator("<span>12</span> הערה", m)).toBe("12");
+  });
+  it("respects the numbering asked for", () => {
+    expect(bareLeadingMarker("יב הערה", { numbering: "digits" })).toBeNull();
+    expect(bareLeadingMarker("12 הערה", { numbering: "letters" })).toBeNull();
   });
 });
 

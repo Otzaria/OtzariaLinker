@@ -110,6 +110,8 @@ export const TITLE_FIT = {
 } as const;
 
 const pct = (x: number): string => `${Math.round(x * 100)}%`;
+/** headings quoted in a reason, of each kind (found in the base, not found) */
+const EXAMPLES = 2;
 
 /** the base units a path element may be the deepest aligned level of; names are compared exactly (cheap, and "identical titles" is the question) */
 const elementKey = (e: PathElement): string => (e.kind === "name" ? `$${e.name}` : e.kind === "daf" ? `d${e.n}` : `#${e.n}`);
@@ -188,14 +190,24 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
   const commentaryKeys = new Set<string>();
   let duplicates = 0;
   let shared = 0;
+  // a few headings of each kind, quoted in the reasons: the share alone does not say WHICH titles are not the base's (#42 C15)
+  const found: string[] = [];
+  const notFound: string[] = [];
+  const label = (path: readonly PathElement[]) => path.map((e) => e.label).join(" › ");
   for (const h of cs.headings) {
     const key = pathKey(h.path);
     if (commentaryKeys.has(key)) duplicates++;
     else {
       commentaryKeys.add(key);
-      if (placed(h.path)) shared++;
+      if (placed(h.path)) {
+        shared++;
+        if (found.length < EXAMPLES) found.push(label(h.path));
+      } else if (notFound.length < EXAMPLES && h.path.length) notFound.push(label(h.path));
     }
   }
+  const quote = (list: readonly string[]) => list.map((x) => `"${x}"`).join(", ");
+  const yes = found.length ? ` למשל ${quote(found)}.` : "";
+  const no = notFound.length ? ` כותרות שאין להן מקום בבסיס: ${quote(notFound)}.` : "";
 
   const metrics: TitleFitMetrics = {
     contentLines,
@@ -222,10 +234,10 @@ export function titleFit(commentary: EngineBook, base: EngineBook): TitleFitRepo
   else add("titles", true, `${pct(metrics.titleDensity)} משורות הפירוש נמצאות תחת כותרת עם מקום.`);
 
   if (!noTitles) {
-    if (metrics.placedShare >= T.fitPlaced) add("same-titles", true, `לכותרות של ${pct(metrics.placedShare)} משורות הפירוש יש כותרת תואמת בספר הבסיס (אותו שם או אותו מספר).`);
-    else if (metrics.placedShare < T.unfitPlaced) add("other-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: הכותרות בשני הספרים אינן אותן כותרות.`);
-    else if (metrics.placedShare < T.partialPlaced) add("unclear-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: מעט מדי כדי לומר שהכותרות הן של הבסיס, ויותר מדי כדי לומר שאינן. הבדיקה לא מכריעה; אם הפירוש כתוב על הבסיס, אפשר להריץ את שיטת הכותרות ולבדוק את התוצאה.`);
-    else add("some-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס. שאר השורות לא יקושרו לפי כותרות.`);
+    if (metrics.placedShare >= T.fitPlaced) add("same-titles", true, `לכותרות של ${pct(metrics.placedShare)} משורות הפירוש יש כותרת תואמת בספר הבסיס (אותו שם או אותו מספר),${yes || "."}`);
+    else if (metrics.placedShare < T.unfitPlaced) add("other-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: הכותרות בשני הספרים אינן אותן כותרות.${no}`);
+    else if (metrics.placedShare < T.partialPlaced) add("unclear-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס: מעט מדי כדי לומר שהכותרות הן של הבסיס, ויותר מדי כדי לומר שאינן. הבדיקה לא מכריעה; אם הפירוש כתוב על הבסיס, אפשר להריץ את שיטת הכותרות ולבדוק את התוצאה.${no}${found.length ? ` כותרות שנמצאו: ${quote(found)}.` : ""}`);
+    else add("some-titles", false, `לכותרות של ${pct(metrics.placedShare)} בלבד משורות הפירוש יש כותרת תואמת בספר הבסיס. שאר השורות לא יקושרו לפי כותרות.${found.length ? ` כותרות שנמצאו: ${quote(found)}.` : ""}${no}`);
     if (metrics.duplicateShare > T.maxDuplicates) add("duplicates", false, `${pct(metrics.duplicateShare)} מכותרות הפירוש חוזרות על מקום שכבר נכתב (אין כותרת אחת לכל יחידה), ולכן המקום בבסיס עלול להיות לא חד־משמעי.`);
   }
 

@@ -3,8 +3,10 @@ import { parseConnectionType, SOURCE_VIEW_TYPES } from "../core/links/connection
 import { linesFingerprint } from "../core/text/fingerprint";
 import type { BookRef, LinkSide } from "../core/links/model";
 import { refBlockOf, sefariaOwnedOf, withoutRange } from "../core/links/sefaria-owned";
-import { capSpanned, runEngineSliced, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { capSpanned, compileForEngine, LineGate, runEngineSliced, SOURCE_FILTER_OPTION, type Confidence, type EngineBook, type EngineContext, type EngineResult, type Reason, type Suggestion } from "../linking/automatic";
+import { capConfidence, capUndecided } from "../linking/batch";
 import { titleFit, titleGateAdvice, type TitleFitReport, type TitleGateAdvice } from "../linking/title-fit";
+import { applyPairFit, pairFit } from "../linking/pair-fit";
 import { MAXLINK_PROGRESS_UNIT, type MaxLinkJobResult, type StepResult } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import type { PlanStep, SingleEngineId } from "../linking/plan";
@@ -38,11 +40,22 @@ export interface MaxLinkJobOptions {
   /** keys of the books the library treats as Sefaria's (core/links/sefaria-owned.ts), given to every engine */
   sefariaOwned?: readonly string[];
   /**
+   * The line filter of the run (issue #27, findings #40 A1; linking/automatic/source-filter.ts): given to every engine of every step, and
+   * checked again on what each step returns, whichever path produced it.
+   */
+  sourceFilter?: unknown;
+  /**
    * A time budget for each step: a step that runs longer is stopped with what it found (marked `stopped`)
    * and the job goes on to the next one — unlike a cancel, which stops the job. The app does not set it;
    * the library benchmark does (BENCH_STEP_S), so one slow pair does not cost the book's other steps.
    */
   stepBudgetMs?: number;
+  /**
+   * Pairs ("<source key>><target key>", the step's input direction) the user chose to run whatever the pair check says (#42 C10): their
+   * suggestions are kept when the check finds the pair unsuitable or undecided, capped at "possible" with the reasons. A pair the user
+   * named (relation via "user") or forced the headings method on is forced already.
+   */
+  forcedPairs?: readonly string[];
 }
 
 /**
@@ -173,20 +186,6 @@ export async function partByLinks(registry: SourceRegistry, source: EngineBook, 
   return counts[best]! >= PART_MIN && counts[best]! >= PART_SHARE * lines.length ? partSection(source, parts[best]!) : null;
 }
 
-/** Lowers the given confidences to "possible", with a warning that says why. */
-function capConfidence(r: EngineResult, levels: readonly Confidence[], why: Reason): EngineResult {
-  return { ...r, suggestions: r.suggestions.map((s) => (levels.includes(s.confidence) ? { ...s, confidence: "possible" as const, warnings: [...s.warnings, why] } : s)) };
-}
-
-/**
- * A step whose base was chosen between books of the same title by a rule (PlanStep.ambiguousBase): nothing it finds is above "possible",
- * each suggestion says why, and the step says so once. The user lifts it by naming the book.
- */
-function ambiguousBaseCap(r: EngineResult, title: string): EngineResult {
-  const why: Reason = { code: "maxlink/ambiguous-base", text: `יש כמה ספרים בשם "${title}", והבסיס נבחר לפי כלל ולא לפי ראיה, ולכן ההצעה הזו לא יכולה להיות מעל "אפשרית". בחרו במפורש את הספר (מקור לספרי הבסיס, או זוג עם הספר עצמו) כדי להסיר את ההגבלה.` };
-  return { ...capConfidence(r, ["certain", "high"], why), notes: [{ code: "maxlink/ambiguous-base", text: why.text }, ...r.notes] };
-}
-
 /**
  * The title gate (issue #21), as an advisor (fix round before the merge of PR 2). The check (linking/title-fit.ts) cannot rule on every pair:
  * it is read through titleGateAdvice. Only a ruling the measurement supports (no titles, or none of them the base's) skips the step — its
@@ -244,10 +243,35 @@ export async function maxlinkJob(
   const partLinks = new Map<string, Map<string, number[]>>();
   const focusBooks = [...new Set(steps.map((s) => s.source.key))];
   const total = (steps.length + focusBooks.length) * UNIT;
-  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }) });
+  const filter = options.sourceFilter;
+  // an invalid filter fails the job before anything runs: running without it would link the lines the user excluded
+  if (filter !== undefined) compileForEngine(filter, "headings");
+  // the filter is a statement about the DEPENDENT books of the run. A footnotes step runs base → notes (the markers are in the base), so
+  // its dependent book is the step's target: the engine does not get the filter (engineSteps would judge the base's lines), and the guard
+  // judges the notes book (V7 PR2 review, finding 4: a "[א]" filter meant for commentaries dropped every note by the base's lines)
+  const filtered = (step: PlanStep): BookRef => (step.kind === "pair" && step.engine === "footnotes" ? step.target : step.source);
+  const optionsOf = (engine: string): Record<string, unknown> => ({ ...(options.engineOptions?.[engine] ?? {}), ...(options.sefariaOwned && { sefariaOwned: options.sefariaOwned }), ...(filter !== undefined && engine !== "footnotes" && { [SOURCE_FILTER_OPTION]: filter }) });
+  /** the run's filter judged on each dependent book once (stage 5 of source-filter.ts: the guard on every step's result) */
+  const gates = new Map<string, LineGate>();
+  const guard = async (step: PlanStep, r: EngineResult, ...read: EngineBook[]): Promise<EngineResult> => {
+    if (filter === undefined) return r;
+    const book = filtered(step);
+    let gate = gates.get(book.key);
+    if (!gate) {
+      gate = new LineGate(book.key, compileForEngine(filter, step.engine));
+      gate.book(read.find((x) => x.book.key === book.key) ?? (await load(registry, book, fps)));
+      gates.set(book.key, gate);
+    }
+    return gate.guard(r);
+  };
   const items: StepResult[] = [];
   /** the fingerprint of every book read (MaxLinkJobResult.fingerprints) */
   const fps = new Map<string, string>();
+  /**
+   * The pair check (linking/pair-fit.ts, #42 C10) of every whole-book pair step, once the library's links are read: per pair, the
+   * steps' items, whether the user named it, and the ד"ה lines that were searched and not found (what the check needs of the run).
+   */
+  const gated = new Map<string, { step: Extract<PlanStep, { kind: "pair" }>; items: number[]; forced: boolean; dh: EngineResult | null }>();
 
   let loaded = null as { key: string; source: EngineBook; target: EngineBook } | null;
   let loadError = null as { key: string; message: string } | null;
@@ -276,7 +300,7 @@ export async function maxlinkJob(
       if (step.kind === "pair" && step.relation.through) {
         loaded = null;
         const user = Object.fromEntries(Object.entries(optionsOf(step.engine)).filter(([, v]) => v !== undefined && v !== ""));
-        result = await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks, fps);
+        result = await guard(step, await runThrough(registry, step, results, { ...step.options, ...user }, inner, partLinks, fps));
       } else if (step.kind === "pair") {
         const key = pairKey(step);
         if (loadError?.key === key) throw new Error(loadError.message);
@@ -305,17 +329,31 @@ export async function maxlinkJob(
         const skipped = fit && advice && step.titleGate && !step.titleForced && advice.action === "skip" ? titleGateSkip(loaded.source, loaded.target, advice) : null;
         result = skipped ?? (await runScoped(step, loaded.source, loaded.target, { ...step.options, ...user }, inner, byLinks));
         if (!skipped && fit && advice && advice.action !== "run") result = titleAdvice(result, fit, advice, step.titleForced === true, loaded.source.book.title, loaded.target.book.title);
-        if (step.ambiguousBase) result = ambiguousBaseCap(result, step.target.title);
+        // a base chosen between editions by a rule (PlanStep.ambiguousBase): the one rule of every path (linking/batch.ts capUndecided)
+        if (step.ambiguousBase) result = capUndecided(result, step.target.title, "maxlink/ambiguous-base");
+        // the primary target of a hierarchy whose fallback is "review" (PlanChoices.targets, #45): nothing of it above "possible"
+        if (step.targetRole === "primary-review")
+          result = capConfidence(result, ["certain", "high"], { code: "maxlink/target-fallback", text: `השורה אינה מזכירה אף יעד בשמה, ולכן היא מקושרת ליעד הראשי "${step.target.title}" לבדיקה בלבד, לפי מדיניות היעדים שנבחרה.` });
+        // decided on what the engine found, before the guard: notes the filter excludes are not "no notes found"
         if (step.engine === "footnotes" && !result.suggestions.length) result = await notesAsCommentary(result, loaded.source, loaded.target, inner, options.sefariaOwned);
+        result = await guard(step, result, loaded.source, loaded.target);
         // a part-to-part step is one part of the pair: runThrough reads whole pairs only
         if (step.relation.scope?.baseSection === undefined) results.set(`${step.engine}|${key}`, result);
       } else {
         loaded = null;
         const run = runners[step.engine];
         if (!run) throw new Error(`השיטה "${step.engine}" אינה זמינה בגרסה הזו.`);
-        result = await run(registry, step.source, optionsOf(step.engine), inner);
+        result = await guard(step, await run(registry, step.source, optionsOf(step.engine), inner));
       }
       const cut = ctx.signal?.aborted === true;
+      if (step.kind === "pair" && !step.relation.through && (step.engine === "dibur-hamatchil" || step.engine === "headings")) {
+        const g = gated.get(pairKey(step)) ?? { step, items: [], forced: false, dh: null };
+        g.items.push(items.length);
+        g.forced ||= step.relation.via === "user" || step.titleForced === true || (options.forcedPairs?.includes(pairKey(step)) ?? false);
+        if (step.engine === "dibur-hamatchil")
+          g.dh = { ...result, unmatched: result.unmatched.filter((u) => u.reasons.some((x) => x.code === "dh/not-found")).map((u) => ({ line: u.line, reasons: [{ code: "dh/not-found", text: "" }] })) };
+        gated.set(pairKey(step), g);
+      }
       items.push({ stepId: step.id, result: { ...result, unmatched: [] }, unmatched: result.unmatched.length, ms: Date.now() - t0, ...((cut || overBudget()) && { stopped: true }) });
       if (cut) {
         stopped = true;
@@ -346,6 +384,21 @@ export async function maxlinkJob(
     }
   }
   if (ctx.signal?.aborted) stopped = true;
+  // #42 C10: is the commentary written on this base at all? Judged per pair from the metadata, the library's links and the ד"ה run
+  for (const g of gated.values()) {
+    const { source, target, relation } = g.step;
+    const prefix = [`${source.title}#`, `${target.title}#`];
+    let libraryLinks = 0;
+    for (const k of keys) {
+      const [a, b] = k.split("|") as [string, string];
+      if ((a.startsWith(prefix[0]!) && b.startsWith(prefix[1]!)) || (a.startsWith(prefix[1]!) && b.startsWith(prefix[0]!))) libraryLinks++;
+    }
+    const report = pairFit({ commentary: source, base: target, dh: g.dh, declared: relation.via === "base-text" || relation.via === "title" || relation.scope !== undefined, libraryLinks });
+    for (const i of g.items) {
+      const it = items[i]!;
+      if (it.result) items[i] = { ...it, result: { ...applyPairFit(it.result, report, g.forced, { commentary: source.title, base: target.title }), unmatched: [] }, pairFit: report };
+    }
+  }
   // the fingerprint of every book the steps depend on (V5 P1-8): the ones a single-book engine read by
   // itself are hashed here (a text book is in its source's cache; a failing read leaves it out)
   const wanted = new Set<string>(focusBooks);

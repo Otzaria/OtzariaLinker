@@ -18,7 +18,8 @@ function sg(engine: EngineId, source: LinkSide, target: LinkSide, confidence: Co
 /** headings: commentary line → base line(s) */
 const H = (c: number, b: number, conf: Confidence, end?: number): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B, b, end), conf), focus: C.key });
 /** dibur-hamatchil, form B: base line (anchored) → commentary line */
-const D = (c: number, b: number, conf: Confidence): MergeItem => ({ suggestion: sg("dibur-hamatchil", side(B, b), side(C, c), conf, { declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 9 } }), focus: C.key });
+/** found by a search of the whole base (dh/window-book): independent of the headings (merge-evidence.test.ts covers the windows the headings draw) */
+const D = (c: number, b: number, conf: Confidence): MergeItem => ({ suggestion: sg("dibur-hamatchil", side(B, b), side(C, c), conf, { declaredType: "commentary", anchor: { rawStart: 3, rawEnd: 9 }, rules: ["dibur-hamatchil/rule", "dh/window-book"] }), focus: C.key });
 /** footnotes: main line @marker → note line */
 const F = (m: number, at: number, n: number, conf: Confidence): MergeItem => ({ suggestion: sg("footnotes", side(M, m), side(N, n), conf, { anchor: { rawStart: at, rawEnd: at + 1 } }), focus: M.key });
 
@@ -157,7 +158,7 @@ describe("mergeSuggestions — a range collapsed on a Sefaria side keeps its spa
   // headings on a Sefaria base: the section's first line is written, the section stays in citedSpan
   const Hs = (c: number, b: number, end: number, conf: Confidence): MergeItem => ({ suggestion: sg("headings", side(C, c), side(B, b), conf, { citedSpan: { line: b, end } }), focus: C.key });
   /** dibur-hamatchil without an anchor (a Sefaria base): commentary line → base line */
-  const Dc = (c: number, b: number, conf: Confidence, citedSpan?: { line: number; end: number }): MergeItem => ({ suggestion: sg("dibur-hamatchil", side(C, c), side(B, b), conf, { declaredType: "commentary", ...(citedSpan && { citedSpan }) }), focus: C.key });
+  const Dc = (c: number, b: number, conf: Confidence, citedSpan?: { line: number; end: number }): MergeItem => ({ suggestion: sg("dibur-hamatchil", side(C, c), side(B, b), conf, { declaredType: "commentary", rules: ["dibur-hamatchil/rule", "dh/window-book"], ...(citedSpan && { citedSpan }) }), focus: C.key });
 
   it("a ד\"ה line inside the collapsed section agrees with it, as it did with the range: folded, not a conflict", () => {
     const { suggestions, stats } = mergeSuggestions([Hs(5, 10, 20, "high"), Dc(5, 15, "possible")]);

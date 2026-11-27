@@ -340,6 +340,11 @@ progress { accent-color: var(--primary); width: 120px; height: 6px; }
 .problems li.warning { background: var(--warning-container); color: var(--on-warning-container); }
 .problems li.info { background: var(--surface-container); color: var(--on-surface-variant); }
 .stored-as { margin: 0; display: flex; gap: 6px; align-items: start; font-size: var(--fs-sm); color: var(--on-surface-variant); }
+/* "continue the previous passage" preview (builder.tsx ContinuePrevious, #44) */
+.continue-preview { display: grid; gap: 6px; padding: 8px; border-radius: 8px; background: var(--surface-container); font-size: var(--fs-sm); }
+.continue-preview p { margin: 0; }
+.continue-warning { display: flex; gap: 6px; align-items: start; padding: 6px; border-radius: 6px; background: var(--warning-container); color: var(--on-warning-container); }
+.link-item .continued { font-size: var(--fs-sm); color: var(--on-surface-variant); }
 .adv-link { justify-self: start; font-size: var(--fs-sm); color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 .link-btn { font: inherit; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 

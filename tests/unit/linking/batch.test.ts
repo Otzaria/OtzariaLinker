@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRef } from "../../../src/core/links/model";
-import { pairByTitle } from "../../../src/linking/batch";
+import type { Suggestion } from "../../../src/linking/automatic/types";
+import { capUndecided, pairByTitle, pairOne, titleIndex } from "../../../src/linking/batch";
 
 const ref = (key: string, title: string, origin: BookRef["origin"] = "otzaria"): BookRef => ({ key, title, origin });
 
@@ -53,5 +54,94 @@ describe("pairByTitle — books that share a base key (LIBRARY_BENCHMARK.md §6.
     expect(one("לבושי שרד על שלחן ערוך אורח חיים", sa).note).toContain("כתיב");
     expect(one("אוצר ההלכה על שולחן ערוך אורח חיים חלק ו", sa).target?.key).toBe("d:5");
     expect(one("ביאור על שולחן ערוך חושן משפט", sa).target).toBeNull();
+  });
+
+  /*
+   * V7 v52 validation §5, "a finding not fixed": two DIFFERENT books that meet only under the loose key (here two volumes, "… חלק א"
+   * and "… חלק ב", which the loose key folds into the book's name) are not editions of one book. The edition rules (the dependant's
+   * own source, the official library over a personal copy) chose one of them anyway, as if they were. Never a guess: refused.
+   */
+  it("different books that meet only under the loose spelling key are ambiguous: no rule picks one", () => {
+    const volumes = [ref("d:1", 'שו"ת הרשב"א חלק א', "otzaria"), ref("p:2", 'שו"ת הרשב"א חלק ב', "personal")];
+    // the dependant's own source (p) would pick "חלק ב"
+    const own = pairByTitle([ref("p:9", 'מפתחות על שו"ת הרשב"א', "personal")], volumes)[0]!;
+    expect(own.target).toBeNull();
+    expect(own.undecided).toBeUndefined();
+    expect(own.reason).toContain('שו"ת הרשב"א חלק א');
+    expect(own.reason).toContain('שו"ת הרשב"א חלק ב');
+    // the official library over a personal copy would pick "חלק א"
+    const official = pairByTitle([ref("s:3", 'מפתחות על שו"ת הרשב"א', "personal")], volumes)[0]!;
+    expect(official.target).toBeNull();
+    // one book in two spellings and two sources is still editions of one book: the edition rules apply, and the pair is undecided
+    const sa = [ref("d:5", "שולחן ערוך, אורח חיים", "otzaria"), ref("p:6", "שולחן ערוך, אורח חיים", "personal")];
+    const ed = pairByTitle([ref("s:7", "לבושי שרד על שלחן ערוך אורח חיים", "personal")], sa)[0]!;
+    expect(ed.target?.key).toBe("d:5");
+    expect(ed.undecided?.map((b) => b.key)).toEqual(["p:6"]);
+    // a single volume open is the book (the loose key's purpose): paired, with the spelling note
+    const single = pairByTitle([ref("p:9", 'מפתחות על שו"ת הרשב"א', "personal")], volumes.slice(0, 1))[0]!;
+    expect(single.target?.key).toBe("d:1");
+  });
+});
+
+/*
+ * V7 §2.8, #41 B4: the batch path picked the official "ברכות" over a personal copy of the same title silently — no note, and what it
+ * found could be approved in bulk, while the max-link path caps such a step ("ambiguousBase"). One rule now decides for every path:
+ * a choice made only by origin (or by the dependant's own source) is a provisional default, named in the note with every edition,
+ * and flagged `undecided` until the user chooses the source; an explicit choice (index.prefer) is kept and decides.
+ */
+describe("pairByTitle — several editions of the base (V7 §2.8, #41 B4)", () => {
+  const official = ref("s1:103", "ברכות", "otzaria");
+  const personal = ref("s2:9386", "ברכות", "personal");
+  const comm = ref("s3:1", "ספר נר על ברכות", "personal");
+
+  it("the official book chosen by origin only: a note that names every edition, and the pair is undecided", () => {
+    const [p] = pairByTitle([comm], [official, personal]);
+    expect(p!.target?.key).toBe("s1:103");
+    expect(p!.note).toBeDefined();
+    expect(p!.note).toContain("ספר אישי");
+    expect(p!.note).toContain("אפשרית");
+    expect(p!.undecided?.map((b) => b.key)).toEqual(["s2:9386"]);
+  });
+
+  it("the dependant's own source is a rule too, not evidence", () => {
+    const own = ref("s2:7839", "ספר נר על ברכות", "personal");
+    const [p] = pairByTitle([own], [official, personal]);
+    expect(p!.target?.key).toBe("s2:9386");
+    expect(p!.note).toContain("מאותו מקור");
+    expect(p!.undecided?.map((b) => b.key)).toEqual(["s1:103"]);
+  });
+
+  it("the source the user chose decides: no flag", () => {
+    const index = titleIndex([official, personal], "s2");
+    const p = pairOne(comm, index);
+    expect(p.target?.key).toBe("s2:9386");
+    expect(p.undecided).toBeUndefined();
+  });
+
+  it("an edition under an equivalent title (personal 'מסכת ברכות') is an edition too", () => {
+    const [p] = pairByTitle([comm], [official, ref("s2:1", "מסכת ברכות", "personal")]);
+    expect(p!.target?.key).toBe("s1:103");
+    expect(p!.undecided?.map((b) => b.key)).toEqual(["s2:1"]);
+  });
+
+  it("one book of the title: decided, no note", () => {
+    const [p] = pairByTitle([comm], [official]);
+    expect(p!.target?.key).toBe("s1:103");
+    expect(p!.undecided).toBeUndefined();
+    expect(p!.note).toBeUndefined();
+  });
+
+  it("a corpus the title names is evidence, not a rule: no flag", () => {
+    const [p] = pairByTitle([ref("t:x", "תפארת ישראל על משנה ברכות")], [official, ref("s1:200", "משנה ברכות", "otzaria")]);
+    expect(p!.target?.key).toBe("s1:200");
+    expect(p!.undecided).toBeUndefined();
+  });
+
+  it("capUndecided lowers what the engine found to 'possible', each suggestion and the run say why", () => {
+    const sg = (confidence: Suggestion["confidence"]) => ({ id: confidence, confidence, warnings: [] }) as unknown as Suggestion;
+    const r = capUndecided({ suggestions: [sg("certain"), sg("high"), sg("possible"), sg("ambiguous")], notes: [], unmatched: [] }, "ברכות", "batch/undecided-base");
+    expect(r.suggestions.map((s) => s.confidence)).toEqual(["possible", "possible", "possible", "ambiguous"]);
+    expect(r.suggestions[0]!.warnings[0]!.code).toBe("batch/undecided-base");
+    expect(r.notes[0]!.code).toBe("batch/undecided-base");
   });
 });

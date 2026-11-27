@@ -26,6 +26,7 @@ import { acronymInitials, initialsKeys, startsOf, StepVocabulary, stepProfiler, 
 import { idfFactors, STOP_WORDS, wordWeight } from "../../../matching/word-weights";
 import {
   capSpanned,
+  CONFIDENCE_LABELS,
   confidenceOf,
   DEFAULT_THRESHOLDS,
   type Candidate,
@@ -38,11 +39,12 @@ import {
   type Reason,
   type Suggestion,
 } from "../types";
-import { inheritedConfidence, matchConfidence, dynamicMinThreshold, type MatchEvidence, type Rung } from "./confidence";
+import { evidenceCap, inheritedConfidence, matchConfidence, dynamicMinThreshold, shortLocalCap, unorderedShare, type MatchEvidence, type Rung } from "./confidence";
 import { DEFAULT_MAX_DH_WORDS, extractDh, leadingMarkerTokens, type DhBoundary, type ExtractedDh } from "./extract";
 import { bestRun, orderFactor, qualifyingOccurrence, STRICT_SPEC, type Run, type SearchSpec } from "./search";
 import { baseMarkers, openingNoteNumbers, type CommentatorMarkers } from "./markers";
 import { commentatorOfTitle, type Commentator } from "./addressee";
+import { toGematria } from "../../../core/text/gematria";
 import { headingWindowPlan, widen, type SearchWindow } from "./windows";
 import { contextScore, contextWords, lineKeys, pickByContext, pickByOrder, type TieCandidate } from "./tie-break";
 import { refBlockOf, sefariaByOrigin, sefariaOwnedOf, withoutRange, type SefariaOwned, type SefariaOwnedOption } from "../../../core/links/sefaria-owned";
@@ -95,6 +97,14 @@ export interface DhOptions extends SefariaOwnedOption {
    * (default true; the "item" of build_artzot_hachaim_links.py)
    */
   readonly continueItems?: boolean;
+  /**
+   * the item's plain paragraphs (continueItems) are not links of their own: the item's link gets a RANGE on the
+   * commentary side over them — one record per item, `line_index_N_end` on the commentary's side, as
+   * build_artzot_hachaim_links.py writes a ס"ק (issue #43) and as the library holds ארץ יהודה on ארצות החיים
+   * (`ארץ יהודה על ארצות החיים 314–317` ← `ארצות החיים 333`). Default false (a link per paragraph, as before).
+   * Never on a Sefaria commentary: the sync keeps no range on its side (validate.ts sefaria/range-side).
+   */
+  readonly itemRanges?: boolean;
   /** drop or demote what does not fit the order of the whole commentary (default true; see "the order of the whole commentary" in the engine) */
   readonly order?: boolean;
   /**
@@ -184,6 +194,8 @@ const NAMES_MIN = 5;
 const NAMES_SHARE = 0.05;
 /** a tie looks at this many places of the ranking (the winner and its rivals) */
 const TIE_MAX = 8;
+/** a phrase as consecutive whole words anywhere in a line (repeatsOf) */
+const ANYWHERE: SearchSpec = { ...STRICT_SPEC, requireTargetStart: false, shallowLimit: Number.MAX_SAFE_INTEGER };
 
 /** A placement of one commentary line on the base, before it is shaped into a Suggestion. */
 interface Placement {
@@ -204,6 +216,10 @@ interface Placement {
   readonly depth: number;
   /** a tie between places that score alike (tie-break.ts): every tied place, for the order pass to choose again */
   readonly tie?: TieState & { readonly common: MatchParts };
+  /** a line placed by its own words in a LOCAL window (not the whole base): how many words of its ד"ה matched (SHORT_LOCAL) */
+  readonly localWords?: number;
+  /** … and whether that place is before the previous line's (SHORT_LOCAL) */
+  readonly localBackward?: true;
 }
 
 /** Reasons, rule ids and warnings of a placement. */
@@ -218,6 +234,8 @@ interface MatchPart extends MatchParts {
   readonly base: number;
   readonly baseEnd?: number;
   readonly words: { rawStart: number; rawEnd: number };
+  /** the place is before the previous line's (the same test as its dh/backward warning); Placement.localBackward comes from it */
+  readonly backward?: true;
 }
 
 /**
@@ -812,6 +830,31 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     return { pos: best.pos, line: bLines[best.pos]!.index, run, exact: false, matchedWeight: sim * ww, windowWeight: ww, rank: sim * ww, lineTokens: bTokens[best.pos]!.length, contLine: null, lemmaHead: false };
   };
 
+  /**
+   * Other lines of the window that hold the words the candidate matched, as written there (search keys, consecutive):
+   * at most REPEATS_MAX of them. The phases search near the previous match first and stop at a verbatim hit, so a phrase
+   * that also stands elsewhere often never meets its rivals; counted here once, on the inverted index of its rarest word
+   * (#42 C9: three words at "high", 19 right / 4 wrong when the phrase repeats in the base, 280 / 0 when it does not).
+   */
+  const REPEATS_MAX = 3;
+  const repeatsOf = (c: Cand, window: SearchWindow): number[] => {
+    const toks = bTokens[c.pos]!.slice(c.run.tgtStart, Math.min(c.run.tgtEnd, c.lineTokens));
+    if (!toks.length) return [];
+    const ix = keyIndex ?? buildIndex();
+    let holders: readonly number[] | undefined;
+    for (const t of toks) {
+      const h = ix.get(t.key) ?? [];
+      if (!holders || h.length < holders.length) holders = h;
+    }
+    const out: number[] = [];
+    for (const p of positionsIn(window.from, window.to, holders)) {
+      if (p === c.pos || qualifyingOccurrence(toks, bTokens[p]!, ANYWHERE) < 0) continue;
+      out.push(bLines[p]!.index);
+      if (out.length >= REPEATS_MAX) break;
+    }
+    return out;
+  };
+
   const evidenceOf = (c: Cand, runnerUp: number): MatchEvidence => ({
     matchedWeight: c.matchedWeight,
     windowWeight: c.windowWeight,
@@ -960,7 +1003,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
         reasons.push(r("dh/continuation", 'גם ההמשך שאחרי "וכו\'" נמצא בספר הבסיס'));
         if (c.contLine > (baseEnd ?? c.line)) baseEnd = c.contLine;
       }
-      return { base: c.line, ...(baseEnd !== undefined ? { baseEnd } : {}), words: { rawStart: tg[c.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd }, reasons, rules, warnings };
+      return { base: c.line, ...(baseEnd !== undefined ? { baseEnd } : {}), words: { rawStart: tg[c.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd }, reasons, rules, warnings, ...(prevIn !== null && c.line < prevIn && { backward: true as const }) };
     };
 
     let win = cands[0]!;
@@ -987,7 +1030,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       win = chosen.c;
       tie = { cands: tied.map((x, j) => ({ ...tc[j]!, part: matchPart(x.c, ex, prevIn) })), chosen: k, why: k ? "context" : null };
     }
-    const score = chosen.score;
+    let score = chosen.score;
     const alternatives = scored
       .filter((x) => x !== chosen)
       .map((x) => ({ line: x.c.line, score: x.score }))
@@ -1026,6 +1069,31 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     else if (window.kind === "unit") reasons.push(r("dh/window-unit", `החיפוש הוגבל לשורה הממוספרת שהכותרת בפירוש מציינת (${window.label})`));
     else if (window.kind === "page") reasons.push(r("dh/window-page", `החיפוש הוגבל לעמוד "${window.label}", לפי סימני העמודים שבספר הבסיס`));
     else reasons.push(r("dh/window-book", "החיפוש נעשה בכל ספר הבסיס, לפי סדר ההתקדמות של הפירוש"));
+    // #41 B2, #42 C9: what the evidence allows beyond the match itself — a word or two found in the whole base, or a
+    // phrase that stands in other lines of the window, is placed by the walk's order, not by the words
+    let repeats: number[] = [];
+    const matchedWords = uniqueN || win.run.srcUsed;
+    if (confidence === "certain" || confidence === "high") {
+      repeats = uniqueN || window.kind !== "book" ? [] : repeatsOf(win, window);
+      const words = uniqueN || win.run.srcUsed;
+      const cap = evidenceCap({ words, wholeBook: window.kind === "book", repeats: repeats.length });
+      const lowers = cap !== null && (confidence === "certain" || cap.cap === "possible");
+      if (lowers) {
+        confidence = cap.cap;
+        score = Math.min(score, (cap.cap === "high" ? thresholds.certain : thresholds.high) - 0.01);
+      }
+      const label = CONFIDENCE_LABELS[confidence];
+      if (cap?.rule === "dh/short-whole-book" && lowers) {
+        rules.push(cap.rule);
+        warnings.push(r(cap.rule, `הדיבור המתחיל קצר (${words === 1 ? "מילה אחת" : `${words} מילים`}) ונמצא בחיפוש בכל ספר הבסיס, בלי כותרת שמצמצמת את החיפוש. מילים כאלה נמצאות במקומות רבים, והמקום נבחר לפי סדר ההתקדמות של הפירוש, ולכן הוודאות הוגבלה ל"${label}".`));
+      }
+      // a phrase that stands elsewhere too: said, and its other places offered, even when the level was already below the cap
+      if (repeats.length) {
+        rules.push("dh/repeated-phrase");
+        const where = repeats.length >= REPEATS_MAX ? `ב־${REPEATS_MAX} שורות נוספות לפחות` : repeats.length === 1 ? "בשורה נוספת" : `ב־${repeats.length} שורות נוספות`;
+        warnings.push(r("dh/repeated-phrase", `המילים שנמצאו מופיעות כלשונן גם ${where} בספר הבסיס (${repeats.map((l) => `שורה ${l + 1}`).join(", ")}), והמקום נבחר לפי סדר ההתקדמות של הפירוש. לכן ההצעה אינה "ודאית" (היא "${label}"), והמקומות האחרים מוצגים כמועמדים חלופיים.`));
+      }
+    }
     const common = { reasons, rules, warnings };
     const part = tie ? tie.cands[tie.chosen]!.part : matchPart(win, ex, prevIn);
     const placed: Placement = {
@@ -1042,8 +1110,16 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       rootScore: score,
       depth: 0,
       ...(tie ? { tie: { ...tie, common } } : {}),
+      // from the chosen place's part, as its dh/backward warning is: a place moved later (the order pass) takes its part's
+      ...(window.kind !== "book" ? { localWords: matchedWords, ...(part.backward && { localBackward: true as const }) } : {}),
     };
-    return withMatch(placed, common, part, tie);
+    const out = withMatch(placed, common, part, tie);
+    // the other lines that hold the same words are its alternatives, saying why they were not chosen
+    if (!repeats.length) return out;
+    const why = r("dh/alt-repeat", "אותן מילים מופיעות גם כאן, כלשונן; המקום שנבחר הוא זה שמתאים לסדר ההתקדמות של הפירוש");
+    const known = out.alternatives.map((a) => (repeats.includes(a.line) ? { ...a, why } : a));
+    const extra = repeats.filter((l) => l !== out.base && !out.alternatives.some((a) => a.line === l)).map((line) => ({ line, score, why }));
+    return { ...out, alternatives: [...known, ...extra] };
   };
 
   /**
@@ -1071,6 +1147,32 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       return { cLine, base, score, confidence: confidenceOf(score, alternatives[0]?.score ?? null, thresholds), reasons, rules, warnings: [], alternatives, rootScore: score, depth: 0 };
     }
     return null;
+  };
+
+  /*
+   * "בש"ך ס"ק ג - …" against the Shach itself (#41 B13, #10): the line names the place by number and quotes nothing, so it goes to the
+   * base line that opens with seif katan ג — "(ג)", "[ג]" — inside the line's window. One such line in a section window → high (a number,
+   * not words: never certain); several, or a window that is the whole book → the first at or after the previous line's place, possible.
+   */
+  const seifOpenings = new Map<number, number[]>();
+  if (baseIs)
+    for (const l of bLines) {
+      if (l.heading !== null) continue;
+      const n = openingNoteNumbers(l.text)[0];
+      if (n !== undefined) seifOpenings.set(n, [...(seifOpenings.get(n) ?? []), l.index]);
+    }
+  const placeOnSeifKatan = (n: number, who: Commentator, cLine: number, prev: number | null): Placement | null => {
+    const window = windowFor(cLine);
+    const at = (seifOpenings.get(n) ?? []).filter((i) => i >= window.from && i <= window.to);
+    if (!at.length) return null;
+    const prevIn = prev !== null && prev >= window.from && prev <= window.to ? prev : null;
+    const base = (prevIn === null ? undefined : at.find((i) => i >= prevIn)) ?? at[0]!;
+    const sure = at.length === 1 && window.kind !== "book";
+    const score = sure ? 0.9 : 0.7;
+    const reasons = [r("dh/seif-katan", `השורה מפנה ל${who.name} ס"ק ${toGematria(n)} במספר, בלי לצטט; שורת הבסיס הזו נפתחת בס"ק ${toGematria(n)}`)];
+    if (!sure) reasons.push(r("dh/seif-katan-many", `בטווח יש ${at.length} שורות שנפתחות בס"ק ${toGematria(n)}, או שהטווח הוא כל הספר; לבדיקה`));
+    const alternatives = at.filter((i) => i !== base).slice(0, 3).map((line) => ({ line, score: 0.5 }));
+    return { cLine, base, score, confidence: confidenceOf(score, null, thresholds), reasons, rules: ["dh/seif-katan", `dh/window-${window.kind}`], warnings: [], alternatives, rootScore: score, depth: 0 };
   };
 
   /** A line that continues `parent` (בא"ד, שם, עוד כתב, an item paragraph): its place, weakened. */
@@ -1187,6 +1289,15 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       continue;
     }
     if (unaddressed && !active) unaddressed.add(line.index);
+    const named = ex.addressee?.kind === "named" ? ex.addressee : null;
+    const bySeif: Placement | null = named?.seifKatan !== undefined && baseIs?.key === named.commentator.key ? placeOnSeifKatan(named.seifKatan, named.commentator, line.index, prev) : null;
+    if (bySeif) {
+      crossedHeading = false;
+      place(bySeif, false, bySeif.cLine);
+      chain = bySeif;
+      prev = bySeif.base;
+      continue;
+    }
     const marked: Placement | null = noteMarkers && noteNumbers.has(line.index) ? placeOnMarker(noteMarkers, noteNumbers.get(line.index)!, line.index, prev) : null;
     if (marked) {
       crossedHeading = false;
@@ -1295,9 +1406,14 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       const from = tie.cands[tie.chosen]!;
       const alternatives = [...pl.alternatives.filter((a) => a.line !== to.line), { line: from.line, score: from.score }].sort((a, b) => b.score - a.score);
       const moved: TieState = { cands: tie.cands, chosen: k, why: "order", bracket: [lo, hi] };
-      const { baseEnd: _end, ...rest } = pl;
+      /*
+       * localBackward (SHORT_LOCAL) is the new place's, like its dh/backward warning (withMatch takes both from `to.part`; V7 round 2
+       * review, finding 10). Before, it kept the old place's. That had no effect: a moved place is "ambiguous", and the SHORT_LOCAL cap
+       * below reads only "high" ones (the off-order pass only lowers a level) — but nothing should rely on that.
+       */
+      const { baseEnd: _end, localBackward: _back, ...rest } = pl;
       placements[i] = withMatch(
-        { ...rest, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}), words: to.part.words, score: to.score, rootScore: to.score, confidence: "ambiguous", alternatives, tie: { ...moved, common: tie.common } },
+        { ...rest, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}), ...(rest.localWords !== undefined && to.part.backward && { localBackward: true as const }), words: to.part.words, score: to.score, rootScore: to.score, confidence: "ambiguous", alternatives, tie: { ...moved, common: tie.common } },
         tie.common,
         to.part,
         moved,
@@ -1360,6 +1476,77 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     }
   }
 
+  /*
+   * ── a short ד"ה in a local window (SHORT_LOCAL, V7 benchmark §7.1) ────────────────────────────────
+   * A short ד"ה in a local window is placed by the walk's order as much as by its words. Two cases where that order is no evidence,
+   * both only at "high": a ד"ה of up to three words found BEFORE the previous line's place (the walk chose an earlier place of common
+   * words), and, in a commentary that itself goes back often — a share of its placements in local windows found before the previous
+   * line's place — every ד"ה of one or two words (the word a note opens with is often its topic rather than a quote: כף החיים "ואם",
+   * "כבד"). Applied after the order passes, so they see the same placements as before; a line that inherits a capped place (בא"ד, שם,
+   * an item paragraph) is capped with it.
+   */
+  {
+    const local = placements.filter((pl) => pl.localWords !== undefined && meta.get(pl.cLine)?.direct);
+    const backward = local.filter((pl) => pl.warnings.some((w) => w.code === "dh/backward")).length;
+    const unordered = unorderedShare(local.length, backward);
+    const cappedRoots = new Map<number, string>();
+    let unorderedCapped = 0;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      const m = meta.get(pl.cLine);
+      if (pl.confidence !== "high" || pl.localWords === undefined || !m?.direct) continue;
+      const cap = shortLocalCap({ words: pl.localWords, local: true, backward: pl.localBackward === true, unordered });
+      if (!cap) continue;
+      if (cap.rule === "dh/short-unordered") unorderedCapped++;
+      cappedRoots.set(pl.cLine, cap.rule);
+      const words = pl.localWords === 1 ? "מילה אחת" : `${pl.localWords} מילים`;
+      const why =
+        cap.rule === "dh/short-backward"
+          ? `הדיבור המתחיל קצר (${words}) ונמצא לפני המקום של השורה הקודמת בספר הבסיס. מילים כאלה נמצאות במקומות רבים, ופירוש שחוזר אחורה עם מילים מעטות טועה לעתים קרובות, ולכן הוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`
+          : `הדיבור המתחיל קצר (${words}), והמקום שלו נבחר גם לפי סדר ההתקדמות של הפירוש. הפירוש הזה חוזר אחורה בספר הבסיס לעתים קרובות, ולכן הסדר אינו ראיה, והוודאות הוגבלה ל"${CONFIDENCE_LABELS[cap.cap]}". בדקו את המקום לפני האישור.`;
+      placements[i] = { ...pl, confidence: cap.cap, score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, cap.rule], warnings: [...pl.warnings, r(cap.rule, why)] };
+    }
+    if (cappedRoots.size)
+      for (let i = 0; i < placements.length; i++) {
+        const pl = placements[i]!;
+        const m = meta.get(pl.cLine);
+        const rule = m && !m.direct ? cappedRoots.get(m.root) : undefined;
+        if (!rule || (pl.confidence !== "certain" && pl.confidence !== "high")) continue;
+        placements[i] = { ...pl, confidence: "possible", score: Math.min(pl.score, thresholds.high - 0.01), rules: [...pl.rules, rule], warnings: [...pl.warnings, r(rule, `השורה יורשת את המקום של שורה ${m!.root + 1} בפירוש, שהוודאות שלה הוגבלה ל"אפשרית" (דיבור המתחיל קצר); לכן גם הוודאות שלה הוגבלה.`)] };
+      }
+    if (unorderedCapped)
+      notes.push(r("dh/short-unordered", `${backward} מתוך ${local.length} השורות שמוקמו בתוך קטע (${Math.round((100 * backward) / local.length)}%) נמצאו לפני המקום של השורה הקודמת: הפירוש אינו הולך לפי סדר ספר הבסיס. לכן ${unorderedCapped} הצעות של דיבור המתחיל בן מילה או שתיים הוגבלו ל"אפשרית"; בדקו אותן לפני האישור.`));
+  }
+
+  /*
+   * ── item ranges (itemRanges; issue #43) ──────────────────────────────────────────────────
+   * An item paragraph right after its item's lines (the next commentary line, same root, same base place) is folded
+   * into the item's link as the end of a range on the commentary side; anything between them (a heading, a line the
+   * engine did not place, a line of another root) ends the range, so a range never crosses a section.
+   */
+  const cEnd = new Map<number, number>();
+  if (options.itemRanges === true && !sefariaOwned(commentary.book)) {
+    const cNext = new Map<number, number>();
+    commentary.lines.forEach((l, i) => {
+      const n = commentary.lines[i + 1];
+      if (n) cNext.set(l.index, n.index);
+    });
+    let head: Placement | null = null;
+    let last = -1;
+    for (let i = 0; i < placements.length; i++) {
+      const pl = placements[i]!;
+      const fold = head !== null && pl.rules[0] === "dh/inherit-item" && meta.get(pl.cLine)?.root === head.cLine && cNext.get(last) === pl.cLine && pl.base === head.base && pl.baseEnd === head.baseEnd;
+      if (fold) {
+        last = pl.cLine;
+        cEnd.set(head!.cLine, last);
+        placements.splice(i--, 1);
+        continue;
+      }
+      head = pl;
+      last = pl.cLine;
+    }
+  }
+
   // ── shape the suggestions ────────────────────────────────────────────────────────────────
   const cByIndex = new Map(commentary.lines.map((l) => [l.index, l]));
   const side = (book: BookRef, line: number, end?: number): LinkSide => (end !== undefined && end > line ? { book, line, end } : { book, line });
@@ -1369,13 +1556,17 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
     const { target: baseSide, citedSpan, lines: each, reason: firstRef } = baseRanges
       ? { target: side(base.book, p.base, p.baseEnd), citedSpan: undefined, lines: undefined, reason: undefined }
       : withoutRange(side(base.book, p.base, p.baseEnd), block);
-    const cSide = side(commentary.book, p.cLine);
+    const cSide = side(commentary.book, p.cLine, cEnd.get(p.cLine));
     const baseLine = bLines[posOf.get(p.base)!];
     /** the line written: the quote's first, or the first after it that can carry a record (firstRef) */
     const writtenLine = baseSide.line === p.base ? baseLine : bLines[posOf.get(baseSide.line)!];
     const warnings = [...p.warnings];
     const rules = [...p.rules];
     const reasons = [...p.reasons];
+    if (cSide.end !== undefined) {
+      rules.push("dh/item-range");
+      reasons.push(r("dh/item-range", `הפסקאות שאחרי הדיבור המתחיל, עד שורה ${cSide.end + 1} בפירוש, שייכות לאותו מקום, ולכן הקישור הוא טווח בפירוש ולא קישור לכל פסקה`));
+    }
     /*
      * A match over several base lines on a Sefaria base keeps its FIRST line — where the ד"ה starts —
      * unless withoutRange writes it otherwise: a record per line for a short span, or the first line that

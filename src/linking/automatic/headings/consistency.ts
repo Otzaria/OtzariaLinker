@@ -3,6 +3,28 @@ import type { Alignment } from "./align";
 import { kindWord, type PathElement } from "./numbering";
 import { pathKey, type BookStructure, type Unit } from "./structure";
 
+/**
+ * #42 C15: the widest range a headings link may have at each level. The heading places the line on a whole unit (an amud, a siman
+ * without seifim); that is right, but a range is not a place one approves in bulk, and on a Sefaria base it is written as one record
+ * per line of the span (up to SPAN_EACH_LINE_MAX = 20, core/links/sefaria-owned.ts). Measured on the official database (V7 matching
+ * benchmark, docs/validation/V7_MATCHING_BENCHMARK.md §4): headings-only "high" links averaged 52.8 lines in the finding; on the
+ * benchmark's tuning pairs 92 "high" links were 21–100 lines wide. Above highMax lines: "possible" at most; above certainMax: "high" at most.
+ */
+export const RANGE_WIDTH = { certainMax: 5, highMax: 20 } as const;
+
+/** The level a range of `width` base lines allows, with the warning that says why, or null when its width caps nothing. */
+export function rangeWidthCap(width: number, unit: string): { cap: "high" | "possible"; warning: Reason } | null {
+  if (width <= RANGE_WIDTH.certainMax) return null;
+  const cap = width > RANGE_WIDTH.highMax ? "possible" : "high";
+  return {
+    cap,
+    warning: {
+      code: "heading/wide-range",
+      text: `הכותרת מקשרת את השורה ל${unit} כולו, טווח של ${width} שורות בספר הבסיס, ולא לשורה מסוימת בו. הקישור נכון לקטע, אבל אינו מדויק, ולכן הביטחון הוגבל ל"${cap === "high" ? "גבוהה" : "אפשרית"}". אם הפירוש מצטט את הבסיס, שיטת דיבור המתחיל יכולה למצוא את השורה המדויקת.`,
+    },
+  };
+}
+
 /*
  * Structural-consistency guards of the headings engine. The aligner (./align.ts) judges ONE path at a
  * time, so a pair whose heading trees only LOOK alike gets confident links: the same kind word and

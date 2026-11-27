@@ -1,5 +1,5 @@
 import type { BookRef } from "../core/links/model";
-import type { EngineContext, EngineResult } from "../linking/automatic";
+import { compileForEngine, LineGate, SOURCE_FILTER_OPTION, type EngineContext, type EngineLine, type EngineResult } from "../linking/automatic";
 import { AliasIndex, dafStructureFromAltToc, type DafStructure, buildHeadingsIndex, buildRefIndex, CitationRun, NamedUnitIndex, unitKindOf, unitsFromAltToc, type CatalogBook, type CitationsOptions, type NamedUnit, type NamedUnitSource, type TargetIndex, type UnitKind, citationGate } from "../linking/automatic/citations";
 import type { SourceRegistry } from "../sources/registry";
 
@@ -38,7 +38,19 @@ const MAX_PAGES = 50;
  * Progress: the scan is the first half, the target books the second (done/total in per-mille).
  * Keep the signature: the max-linking orchestrator calls it as is.
  */
-export async function citationsJob(registry: SourceRegistry, source: BookRef, options: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+export async function citationsJob(registry: SourceRegistry, source: BookRef, allOptions: Record<string, unknown>, ctx: EngineContext): Promise<EngineResult> {
+  // the run's line filter (issue #27, findings #40 A1; source-filter.ts LineGate): an excluded line is still READ, as context — a "שם" or
+  // a bare "פרק ג" on the next included line refers to the place the excluded line cited (V7 PR2 review, finding 2: blanking it sent
+  // "[ב] (שם, ג)" after "א) (בראשית ב, ב)" to בראשית א, ג at "high") — and the guard drops every suggestion and unmatched line of it
+  const { [SOURCE_FILTER_OPTION]: rawFilter, ...options } = allOptions;
+  const gate = rawFilter === undefined ? null : new LineGate(source.key, compileForEngine(rawFilter, "citations"), false);
+  const result = await citationsRun(registry, source, options, ctx, gate);
+  if (!gate) return result;
+  const guarded = gate.guard(result);
+  return { ...guarded, notes: [gate.note(), ...guarded.notes] };
+}
+
+async function citationsRun(registry: SourceRegistry, source: BookRef, options: Record<string, unknown>, ctx: EngineContext, gate: LineGate | null): Promise<EngineResult> {
   // not without a reason (2.1): a book with no sign of a place in it (suitability.ts CITATION_GATE: one line with a place word and a number, or with the
   // name of an open book and two numbers) has little to find. The look stops as soon as the gate opens, so a book with references pays one
   // chunk; one without pays a read of its lines, far below the scanner. A user who knows better runs it anyway (CitationsOptions.noGate).
@@ -65,7 +77,10 @@ export async function citationsJob(registry: SourceRegistry, source: BookRef, op
   };
   let scanned = 0;
   for await (const chunk of registry.scan(source.key, CHUNK)) {
-    run.scan(chunk.lines.map((l) => ({ index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef })));
+    run.scan(chunk.lines.map((l): EngineLine => {
+      const line: EngineLine = { index: l.index, text: l.anchorText, heading: l.heading, heRef: l.heRef };
+      return gate ? gate.judge(line) : line;
+    }));
     scanned += chunk.lines.length;
     const total = Math.max(scanned, chunk.total ?? 0);
     ctx.progress?.(Math.round((scanned / total) * 500), 1000);

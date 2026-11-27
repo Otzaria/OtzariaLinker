@@ -2,7 +2,7 @@ import { batch, computed, signal, type ReadonlySignal, type Signal } from "@prea
 import type { SourceBook } from "../core/books";
 import type { BookRef, Link, LinkMatched, LinkSide } from "../core/links/model";
 import { CONFIDENCE_ORDER, compileSourceFilter, previewSourceFilter, recordsOf, sortSuggestions, type Confidence, type EngineId, type EngineResult, type Reason, type SourceFilter, type SourceFilterPreview, type Suggestion, type SuggestionSort } from "../linking/automatic";
-import { pairByTitle, type BatchPair } from "../linking/batch";
+import { capUndecided, pairByTitle, type BatchPair } from "../linking/batch";
 import type { MaxLinkRunInfo } from "../linking/maxlink-report";
 import { linePairKey } from "../linking/merge";
 import { addChanges, commit, type Change, type LinkState } from "./history";
@@ -78,6 +78,8 @@ export interface BatchRow {
   target: BookRef | null;
   /** why the book was not run (unpaired) or failed */
   problem?: string;
+  /** how the base was chosen when its name was not enough (several editions, another spelling): batch.ts BatchPair.note */
+  note?: string;
   suggestions: number;
   certain: number;
   high: number;
@@ -263,13 +265,15 @@ export class SuggestionsState {
   /**
    * Batch linking (stage 8.4): every book of one open source (e.g. a folder of commentaries) against
    * the base book its title names, among all open books. Unpaired books are listed with the reason.
+   * `choice.preferSource`: the source the user chose for bases open in several sources; without it a base chosen among editions
+   * by a rule is undecided, and what its pair finds is capped at "possible" (V7 §2.8, #41 B4).
    */
-  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}): Promise<boolean> {
+  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}, choice: { preferSource?: string } = {}): Promise<boolean> {
     const src = this.host.sources.value.find((s) => s.info.id === sourceId);
     if (!src) return false;
     const commentaries = src.books.map((b) => this.host.refOf(b.key));
     const bases = [...this.host.books.value.values()].map((b) => this.host.refOf(b.key));
-    const pairs = pairByTitle(commentaries, bases);
+    const pairs = pairByTitle(commentaries, bases, choice.preferSource);
     const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
     if (!runnable.length) {
       this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר בקובץ או במסד הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
@@ -283,18 +287,20 @@ export class SuggestionsState {
     // a cancel keeps the books done and what the last one found (keepPartial); the rest say they did not run
     const reached = new Set(items.map((it) => it.source.key));
     const partial = items.length < runnable.length || items.some((it) => it.result && isPartial(it.result));
-    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 }));
+    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.note && { note: p.note }), ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 }));
     for (const it of items) {
       const row = rows.find((r) => r.source.key === it.source.key)!;
       if (it.error) row.problem = it.error;
-      for (const sg of it.result?.suggestions ?? []) {
+      const undecided = runnable.find((p) => p.source.key === it.source.key)?.undecided?.length;
+      const result = it.result && undecided ? capUndecided(it.result, row.target?.title ?? "", "batch/undecided-base") : it.result;
+      for (const sg of result?.suggestions ?? []) {
         suggestions.push(sg);
         row.suggestions++;
         if (sg.confidence === "certain") row.certain++;
         else if (sg.confidence === "high") row.high++;
         else row.review++;
       }
-      for (const n of it.result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
+      for (const n of result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
     this.startRun({ engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;

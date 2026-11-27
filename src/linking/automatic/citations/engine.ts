@@ -166,14 +166,37 @@ const PENALTY = {
   pagesSplit: 0.15,
   /** "שם" more than six lines (up to fifteen) after the citation it completes, with no heading between */
   ibidFar: 0.05,
+  /**
+   * "ברכות יג: ד"ה והא" with no commentator's name (issue #41 B7): the ד"ה is some commentary's words on the daf; the daf itself is
+   * linked, a coarse target — at most "possible", like a unit cited by name
+   */
+  diburNoCommentator: 0.16,
+  /**
+   * "הוריות 10 סעיפים" (issue #41 B8): one bare Arabic number between a name that is also a word and a Hebrew word — as often a count
+   * of that word as an address; at most "possible"
+   */
+  quantityLike: 0.16,
+  /**
+   * a siman of a book in parts of the Shulchan Aruch (by its headings), with no part in the context (issue #42 C20): the simanim
+   * restart in each part, and only one part's was found — at most "possible" (a book by headings already pays 0.1)
+   */
+  partUndecided: 0.06,
+  /**
+   * loose forms read in the V7 round (issue #42 C21): one bare numeral where the words end ("בראשית א.", "ויקרא רבה ג"), a name
+   * that is also a numeral outside brackets ("שמ"א ג ד") — each was no place before, for a reason (prose writes them): "possible"
+   */
+  looseForm: 0.16,
 } as const;
 
 export interface Pending {
   readonly citation: Citation;
   /** fallback: a unit cited by name whose location was not found (the unit is linked); addressed: its location was; dibur: the ד"ה's line was found */
-  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean }[];
+  /** partUndecided: found in one part of a book in parts of the Shulchan Aruch, and the context names none (issue #42 C20) */
+  readonly resolved: { target: AliasTarget; res: Resolution; heRef: string | null; fallback?: boolean; addressed?: boolean; dibur?: boolean; partUndecided?: boolean }[];
   /** books whose index could not be read or had no structure */
   unindexed: number;
+  /** the place was found only in another part of the Shulchan Aruch than the context's (issue #42 C20) */
+  partMismatch?: { want: string; found: string };
   /** the numbers' other reading ("פ"ב" as 82) names a place in one of the candidate books */
   altElsewhere?: boolean;
 }
@@ -348,7 +371,8 @@ export class CitationRun {
           }
         }
         if (p.citation.unit) {
-          const res = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
+          const found = resolveUnit(p.citation, t, index, this.units.byBook.get(book.key) ?? bookUnits ?? null);
+          const res = found && { ...found, r: contentStart(found.r, index, heRefAt) };
           if (res) p.resolved.push({ target: t, res: res.r, heRef: res.r.line === res.r.end && heRefAt ? heRefAt(res.r.line) : null, ...(res.fallback && { fallback: true }), ...(res.addressed && { addressed: true }) });
           else if (!index || index.via === "none") p.unindexed++;
           continue;
@@ -364,7 +388,7 @@ export class CitationRun {
           const chapters = (this.units.byBook.get(book.key) ?? bookUnits ?? []).filter((x) => x.kind === "chapter");
           // "פרק בתרא": the last chapter
           const u = n === 0 ? chapters.at(-1) : chapters.find((x) => x.ordinal === n);
-          if (u) p.resolved.push({ target: t, res: { book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, heRef: null });
+          if (u) p.resolved.push({ target: t, res: contentStart({ book, line: u.line, end: u.end, leaf: false, wholeDaf: false, amudFromBareLetter: false, label: `${book.title}, פרק ${u.name}`, via: "named", daf: true }, index, heRefAt), heRef: null });
           continue;
         }
         // "[בב"ש שער ג']": a book's own level named by its word ("כלל", "שער") is read by the position of the
@@ -374,13 +398,25 @@ export class CitationRun {
         // book_acronym is too noisy to trust without the target's own references: a database name
         // located only by headings ("בתרא" → a commentary's headings) is not a reading
         if (res && res.via === "headings" && t.tier === "acronym") continue;
+        // a book in parts of the Shulchan Aruch, by its headings ("משכנות יעקב": יורה דעה, then glosses on חושן משפט): the siman found
+        // is in one part. Another part in the context — not this place (issue #42 C20); no part in it — not sure which (below).
+        // A part written in the citation itself was asked of the index already (t.section)
+        let partUndecided = false;
+        if (res?.part && index.parts && !t.section) {
+          const want = p.citation.partContext;
+          if (want && want !== res.part) {
+            p.partMismatch = { want, found: res.part };
+            continue;
+          }
+          partUndecided = !want;
+        }
         // "תהלים פ"ו", "תה' פ' ב": the numbers have a second reading; it costs only when some book the name may
         // mean has that place too — this one, or another candidate ("בכתובות פ"ב": chapter 2 of the Mishna, or
         // daf 82 of the Bavli). In a midrash rabbah "פי"א" is its parsha 11, the way it is cited.
         const alt = !res?.daf && p.citation.rule !== "midrash-rabbah" ? alternativeReading(p.citation.elems) : null;
         const other = alt ? index.resolve(alt, t.collection, t.section) : null;
         if (other && (!res || other.line !== res.line || other.end !== res.end)) p.altElsewhere = true;
-        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null });
+        if (res) p.resolved.push({ target: t, res, heRef: res.line === res.end && heRefAt ? heRefAt(res.line) : null, ...(partUndecided && { partUndecided: true }) });
       }
     }
   }
@@ -411,6 +447,13 @@ export class CitationRun {
       // an ibid follows the book its antecedent was linked to
       // (one moved to a commentator — "רש"י שם ד"ה" — is in that commentary, not in the antecedent's book)
       if (c.ibidOf !== undefined && chosenBook.has(c.ibidOf) && !c.commentator) options = options.filter((o) => o.target.book.key === chosenBook.get(c.ibidOf!));
+      if (!options.length && p.partMismatch && !p.resolved.length) {
+        counts.noLocation++;
+        const list = unmatched.get(c.line) ?? [];
+        list.push({ code: "citations/part-mismatch", text: `"${c.text}": בספר ${c.candidates.map((x) => x.book.title).slice(0, 3).join(" / ")} המקום נמצא רק בחלק ${p.partMismatch.found}, וההקשר מדבר על ${p.partMismatch.want}. הספר מחולק לפי חלקי השולחן ערוך והסימנים מתחילים מחדש בכל חלק, ולכן לא קושר. אם זה המקום, קשרו אותו ביד.` });
+        unmatched.set(c.line, list);
+        continue;
+      }
       if (!options.length) {
         const why = p.resolved.length
           ? `"${c.text}": המקום שאליו מפנה ה"שם" לא נמצא בספר של ההפניה הקודמת`
@@ -424,7 +467,7 @@ export class CitationRun {
         unmatched.set(c.line, list);
         continue;
       }
-      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
+      const scored = options.map((o) => ({ ...o, score: scoreOf(c, o.target, o.res, o.addressed, !!p.altElsewhere) - (o.fallback ? PENALTY.unitFallback : 0) - (o.partUndecided ? PENALTY.partUndecided : 0) })).sort((a, b) => b.score - a.score || tierOrder(a.target) - tierOrder(b.target));
       const best = scored[0]!;
       // the same book reached through two names (a title and an acronym) is not a rival
       const rival = scored.find((o) => o.target.book.key !== best.target.book.key);
@@ -436,16 +479,18 @@ export class CitationRun {
         continue;
       }
       const res = best.res;
-      // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1)
-      const ranged = this.opts.ranges && res.end > res.line && !this.sefariaOwned(res.book);
-      // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
-      const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
-      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
       const inlineMode = this.opts.citationType === "inline-linker";
       const allowAnchor = this.anchorPolicy(res.book, anchorsAllowed);
       const anchor: RawAnchor | undefined = allowAnchor && !this.notesLines.has(c.line) ? { rawStart: c.rawStart, rawEnd: c.rawEnd } : undefined;
       // INLINE_LINKER needs the anchor (start and end after it): without one the suggestion stays a REFERENCE
       const inline = inlineMode && anchor !== undefined && c.rawEnd > c.rawStart;
+      // no range into a Sefaria book: the weekly sync remaps only the start line from ref_2, so the end would drift (B1). An
+      // INLINE_LINKER record never reaches the sync (private use only, LINK_FORMATS §1.12, which allows its line_index_2_end):
+      // "בראשית א, א-ג" is the three verses there (issue #42 C17)
+      const ranged = this.opts.ranges && res.end > res.line && (inline || !this.sefariaOwned(res.book));
+      // a unit cut on a Sefaria side: its first line that can carry a ref_2 (an alt_toc chapter may start on a line without a heRef)
+      const firstRef = !ranged && this.opts.ranges && res.end > res.line ? firstRefIn(res.line, res.end, this.refBlocks.get(res.book.key)) : { line: res.line };
+      const target: LinkSide = ranged ? { book: res.book, line: res.line, end: res.end } : { book: res.book, line: firstRef.line };
       // the id names the span (raw offsets in the line) even without an anchor, so a measure or a
       // reviewer can tell two mentions in one line apart; two mentions of the same place in one line
       // without anchors are still ONE link
@@ -463,6 +508,10 @@ export class CitationRun {
       if (firstRef.reason) {
         reasons.push(firstRef.reason);
         rules.push("citations.first-ref");
+      }
+      if (best.partUndecided && res.part) {
+        rules.push("citations.part-undecided");
+        warnings.push({ code: "citations/part-undecided", text: `הספר מחולק לפי חלקי השולחן ערוך, והסימן נמצא בחלק ${res.part}. ההקשר אינו אומר איזה חלק, ולכן ייתכן שהכוונה לסימן בחלק אחר` });
       }
       if (rival && confidence === "ambiguous") warnings.push({ code: "citations/ambiguous", text: `השם "${c.name}" מתאים גם ל${rival.target.book.title}, ושם המקום קיים גם כן` });
       suggestions.push({
@@ -532,12 +581,15 @@ export class CitationRun {
   private anchorPolicy(target: BookRef, cache: Map<string, boolean>): boolean {
     const hit = cache.get(target.key);
     if (hit !== undefined) return hit;
-    // INLINE_LINKER (private use): the offsets are in the user's own source line, so the target may be a Sefaria book
+    // INLINE_LINKER (private use): the offsets are in the user's own source line, so the target may be a Sefaria book.
+    // A book of a personal database (origin "personal") too (issue #41 B9): Otzaria's personal import places such a book (an
+    // attached database, docs/contracts/LINK_FORMATS.md §1.12) — but only as INLINE_LINKER, which validateLink accepts for a
+    // PRIVATE export alone; a "reference" from it stays anchorless, as the library is not where its links go
+    const inline = this.opts.citationType === "inline-linker";
     const ok =
       this.opts.anchors === "auto" &&
-      this.source.origin === "otzaria" &&
-      !this.sefariaOwned(this.source) &&
-      (this.opts.citationType === "inline-linker" || (target.origin === "otzaria" && !this.sefariaOwned(target)));
+      ((this.source.origin === "otzaria" && !this.sefariaOwned(this.source)) || (inline && this.source.origin === "personal")) &&
+      (inline || (target.origin === "otzaria" && !this.sefariaOwned(target)));
     cache.set(target.key, ok);
     return ok;
   }
@@ -549,6 +601,11 @@ export class CitationRun {
     if (!without && this.opts.citationType === "inline-linker")
       return { code: "citations/inline-linker", text: 'כל קישור הוא "ציטוט בטקסט": מילות ההפניה בשורה מסומנות ויוצגו באוצריא כקישור שנפתח בלחיצה. הסוג הזה מוכר רק לייבוא האישי של אוצריא: בייצוא לספרייה הקישורים יוחזקו, ולכן ייצאו אותם בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote() };
     if (!without) return { code: "citations/anchors", text: "כל קישור מסמן את מילות ההפניה בשורה (עוגן), כך שבאוצריא הן יוצגו כקישור בתוך הטקסט." };
+    if (this.source.origin === "personal")
+      return {
+        code: "citations/anchors-source",
+        text: 'ספר המקור הוא ספר ממסד אישי, ולכן קישור מסוג "הפניה" נכתב בלי עוגן על מילות ההפניה (הוא יוצג בפאנל הקישורים). כדי שהמילים יסומנו ויהיו לחיצות בתוך הטקסט, בחרו בסוג הקישור "ציטוט בטקסט" וייצאו לשימוש פרטי: ייבוא אישי באוצריא יודע לאתר ספרים של מסד מצורף. ' + inlineLinkerVersionNote(),
+      };
     if (this.source.origin !== "otzaria" || this.sefariaOwned(this.source))
       return { code: "citations/anchors-source", text: "ספר המקור אינו ספר של ספריית אוצריא, ולכן הקישורים נכתבים בלי עוגן על מילות ההפניה (הם יוצגו בפאנל הקישורים)." };
     return { code: "citations/anchors-sefaria", text: "קישורים לספרי ספריא נכתבים בלי עוגן על מילות ההפניה: הספרייה אינה מקבלת עוגן בקישור מספר אוצריא אל ספר ספריא. הם יוצגו בפאנל הקישורים." };
@@ -568,6 +625,21 @@ function alternativeReading(elems: readonly AddrElem[]): AddrElem[] | null {
 }
 
 const SECTION_KINDS: ReadonlySet<string> = new Set(["klal", "shaar", "maamar", "remez", "piska", "drush", "teshuva"]);
+
+/** how far past a unit's first line its first line of content is looked for (a chapter heading, an amud heading, a title) */
+const MAX_HEADING_SKIP = 8;
+
+/**
+ * A unit cited whole starts at its first line of CONTENT (issue #42 C18). A chapter's alt_toc entry (a unit cited by name, a
+ * chapter by number) is often its heading line, and the export holds a link with a heading at either end (export/heading-line):
+ * 35 of 24,619 suggestions of a sample began on one. In a book indexed by its references a heading is a line with no heRef —
+ * the first line under it that has one is where the unit's text begins. The reference index's own nodes already begin there.
+ */
+function contentStart(r: Resolution, index: TargetIndex | null, heRefAt: ((line: number) => string | null) | undefined): Resolution {
+  if (!heRefAt || index?.via !== "heref" || r.end <= r.line || heRefAt(r.line)) return r;
+  for (let l = r.line + 1, last = Math.min(r.end, r.line + MAX_HEADING_SKIP); l <= last; l++) if (heRefAt(l)) return { ...r, line: l };
+  return r;
+}
 
 const isDafElem = (e: AddrElem): boolean => e.kind === "daf" || e.amud !== undefined;
 
@@ -698,6 +770,10 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
   if (t.otherWork) s -= PENALTY.otherWork;
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
+  // "ושם ע"ב ד"ה" after a commentary's own book (detect.ts ibidAmud): the start of its amud, the ד"ה not placed — as coarse as B7
+  if (c.rule === "dibur-no-commentator" || c.rule === "ibid-amud-dibur") s -= PENALTY.diburNoCommentator;
+  if (c.quantityLike) s -= PENALTY.quantityLike;
+  if (c.rule === "single-bare" || c.rule === "numeric-name-verse") s -= PENALTY.looseForm;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
   if (c.rule === "dibur-context" && c.ibid === "none") s -= PENALTY.baseDaf;
   // "רש"י ד"ה X" with no daf at all: the daf the citing line is on — told by the context, like "שם"
@@ -777,7 +853,11 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "yalkut-parsha": "\"ילקוט\" ואחריו פרשה בתורה, בלי רמז: כל הפרשה בילקוט שמעוני על התורה",
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
+  "ibid-amud-dibur": "\"ושם ע\"ב ד\"ה\" אחרי הפניה לפירוש עצמו: העמוד האחר של הדף בפירוש הזה. הד\"ה לא אותר בעמוד, ולכן הקישור הוא לתחילת העמוד, גס (לכל היותר \"אפשרית\"); בדקו באיזו שורה בעמוד מתחיל הד\"ה",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
+  "single-bare": "אחרי שם של ספר בתנ\"ך או של מדרש רבה נכתב מספר אחד בלבד, בלי סימן ובלי סוגריים, במקום שהמשפט נגמר בו: הפרק (הפרשה) כולו. צורה רופפת, ולכן לכל היותר \"אפשרית\"",
+  "numeric-name-verse": "שם הספר הוא גם מספר (\"שמ\"א\"), ואחריו שני מספרים בלי סוגריים: פרק ופסוק. צורה רופפת, ולכן לכל היותר \"אפשרית\"",
+  "dibur-no-commentator":"אחרי המקום כתוב ד\"ה בלי שם של מפרש: המילים הן של פירוש כלשהו על הדף, ולא כתוב איזה. הקישור הוא לדף עצמו, ולכן הוא גס (לכל היותר \"אפשרית\"); אם תדעו מי המפרש, קשרו לפירוש שלו",
   "responsa-named": "שם המחבר ומילה לתשובות (\"בתשו'\", \"שו\"ת\") לפני הסימן: ספר התשובות שלו בספרייה",
   "responsa-author": "שם המחבר לפני הסימן, וספר התשובות הוא החיבור היחיד שלו בספרייה",
   "implicit-previous": "נכתב מקום בסוגריים בלי שם ספר, ולכן הוא נקרא בספר של ההפניה שלפניו (כמו \"שם\")",
@@ -869,6 +949,10 @@ function explain(c: Citation, t: AliasTarget, r: Resolution, narrowed: "sefaria"
   }
   if (c.evidence === "medium") warnings.push({ code: "citations/bare-numbers", text: "המקום כתוב במספרים בלי סימן (פרק, סימן, דף) ובלי גרשיים" });
   if (c.numericName) warnings.push({ code: "citations/numeric-name", text: `השם "${c.name}" יכול להיקרא גם כמספר` });
+  if (c.quantityLike) {
+    rules.push("citations.quantity-like");
+    warnings.push({ code: "citations/quantity-like", text: "המקום הוא מספר אחד בספרות, בלי סימן ובלי סוגריים, ואחריו מילה: ייתכן שזו כמות (\"10 סעיפים\") ולא מקום. בדקו לפני שאתם מאשרים" });
+  }
   if (c.elems.some((e) => e.numeral.common && !e.explicit)) warnings.push({ code: "citations/common-word-number", text: "אחד המספרים הוא גם מילה רגילה" });
   if (t.collection === "other" && !r.daf && c.elems.some((e) => e.kind === "?")) warnings.push({ code: "citations/generic-book", text: "הספר אינו מהקבצים המוכרים (תנ\"ך, ש\"ס, רמב\"ם, שולחן ערוך), והמספרים הותאמו לרמות הספר לפי הסדר" });
   if (anchored) {

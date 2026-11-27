@@ -78,3 +78,20 @@ describe("discoverPairs — how the base was decided (selection)", () => {
     expect(out.summary.bySelection).toEqual({ confirmed: 0, review: 1, ambiguous: 0 });
   });
 });
+
+describe("discoverPairs — editions under equivalent titles (#42 C12, V7 §2.8)", () => {
+  it("official 'ברכות' and personal 'מסכת ברכות': ambiguous, the other edition named, the confidence low", () => {
+    const p = one([b("p:1", "ספר נר על ברכות", "personal"), b("o:1", "ברכות", "otzaria", { lineCount: 2875 }), b("q:2", "מסכת ברכות", "personal", { lineCount: 2779 })], "p:1");
+    expect(p.base.key).toBe("o:1");
+    expect(p.selection).toBe("ambiguous");
+    expect(p.markers).toContain("ambiguous-title");
+    expect(p.sameTitleKeys).toEqual(["q:2"]);
+    expect(p.confidence).toBe("low");
+  });
+
+  it("another corpus ('משנה ברכות') is another book: not ambiguous", () => {
+    const p = one([b("p:1", "ספר נר על ברכות", "personal"), b("o:1", "ברכות", "otzaria"), b("o:2", "משנה ברכות", "otzaria")], "p:1");
+    expect(p.base.key).toBe("o:1");
+    expect(p.markers).not.toContain("ambiguous-title");
+  });
+});

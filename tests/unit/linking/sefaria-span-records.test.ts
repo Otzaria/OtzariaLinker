@@ -89,10 +89,11 @@ describe("the engines write a cut span by that one rule", () => {
     expect(long!.reasons.map((x) => x.code)).toEqual(expect.arrayContaining(["heading/range-sefaria", "range/sefaria-first-ref"]));
     expect(long!.rules).toContain("headings.first-ref");
     // still never "certain": the records are not the exact place (capSpanned)
-    for (const s of r.suggestions) {
-      expect(s.confidence).not.toBe("certain");
-      expect(s.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
-    }
+    expect(short!.confidence).toBe("high");
+    expect(short!.warnings.map((w) => w.code)).toContain("range/sefaria-not-exact");
+    // the long chapter (26 lines) is wider than RANGE_WIDTH.highMax: "possible", and the width says why (#42 C15)
+    expect(long!.confidence).toBe("possible");
+    expect(long!.warnings.map((w) => w.code)).toContain("heading/wide-range");
   });
 
   it("a base the library does not treat as Sefaria's keeps its range, with no records and no reason", () => {

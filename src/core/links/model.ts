@@ -58,6 +58,27 @@ export interface LinkMatched {
   readonly target?: { readonly rawStart: number; readonly rawEnd: number };
 }
 
+/**
+ * "This passage continues the previous one" (V7 §2.13, issue #44): how a link came to cover a line the user marked as
+ * the continuation of the passage before it. A note for the screens (where it was inherited from) and for cancelling
+ * the continuation; it lives in the saved project only and is NEVER in an exported record (convert.ts writes named
+ * fields only), so the library's file format is unchanged.
+ */
+export interface LinkContinuation {
+  /** "copy": a new link made for the continuing line from the link `from`; "extend": this link's range was extended over it */
+  readonly kind: "copy" | "extend";
+  /** the side of the link that lies in the passage's book */
+  readonly side: "source" | "target";
+  /** 0-based line of the previous passage (the last line the link covered before) */
+  readonly fromLine: number;
+  /** copy: the id of the link it was inherited from (it may be gone since) */
+  readonly from?: string;
+  /** extend: the range end that side had before the FIRST continuation (absent: a single line) */
+  readonly baseEnd?: number;
+  /** extend: the link was an untouched record of the library's file before, so a cancel makes it untouched again */
+  readonly baseStatus?: "existing";
+}
+
 /** An anchor read from link_anchor in a database: VISIBLE offsets, possibly on either stored side. */
 export interface DbAnchor {
   readonly side: 0 | 1;
@@ -108,6 +129,8 @@ export interface Link {
   readonly anchor?: RawAnchor;
   /** an approved suggestion's matched words, so the readers can show them again after a save and a reopen (see LinkMatched) */
   readonly matched?: LinkMatched;
+  /** the passage this link continues (issue #44); a note only, never exported (see LinkContinuation) */
+  readonly continued?: LinkContinuation;
   readonly dbAnchors?: readonly DbAnchor[];
   /** database links only: the table the row was read from (a database can have both; the id says it too, this says it typed) */
   readonly dbTable?: DbLinkTable;

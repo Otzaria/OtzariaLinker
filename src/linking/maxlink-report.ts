@@ -1,4 +1,5 @@
 import { humanCsvCell } from "../core/csv";
+import type { PairFitReport } from "./pair-fit";
 import type { BookRef } from "../core/links/model";
 import { ENGINES, type EngineId, type EngineResult, type Reason } from "./automatic";
 import type { MergedSuggestion, MergeStats } from "./merge";
@@ -25,6 +26,8 @@ export interface StepResult {
   ms: number;
   /** the job was cancelled while this step ran: its result is what the engine found until then */
   stopped?: boolean;
+  /** the pair check of the step's pair (linking/pair-fit.ts, #42 C10): "unsuitable" steps carry no suggestions unless the user named the pair */
+  pairFit?: PairFitReport;
 }
 
 export interface MaxLinkJobResult {

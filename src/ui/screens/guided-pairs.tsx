@@ -1,7 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { BookRef } from "../../core/links/model";
 import { ENGINES } from "../../linking/automatic";
-import { CONFIDENCE_LABELS } from "../../linking/automatic";
+import { CONFIDENCE_LABELS, type SourceFilter } from "../../linking/automatic";
+import { LINE_FILTER_CHOICES } from "../../linking/automatic/option-specs";
 import { notesBaseTitle, pairMethodKey, type PairControl, type PairEngineId, type PlanStep, type PlanUnsuitable } from "../../linking/plan";
 import { durationText } from "../../state/guided-flow";
 import { TypeOptions } from "../workspace/type-options";
@@ -121,6 +122,22 @@ export function PairChoices() {
             <b>לכפות דיבור המתחיל לכל הזוגות</b>
             <span class="muted"> — במקום שיטת הכותרות.</span>
           </span>
+        </label>
+        <label class="field">
+          אילו שורות של הספרים מקושרות
+          {/* the run's line filter (issue #27, findings #40 A1): every method of every pair obeys it; a regular expression of the user's is in the workspace form */}
+          <select
+            value={g.lineFilter.value && "preset" in g.lineFilter.value.prefix ? g.lineFilter.value.prefix.preset : ""}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              g.setLineFilter(v ? ({ prefix: { preset: v } } as SourceFilter) : null);
+            }}
+          >
+            {LINE_FILTER_CHOICES.filter(([v]) => v !== "regex").map(([v, label]) => (
+              <option key={v} value={v}>{label}</option>
+            ))}
+          </select>
+          <span class="muted">הסינון חל על כל השיטות ועל כל הזוגות: שורה שאינו כולל לא תקבל הצעה.</span>
         </label>
         {forceDh && (
           <p class="pair-force-note warn-text" role="status">

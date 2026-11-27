@@ -1,9 +1,11 @@
+import { sefariaOwnedOf } from "../../core/links/sefaria-owned";
+import { applyRunRanges, RUN_RANGE_MODES, type RunRangeBook, type RunRangeMode, type RunRangeOptions } from "../ranges";
 import type { CitationsOptions } from "./citations";
 import { diburHamatchilSteps, type DhOptions } from "./dibur-hamatchil";
 import { runFootnotesEngine, type FootnotesOptions } from "./footnotes";
 import { headingsSteps, type HeadingsOptions } from "./headings";
 import { runPatternEngine, type PatternOptions } from "./pattern";
-import { applySourceFilter, compileSourceFilter, parseSourceFilter, previewSourceFilter } from "./source-filter";
+import { compileForEngine, LineGate, SOURCE_FILTER_OPTION } from "./source-filter";
 import { runSliced, runToEnd, type EngineSteps } from "./steps";
 import type { EngineBook, EngineContext, EngineId, EngineResult } from "./types";
 
@@ -100,19 +102,48 @@ export function runEngineSliced(id: EngineId, source: EngineBook, target: Engine
  * passes over the lines (milliseconds to a second) and run as one step.
  */
 export function* engineSteps(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown> = {}, ctx: EngineContext = {}): EngineSteps<EngineResult> {
-  // a source filter (issue #27, source-filter.ts) decides which lines of the SOURCE enter the engine, and reads the words after a marker;
-  // the engine is given the same book with the same line indexes and lengths, so its output refers to the original lines
-  const { sourceFilter, ...engineOptions } = options;
-  if (sourceFilter === undefined) return yield* runEngineSteps(id, source, target, options, ctx);
-  const spec = parseSourceFilter(sourceFilter);
-  if (!spec) throw Object.assign(new Error("הגדרת סינון השורות אינה תקינה: צריך סימן מוכר או ביטוי רגולרי."), { code: "source-filter/invalid" });
-  const compiled = compileSourceFilter(spec, { strip: id === "dibur-hamatchil" });
-  if (!compiled.ok) throw Object.assign(new Error(compiled.reason), { code: "source-filter/invalid" });
-  const filtered = applySourceFilter(source, compiled.filter);
-  const seen = previewSourceFilter(source.lines, compiled.filter, 0);
-  const r = yield* runEngineSteps(id, filtered, target, engineOptions, ctx);
-  const note = { code: "source-filter/applied", text: `סינון שורות המקור: ${seen.included.toLocaleString("he")} מתוך ${seen.total.toLocaleString("he")} שורות נכנסו לשיטה (${compiled.filter.mode === "include" ? "רק שורות שמתחילות בסימן" : "כל השורות פרט לאלה שמתחילות בסימן"}); הקישור והעוגן נשארים על השורה המקורית.${compiled.filter.strip ? " הסימן עצמו לא נחשב בהתאמה." : ""}` };
-  return { ...r, notes: [note, ...r.notes] };
+  // the line filter of the run (issue #27, findings #40 A1; source-filter.ts LineGate): which lines of the SOURCE may carry a link, the
+  // book as this engine reads it (same indexes, same lengths, so its output refers to the original lines), and the guard on what it proposes
+  // the ranges of the run (linking/ranges.ts applyRunRanges, v3 F-104): set on what the engine proposed, before the guard, so that a
+  // range "until the next match" over a line the filter excludes is trimmed there (LineGate.rangeEnd)
+  const { [SOURCE_FILTER_OPTION]: sourceFilter, sourceRange, targetRange, ...engineOptions } = options;
+  const ranges = runRangeOptions(sourceRange, targetRange);
+  // "the next match" is one the guard keeps: a suggestion it drops does not end a range (V7 round 2 review, finding 10)
+  const ranged = (r: EngineResult, gate?: LineGate): EngineResult => {
+    if (!ranges) return r;
+    const owned = sefariaOwnedOf(options["sefariaOwned"] as readonly string[] | undefined);
+    const out = applyRunRanges(r.suggestions, { source: rangeBookOf(source, owned(source.book)), target: rangeBookOf(target, owned(target.book)) }, ranges, gate && ((s) => gate.keeps(s)));
+    return { ...r, suggestions: out.suggestions, notes: [...r.notes, ...out.notes] };
+  };
+  if (sourceFilter === undefined) return ranged(yield* runEngineSteps(id, source, target, engineOptions, ctx));
+  const gate = new LineGate(source.book.key, compileForEngine(sourceFilter, id), ENGINES.find((e) => e.id === id)?.evidence !== "structure");
+  const r = ranged(yield* runEngineSteps(id, gate.book(source), target, engineOptions, ctx), gate);
+  const guarded = gate.guard(r);
+  return { ...guarded, notes: [gate.note(), ...guarded.notes] };
+}
+
+/** The run's range options, checked (a value no form can make is an error, never ignored); null when both are the engine's. */
+function runRangeOptions(sourceRange: unknown, targetRange: unknown): RunRangeOptions | null {
+  const check = (v: unknown): RunRangeMode | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v === "string" && (RUN_RANGE_MODES as readonly string[]).includes(v)) return v as RunRangeMode;
+    throw Object.assign(new Error("הגדרת הטווחים של ההרצה אינה מוכרת: בחרו \"כמו שהשיטה מציעה\", \"שורה אחת\" או \"עד ההתאמה הבאה\"."), { code: "engine/invalid-option" });
+  };
+  const s = check(sourceRange);
+  const t = check(targetRange);
+  if ((s ?? "engine") === "engine" && (t ?? "engine") === "engine") return null;
+  return { ...(s && { sourceRange: s }), ...(t && { targetRange: t }) };
+}
+
+/** A book of the run as the range rule reads it: its length (the last line read) and its heading lines. */
+function rangeBookOf(b: EngineBook, sefaria: boolean): RunRangeBook {
+  const headings = new Set<number>();
+  let last = -1;
+  for (const l of b.lines) {
+    if (l.heading !== null) headings.add(l.index);
+    if (l.index > last) last = l.index;
+  }
+  return { key: b.book.key, lineCount: last + 1, headings, sefaria };
 }
 
 function* runEngineSteps(id: EngineId, source: EngineBook, target: EngineBook, options: Record<string, unknown>, ctx: EngineContext): EngineSteps<EngineResult> {
@@ -134,6 +165,6 @@ function* runEngineSteps(id: EngineId, source: EngineBook, target: EngineBook, o
 }
 
 export * from "./types";
-export { applySourceFilter, compileSourceFilter, parseSourceFilter, previewSourceFilter, type SourceFilter, type SourceFilterPreview } from "./source-filter";
+export { applySourceFilter, compileForEngine, compileSourceFilter, LineGate, parseSourceFilter, previewSourceFilter, runLineFilter, SOURCE_FILTER_OPTION, type SourceFilter, type SourceFilterPreview } from "./source-filter";
 export { runSliced, runToEnd, SLICE_MS, type EngineSteps } from "./steps";
 export * from "./sort";

@@ -1,4 +1,4 @@
-import { fromGematria } from "../../../core/text/gematria";
+import { fromGematria, toGematria } from "../../../core/text/gematria";
 import { MAX_CUSTOM_REGEX_INPUT, checkCustomPattern } from "../../../core/text/safe-regex";
 import { unitAt, visibleBetween, visibleMap, type VisibleMap } from "../../../core/text/visible-map";
 
@@ -445,6 +445,45 @@ export function leadingMarker(text: string, style: MarkerStyle | CompiledStyle |
   const star = /^\*{1,3}(?=\s)/.exec(rest);
   if (star) return at(star[0].length, parseMarkerToken(star[0])!);
   return taggedLead(html, map, lead, opts);
+}
+
+/*
+ * Hebrew numerals that are also common words at the start of a line ("לא", "מה", "לו"…). Only the canonical spelling of a number is
+ * read as a bare letter marker at all (toGematria: "יב", never "זה"), so these are the canonical spellings that are words.
+ */
+const BARE_STOP_WORDS = new Set(["לא", "לב", "לה", "לו", "מה", "עד", "יד", "נח", "כה", "כד", "מט", "נב", "נד", "סב"]);
+
+/** A Hebrew numeral that is also a common word ("לא", "מה"): as a bare marker it counts only where exactly that number is due. */
+export const numeralIsWord = (token: string): boolean => BARE_STOP_WORDS.has(token.replace(/["'״׳]/g, ""));
+
+/**
+ * A note line that opens with a bare number and a space — "12 text", "יב text" — the shape in which the v52 personal database writes
+ * the notes of אנציקלופדיה תלמודית (#41 B12, issue #14). A CANDIDATE only: prose opens with numbers too ("40 שנה…", "1990"), so the
+ * engine accepts it only where it continues the series of the book's notes (footnotes/engine.ts bareSeries). Up to four digits: a
+ * long entry of אנציקלופדיה תלמודית in v52 runs past note 1000 (a year such as "1990" opens no series: bareSeries). Hebrew letters only
+ * in the canonical spelling of a number and not a common word (`words`: a common word too, for the engine to weigh: numeralIsWord).
+ * The span is the number alone, as the generator counts it.
+ */
+export function bareLeadingMarker(text: string, opts: DetectOptions = {}, words = false): Marker | null {
+  const html = String(text ?? "");
+  const map = visibleMap(html);
+  const lead = /^\s*/.exec(map.text)![0].length;
+  const m = /^(\d{1,4}|[א-ת]{1,3}(?:["״][א-ת])?['׳]?)(?=\s+[^\s\d])/.exec(map.text.slice(lead));
+  if (!m) return null;
+  const len = m[1]!.length;
+  // the number is one run of visible characters, with no tag inside it ("1<b>2</b>" is not "12")
+  for (let k = lead; k < lead + len - 1; k++) if (map.ends[k] !== map.starts[k + 1]) return null;
+  const p = parseMarkerToken(m[1]!);
+  if (!p || p.numbering === "stars" || !accept(p, opts)) return null;
+  if (p.numbering === "letters") {
+    const plain = p.token.replace(/["'״׳]/g, "");
+    if ((!words && BARE_STOP_WORDS.has(plain)) || plain !== toGematria(p.num)) return null;
+  }
+  const rawStart = map.starts[lead]!;
+  const rawEnd = map.ends[lead + len - 1]!;
+  // a number in <sup>/<sub> is a tagged marker (leadingMarker), not a bare one
+  if (/<\s*su[pb]\b[^<>]*>\s*$/i.test(html.slice(0, rawStart))) return null;
+  return { rawStart, rawEnd, visible: visibleBetween(map, rawStart, rawEnd), ...p, style: "leading" };
 }
 
 /** A number in its own element at the very start of the line: `<sup>א</sup> text`, `<b>12</b> text`. */

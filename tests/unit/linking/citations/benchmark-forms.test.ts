@@ -87,11 +87,18 @@ describe("a commentator's ד\"ה", () => {
     expect(cs[2]!.rule).toBe("ibid-amud");
     expect(cs[2]!.dh).toEqual(["אלא", "כתבו"]);
   });
-  it('"ושם ע"ב" after the Gemara is its other amud; with a ד"ה and no commentator, nothing', () => {
+  // V7 round 2 (C21): with a ד"ה and no commentator it was dropped; now, as "ב"ק כ"ג ע"ב ד"ה" (#41 B7), the amud itself, marked so that
+  // the engine keeps it at "possible" (engine.ts PENALTY.diburNoCommentator)
+  it('"ושם ע"ב" after the Gemara is its other amud; with a ד"ה and no commentator, the amud, as a ד"ה with no commentator', () => {
     const cs = scan(['כדאמרינן בב"ק כ"ג ע"א', 'ושם ע"ב אמרו']);
     expect(books(cs[1])).toEqual(["bk"]);
     expect(loc(cs[1])).toBe("daf:23b");
-    expect(scan(['כדאמרינן בב"ק כ"ג ע"א', 'ושם ע"ב ד"ה אלא'])).toHaveLength(1);
+    expect(cs[1]!.rule).toBe("ibid-amud");
+    const dh = scan(['כדאמרינן בב"ק כ"ג ע"א', 'ושם ע"ב ד"ה אלא']);
+    expect(dh).toHaveLength(2);
+    expect(books(dh[1])).toEqual(["bk"]);
+    expect(loc(dh[1])).toBe("daf:23b");
+    expect(dh[1]!.rule).toBe("dibur-no-commentator");
   });
   it('"רש"י ד"ה X" with no daf: the daf of the citing line, in a commentary on the tractate', () => {
     const [c] = scan([['רש"י ד"ה ואי מאי קאמר', "חידושים על בבא קמא, כג:, ב"]], "חידושים על בבא קמא");

@@ -96,6 +96,9 @@ test("keyboard only: the guided flow from the home card to the download", async 
   await tabTo(page, /^המשך$/);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#\/guided\/files$/);
+  // the step is announced: focus moves to its heading once the screen has mounted (an effect, after paint). Tab only then —
+  // a Tab pressed in between was overtaken by that move, and the next stop was the heading (no outline, not a Tab stop)
+  await expect(main.getByRole("heading", { level: 2 })).toBeFocused();
   await tabTo(page, /^הספרים: תיקייה$/);
   const chooser = page.waitForEvent("filechooser");
   await page.keyboard.press("Enter");

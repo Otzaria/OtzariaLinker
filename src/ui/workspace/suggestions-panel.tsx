@@ -228,7 +228,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
                   <input type="checkbox" checked={mergeAll} onChange={(e) => setMergeAll(e.currentTarget.checked)} />
                   <span>
                     <b>כל השיטות שמתאימות, מאוחדות</b>
-                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת).</span>
+                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת). סינון השורות שבחרתם חל על כל השיטות.</span>
                   </span>
                 </label>
               )}

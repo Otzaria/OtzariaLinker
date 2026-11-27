@@ -1,4 +1,5 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import type { ContinuePlan } from "../../linking/ranges";
 import { problemText } from "../../core/links/validate";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { storedForm } from "../../core/links/stored-form";
@@ -200,6 +201,7 @@ function End({ side, pick }: { side: Side; pick: Pick | null }) {
         </span>
       )}
       {!pick.anchor && <RangeButtons side={side} pick={pick} />}
+      {!pick.anchor && pick.end === undefined && !store.editing.value && <ContinuePrevious side={side} pick={pick} />}
       {line && <span class="snip">{plainText(line.anchorText)}</span>}
     </div>
   );
@@ -229,6 +231,71 @@ function RangeButtons({ side, pick }: { side: Side; pick: Pick }) {
         <button class="adv-link" onClick={() => (store.pick[side].value = { bookKey: pick.bookKey, line: pick.line })}>בלי טווח</button>
       )}
     </span>
+  );
+}
+
+/**
+ * "This passage continues the previous one" (V7 §2.13, issue #44): the picked line inherits the link(s) of the passage
+ * before it — the range extended over it, or an independent link where the export needs one. A preview first (what
+ * will be extended, copied or skipped), then one undoable step; a heading between the two needs its own confirmation.
+ */
+function ContinuePrevious({ side, pick }: { side: Side; pick: Pick }) {
+  const store = useStore();
+  const [plan, setPlan] = useState<ContinuePlan | null>(null);
+  const [copy, setCopy] = useState(false);
+  const preview = async (asCopy = copy) => {
+    const p = await store.ranges.planContinue(pick.bookKey, side, pick.line, asCopy ? "copy" : "extend");
+    const cur = store.pick[side].value;
+    // the pick may have moved while the headings were read
+    if (!p || !cur || cur.bookKey !== pick.bookKey || cur.line !== pick.line) return;
+    if (p.refused) return void store.ranges.applyContinue(p); // says why
+    setPlan(p);
+  };
+  // a new pick closes an old preview
+  useEffect(() => setPlan(null), [pick.bookKey, pick.line, side]);
+  if (!plan)
+    return (
+      <span style="grid-column:1/-1" class="row">
+        <button class="adv-link" style="display:inline-flex;align-items:center;gap:4px" onClick={() => preview()} title="השורה הזו ממשיכה את הקטע שלפניה: היא תקבל את הקישורים שלו (הרחבת הטווח שלהם, או קישור נפרד כשהייצוא דורש). תוצג תצוגה מקדימה לפני השינוי.">
+          <Icon name="fl_arrow_upload" size={14} /> המשך לקטע הקודם
+        </button>
+      </span>
+    );
+  const n = (a: string) => plan.items.filter((i) => i.action === a).length;
+  const apply = (crossHeading: boolean) => {
+    if (store.ranges.applyContinue(plan, { crossHeading }) !== null) setPlan(null);
+  };
+  return (
+    <div style="grid-column:1/-1" class="continue-preview" role="group" aria-label="תצוגה מקדימה: המשך לקטע הקודם">
+      <p>
+        המשך של שורה {plan.fromLine! + 1}:{" "}
+        {[n("extend") && `${n("extend")} טווחים יורחבו`, n("copy") && `${n("copy")} קישורים נפרדים ייווצרו`, n("skip") && `${n("skip")} ידולגו`].filter(Boolean).join(" · ") || "אין מה לשנות"}
+      </p>
+      <ul class="muted" style="margin:0;padding-inline-start:16px">
+        {plan.items.map((i) => (
+          <li key={i.prev.id}>
+            {side === "source" ? i.prev.heRef2 || i.prev.target.book.title : i.prev.source.book.title}
+            {": "}
+            {i.action === "extend" ? `הטווח יורחב עד שורה ${plan.line + 1}` : i.action === "copy" ? (i.why === "range-refused" ? `קישור נפרד (טווח אינו מתקבל: ${i.detail})` : "קישור נפרד") : i.why === "covered" ? "כבר מגיע לשורה הזו" : "קישור כזה כבר קיים"}
+          </li>
+        ))}
+      </ul>
+      {plan.headings.length > 0 && (
+        <p class="continue-warning" role="alert">
+          <Icon name="fl_warning" size={16} /> בין שורה {plan.fromLine! + 1} לשורה {plan.line + 1} יש כותרת (שורה {plan.headings.map((h) => h + 1).join(", ")}): זו יחידה אחרת.
+        </p>
+      )}
+      <label class="row">
+        <input type="checkbox" checked={copy} onChange={(e) => (setCopy(e.currentTarget.checked), void preview(e.currentTarget.checked))} />
+        קישורים נפרדים במקום הרחבת טווח
+      </label>
+      <span class="row">
+        <button class="btn filled" disabled={!n("extend") && !n("copy")} onClick={() => apply(plan.headings.length > 0)}>
+          {plan.headings.length ? "המשך למרות הכותרת" : "אישור"}
+        </button>
+        <button class="btn text" onClick={() => setPlan(null)}>ביטול</button>
+      </span>
+    </div>
   );
 }
 

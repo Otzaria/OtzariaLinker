@@ -5,6 +5,7 @@ import { looseWord, type NamedUnit, type NamedUnitIndex, type UnitKind } from ".
 import { toGematria } from "../../../core/text/gematria";
 import { numeralOf, strictValue } from "./numbers";
 import { CHAPTER_OPENINGS } from "./knowledge";
+import { partNamed } from "./resolve";
 import { StructureTracker, type InternalRef } from "./self";
 import { citationTokens, hasHebrewText, unifyFinals, wordShape, type Tok } from "./text";
 
@@ -75,6 +76,14 @@ export interface Citation {
   readonly rule?: string;
   /** the chapter was written as an ordinal word ("בפרק קמא דסנהדרין") */
   readonly ordinal?: true;
+  /** one bare Arabic number and a plain Hebrew word after it ("הוריות 10 סעיפים"): maybe a count, not an address */
+  readonly quantityLike?: true;
+  /**
+   * the part of the Shulchan Aruch the context names ("ביו"ד סי' קצ"ו … [משכנות יעקב סי' מ"ג]"): written before the citation in its
+   * line or up to PART_WINDOW lines before, a heading of the citing book, or the part its title is on. A book in parts whose
+   * simanim restart in each is resolved in that part (engine.ts, issue #42 C20).
+   */
+  readonly partContext?: string;
 }
 
 /** A chapter or parsha cited by its name. */
@@ -175,6 +184,12 @@ export class CitationScanner {
   private headingSince = false;
   /** spans that looked like citations but were dropped, by reason (for the notes) */
   readonly dropped = new Map<string, number>();
+  /** the last part of the Shulchan Aruch named: in the text (with its line), or by a heading of the citing book (held until another) */
+  private lastPart: { part: string; line: number; heading: boolean } | null = null;
+  /** the parts named in the line being scanned, by token */
+  private linePart: { at: number; part: string }[] = [];
+  /** the part the citing book's title is on ("פתחי תשובה על שולחן ערוך יורה דעה"), the context's last resort */
+  private readonly titlePart: string | null;
   private readonly ibidOn: boolean;
   private readonly window: number;
   /** the book a commentary is on ("… על גיטין"), the target of "לעיל"/"לקמן"; per line in a book of partBases */
@@ -204,6 +219,7 @@ export class CitationScanner {
     this.structure = new StructureTracker(sourceTitle);
     this.selfTarget = options.self ? { book: options.self, tier: "derived", collection: collectionOf(options.self.title) } : null;
     this.glossary = glossaryOf(sourceTitle);
+    this.titlePart = partNamed(sourceTitle.replace(/,/g, " "));
   }
 
   /** the commentator whose words this book is a glossary of ("אוצר לעזי רש"י" → רש"י), or null */
@@ -222,6 +238,8 @@ export class CitationScanner {
       this.headingSince = true;
       this.structure.heading(heading, text);
       this.contextCache = undefined;
+      const part = partNamed(text);
+      if (part) this.lastPart = { part, line, heading: true };
       return;
     }
     this.structure.content(heRef);
@@ -236,12 +254,30 @@ export class CitationScanner {
     this.lastFar = !!this.last && line - this.last.line > this.window;
     this.headingSince = false;
     this.lastLineSeen = line;
+    // the parts of the Shulchan Aruch this line names ("ביו"ד", "בחושן משפט"), for the context of its citations (partContext)
+    this.linePart = [];
+    for (let i = 0; i < toks.length; i++) {
+      const part = partMentionAt(toks, i);
+      if (part) this.linePart.push({ at: i, part });
+    }
     for (let i = 0; i < toks.length; i++) {
       const t = toks[i]!;
       if (t.kind !== "word") continue;
       const next = this.yalkut(toks, i, line) ?? this.forward(toks, i, line) ?? this.authorPart(toks, i, line) ?? this.responsa(toks, i, line) ?? this.rambamNamed(toks, i, line) ?? this.numericTanakh(toks, i, line) ?? this.otherChapter(toks, i, line) ?? this.named(toks, i, line) ?? this.reversed(toks, i, line) ?? this.relative(toks, i, line) ?? this.internal(toks, i, line) ?? this.dibur(toks, i, line) ?? this.commentatorIbid(toks, i, line) ?? this.bareNamed(toks, i, line) ?? (this.ibidOn ? (this.ibid(toks, i, line) ?? this.implicit(toks, i, line) ?? this.contextDaf(toks, i, line)) : null);
       if (next !== null) i = next - 1;
     }
+    const named = this.linePart.at(-1);
+    if (named) this.lastPart = { part: named.part, line, heading: false };
+  }
+
+  /** The part of the Shulchan Aruch the context of a citation at toks[from] names (Citation.partContext), or undefined. */
+  private partContextAt(from: number, line: number): string | undefined {
+    let here: string | undefined;
+    for (const x of this.linePart) if (x.at < from) here = x.part;
+    if (here) return here;
+    const last = this.lastPart;
+    if (last && (last.heading || line - last.line <= PART_WINDOW)) return last.part;
+    return this.base ? (partNamed(this.base.book.title) ?? this.titlePart ?? undefined) : (this.titlePart ?? undefined);
   }
 
   /**
@@ -331,7 +367,10 @@ export class CitationScanner {
       const ps = sec && !secAddr ? partSiman(toks, sec.next) : null;
       // "(קהלת רבה פרשה ז')", "בויקרא רבה סוף פ"ד", "(ויק"ר רפכ"ב)", "(ב"ר ספמ"ז)": a parasha of a Midrash Rabbah
       const rabbah = !sec && m.entry.targets.length && m.entry.targets.every((t) => isRabbah(t.book.title)) ? rabbahParsha(toks, m.to) : null;
-      const addr = rabbah || secAddr || ps || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      const parsed = rabbah || secAddr || ps || parseAddress(toks, m.to, { enclosed: opensBefore(toks, i), dafLetter: m.entry.targets.some(onBavli) && !m.entry.targets.some((t) => t.book.title === "שבת") });
+      // "בראשית א.", "ויקרא רבה ג": one bare numeral where the words end, after a book by chapters (issue #42 C21) — a loose form
+      const single = sec ? null : singleBareAt(toks, i, m, parsed);
+      const addr = single ?? parsed;
       if (!addr) continue;
       // "ע"ז נ"ב ע"א", "ר"ה לב.": a tractate whose name is a numeral, with a daf and its amud
       // …or "ע"ז כ"ו א'": a quoted daf and a lone amud letter
@@ -340,7 +379,10 @@ export class CitationScanner {
       // "(תה' צט ז)": a Tanakh name that is also a numeral, with chapter and verse in brackets closing after them
       // …or a chapter alone written as a numeral ("(תה' נט)")
       const bracketVerse = opensBefore(toks, i) && addr.closed && (addr.elems.length === 2 || (addr.elems.length === 1 && !addr.elems[0]!.numeral.common)) && addr.elems.every((e) => e.kind === "?") && m.entry.targets.every((t) => t.collection === "tanakh");
-      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate && !bracketVerse) {
+      // "שמ"א ג ד" outside brackets (issue #42 C21): a name of three letters or more that is also a numeral, then chapter and verse
+      // as two bare numerals that are no words — not after a word that a number follows ("סי' שמ"א ג", "בשנת שמ"א")
+      const numericVerse = m.entry.numeric && !bracketVerse && m.entry.targets.every((t) => t.collection === "tanakh") && m.entry.text.replace(/["']/g, "").length >= 3 && addr.elems.length === 2 && addr.elems.every((e) => e.kind === "?" && !e.numeral.common && e.numeral.form !== "digits" && e.amud === undefined && e.maybeAmud === undefined && e.to === undefined) && !numberWordBefore(toks, i);
+      if (m.entry.numeric && !addr.elems[0]!.explicit && !dafOfTractate && !bracketVerse && !numericVerse) {
         this.drop("numeric-name");
         continue;
       }
@@ -372,6 +414,8 @@ export class CitationScanner {
       if (cands.length && cands.every((c) => c.collection === "tur") && elems.some((e) => e.kind === "seif")) readAs = "tur-seif";
       if (ps && addr === ps) readAs = "part-siman";
       if (rabbah && addr === rabbah) readAs = "rabbah-parsha";
+      if (numericVerse) readAs = "numeric-name-verse";
+      if (single) readAs = "single-bare";
       // "ברכות פרק בתרא דף נ"ו", "במסכת כתובות פרק בתרא": a chapter by an ordinal word is the Gemara's
       if (elems[0]!.ordinal && cands.some((x) => x.collection === "bavli") && !qualifierBefore(toks, i)) cands = cands.filter((x) => x.collection === "bavli");
       // "ובמדרש רבה [ויקרא פכ"ב]", "ברבות [בראשית פי"א]", "ובמד"ר [במדבר פי"ב]": the midrash on that book, not the book
@@ -1448,10 +1492,23 @@ export class CitationScanner {
     if (!prev || (last.elems.length !== 1 && !letterAmud) || (!letterAmud && prev.kind !== "daf" && prev.amud === undefined)) return undefined;
     const to = i + 1 + a[1];
     const dh = diburWordsAt(toks, to);
-    if (dh && !last.c.commentator) return this.drop("dibur-without-commentator");
+    /*
+     * A ד"ה with no commentator before it ("ברכות יג. … ושם ע"ב ד"ה והא"): the words of SOME commentary on the other amud, which
+     * one is not written — as "ברכות יג: ד"ה והא" (#41 B7), the amud itself, a coarse place, "possible" at most (engine.ts
+     * PENALTY.diburNoCommentator). Before, it was dropped (V7 #42 C21). The last citation in a commentary's own book ("רש"י על ברכות
+     * יג.") is that commentary's words.
+     */
+    const noCommentator = !!dh && !last.c.commentator && !last.c.candidates.some((x) => / על /.test(x.book.title));
+    /*
+     * "תוספות על ברכות יג. … ושם ע"ב ד"ה אלא": the commentary's own book, so the words are its words on the other amud — but the
+     * ד"ה is looked for only after a commentator's name (engine.ts refineDibur reads `dh`, set below only with `commentator`), so
+     * the link is to the START of the amud, not to the words. As coarse as B7: at most "possible" (V7 round 2 review, finding 10;
+     * before, "high"). Without a ד"ה, "ושם ע"ב" is the amud itself and stays `ibid-amud`.
+     */
+    const unplacedDibur = !!dh && !noCommentator && !last.c.commentator;
     const elems: AddrElem[] = [{ ...prev, kind: "daf", amud: a[0], explicit: true }];
     const { maybeAmud: _m, amudGlued: _g, ...daf } = elems[0]!;
-    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
+    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: noCommentator ? "dibur-no-commentator" : unplacedDibur ? "ibid-amud-dibur" : "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
   }
 
   /**
@@ -1525,6 +1582,10 @@ export class CitationScanner {
     // "אם ישב בסוכה ח' ימים", "עד שבועות מ"ד ימים": numbers followed by what they count are a quantity, not a place
     const lastElem = c.elems.at(-1);
     if (!c.bracketed && lastElem && !lastElem.explicit && lastElem.amud === undefined && countedAt(toks, c.to)) return this.drop("quantity");
+    // "הוריות 10 סעיפים", "נדרים 50 אחוז": ONE bare Arabic number, no place word, no bracket, and a plain Hebrew word right after it —
+    // more often a count of that word than an address (issue #41 B8); the list of counted words above cannot hold every noun, so it is
+    // kept, at "possible" at most (engine.ts PENALTY.quantityLike)
+    const quantityLike = !c.bracketed && c.elems.length === 1 && !!lastElem && lastElem.numeral.form === "digits" && !lastElem.explicit && lastElem.amud === undefined && lastElem.maybeAmud === undefined && plainWordAt(toks, c.to);
     let candidates = c.candidates;
     let movedFrom = c.movedFrom;
     const qualifier = qualifierBefore(toks, c.from);
@@ -1534,6 +1595,8 @@ export class CitationScanner {
     let alsoBase: readonly AliasTarget[] | null = null;
     let alsoBaseRule = "title-commentator-base";
     let diburWords: readonly string[] | null = c.dh ?? null;
+    /** where the anchor starts: the commentator's name right before the place, when the citation was moved to him (issue #42 C19) */
+    let spanFrom = c.from;
     if ((c.ibid === "none" || c.ibid === "book") && c.commentators !== false) {
       // "בירושלמי פ"ח דכתובות": the qualifier adds that collection's book of the same tractate
       if (qualifier && !candidates.some((x) => x.collection === qualifier)) candidates = [...candidates, ...this.siblings(candidates, qualifier)];
@@ -1569,16 +1632,20 @@ export class CitationScanner {
         movedFrom = candidates;
         candidates = moved;
         commentator = who;
+        if (commentatorBefore(toks, c.from)) spanFrom = nameStart(toks, c.from, commentatorBeforeAt(toks, c.from), 1);
       } else if (!named && (lib = this.libraryCommentaryBefore(toks, c.from, candidates)) !== null) {
         // "ובאוה"ח [שמות ג, ד]", "ובגו"א [ויקרא פ"א]": a commentary's name in the library, on the cited book
         movedFrom = candidates;
         candidates = lib.targets;
         commentator = lib.name;
+        spanFrom = nameStart(toks, c.from, beforeIndex(toks, c.from, 1), lib.name.split(" ").length);
         rule = rule ?? "commentator-named";
         if (dh) diburWords = diburWordsAt(toks, c.to);
       } else if (dh && !named) {
-        this.drop("dibur-without-commentator");
-        return c.to;
+        // "ברכות יג: ד"ה והא": the words of SOME commentary on the daf, which one is not written. The daf itself is the nearest
+        // place that is sure, and a coarse one: linked at "possible" (engine.ts PENALTY.diburNoCommentator; issue #41 B7 —
+        // before, the citation was dropped, and nothing was linked or listed)
+        rule = "dibur-no-commentator";
       } else if (!who && this.glossary && candidates.some((x) => this.glossary!.on.includes(x.collection))) {
         // a glossary of a commentator's words ("אוצר לעזי רש"י"): "(חולין פד:)" is where HE wrote it. Only the
         // collections he wrote on are moved — "חולין" is also the Mishna's name, which has no Rashi; a daf finds
@@ -1600,12 +1667,20 @@ export class CitationScanner {
         if (moved.length) {
           candidates = moved;
           commentator = rc;
+          // the name as written, one or two words ("המל"מ", "לחם משנה"), after an honorific between it and the place
+          let at = beforeIndex(toks, c.from, 1);
+          if (at >= 0 && HONORIFICS.has(wordShape(toks[at]!))) at = beforeIndex(toks, c.from, 2);
+          const two = at > 0 && toks[at - 1]?.kind === "word" && RAMBAM_COMMENTATORS.some(([n]) => n.includes(" ") && n.endsWith(wordShape(toks[at]!)));
+          spanFrom = nameStart(toks, c.from, at, two ? 2 : 1);
         }
       }
     }
     candidates = [...candidates].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
-    const first = toks[c.from]!;
-    const lastTok = toks[c.to - 1]!;
+    // the anchor: from the commentator's name (if any) to the end of the place, with no bracket left open or closed alone in it
+    const span = balancedSpan(toks, spanFrom, c.to);
+    const partContext = this.partContextAt(c.from, line);
+    const first = toks[span.from]!;
+    const lastTok = toks[span.to - 1]!;
     const cit: Citation = {
       seq: this.seq++,
       line,
@@ -1628,6 +1703,8 @@ export class CitationScanner {
       ...(c.ordinal && { ordinal: true }),
       ...(c.internal && { internal: c.internal }),
       ...(commentator && diburWords?.length && { dh: diburWords }),
+      ...(quantityLike && { quantityLike: true as const }),
+      ...(partContext && { partContext }),
       numericName: c.numericName,
     };
     this.citations.push(cit);
@@ -1639,7 +1716,8 @@ export class CitationScanner {
     }
     this.last = { c: cit, line, elems: c.elems };
     if (c.elems[0] && (c.elems[0].kind === "daf" || c.elems[0].amud !== undefined) && (cit.movedFrom ?? cit.candidates).some((x) => x.collection === "bavli" && !x.book.title.includes(" על "))) this.lastTalmud = { c: cit, line };
-    return c.to;
+    // the anchor may have taken the rest of a bracket the place opened ("ברכות (יג: ושם)"): those words are not read again
+    return Math.max(c.to, span.to);
   }
 
   /**
@@ -1771,6 +1849,9 @@ const MAX_OTHER_WORKS = 3;
 /** past the ibid window, how far "שם" with a place of its own (or "<book> שם") may still reach, scored lower */
 const FAR_WINDOW = 15;
 
+/** how many lines after a part of the Shulchan Aruch is named in the text it is still the context of a citation (Citation.partContext) */
+const PART_WINDOW = 10;
+
 /** "בבתרא", "דקמא", "במציעא": a tractate by its nickname (the Bavot), right before a place */
 const TRACTATE_NICKNAMES = /^[ובד]{0,2}(?:בתרא|קמא|מציעא)$/;
 
@@ -1820,6 +1901,64 @@ function sectionAt(toks: readonly Tok[], at: number): { part: string; next: numb
   for (const [part, names] of Object.entries(SA_PARTS)) {
     if (two && names.includes(two)) return { part, next: i + 2 };
     if (names.includes(one)) return { part, next: i + 1 };
+  }
+  return null;
+}
+
+/** words a number follows ("סי' שמ"א", "בשנת שמ"א", "דף", "אות"): a name that is also a numeral after one of them is that number */
+const NUMBER_WORD_BEFORE = /^[ובלדהמש]{0,2}(?:סי'|סימן|סימנים|ס"ק|סק'|סע'|סעי'|סעיף|דף|ד'|פרק|פ'|פר'|הלכה|הל'|אות|עמוד|עמ'|תשובה|תשו'|שנת|שנה|כלל|שער|רמז|מצוה|מצות|משנה|מאמר|פסקה|אופן|חלק|ח')$/;
+const numberWordBefore = (toks: readonly Tok[], i: number): boolean => {
+  const prev = before(toks, i, 1);
+  return prev?.kind === "word" && NUMBER_WORD_BEFORE.test(wordShape(prev));
+};
+
+/** a word for a parasha before a name: "בפרשת בראשית א" is the parasha, not the book */
+const PARSHA_BEFORE = /^[ובלד]{0,2}(?:פרשת|פרשה|פרש'|פ'|פר')$/;
+
+/**
+ * "בראשית א.", "כמו שכתוב בראשית ב" (at the line's end), "ויקרא רבה ג" (issue #42 C21): ONE bare numeral after the name of a book of the
+ * Tanakh or of a midrash rabbah — its chapter (parasha), a whole unit. parseAddress does not take a single bare numeral outside brackets
+ * as a place ("שמות ה'", "בראשית ברא"); this reads it only where the words end (punctuation or the line's end), or before any word after
+ * a midrash rabbah, whose two-word name is no phrase of prose; never after a word for a parasha, never a numeral that is also a word,
+ * never a title that is one ("שמות", "דברים"). With the glued "." parseAddress read as an amud ("בראשית א." — daf א), the period is the
+ * sentence's. A loose form: engine.ts scores it "possible" (PENALTY.looseForm).
+ */
+function singleBareAt(toks: readonly Tok[], i: number, m: AliasMatch, parsed: Address | null): Address | null {
+  const ts = m.entry.targets;
+  if (!ts.length || m.entry.numeric || opensBefore(toks, i)) return null;
+  const tanakh = ts.every((t) => t.collection === "tanakh");
+  const rabbah = ts.every((t) => isRabbah(t.book.title));
+  if ((!tanakh && !rabbah) || ts.some((t) => COMMON_TITLES.has(t.book.title))) return null;
+  const prev = before(toks, i, 1);
+  if (prev?.kind === "word" && PARSHA_BEFORE.test(wordShape(prev))) return null;
+  const num = numeralOf(toks[m.to]);
+  if (!num || num.common || num.form === "digits" || num.n > 150) return null;
+  if (parsed) {
+    const e = parsed.elems[0]!;
+    if (!(parsed.elems.length === 1 && e.amudGlued && e.amud === 1 && !e.explicit && e.to === undefined && parsed.to === m.to + 2 && !parsed.closed)) return null;
+  } else {
+    const after = toks[m.to + 1];
+    const ends = !after || (after.kind === "punct" && ";:)],.".includes(after.text) && !(after.text === "," && numeralOf(toks[m.to + 2])));
+    const word = rabbah && after?.kind === "word" && !after.gershayim && !after.geresh && !numeralOf(after);
+    if (!ends && !word) return null;
+  }
+  if (isDate(toks, m.to + 1)) return null;
+  return { elems: [{ kind: "?", n: num.n, explicit: false, numeral: num }], from: m.to, to: m.to + 1, bracketed: false, closed: false, evidence: "medium" };
+}
+
+/**
+ * A part of the Shulchan Aruch named at toks[i] in running text, for the context of the citations after it ("ביורה דעה", "ובחו"מ",
+ * "לאו"ח"): one or two words, with up to two prefix letters. Wider than sectionAt (which reads the part that FOLLOWS a name).
+ */
+function partMentionAt(toks: readonly Tok[], i: number): string | null {
+  const t = toks[i];
+  if (t?.kind !== "word") return null;
+  const shape = wordShape(t);
+  const next = toks[i + 1]?.kind === "word" ? wordShape(toks[i + 1]!) : "";
+  for (let p = 0; p <= 2 && p < shape.length - 1; p++) {
+    if (p && !/^[ובלמהד]$/.test(shape[p - 1]!)) break;
+    const one = shape.slice(p);
+    for (const [part, names] of Object.entries(SA_PARTS)) if (names.includes(one) || (next && names.includes(`${one} ${next}`))) return part;
   }
   return null;
 }
@@ -1962,6 +2101,81 @@ function qualifierBefore(toks: readonly Tok[], i: number): Collection | undefine
     if (q) return q;
   }
   return undefined;
+}
+
+/** the index of the word commentatorBefore() read, or -1 */
+function commentatorBeforeAt(toks: readonly Tok[], i: number): number {
+  const t = before(toks, i, 1);
+  if (t?.kind === "word" && !t.gershayim && !t.geresh && POSITION_BEFORE.test(t.text)) return beforeIndex(toks, i, 2);
+  return beforeIndex(toks, i, 1);
+}
+
+/**
+ * Where the anchor of a citation moved to a commentator starts (issue #42 C19): at his name, `words` words that END at toks[at],
+ * when only words, brackets and commas lie between it and the place at toks[from] (beforeIndex). Before, "תוס' ברכות ב." held the
+ * name when the database's name for the book began with it ("תוס' ברכות"), and "רשב"ם בבא בתרא קכא." did not: the name is now
+ * always in it. A name not found right there leaves the anchor on the place.
+ */
+function nameStart(toks: readonly Tok[], from: number, at: number, words: number): number {
+  if (at < 0 || at >= from) return from;
+  const start = at - (words - 1);
+  if (start < 0) return from;
+  for (let k = start; k <= at; k++) if (toks[k]!.kind !== "word") return from;
+  return start;
+}
+
+/** the bracket pairs an anchor keeps balanced */
+const CLOSER: Readonly<Record<string, string>> = { "(": ")", "[": "]", "{": "}" };
+/** how many tokens past the place an anchor may reach for the bracket the place opened */
+const MAX_BRACKET_REACH = 4;
+/** the words an anchor may reach over for its bracket's close: "see there", "and there" */
+const SEE_THERE: ReadonlySet<string> = new Set(['ע"ש', 'עיי"ש', 'עי"ש', 'וע"ש', 'וש"נ', "ושם", "שם", "וכו'", "וגו'", 'ע"כ', 'עכ"ל']);
+
+/**
+ * The anchor's tokens with every bracket in them closed in them (issue #42 C19): "ברכות (יג:" — the place opened a bracket and the
+ * citation ends before its close — reaches the close when it is a few tokens on ("ברכות (דף יג: ע"ש)"), and otherwise stops before
+ * the bracket ("ברכות"); a close with no open in the span takes its open right before the span, or is left out.
+ */
+function balancedSpan(toks: readonly Tok[], from: number, to: number): { from: number; to: number } {
+  const open: number[] = [];
+  let end = to;
+  let start = from;
+  for (let k = from; k < end; k++) {
+    const t = toks[k]!;
+    if (t.kind !== "punct") continue;
+    if (CLOSER[t.text]) open.push(k);
+    else if (Object.values(CLOSER).includes(t.text)) {
+      const o = open.at(-1);
+      if (o !== undefined && CLOSER[toks[o]!.text] === t.text) open.pop();
+      else if (k === start && start > 0 && toks[start - 1]?.kind === "punct" && CLOSER[toks[start - 1]!.text] === t.text) start--;
+      else if (k === start) start++;
+      else {
+        end = k;
+        break;
+      }
+    }
+  }
+  while (open.length) {
+    const o = open.pop()!;
+    const want = CLOSER[toks[o]!.text]!;
+    let close = -1;
+    for (let k = end; k < Math.min(toks.length, end + MAX_BRACKET_REACH); k++) {
+      const t = toks[k]!;
+      if (t.kind === "punct" && t.text === want) {
+        close = k;
+        break;
+      }
+      if (t.kind === "punct" && CLOSER[t.text]) break;
+      // only words that say "see there" may lie in the way ("(דף יג: ע"ש)"): "(י"א: ובכורות ג'.)" holds a second citation,
+      // which an anchor reaching for the bracket would swallow (and the scan would skip)
+      if (t.kind !== "punct" && !SEE_THERE.has(wordShape(t))) break;
+    }
+    if (close >= 0 && !open.length) end = close + 1;
+    else end = o;
+  }
+  // a span that kept nothing but brackets is the place as read
+  if (end <= start || !toks.slice(start, end).some((t) => t.kind !== "punct")) return { from, to };
+  return { from: start, to: end };
 }
 
 function commentatorBefore(toks: readonly Tok[], i: number): string | undefined {
@@ -2336,6 +2550,14 @@ function quantifierBefore(toks: readonly Tok[], i: number): boolean {
 const COUNTED: ReadonlySet<string> = new Set(["ימים", "יום", "יומין", "שנים", "שנה", "שנין", "שעות", "חדשים", "חודשים", "פעמים", "אמות", "דורות", "אלף", "אלפים", "מאות", "רבוא", "זוז", "זוזים", "מנה", "סלעים"]);
 
 const countedAt = (toks: readonly Tok[], i: number): boolean => toks[i]?.kind === "word" && COUNTED.has(toks[i]!.text);
+/**
+ * A word at toks[i] that may be what a number counts ("סעיפים", "אחוז", "גרם"): no quote marks (not "ד"ה", "ע"א"), not a word with
+ * the conjunction ו ("ושם", "ועוד": the sentence goes on after a citation), not a place word or a function word ("שם", "כי", "על").
+ */
+const plainWordAt = (toks: readonly Tok[], i: number): boolean => {
+  const t = toks[i];
+  return t?.kind === "word" && !t.gershayim && !t.geresh && !t.text.startsWith("ו") && !/^(?:שם|עמוד|דף|סעיף|הלכה|פסוק|משנה|כי|אשר|של|על|אל|עם|הוא|היא|הם|כמו|גם|אבל|אך|רק|כן|לא|ע|עי|עיין|ראה)$/.test(t.text);
+};
 
 /** a part's name alone ("או"ח", "חושן משפט") */
 const isSaPartAlone = (name: string): boolean => Object.values(SA_PARTS).some((names) => names.includes(normTitle(name)));

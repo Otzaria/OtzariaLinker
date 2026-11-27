@@ -190,6 +190,30 @@ describe("chapters anchored to headings", () => {
     expect(pairs(res)).toEqual(["1>1"]);
     expect(codes(res.notes)).toContain("footnotes/headings-unpaired");
   });
+
+  /*
+   * #42 C13: the notes book has a chapter the book does not (an introduction's notes, a chapter printed only in the notes). Three of
+   * the four notes sections pair by heading (75%, under the 80% that "auto" asked of the NOTES side), so the chapters were inferred by
+   * numbering, and chapter ג of the book went to the notes of the extra chapter at "possible". Every section of the BOOK that holds
+   * markers pairs by an equal heading: that is enough to follow the headings.
+   */
+  it("an extra chapter in the notes book: each chapter of the book goes to the notes under the equal heading (#42 C13)", () => {
+    const n = ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", ...noteLines(["1", "2"]), "<h2>פרק ב</h2>", ...noteLines(["1", "2"]), "<h2>הוספה</h2>", ...noteLines(["1", "2"]), "<h2>פרק ג</h2>", ...noteLines(["1", "2"])];
+    const m = ["<h1>ספר</h1>", "<h2>פרק א</h2>", "א<sup>1</sup> ב<sup>2</sup>", "<h2>פרק ב</h2>", "ג<sup>1</sup> ד<sup>2</sup>", "<h2>פרק ג</h2>", "ה<sup>1</sup> ו<sup>2</sup>"];
+    const res = run(m, n);
+    expect(pairs(res)).toEqual(["2>2", "2>3", "4>5", "4>6", "6>11", "6>12"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain" && s.rules.includes("chapter:heading"))).toBe(true);
+    // the extra chapter's notes are reported, not linked
+    expect(res.notes.find((x) => x.code === "footnotes/note-without-marker")?.text).toContain("(שורות 9, 10)");
+  });
+
+  it("the same with the book's chapters in a different order from the notes' sequence", () => {
+    const n = ["<h1>הערות לספר</h1>", "<h2>פרק א</h2>", ...noteLines(["1", "2", "3"]), "<h2>פרק ב</h2>", ...noteLines(["1", "2"]), "<h2>פרק ג</h2>", ...noteLines(["1"])];
+    const m = ["<h1>ספר</h1>", "<h2>פרק א</h2>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>", "<h2>פרק ג</h2>", "ה<sup>1</sup>"];
+    const res = run(m, n);
+    expect(pairs(res)).toEqual(["2>2", "2>3", "2>4", "4>9"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
 });
 
 describe("repeats, duplicates and the unmatched report", () => {
@@ -407,5 +431,155 @@ describe("bare-number markers (#14)", () => {
     const res = run(["שלום עולם"], ["הערה בלי מספר"]);
     expect(codes(res.notes)).toContain("footnotes/no-notes");
     expect(codes(res.notes)).not.toContain("footnotes/swapped");
+  });
+});
+
+/*
+ * #41 B12, issue #14, V7 §2.11 — note lines of the form "number, space, text", as the v52 personal database writes the notes of
+ * אנציקלופדיה תלמודית: the automatic setting found 0 notes (a manual "^(\d+)" found 2,763 in volume 6). v52 is NOT on this machine,
+ * so these are SYNTHETIC lines in the shapes the finding and the issue describe (entries under <h2>, numbering that restarts per
+ * entry, bare numbers glued to words in the text, "12 text" note lines); the real-text check is the "bare" mode of
+ * tests/integration/linking/footnotes/real-db.local.test.ts, which rewrites real line_note notes of the official database into this
+ * shape. The user must not need a regular expression to get a reasonable result.
+ */
+describe('notes that open with a bare number: "12 text" (#41 B12, #14, V7 §2.11)', () => {
+  const entry = (name: string, n: number, glue = (k: number) => `מילה${k}`) => [`<h2>${name}</h2>`, Array.from({ length: n }, (_, i) => `דברי הערך ${glue(i + 1)} והמשך`).join(" ")];
+  const notesOf = (name: string, n: number, open = (k: number) => `${k} `) => [`<h2>${name}</h2>`, ...Array.from({ length: n }, (_, i) => `${open(i + 1)}ראה ברכות דף ${i + 2} עמוד א.`)];
+  const MAIN_V52 = ["<h1>אנציקלופדיה תלמודית</h1>", ...entry("אב", 4), ...entry("אבד", 3), ...entry("אבל", 5)];
+  const NOTES_V52 = ["<h1>הערות לאנציקלופדיה תלמודית</h1>", ...notesOf("אב", 4), ...notesOf("אבד", 3), ...notesOf("אבל", 5)];
+  const entryOf = (lines: readonly string[], i: number) => lines.slice(0, i + 1).filter((l) => l.startsWith("<h2>")).at(-1);
+
+  it("the v52 shape, all automatic: every note found, under its own entry, and the run says how the notes were read", () => {
+    const res = run(MAIN_V52, NOTES_V52);
+    expect(res.suggestions).toHaveLength(12);
+    for (const s of res.suggestions) {
+      const shown = MAIN_V52[s.source.line]!.slice(s.anchor!.rawStart, s.anchor!.rawEnd);
+      expect(NOTES_V52[s.target.line]!.startsWith(`${shown} `)).toBe(true);
+      expect(entryOf(MAIN_V52, s.source.line)).toBe(entryOf(NOTES_V52, s.target.line));
+    }
+    expect(codes(res.notes)).toContain("footnotes/bare-leading");
+    expect(codes(res.notes)).not.toContain("footnotes/no-notes");
+  });
+
+  it("markers in <sup> and notes '12 text': exact keys under matching headings → certain", () => {
+    const main = ["<h1>ספר</h1>", ...entry("אב", 3, (k) => `מילה<sup>${k}</sup>`), ...entry("אבד", 2, (k) => `מילה<sup>${k}</sup>`)];
+    const notes = ["<h1>הערות לספר</h1>", ...notesOf("אב", 3), ...notesOf("אבד", 2)];
+    const res = run(main, notes);
+    expect(res.suggestions).toHaveLength(5);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("Hebrew numbering: 'א text', 'ב text' against <sup>(א)</sup>", () => {
+    const heb = ["", "א", "ב", "ג", "ד", "ה"];
+    const main = ["<h1>ספר</h1>", "שורה<sup>(א)</sup> ועוד<sup>(ב)</sup>", "ושוב<sup>(ג)</sup> וגם<sup>(ד)</sup> וסוף<sup>(ה)</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", ...[1, 2, 3, 4, 5].map((k) => `${heb[k]} ראה שם בפנים`)];
+    expect(pairs(run(main, notes))).toEqual(["1>1", "1>2", "2>3", "2>4", "2>5"]);
+  });
+
+  it("a numeral that is also a word ('לא' = 31, 'לב' = 32) is a note exactly where it is due, and prose elsewhere", () => {
+    const heb = ["כח", "כט", "ל", "לא", "לב", "לג"];
+    const main = ["<h1>ספר</h1>", heb.map((h) => `מילה<sup>(${h})</sup>`).join(" ")];
+    const notes = ["<h1>הערות לספר</h1>", ...heb.map((h) => `${h} ראה שם`)];
+    expect(pairs(run(main, notes))).toEqual(["1>1", "1>2", "1>3", "1>4", "1>5", "1>6"]);
+    const prose = run(["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"], ["<h1>הערות לספר</h1>", "1 הערה", "2 הערה", "לא ידע מזה", "3 הערה"]);
+    expect(pairs(prose)).toEqual(["1>1", "1>2", "1>4"]);
+  });
+
+  it("mixed openings in one book: '1.', '2 ', '3)', '(4)', '5 '", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup> ד<sup>4</sup> ה<sup>5</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "1. הערה", "2 הערה", "3) הערה", "(4) הערה", "5 הערה"];
+    expect(pairs(run(main, notes))).toEqual(["1>1", "1>2", "1>3", "1>4", "1>5"]);
+  });
+
+  it("continuation lines: a line that opens with a number that does not continue the series is not a note", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "1 הערה ראשונה", "2 הערה שנייה, שנמשכת", "40 שנה אחר כך כתב כך", "3 הערה שלישית"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>2", "1>4"]);
+    expect(res.notes.find((n) => n.code === "footnotes/unmarked-note-lines")?.text).toContain("(שורות 4)");
+  });
+
+  // V7 PR2 review, finding 1: in a notes book whose notes carry tags, a bare number is a note only where it fills a gap in the
+  // tagged series; a line that opens with the number of the tagged note after it, or repeats the one before it, continues a note
+  it("tagged notes: a continuation line that opens with the next tagged number is not a note", () => {
+    const main = ["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup> ועוד<sup>3</sup>."];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה ראשונה ארוכה", "2 שנים אחר כך כתב כך", "<sup>2</sup> הערה שנייה", "<sup>3</sup> הערה שלישית"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3", "1>4"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+    expect(codes(res.notes)).not.toContain("footnotes/bare-leading");
+  });
+
+  it("tagged notes: a continuation line that repeats the number of the tagged note before it is not a note", () => {
+    const main = ["<h1>ספר</h1>", "שלום<sup>1</sup> עולם<sup>2</sup>."];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה ראשונה", "1 גרם משקלו", "<sup>2</sup> הערה שנייה"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3"]);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+  });
+
+  it("tagged notes: a single bare line that fills a gap is not enough to read bare numbers as notes", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "<sup>1</sup> הערה", "2 שנים אחר כך", "<sup>3</sup> הערה"];
+    const res = run(main, notes);
+    expect(pairs(res)).toEqual(["1>1", "1>3"]);
+    expect(codes(res.notes)).not.toContain("footnotes/bare-leading");
+  });
+
+  it("ordinary numbers that open prose lines are not markers: no series, no notes", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "1990 נולד המחבר", "40 שנה ישב בעיר", "613 מצוות", "7 ימים", "250 איש"];
+    const res = run(main, notes);
+    expect(res.suggestions).toHaveLength(0);
+    expect(codes(res.notes)).not.toContain("footnotes/bare-leading");
+  });
+
+  it("numbering that restarts (no headings): the chapters are followed", () => {
+    const main = ["<h1>ספר</h1>", "שלום1 עולם2 דבר3", "ועוד1 שורה2"];
+    const notes = ["<h1>הערות לספר</h1>", "1 א", "2 ב", "3 ג", "1 ד", "2 ה"];
+    expect(pairs(run(main, notes, { mainMarkers: "digits" }))).toEqual(["1>1", "1>2", "1>3", "2>4", "2>5"]);
+  });
+
+  it("a repeated number in one chapter: both notes, the link is ambiguous", () => {
+    const main = ["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"];
+    const notes = ["<h1>הערות לספר</h1>", "1 הערה", "2 הערה", "2 הערה נוספת", "3 הערה"];
+    const res = run(main, notes);
+    expect(res.suggestions.find((s) => s.target.line === 2)!.confidence).toBe("ambiguous");
+    expect(pairs(res)).toContain("1>4");
+  });
+
+  it("a chapter missing from the notes: its markers are reported, the others still linked", () => {
+    const main = ["<h1>ספר</h1>", ...entry("אב", 2, (k) => `מילה<sup>${k}</sup>`), ...entry("אבד", 2, (k) => `מילה<sup>${k}</sup>`), ...entry("אבל", 2, (k) => `מילה<sup>${k}</sup>`)];
+    const notes = ["<h1>הערות לספר</h1>", ...notesOf("אב", 2), ...notesOf("אבל", 2)];
+    const res = run(main, notes);
+    expect(res.suggestions).toHaveLength(4);
+    expect(res.suggestions.every((s) => s.confidence === "certain")).toBe(true);
+    expect(res.unmatched.map((u) => u.line)).toEqual([4]);
+  });
+
+  it("several markers on one line, each to its own note", () => {
+    const res = run(["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup> ד<sup>4</sup>"], ["<h1>הערות לספר</h1>", "1 א", "2 ב", "3 ג", "4 ד"]);
+    expect(pairs(res)).toEqual(["1>1", "1>2", "1>3", "1>4"]);
+  });
+
+  it("notes without a clear marker are counted, not linked", () => {
+    const res = run(["<h1>ספר</h1>", "א<sup>1</sup> ב<sup>2</sup> ג<sup>3</sup>"], ["<h1>הערות לספר</h1>", "1 א", "2 ב", "הערה בלי מספר", "3 ג"]);
+    expect(pairs(res)).toEqual(["1>1", "1>2", "1>4"]);
+    expect(codes(res.notes)).toContain("footnotes/unmarked-note-lines");
+  });
+
+  it("the books in reverse order WITH headings: the reverse-order note, not a positional guess (engine.ts:194-206)", () => {
+    const res = runFootnotesEngine(book(NOTES, "n", NOTES_V52), book(MAIN, "m", MAIN_V52));
+    expect(res.suggestions).toHaveLength(0);
+    expect(codes(res.notes)).toContain("footnotes/swapped");
+    expect(codes(res.notes)).not.toContain("footnotes/positional");
+  });
+
+  it("reverse order with headings, the usual '12.' notes and <sup> markers", () => {
+    const main = ["<h1>ספר</h1>", ...entry("אב", 3, (k) => `מילה<sup>${k}</sup>`), ...entry("אבד", 2, (k) => `מילה<sup>${k}</sup>`)];
+    const notes = ["<h1>הערות לספר</h1>", ...notesOf("אב", 3, (k) => `${k}. `), ...notesOf("אבד", 2, (k) => `${k}. `)];
+    const res = runFootnotesEngine(book(NOTES, "n", notes), book(MAIN, "m", main));
+    expect(res.suggestions).toHaveLength(0);
+    expect(codes(res.notes)).toContain("footnotes/swapped");
   });
 });
