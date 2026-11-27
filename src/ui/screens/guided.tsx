@@ -16,6 +16,7 @@ import { BulkApprove } from "../workspace/bulk-approve";
 import { MaxLinkJobView } from "../workspace/maxlink-job";
 import { ExistingLinks } from "./guided-existing";
 import { PairChoices } from "./guided-pairs";
+import { GuidedTargets } from "./guided-targets";
 
 /*
  * The guided flow "link a folder (or several books) to Otzaria" (route "#/guided/<step>"): six
@@ -180,6 +181,12 @@ function FilesStep() {
           ))}
         </ul>
       )}
+      {g.otherSources.value.length > 0 && (
+        // V7 §3.3 (#22): what is open already is used, not asked for again — said here, since the database step is skipped when nothing is missing
+        <p class="muted guided-open-others">
+          <Icon name="fl_checkmark_circle" size={16} /> כבר פתוחים, ולא צריך לבחור אותם שוב: {g.otherSources.value.map((s) => `"${sourceNameText(s.info.label)}"`).join(", ")}. מהם יילקחו ספרי הבסיס שהספרים כתובים עליהם.
+        </p>
+      )}
       <p class="muted small">
         מעדיפים את המסלול הקודם, עם גיליון המשימה?{" "}
         <button class="adv-link" onClick={() => ((store.startTask.value = "folder-otzaria"), (store.dialog.value = "start"))}>
@@ -325,6 +332,7 @@ function PlanStep() {
         ))}
       </ul>
       <PairChoices />
+      <GuidedTargets />
       <ExistingLinks />
       {skipped > 0 && <p class="muted">{skipped === 1 ? "ספר אחד לא יקושר" : `${n(skipped)} ספרים לא יקושרו`} — הסיבה בשלב "{GUIDED_STEP_TITLES.books}".</p>}
       <fieldset class="guided-purpose">

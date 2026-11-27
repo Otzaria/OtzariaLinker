@@ -125,7 +125,7 @@ function ProjectLinksPanel() {
           ) : null,
         )}
         {book && (
-          <button class="chip" aria-pressed={!!f.onlyBook} onClick={() => set({ onlyBook: !f.onlyBook })} title="רק קישורים של ספר המקור המוצג">
+          <button class="chip" aria-pressed={!!f.onlyBook} onClick={() => set({ onlyBook: !f.onlyBook })} title="רק קישורים שהספר המוצג מקשר בהם">
             רק הספר המוצג
           </button>
         )}
@@ -134,8 +134,8 @@ function ProjectLinksPanel() {
       <details class="held" style="margin:0 6px">
         <summary>סינון ומיון</summary>
         <div class="lt-grid">
-          {choose("ספר מקור", "source", opts.source)}
-          {choose("ספר יעד", "target", opts.target)}
+          {choose("הספר המקשר", "source", opts.source)}
+          {choose("הספר המקושר", "target", opts.target)}
           {choose("סוג", "type", opts.type, (t) => TYPE_LABELS[t as ConnectionType].he)}
           {choose("שיטה", "engine", ["manual", ...opts.engine], (e) => (e === "manual" ? "ידני / מקובץ" : ENGINES.find((x) => x.id === e)?.title ?? e))}
           {choose("ודאות", "confidence", CONFIDENCE_ORDER.filter((c) => rows.some((r) => r.confidence === c)), (c) => CONFIDENCE_LABELS[c as Confidence])}
@@ -174,7 +174,7 @@ function ProjectLinksPanel() {
   );
 }
 
-const SORT_LABEL: Record<SortKey, string> = { source: "ספר ושורת מקור", target: "ספר ושורת יעד", type: "סוג", status: "מצב", engine: "שיטה", confidence: "ודאות" };
+const SORT_LABEL: Record<SortKey, string> = { source: "הספר המקשר והשורה", target: "הספר המקושר והשורה", type: "סוג", status: "מצב", engine: "שיטה", confidence: "ודאות" };
 const ROW = 64;
 
 /** Only the rows in view are in the DOM: 100K links scroll like 100. */
@@ -222,9 +222,9 @@ function GroupActions({ sel, rows, clear }: { sel: ReadonlySet<string>; rows: re
           </select>
           <TypesHelpButton />
           <span class="lt-target">
-            <input list="lt-titles" placeholder="ספר יעד חדש…" aria-label="ספר יעד חדש" value={title} onInput={(e) => setTitle(e.currentTarget.value)} />
+            <input list="lt-titles" placeholder="ספר מקושר חדש…" aria-label="ספר מקושר חדש" value={title} onInput={(e) => setTitle(e.currentTarget.value)} />
             <datalist id="lt-titles">{[...store.booksByTitle.value.keys()].map((t) => <option key={t} value={t} />)}</datalist>
-            <button class="btn text small" disabled={!title.trim()} onClick={() => store.fixes.retarget(ids, title)}>החלפת יעד</button>
+            <button class="btn text small" disabled={!title.trim()} onClick={() => store.fixes.retarget(ids, title)}>החלפת הספר המקושר</button>
           </span>
           <button class="btn text small" disabled={busy} onClick={() => void store.fixes.fixRefs(ids)} title="ציון ספריא באנגלית רק בצד של ספר ספריא; החסר נבנה משם המקום שבמסד">{store.prefs.advanced.value ? "תיקון ref" : "תיקון ציון ספריא"}</button>
           <button class="btn text small" onClick={() => store.fixes.fixDirection(ids)} title='קישור מפירוש אל הספר שעליו נכתב: הסוג "מקור"'>תיקון כיוון</button>
@@ -265,8 +265,8 @@ function FillRanges() {
         <label class="field">
           הספר הוא, בקישורים
           <select value={side} onChange={(e) => setSide(e.currentTarget.value as "source" | "target")}>
-            <option value="source">צד המקור</option>
-            <option value="target">צד היעד</option>
+            <option value="source">הצד המקשר</option>
+            <option value="target">הצד המקושר</option>
           </select>
         </label>
         <label class="check">

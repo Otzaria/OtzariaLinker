@@ -1,4 +1,4 @@
-import { inlineLinkerVersionNote } from "../../core/links/connection-type";
+import { AUTHORABLE_TYPES, canonicalTypeString, inlineLinkerVersionNote, TYPE_GROUP_LABELS, TYPE_LABELS, typeGroups, typeShown } from "../../core/links/connection-type";
 import { checkCustomPattern } from "../../core/text/safe-regex";
 import type { MarkerStyle } from "./footnotes/markers";
 import { compilePattern, CUSTOM_PRESET, DEFAULT_PRESET, describeLevels, PATTERN_PRESETS, presetById } from "./pattern";
@@ -34,7 +34,8 @@ interface SpecBase {
 }
 
 export type OptionSpec =
-  | (SpecBase & { kind: "select"; choices: readonly (readonly [value: string, label: string])[]; default: string })
+  /** groups: the choices shown under a heading each (<optgroup>), by value; a choice in no group is shown first */
+  | (SpecBase & { kind: "select"; choices: readonly (readonly [value: string, label: string])[]; default: string; groups?: readonly (readonly [label: string, values: readonly string[]])[] })
   | (SpecBase & { kind: "number"; min: number; max: number; step?: number; default: number })
   | (SpecBase & { kind: "boolean"; default: boolean })
   /** a marker style: a select plus a text field for a custom tag or regular expression */
@@ -56,15 +57,20 @@ const THRESHOLDS: OptionSpec[] = [
   { kind: "number", key: "t.margin", label: "מרווח לעמימות (%)", min: 0, max: 50, default: DEFAULT_THRESHOLDS.ambiguityMargin * 100, hint: "מועמד שני קרוב יותר מזה לראשון הופך את ההצעה ל\"עמומה\"." },
 ];
 
-const TYPE_CHOICES = [
-  ["", "ברירת המחדל של השיטה"],
-  ["source", "מקור"],
-  ["commentary", "פירוש"],
-  ["targum", "תרגום"],
-  ["reference", "הפניה"],
-  ["footnotes", "הערות שוליים"],
-  ["other", "אחר"],
-] as const;
+/*
+ * The link type of an engine's links (V7 §3.6, issue #26): one choice for every engine, grouped by what the type means in
+ * Otzaria — a commentary or a link — like the builder's picker (core/links/connection-type.ts typeGroups) and Link-Notes. The
+ * value is the string the file stores; the direction type says which way it runs, since "מקור" alone reads as a file.
+ */
+const TYPE_GROUPS = typeGroups();
+const TYPE_SPEC: OptionSpec = {
+  kind: "select",
+  key: "declaredType",
+  label: "סוג הקישור",
+  default: "",
+  choices: [["", "ברירת המחדל של השיטה"], ...AUTHORABLE_TYPES.map((t) => [canonicalTypeString(t), typeShown(t)] as const)],
+  groups: (["commentaries", "links", "direction"] as const).map((g) => [TYPE_GROUP_LABELS[g], TYPE_GROUPS[g].map(canonicalTypeString)] as const),
+};
 
 /**
  * The source filter (issue #27, source-filter.ts) as form fields: which lines of the source enter the engine, and whether the marker in front
@@ -141,7 +147,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "select", key: "inlineMarkers", label: "מספור \"(יב)\" בתחילת שורות הפירוש", default: "auto", choices: [["auto", "אוטומטי — רק כשהוא מקביל לבסיס"], ["always", "תמיד כרמה העמוקה"], ["never", "אף פעם"]] },
     { kind: "boolean", key: "untaggedHeadings", label: "שורות קצרות כמו \"פרק ג\" נחשבות כותרת גם בלי תגית", default: true },
     { kind: "number", key: "maxAlternatives", label: "מספר חלופות לכל הצעה", min: 0, max: 10, default: 3 },
-    { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    TYPE_SPEC,
     ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
     ...THRESHOLDS,
@@ -158,6 +164,8 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "boolean", key: "continueItems", label: "פסקאות בלי ד\"ה יורשות את מקום הד\"ה שלפניהן", default: true },
     { kind: "boolean", key: "itemRanges", label: "פסקאות ההמשך כטווח אחד בפירוש", default: false, hint: "במקום קישור לכל פסקה: קישור אחד לכל פריט (ס\"ק), עם טווח בפירוש עד הפסקה האחרונה שלו. כמו בקובץ של ארץ יהודה על ארצות החיים." },
     { kind: "boolean", key: "order", label: "הסרת התאמות שאינן בסדר של הפירוש", default: true, hint: "במדידה על ספרים אמיתיים התאמה שאינה מתיישבת עם סדר השורות שסביבה הייתה שגויה ברוב המקרים." },
+    // #41 B5 (#26): the engine always took a declared type (engine.ts DhOptions.declaredType); only the form lacked it
+    TYPE_SPEC,
     ...RUN_RANGE_SPECS,
     ...THRESHOLDS,
   ],
@@ -170,7 +178,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "number", key: "headingLevel", label: "רמת הכותרת שמתחילה פרק (0 = כל כותרת)", min: 0, max: 6, default: 0 },
     { kind: "select", key: "chapterAlignment", label: "שיוך הסימנים לפרקים", default: "global", choices: [["global", "גלובלי (מומלץ)"], ["greedy", "סימן אחר סימן (כמו Link-Notes)"]] },
     { kind: "boolean", key: "includeInlineNoteMarkers", label: "לקרוא גם סימנים של הערות שכבר מוטמעות בשורה", default: false },
-    { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    TYPE_SPEC,
     ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
   ],
@@ -184,7 +192,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
       key: "citationType",
       label: "סוג הקישור",
       default: "reference",
-      choices: [["reference", "הפניה (מתאים גם לספרייה)"], ["inline-linker", "ציטוט בטקסט (לשימוש פרטי בלבד)"]],
+      choices: [["reference", `${TYPE_LABELS.REFERENCE.he} (מתאים גם לספרייה)`], ["inline-linker", "ציטוט בטקסט (לשימוש פרטי בלבד)"]],
       hint: 'ציטוט בטקסט נפתח בלחיצה על מילות ההפניה, גם בספר של ספריא. הסוג מוכר רק לייבוא האישי של אוצריא, ולכן בייצוא לספרייה הוא יוחזק: ייצאו אותו בבחירה "לשימוש פרטי". ' + inlineLinkerVersionNote(),
     },
     { kind: "select", key: "scope", label: "לאילו ספרים לקשר", default: "all", choices: [["all", "כל הספרים הפתוחים"], ["classic", 'תנ"ך, משנה, ש"ס, רמב"ם, טור ושולחן ערוך בלבד']] },
@@ -228,7 +236,7 @@ export const ENGINE_OPTION_SPECS: Readonly<Record<EngineId, readonly OptionSpec[
     { kind: "select", key: "matches", label: "כמה התאמות בכל שורה", default: "", choices: [["", "לפי התבנית"], ["first", "הראשונה בלבד"], ["all", "כולן"]] },
     { kind: "boolean", key: "sectionRanges", label: "לקשר לכל הסעיף שתחתיה ההפניה מצביעה (טווח)", default: false },
     { kind: "select", key: "anchors", label: "עוגן על המילים שנמצאו", default: "auto", choices: [["auto", "כשאוצריא תשמור אותו"], ["off", "בלי עוגן"]] },
-    { kind: "select", key: "declaredType", label: "סוג הקישור", default: "", choices: TYPE_CHOICES },
+    TYPE_SPEC,
     ...RUN_RANGE_SPECS,
     ...lineFilterSpecs(false, false),
     ...THRESHOLDS,

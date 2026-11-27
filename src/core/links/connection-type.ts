@@ -197,3 +197,12 @@ export const TYPE_GROUP_LABELS = {
   links: "סוגי קישור — יופיעו בפאנל הקישורים באוצריא",
   direction: "כיוון — מפירוש אל ספר הבסיס שלו",
 } as const;
+
+/**
+ * Types a links file of the library cannot carry, shown beside a type picker with the reason (V7 §3.6), never as a choice:
+ * LINKER is skipped by the generator, INLINE_LINKER is known only to Otzaria's personal import (LINK_FORMATS §1.12).
+ */
+export const UNSUPPORTED_TYPES: readonly { value: string; label: string; why: string }[] = [
+  { value: "linker", label: "קישור אוטומטי", why: "אוצריא יוצרת קישורים כאלה בעצמה בכל בנייה של המסד, וקובץ קישורים לא יכול לכתוב אותם" },
+  { value: INLINE_LINKER_TYPE, label: INLINE_LINKER_LABEL, why: "רק הייבוא האישי של אוצריא מכיר אותו, ולכן לספרייה הוא לא נשלח. בשיטת מראי מקומות יש לו בחירה משלה" },
+];

@@ -1,13 +1,13 @@
 import type { ComponentChildren } from "preact";
 import { useRef } from "preact/hooks";
-import { chooseLayout, resetLayout, type Layout, type PanelId } from "../../state/preferences";
+import { chooseLayout, effectiveLayout, resetLayout, type Layout, type PanelId } from "../../state/preferences";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { rovingKeys, rovingTabIndex, useFocusOnMount } from "../keyboard";
 import { Builder } from "./builder";
 import { LinksPanel } from "./links-panel";
 import { Reader } from "./reader";
-import { HideButton } from "./hide-button";
+import { Grip, HideButton } from "./hide-button";
 import { SourcesBody } from "./sources-panel";
 import { QaPanel } from "./qa-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
@@ -21,7 +21,8 @@ const PANEL_DRAG = "application/x-otzaria-panel";
 
 export function Workspace() {
   const store = useStore();
-  const layout = store.prefs.layout.value;
+  // the suggestions tab widens the side panel while its width is the preset's (#41 B23, effectiveLayout)
+  const layout = effectiveLayout(store.prefs.layout.value, store.sideTab.value, innerWidth);
   // "source above target" puts both readers in the source's column: it stays while either is shown
   const stacked = layout.preset === "stack";
   const visible = layout.order.filter((p) => !layout.hidden.includes(p) || (stacked && p === "source" && !layout.hidden.includes("target")));
@@ -121,9 +122,7 @@ export function Panel({ id, title, icon, children, actions, class: cls }: { id: 
   return (
     <section class={`panel${cls ? ` ${cls}` : ""}`} aria-label={title}>
       <div class="panel-head" draggable>
-        <span class="grip" title="גררו כדי להזיז את הפאנל">
-          <Icon name="fl_re_order_dots_vertical" size={16} />
-        </span>
+        <Grip id={id} label={title} />
         <h2 class="grow">
           <Icon name={icon} size={18} />
           {title}
@@ -152,9 +151,7 @@ function SidePanel() {
   return (
     <section class="panel side-panel" aria-label="בונה וקישורים">
       <div class="tabs">
-        <span class="grip" style="align-self:center;cursor:grab" draggable title="גררו כדי להזיז את הפאנל">
-          <Icon name="fl_re_order_dots_vertical" size={16} />
-        </span>
+        <Grip id="side" label="החלונית" style="align-self:center;cursor:grab" draggable />
         {/* only tabs inside the tab list (the hide button is not a tab); arrows move between them */}
         <div role="tablist" aria-label="החלונית" onKeyDown={rovingKeys}>
           {tabButton("builder", "oz_link_add", "בונה")}
@@ -183,7 +180,7 @@ function Splitter({ left, right, grid }: { left: PanelId; right: PanelId; grid: 
     if (!prev || !next || !grid.current) return;
     el.setPointerCapture(e.pointerId);
     el.classList.add("active");
-    const start: Layout = store.prefs.layout.value;
+    const start: Layout = effectiveLayout(store.prefs.layout.value, store.sideTab.value, innerWidth);
     const x0 = e.clientX;
     const wPrev = prev.getBoundingClientRect().width;
     const wNext = next.getBoundingClientRect().width;
@@ -206,11 +203,28 @@ function Splitter({ left, right, grid }: { left: PanelId; right: PanelId; grid: 
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    const l = store.prefs.layout.value;
+    const l = effectiveLayout(store.prefs.layout.value, store.sideTab.value, innerWidth);
     const step = 0.1 * (e.key === "ArrowLeft" ? 1 : -1);
     const a = Math.max(0.3, l.sizes[left] + step);
     const b = Math.max(0.3, l.sizes[right] - step);
     chooseLayout(store.prefs, { ...l, sizes: { ...l.sizes, [left]: a, [right]: b } });
   };
-  return <div class="splitter" role="separator" aria-orientation="vertical" tabIndex={0} aria-label="שינוי רוחב הפאנלים" onPointerDown={onDown} onKeyDown={onKey} />;
+  // a focusable separator is a widget: ARIA requires its value (#42 C26, axe aria-required-attr) — the earlier panel's share of the pair, in percent
+  const sizes = effectiveLayout(store.prefs.layout.value, store.sideTab.value, innerWidth).sizes;
+  const share = Math.round((100 * sizes[left]) / (sizes[left] + sizes[right] || 1));
+  return (
+    <div
+      class="splitter"
+      role="separator"
+      aria-orientation="vertical"
+      tabIndex={0}
+      aria-label="שינוי רוחב הפאנלים"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={share}
+      aria-valuetext={`${share}% לפאנל הראשון`}
+      onPointerDown={onDown}
+      onKeyDown={onKey}
+    />
+  );
 }

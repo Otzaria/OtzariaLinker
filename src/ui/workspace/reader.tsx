@@ -4,6 +4,7 @@ import type { SourceLine } from "../../core/books";
 import type { Link } from "../../core/links/model";
 import { sanitizeBookHtml } from "../../core/text/sanitize";
 import { CONFIDENCE_LABELS, CONFIDENCE_ORDER, type Confidence } from "../../linking/automatic";
+import { linksCount } from "../../state/history";
 import { CHUNK } from "../../state/lines";
 import type { Side } from "../../state/store";
 import { useStore } from "../context";
@@ -17,7 +18,7 @@ import { splitMatched } from "./matched-words";
 import { BookInfo } from "./book-info";
 import { BookList } from "./book-picker";
 import { SourceBadge, useBookOrigin } from "./source-badge";
-import { HideButton } from "./hide-button";
+import { Grip, HideButton } from "./hide-button";
 import { parseDraggedLine } from "./line-drag";
 import { LineLinksPopover, type LineLinksAt } from "./line-links";
 import { plainText } from "./plain-text";
@@ -53,6 +54,8 @@ export function Reader({ side }: { side: Side }) {
   const onKeyDown = (e: KeyboardEvent) => {
     // Escape closes the book-info strip and keeps the focus on the name that opened it
     if (e.key === "Escape" && infoOpen && !e.defaultPrevented) {
+      // handled: the same Escape must not also cancel an edit in the builder (app.tsx)
+      e.preventDefault();
       setInfoOpen(false);
       (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".panel-head h2 button")?.focus();
       return;
@@ -97,9 +100,7 @@ function ReaderHead({ side, bookKey, title, onChoose, onFind, findOpen, infoOpen
   const showSource = !!origin.source && store.sources.value.length > 1;
   return (
     <div class="panel-head" data-panel={side} draggable>
-      <span class="grip" title="גררו כדי להזיז את הפאנל">
-        <Icon name="fl_re_order_dots_vertical" size={16} />
-      </span>
+      <Grip id={side} label={`קורא ה${role.short}`} />
       <span class={`side-badge ${side}`} title={role.hint}>{role.short}</span>
       <h2 class="grow book-title" title={title}>
         {title ? (
@@ -222,6 +223,8 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
   const marks = useLineMarks(side, bookKey);
   const pick = store.pick[side].value;
   const pickHere = pick && pick.bookKey === bookKey ? pick : null;
+  /** the keyboard cursor of Ctrl/Cmd+arrows, before Ctrl+Space adds its line to the picked ones; null = the pick itself */
+  const [cursor, setCursor] = useState<number | null>(null);
   /** the line whose links are open (its count was clicked) */
   const [linksAt, setLinksAt] = useState<LineLinksAt | null>(null);
   const openLinks = (line: number, anchor: HTMLElement) => setLinksAt((cur) => (cur?.line === line ? null : { line, anchor }));
@@ -243,14 +246,23 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
       if (a && side === "source") return store.pickAnchor(side, bookKey, i, a);
       if (a) return; // words in the target are just selected text; anchors live on the source line
     }
+    // Ctrl/Cmd: the line joins the picked lines, or leaves them (v3 F-046); a link from each is made in one step
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      setCursor(i);
+      return store.toggleLine(side, bookKey, i);
+    }
+    setCursor(null);
     if (e.shiftKey) getSelection()?.removeAllRanges(); // a Shift-range is lines, not text
     store.pickLine(side, bookKey, i, e.shiftKey);
-    if (side === "target" && store.prefs.createMode.value === "click" && store.pick.source.value) createNow();
+    if (side === "target" && store.prefs.createMode.value === "click" && store.pick.source.value) void createNow();
   };
 
-  const createNow = () => {
+  const createNow = async () => {
+    // an automatic range end (rangeAutoEnd) is part of the pick: the link is made with it
+    await store.whenPicked();
+    const n = store.drafts.peek().length;
     const made = store.createFromDraft();
-    if (made) store.notify("success", "הקישור נוצר (Ctrl+Z מבטל).");
+    if (made) store.notify("success", n > 1 ? `נוצרו ${linksCount(n)} (Ctrl+Z מבטל).` : "הקישור נוצר (Ctrl+Z מבטל).");
     else if (store.draftProblems.value.length) {
       // the plain words; the file's field name only in the notice's details (audit F14)
       const p = store.draftProblems.value.find((x) => x.severity === "error");
@@ -265,20 +277,58 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
       if (btn) (e.preventDefault(), openLinks(pickHere.line, btn));
       return;
     }
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    // keyboard-only use: the first arrow picks the first line in view (UX review #6)
-    if (!pickHere) {
-      const top = scroller.current?.getBoundingClientRect().top ?? 0;
-      const first = [...(scroller.current?.querySelectorAll<HTMLElement>(".ln") ?? [])].find((el) => el.getBoundingClientRect().bottom > top);
-      store.pickLine(side, bookKey, first ? Number(first.dataset.i) : 0);
+    const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
+    // Ctrl/Cmd+Space: the line under the keyboard cursor joins the picked lines, or leaves them (v3 F-046)
+    if (ctrl && e.key === " " && !e.shiftKey) {
+      e.preventDefault();
+      const at = cursor ?? pickHere?.line ?? firstInView();
+      setCursor(at);
+      store.toggleLine(side, bookKey, at);
       return;
     }
-    const edge = e.shiftKey ? (pickHere.end ?? pickHere.line) : pickHere.line;
-    const next = Math.max(0, edge + (e.key === "ArrowDown" ? 1 : -1));
-    if (count !== undefined && next >= count) return;
+    // v3's line keys (§16): arrows, PgUp/PgDn by a screen of lines, Home/End to the first and last line; Shift extends
+    // the range; with Ctrl/Cmd only the cursor moves (for Ctrl+Space), the pick stays
+    const page = () => Math.max(1, linesInView() - 1);
+    const steps: Record<string, () => number> = { ArrowDown: () => 1, ArrowUp: () => -1, PageDown: page, PageUp: () => -page() };
+    if (!(e.key in steps) && e.key !== "Home" && e.key !== "End") return;
+    if (e.key === "End" && count === undefined) return;
+    e.preventDefault();
+    // keyboard-only use: the first arrow picks the first line in view (UX review #6)
+    if (!pickHere && !ctrl && e.key in steps) {
+      store.pickLine(side, bookKey, firstInView());
+      return;
+    }
+    // Shift extends from the far end of the pick; otherwise the keys move on from the keyboard cursor (after Ctrl+Space), else the pick
+    const edge = pickHere ? (e.shiftKey ? (pickHere.end ?? pickHere.lines?.at(-1) ?? pickHere.line) : pickHere.line) : firstInView();
+    const from = e.shiftKey && !ctrl ? edge : (cursor ?? edge);
+    const last = count !== undefined ? count - 1 : Number.MAX_SAFE_INTEGER;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? last : Math.min(last, Math.max(0, from + steps[e.key]!()));
+    if (ctrl) {
+      setCursor(next);
+      store.reveal(side, bookKey, next);
+      return;
+    }
+    setCursor(null);
     store.pickLine(side, bookKey, next, e.shiftKey);
     store.reveal(side, bookKey, next);
+  };
+  /** The first line shown at the top of the reader. */
+  const firstInView = (): number => {
+    const top = scroller.current?.getBoundingClientRect().top ?? 0;
+    const first = [...(scroller.current?.querySelectorAll<HTMLElement>(".ln") ?? [])].find((el) => el.getBoundingClientRect().bottom > top);
+    return first ? Number(first.dataset.i) : 0;
+  };
+  /** How many lines the reader shows now (lines wrap, so a page is counted, not computed from a height). */
+  const linesInView = (): number => {
+    const box = scroller.current?.getBoundingClientRect();
+    if (!box) return 10;
+    let n = 0;
+    for (const el of scroller.current!.querySelectorAll<HTMLElement>(".ln")) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > box.top && r.top < box.bottom) n++;
+      else if (n) break;
+    }
+    return n || 10;
   };
 
   const [dropLine, setDropLine] = useState<number | null>(null);
@@ -321,10 +371,10 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
       <ReaderTools side={side} bookKey={bookKey} count={count} unlinkedOn={unlinkedOn} onUnlinked={setUnlinkedOn} />
       {findOpen && <FindBar side={side} bookKey={bookKey} focusSeq={findSeq} onClose={() => scroller.current?.focus()} />}
       {/* the arrows pick lines here (keyboard use); what was picked is said aloud, the eye sees the highlight */}
-      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ${role.name} (החצים בוחרים שורה)`}>
+      <div class="panel-body" ref={scroller} tabIndex={0} onKeyDown={onKey} role="region" aria-label={`שורות ${role.name} (החצים בוחרים שורה; Ctrl+חץ ו־Ctrl+רווח מוסיפים שורות)`}>
         <div class="lines" onClick={onClick} {...dnd}>
           {Array.from({ length: chunks }, (_, c) => (
-            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} unlinked={unlinked} />
+            <Chunk key={c} c={c} bookKey={bookKey} active={active.has(c)} io={io} count={count} marks={marks} pick={pickHere} cursor={cursor} dropLine={dropLine} draggableNo={side === "source"} hits={hits} currentHit={currentHit} linksOpen={linksAt?.line ?? null} onLinks={openLinks} unlinked={unlinked} />
           ))}
         </div>
       </div>
@@ -337,7 +387,8 @@ function BookView({ side, bookKey, lineCount, findSeq }: { side: Side; bookKey: 
 }
 
 /** "שורה 12: בראשית ברא…" — the picked line (or range) for the screen reader's live region. */
-function pickedLineText(pick: { line: number; end?: number; anchor?: { text: string } }, html: string | undefined): string {
+function pickedLineText(pick: { line: number; end?: number; lines?: readonly number[]; anchor?: { text: string } }, html: string | undefined): string {
+  if (pick.lines) return `נבחרו ${pick.lines.length} שורות: ${pick.lines.map((i) => i + 1).join(", ")}`;
   const where = pick.end !== undefined && pick.end > pick.line ? `שורות ${pick.line + 1}–${pick.end + 1}` : `שורה ${pick.line + 1}`;
   const text = pick.anchor ? `המילים "${pick.anchor.text}"` : html ? plainText(html).slice(0, 120) : "";
   return `נבחרה ${where}${text ? `: ${text}` : ""}`;
@@ -388,7 +439,7 @@ function useLineMarks(side: Side, bookKey: string): Marks {
   return { project: project.value, suggested: suggested.value };
 }
 
-function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; anchor?: { text: string } } | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null; linksOpen: number | null; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: ReadonlySet<number> | null }) {
+function Chunk(props: { c: number; bookKey: string; active: boolean; io: IntersectionObserver; count: number | undefined; marks: Marks; pick: { line: number; end?: number; lines?: readonly number[]; anchor?: { text: string } } | null; cursor: number | null; dropLine: number | null; draggableNo: boolean; hits: ReadonlySet<number>; currentHit: number | null; linksOpen: number | null; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: ReadonlySet<number> | null }) {
   const { c, bookKey, active, io, count } = props;
   const store = useStore();
   const ref = useRef<HTMLDivElement>(null);
@@ -410,13 +461,16 @@ function Chunk(props: { c: number; bookKey: string; active: boolean; io: Interse
   const dbCount = countDb(existing, bookKey, from, n);
   if (error) return <div ref={ref} data-chunk={c} class="chunk-ph">שגיאה בטעינת שורות {from + 1}–{from + n}: {error}</div>;
   if (lines.every((l) => !l) && count === undefined && c > 0) return <div ref={ref} data-chunk={c} />;
+  const p = props.pick;
+  const several = p?.lines ? new Set(p.lines) : null;
+  const picked = (i: number) => !!p && (several ? several.has(i) : i >= p.line && i <= (p.end ?? p.line));
 
   return (
     <div ref={ref} data-chunk={c}>
       {lines.map((l, k) => {
         const i = from + k;
         if (!l) return <div key={i} class="ln" data-i={i}><span class="no">{i + 1}</span><span class="tx muted">…</span></div>;
-        return <Line key={i} l={l} picked={!!props.pick && i >= props.pick.line && i <= (props.pick.end ?? props.pick.line)} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} linksOpen={props.linksOpen === i} onLinks={props.onLinks} unlinked={!!props.unlinked?.has(i)} />;
+        return <Line key={i} l={l} picked={picked(i)} cursor={props.cursor === i} mark={props.marks.project.get(i)} sug={props.marks.suggested.get(i)} db={dbCount.get(i) ?? 0} dropOver={props.dropLine === i} draggableNo={props.draggableNo} found={props.hits.has(i) ? (props.currentHit === i ? "current" : "hit") : null} linksOpen={props.linksOpen === i} onLinks={props.onLinks} unlinked={!!props.unlinked?.has(i)} />;
       })}
     </div>
   );
@@ -430,13 +484,13 @@ function countDb(links: Link[] | undefined, bookKey: string, from: number, n: nu
   return m;
 }
 
-function Line({ l, picked, mark, sug, db, dropOver, draggableNo, found, linksOpen, onLinks, unlinked }: { l: SourceLine; picked: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null; linksOpen: boolean; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: boolean }) {
+function Line({ l, picked, cursor, mark, sug, db, dropOver, draggableNo, found, linksOpen, onLinks, unlinked }: { l: SourceLine; picked: boolean; cursor: boolean; mark: { new: number; file: number; deleted: number } | undefined; sug: Confidence | undefined; db: number; dropOver: boolean; draggableNo: boolean; found: "hit" | "current" | null; linksOpen: boolean; onLinks: (line: number, anchor: HTMLElement) => void; unlinked: boolean }) {
   const html = useMemo(() => sanitizeBookHtml(l.anchorText), [l.anchorText]);
   const total = (mark?.new ?? 0) + (mark?.file ?? 0) + (mark?.deleted ?? 0) + db;
-  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}${unlinked ? " unlinked" : ""}`;
+  const cls = `ln${l.heading !== null ? " heading" : ""}${picked ? " picked" : ""}${cursor ? " cursor" : ""}${dropOver ? " drop-over" : ""}${found ? " find-hit" : ""}${found === "current" ? " find-current" : ""}${unlinked ? " unlinked" : ""}`;
   return (
     <div class={cls} data-i={l.index} title={l.heading !== null ? "שורת כותרת — אוצריא לא יוצרת קישור אל כותרת או ממנה" : undefined}>
-      <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר היעד" : undefined}>{l.index + 1}</span>
+      <span class="no" draggable={draggableNo} title={draggableNo ? "גררו את המספר אל שורה בספר המקושר" : undefined}>{l.index + 1}</span>
       <span class="tx" dangerouslySetInnerHTML={{ __html: html }} />
       <span class="marks">
         {/* the counts open the line's links (line-links.tsx); only the picked line's is a Tab stop */}

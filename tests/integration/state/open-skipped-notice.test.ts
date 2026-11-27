@@ -32,3 +32,17 @@ describe("files that were not opened", () => {
     expect(n.details!.join("\n")).not.toMatch(/empty\.db:.*שאינו/);
   });
 });
+
+describe("the notice of files that did not open stays (#41 B24)", () => {
+  it("is sticky", async () => {
+    const { AppStore } = await import("../../../src/state/store");
+    const { SourceRegistry } = await import("../../../src/sources/registry");
+    const { loadPreferences } = await import("../../../src/state/preferences");
+    const { registryService } = await import("../../support/books-service");
+    const store = new AppStore(registryService(new SourceRegistry()), { save: () => {} }, loadPreferences(null));
+    await store.openFiles([{ path: "seforim.db", blob: new Blob([new Uint8Array(4096).fill(7)]) }]);
+    const n = store.notices.value.find((x) => x.text.includes("לא נפתח"))!;
+    expect(n.sticky).toBe(true);
+    expect(n.details!.join(" ")).toContain("מסד SQLite");
+  });
+});

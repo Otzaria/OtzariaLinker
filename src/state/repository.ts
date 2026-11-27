@@ -6,7 +6,8 @@ import type { UserPair } from "../linking/plan";
 import { discoverPairs, type DiscoveryBook, type PairProposal } from "../linking/discovery";
 import { linksReadingText, type CoverageReport } from "../linking/coverage";
 import type { CoverageRow, CoverageState } from "./coverage";
-import type { BooksService, OpenedSource } from "./services";
+import { humanCsvCell } from "../core/csv";
+import type { BooksService, OpenedSource, Saver } from "./services";
 
 /*
  * The analysis of a repository (V6 3.9) — an open database taken as a whole: how many books, how many links, which books have none,
@@ -36,6 +37,8 @@ export interface RepoRow {
   flags: { flag: DbLinkFlag; count: number }[];
   /** the books it is most linked to, for the pair suggestions (a commentary is linked to its base) */
   top: { key: string; title: string; links: number }[];
+  /** how many books it is linked to (all of them; `top` keeps only the first) */
+  related?: number;
   /** why its links cannot be read (no link table…): it is not counted as having none */
   unavailable?: string;
   /** the lines by what links them, once counted (CoverageRow); `unlinked` is an upper bound unless `exact` (the book's headings were read) */
@@ -80,7 +83,7 @@ export interface RepositoryHost {
   isLibrarySource(sourceId: string): boolean;
 }
 
-export type RepoSort = "title" | "links-asc" | "links-desc" | "unlinked-share";
+export type RepoSort = "title" | "links-asc" | "links-desc" | "unlinked-share" | "problems" | "related";
 
 export interface RepoProgress {
   stage: "links" | "coverage";
@@ -95,6 +98,125 @@ export const isSuspicious = (r: RepoRow): boolean => {
 
 /** The share of a book's content lines that no link touches, when its coverage was counted. */
 export const unlinkedShare = (r: RepoRow): number | null => (r.coverage && r.coverage.suitable > 0 ? r.coverage.unlinked / r.coverage.suitable : null);
+
+export type RepoFilter = "all" | "no-links" | "partial" | "flagged" | "suspicious" | "unlinked" | "unreadable";
+
+const flagged = (r: RepoRow) => r.flags.reduce((n, f) => n + f.count, 0);
+/** some links, and lines that none of them reaches (known only once the coverage was counted) */
+const partly = (r: RepoRow) => r.total > 0 && !!r.coverage && r.coverage.unlinked > 0 && r.coverage.unlinked < r.coverage.suitable;
+
+/** The books of the list: those the query and the filter keep, in the order asked for. */
+export function repoList(books: readonly SourceBook[], rows: ReadonlyMap<string, RepoRow>, o: { query: string; filter: RepoFilter; sort: RepoSort }): SourceBook[] {
+  const q = o.query.trim();
+  const out = books.filter((b) => {
+    if (q && !b.title.includes(q)) return false;
+    const r = rows.get(b.key);
+    if (o.filter === "all") return true;
+    if (o.filter === "unreadable") return !!r?.unavailable;
+    if (!r || r.unavailable) return false;
+    if (o.filter === "no-links") return r.total === 0;
+    if (o.filter === "partial") return partly(r);
+    if (o.filter === "flagged") return r.flags.length > 0;
+    if (o.filter === "suspicious") return isSuspicious(r);
+    return (unlinkedShare(r) ?? 0) >= 0.5;
+  });
+  const byName = new Intl.Collator("he");
+  if (o.sort === "title") out.sort((a, b) => byName.compare(a.title, b.title));
+  // a book not read, or whose links could not be read, is unknown: it sorts after the known ones, never as a book with 0 links
+  const value = (k: string, f: (r: RepoRow) => number | null | undefined) => {
+    const r = rows.get(k);
+    return r && !r.unavailable ? (f(r) ?? null) : null;
+  };
+  const by = (f: (r: RepoRow) => number | null | undefined, asc = false) =>
+    out.sort((a, b) => {
+      const x = value(a.key, f);
+      const y = value(b.key, f);
+      if (x === null || y === null) return (x === null ? 1 : 0) - (y === null ? 1 : 0);
+      return asc ? x - y : y - x;
+    });
+  if (o.sort === "links-asc") by((r) => r.total, true);
+  else if (o.sort === "links-desc") by((r) => r.total);
+  else if (o.sort === "unlinked-share") by(unlinkedShare);
+  else if (o.sort === "problems") by(flagged);
+  else if (o.sort === "related") by((r) => r.related ?? r.top.length);
+  return out;
+}
+
+/** One direct neighbour of a book (V7 §3.14): the database's links each way, the project's links, a suggested pair. */
+export interface BookRelation {
+  title: string;
+  key?: string;
+  /** database links from this book to it, and from it to this book */
+  out: number;
+  in: number;
+  project: number;
+  /** of the project's links, those the QA doubts */
+  problems: number;
+  /** a suggested pair: the neighbour is this book's base, or written on it */
+  suggested?: "base" | "dependant";
+  /** in another source, or a book that is not open */
+  external: boolean;
+}
+
+/**
+ * The direct relations of ONE book, joined by title, for its small map: at most `max`, the suggested and the doubted ones always among
+ * them, then the most linked. Nothing beyond the neighbours: a map of the whole repository would be millions of nodes.
+ */
+export function bookRelations(
+  bookKey: string,
+  sourceId: string,
+  byBook: readonly { bookKey: string; title: string; out: number; in: number }[],
+  project: readonly { title: string; problem: boolean }[],
+  proposals: readonly { dependant: { key: string; title: string }; base: { key: string; title: string } }[],
+  max = 8,
+): BookRelation[] {
+  const m = new Map<string, BookRelation>();
+  const at = (title: string, key?: string, closed = false) => {
+    let r = m.get(title);
+    if (!r) m.set(title, (r = { title, ...(key && { key }), out: 0, in: 0, project: 0, problems: 0, external: closed || (!!key && sourceIdOfBookKey(key) !== sourceId) }));
+    return r;
+  };
+  for (const b of byBook) {
+    const closed = b.bookKey.startsWith("unresolved:");
+    const r = at(b.title, closed ? undefined : b.bookKey, closed);
+    r.out += b.out;
+    r.in += b.in;
+  }
+  for (const p of project) {
+    const r = at(p.title);
+    r.project++;
+    if (p.problem) r.problems++;
+  }
+  for (const p of proposals) {
+    if (p.dependant.key === bookKey) at(p.base.title, p.base.key).suggested = "base";
+    else if (p.base.key === bookKey) at(p.dependant.title, p.dependant.key).suggested = "dependant";
+  }
+  const weight = (r: BookRelation) => r.out + r.in + r.project;
+  const first = (r: BookRelation) => (r.suggested || r.problems ? 0 : 1);
+  return [...m.values()].sort((a, b) => first(a) - first(b) || weight(b) - weight(a)).slice(0, max).sort((a, b) => weight(b) - weight(a));
+}
+
+/** What the report says of a book: never a count for a book that was not read. */
+export function repoStatus(r: RepoRow | undefined): string {
+  if (!r) return "לא נבדק";
+  if (r.unavailable) return `לא נקרא: ${r.unavailable}`;
+  if (r.total === 0) return "בלי קישורים";
+  if (r.coverageUnknown) return "יש קישורים; הכיסוי לא ידוע";
+  if (!r.coverage) return "יש קישורים";
+  return partly(r) ? "מקושר חלקית" : r.coverage.unlinked ? "בלי קישור בשורות התוכן" : "כל שורות התוכן מקושרות";
+}
+
+/** The analysis as a CSV for a person (Excel): one row per book; the counts of a book that was not read are empty, not 0. */
+export function repoReportCsv(books: readonly SourceBook[], rows: ReadonlyMap<string, RepoRow>, source: string): string {
+  const head = ["מקור", "ספר", "שורות", "קישורים", "יוצאים", "נכנסים", "ספרים מקושרים", "קישורים מסומנים", "שורות תוכן", "שורות בלי קישור", "מצב"];
+  const lines = books.map((b) => {
+    const r = rows.get(b.key);
+    const ok = r && !r.unavailable ? r : undefined;
+    const c = ok?.coverage;
+    return [source, b.title, b.lineCount ?? "", ok?.total ?? "", ok?.out ?? "", ok?.in ?? "", ok ? (ok.related ?? ok.top.length) : "", ok ? flagged(ok) : "", c?.suitable ?? "", c?.unlinked ?? "", repoStatus(r)];
+  });
+  return [head, ...lines].map((l) => l.map(humanCsvCell).join(",")).join("\r\n");
+}
 
 export class RepositoryState {
   /** the source being analyzed (an open database); null = the first one */
@@ -161,7 +283,14 @@ export class RepositoryState {
   constructor(
     private readonly host: RepositoryHost,
     private readonly service: Pick<BooksService, "dbLinkSummary">,
+    private readonly saver?: Saver,
   ) {}
+
+  /** Saves the analysis so far as a CSV report (repoReportCsv). */
+  saveReport(): void {
+    const src = this.source.peek();
+    if (src && this.saver) this.saver.save(`ניתוח-מאגר-${new Date().toISOString().slice(0, 10)}.csv`, repoReportCsv(this.books.peek(), this.rows.peek(), src.info.label), "text/csv;charset=utf-8");
+  }
 
   get available(): boolean {
     return !!this.service.dbLinkSummary;
@@ -244,6 +373,7 @@ export class RepositoryState {
       ends,
       flags: s.flags ? s.flags.map((f) => ({ flag: f.flag, count: f.count })) : [],
       top: s.byBook.slice(0, TOP).map((b) => ({ key: b.bookKey, title: b.title, links: b.out + b.in })),
+      related: s.byBook.length,
     };
   }
 

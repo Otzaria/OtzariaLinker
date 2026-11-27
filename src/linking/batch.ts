@@ -112,13 +112,13 @@ export function resolveBaseKey(k: string, index: TitleIndex, self: BookRef, name
     const from = (src: string) => pool.filter((b) => sourceIdOfBookKey(b.key) === src);
     const chosen = index.prefer ? from(index.prefer) : [];
     const own = from(sourceIdOfBookKey(self.key));
-    if (chosen.length === 1) (note = [note, `"${chosen[0]!.title}" פתוח בכמה מקורות; נבחר זה מהמקור שבחרתם לספרי הבסיס.`].filter(Boolean).join(" ")), (pool = chosen);
+    if (chosen.length === 1) (note = [note, `"${chosen[0]!.title}" פתוח בכמה קבצים ומסדים; נבחר זה מהקובץ או המסד שבחרתם לספרי הבסיס.`].filter(Boolean).join(" ")), (pool = chosen);
     else if (own.length === 1) (rule = `זה שמאותו מקור כמו "${self.title}"`), (pool = own);
   }
   const official = pool.filter((b) => b.origin !== "personal");
   if (official.length && official.length < pool.length) (rule ??= "זה של המאגר הרשמי, ולא העותק האישי"), (pool = official);
   if (pool.length > 1)
-    return { reason: `"${pool[0]!.title}" פתוח ב־${new Set(pool.map((b) => sourceIdOfBookKey(b.key))).size > 1 ? `${pool.length} מקורות` : `${pool.length} ספרים באותו שם`}, ולא ברור על איזה מהם הספר כתוב. בחרו למעלה מאיזה מקור לקחת את ספרי הבסיס, או קשרו את הזוג ידנית.` };
+    return { reason: `"${pool[0]!.title}" פתוח ב־${new Set(pool.map((b) => sourceIdOfBookKey(b.key))).size > 1 ? `${pool.length} קבצים ומסדים` : `${pool.length} ספרים באותו שם`}, ולא ברור על איזה מהם הספר כתוב. בחרו למעלה מאיזה מקור לקחת את ספרי הבסיס, או קשרו את הזוג ידנית.` };
   const target = pool[0]!;
   const undecided = rule ? editions.filter((b) => b.key !== target.key) : [];
   if (undecided.length)

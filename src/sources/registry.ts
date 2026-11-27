@@ -21,6 +21,7 @@ import { MappedDbSource, testMapping } from "./db/mapped-source";
 import { pendingMapping } from "./db/pending";
 import { listingFromLinks, type LinkListing } from "./db/link-listing";
 import { detectKind, type DetectedKind } from "./detect";
+import { isReadFailure, unreadableReason } from "./read-failure";
 import { loneCrMessage, TextFilesSource, type TextFile } from "./text/text-source";
 
 /*
@@ -113,8 +114,16 @@ export class SourceRegistry {
     const loneCr: string[] = [];
     for (const f of files) {
       signal?.throwIfAborted();
-      const kind = detectKind(new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer()), f.path);
-      await this.route(f, kind, result, all, notUtf8, signal, loneCr);
+      let head: Uint8Array;
+      try {
+        head = new Uint8Array(await f.blob.slice(0, HEAD).arrayBuffer());
+      } catch (err) {
+        // one file the browser cannot read (locked, only in the cloud, gone) is skipped with the reason; the rest of the drop opens (F-012)
+        if (signal?.aborted) throw err;
+        result.skipped.push({ path: f.path, reason: unreadableReason(err) });
+        continue;
+      }
+      await this.route(f, detectKind(head, f.path), result, all, notUtf8, signal, loneCr);
     }
     // a text book already open (the same file or folder picked again, F-016) is not opened again. From the check to add() the
     // code is synchronous, so a drop of the same files that overlaps this one sees them taken.
@@ -445,7 +454,7 @@ export class SourceRegistry {
           const enc = decodeText(head, { partial: f.blob.size > SNIFF }).encoding;
           if (hasLoneCr(head, f.blob.size > SNIFF)) loneCr.push(f.path);
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
-        } else result.skipped.push({ path: f.path, reason: "קובץ טקסט שאינו ‎.txt — לא נטען כספר." });
+        } else result.skipped.push({ path: f.path, reason: misnamedReason(f.path) });
         return;
       case "json":
         // other JSON (an array of records, an object holding one, JSON Lines): the user maps its fields
@@ -606,6 +615,16 @@ function loneCrWarning(paths: readonly string[]): { code: string; message: strin
   return { code: "source/lone-cr", message: loneCrMessage(paths) };
 }
 
+/**
+ * Why a file whose bytes are not what its name says was not opened (#41 B24): a damaged .db used to be called "a text file
+ * that is not .txt" — the detector found no SQLite header, and every unknown file fell into "text".
+ */
+function misnamedReason(path: string): string {
+  if (/\.(db|sqlite3?|db3)$/i.test(path)) return "הקובץ אינו מסד SQLite תקין (חסרה כותרת המסד): ייתכן שהוא פגום, חלקי (ההורדה לא הסתיימה) או שאינו מסד בכלל. הורידו או העתיקו אותו שוב ונסו שוב.";
+  if (/\.zip$/i.test(path)) return "הקובץ אינו ZIP תקין: ייתכן שהוא פגום או שההורדה לא הסתיימה. הורידו אותו שוב, או פתחו את התיקייה עצמה.";
+  return "קובץ טקסט שאינו \u200e.txt — לא נטען כספר.";
+}
+
 const nameOf = (path: string): string => path.split(/[\\/]/).at(-1) ?? path;
 
 function labelForTexts(files: readonly TextFile[]): string {
@@ -624,5 +643,6 @@ function documentText(bytes: Uint8Array): string {
 }
 
 function reasonOf(err: unknown, fallback: string): string {
+  if (isReadFailure(err)) return unreadableReason(err);
   return err instanceof LinkerError ? err.message : `${fallback} (${err instanceof Error ? err.message : String(err)})`;
 }

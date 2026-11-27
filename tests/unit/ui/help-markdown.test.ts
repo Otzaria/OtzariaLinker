@@ -58,3 +58,22 @@ describe("help: the guide rendered inside the tool", () => {
     expect(slug("קישורים `ref_1`")).toBe("קישורים-ref_1");
   });
 });
+
+describe("the help works offline (#41 B28, V7 §3.21)", () => {
+  const guide = readFileSync(resolve("docs/USER_GUIDE.md"), "utf8");
+  const ts = readFileSync(resolve("docs/TROUBLESHOOTING.md"), "utf8");
+  it("the troubleshooting guide is inside the help, and the guide's link to it stays inside", async () => {
+    const { helpText } = await import("../../../src/ui/help/markdown");
+    const r = renderGuide(helpText(guide, ts));
+    expect(r.toc.some((t) => t.text === "פתרון תקלות")).toBe(true);
+    expect(r.html).not.toContain("TROUBLESHOOTING.md\"");
+    expect(r.anchors.filter((a) => !r.ids.has(a))).toEqual([]);
+  });
+  it("a link to a document that is not in the file says it needs the network", async () => {
+    const { helpText } = await import("../../../src/ui/help/markdown");
+    const r = renderGuide(helpText(guide, ts));
+    const external = [...r.html.matchAll(/<a href="https:[^"]*"[^>]*>[\s\S]*?<\/a>[^<]*/g)].map((m) => m[0]);
+    expect(external.length).toBeGreaterThan(0);
+    for (const a of external) expect(a).toContain("דורש רשת");
+  });
+});

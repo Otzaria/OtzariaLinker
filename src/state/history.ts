@@ -71,6 +71,8 @@ export interface Command {
   readonly files?: readonly FileChange[];
   /** suggestion rejections the same action added or forgot (review C10) */
   readonly rejections?: RejectionChange;
+  /** open books (by key) the same action removed from the tool or brought back (V7 parity F-035) */
+  readonly removedBooks?: RejectionChange;
   readonly at: number;
 }
 
@@ -95,6 +97,12 @@ export interface LinkState {
    * autosaved (review C10).
    */
   readonly rejected: ReadonlySet<string>;
+  /**
+   * Open books (by session key) the user removed from the tool with their links (version 3's "הסרת ספר", F-035):
+   * their source stays open, but the screens do not list them. Part of the undoable state, so undo brings the book
+   * back with its links. Session keys only: never saved in a project.
+   */
+  readonly removedBooks: ReadonlySet<string>;
   readonly undo: readonly Command[];
   readonly redo: readonly Command[];
   /** bumps on every change; autosave and "unsaved changes" compare against it */
@@ -103,7 +111,7 @@ export interface LinkState {
 
 export const HISTORY_LIMIT = 500;
 
-export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), files: new Map(), rejected: new Set(), undo: [], redo: [], revision: 0 });
+export const emptyLinkState = (): LinkState => ({ links: new Map(), altToc: new Map(), files: new Map(), rejected: new Set(), removedBooks: new Set(), undo: [], redo: [], revision: 0 });
 
 function applyChanges(links: ReadonlyMap<string, Link>, changes: readonly Change[], dir: "after" | "before"): Map<string, Link> {
   const next = new Map(links);
@@ -150,18 +158,21 @@ export function commit(
   altToc: readonly AltTocChange[] = [],
   files: readonly FileChange[] = [],
   rejections: { readonly add?: Iterable<string>; readonly remove?: Iterable<string> } = {},
+  books: { readonly remove?: Iterable<string>; readonly restore?: Iterable<string> } = {},
 ): LinkState {
   const real = changes.map(settle).filter((c): c is Change => !!c && c.before !== c.after);
   const realAlt = altToc.filter((c) => c.before !== c.after);
   const realFiles = files.filter((c) => c.before !== c.after);
   const rej = rejectionChange(s.rejected, rejections.add, rejections.remove);
-  if (!real.length && !realAlt.length && !realFiles.length && !rej) return s;
-  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), ...(realFiles.length && { files: realFiles }), ...(rej && { rejections: rej }), at };
+  const rem = rejectionChange(s.removedBooks, books.remove, books.restore);
+  if (!real.length && !realAlt.length && !realFiles.length && !rej && !rem) return s;
+  const cmd: Command = { label, changes: real, ...(realAlt.length && { altToc: realAlt }), ...(realFiles.length && { files: realFiles }), ...(rej && { rejections: rej }), ...(rem && { removedBooks: rem }), at };
   return {
     links: applyChanges(s.links, real, "after"),
     altToc: applyKeyed(s.altToc, realAlt, "after"),
     files: applyKeyed(s.files, realFiles, "after"),
     rejected: applyRejections(s.rejected, rej ?? undefined, "after"),
+    removedBooks: applyRejections(s.removedBooks, rem ?? undefined, "after"),
     undo: [...s.undo, cmd].slice(-HISTORY_LIMIT),
     redo: [],
     revision: s.revision + 1,
@@ -171,13 +182,13 @@ export function commit(
 export function undo(s: LinkState): LinkState {
   const cmd = s.undo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyKeyed(s.altToc, cmd.altToc, "before"), files: applyKeyed(s.files, cmd.files, "before"), rejected: applyRejections(s.rejected, cmd.rejections, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "before"), altToc: applyKeyed(s.altToc, cmd.altToc, "before"), files: applyKeyed(s.files, cmd.files, "before"), rejected: applyRejections(s.rejected, cmd.rejections, "before"), removedBooks: applyRejections(s.removedBooks, cmd.removedBooks, "before"), undo: s.undo.slice(0, -1), redo: [...s.redo, cmd], revision: s.revision + 1 };
 }
 
 export function redo(s: LinkState): LinkState {
   const cmd = s.redo.at(-1);
   if (!cmd) return s;
-  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), rejected: applyRejections(s.rejected, cmd.rejections, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
+  return { links: applyChanges(s.links, cmd.changes, "after"), altToc: applyKeyed(s.altToc, cmd.altToc, "after"), files: applyKeyed(s.files, cmd.files, "after"), rejected: applyRejections(s.rejected, cmd.rejections, "after"), removedBooks: applyRejections(s.removedBooks, cmd.removedBooks, "after"), undo: [...s.undo, cmd], redo: s.redo.slice(0, -1), revision: s.revision + 1 };
 }
 
 /**
@@ -334,7 +345,7 @@ export const historyPosition = (s: LinkState): number => s.undo.length;
 /** Every action the history holds, oldest first: the applied ones, then the undone ones in redo order. */
 export function timeline(s: LinkState): HistoryEntry[] {
   const all = [...s.undo, ...[...s.redo].reverse()];
-  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0) + (c.files?.length ?? 0) + (c.rejections ? c.rejections.added.length + c.rejections.removed.length : 0), position: i + 1, applied: i < s.undo.length }));
+  return all.map((c, i) => ({ label: c.label, at: c.at, changes: c.changes.length + (c.altToc?.length ?? 0) + (c.files?.length ?? 0) + (c.rejections ? c.rejections.added.length + c.rejections.removed.length : 0) + (c.removedBooks ? c.removedBooks.added.length + c.removedBooks.removed.length : 0), position: i + 1, applied: i < s.undo.length }));
 }
 
 /** Undoes or redoes, one action at a time, until `position` actions are applied. */
@@ -353,6 +364,10 @@ export const linksCount = (n: number): string => (n === 1 ? "קישור אחד" 
 export const booksCount = (n: number): string => (n === 1 ? "ספר אחד" : `${n.toLocaleString("he")} ספרים`);
 /** "קובץ אחד" / "1,200 קבצים" */
 export const filesCount = (n: number): string => (n === 1 ? "קובץ אחד" : `${n.toLocaleString("he")} קבצים`);
+/** "נפתח ספר אחד" / "נפתחו 3 ספרים" (#41 B27: the verb agrees with the count) */
+export const booksOpened = (n: number): string => (n === 1 ? "נפתח ספר אחד" : `נפתחו ${booksCount(n)}`);
+/** "קובץ או מסד אחד" / "3 קבצים ומסדים" */
+export const sourcesCount = (n: number): string => (n === 1 ? "קובץ או מסד אחד" : `${n.toLocaleString("he")} קבצים ומסדים`);
 /** "קישור אחד לא ייוצא" / "3 קישורים לא ייוצאו" — the verb agrees too (V5 UX audit U13) */
 export const heldLinksText = (n: number): string => (n === 1 ? "קישור אחד לא ייוצא" : `${n.toLocaleString("he")} קישורים לא ייוצאו`);
 /** "מחיקה אחת לא תגיע לספרייה" / "3 מחיקות לא יגיעו לספרייה" */

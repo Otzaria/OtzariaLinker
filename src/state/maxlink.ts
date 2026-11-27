@@ -374,6 +374,19 @@ export class MaxLinkState {
     return this.drive();
   }
 
+  /**
+   * Forgets the existing-links evidence (the full reset): it is by session book keys, which name nothing once the sources
+   * are closed. The job stays — it names its books by title and resumes when they are open again.
+   */
+  forgetEvidence(): void {
+    this.checked.clear();
+    batch(() => {
+      this.evidence.value = new Map();
+      this.checkedCount.value = 0;
+      this.unchecked.value = 0;
+    });
+  }
+
   /** Forgets the job (its stored results too). The suggestions shown stay until the next run. */
   discardJob(): void {
     if (this.running.peek()) return;

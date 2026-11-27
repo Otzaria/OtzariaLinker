@@ -49,3 +49,14 @@ dialog.repository .icon-btn { min-inline-size: 28px; min-block-size: 28px; }
 .repo-conf-medium { background: var(--surface-container-highest); }
 .repo-conf-low { background: var(--warning-container); color: var(--on-warning-container); }
 dialog.repository .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.repo-map svg { inline-size: 100%; max-block-size: 260px; display: block; }
+.repo-map text { font-size: 11px; fill: var(--on-surface); }
+.repo-map line { stroke: var(--outline); stroke-width: 1.5; }
+.repo-map circle, .repo-map-head { fill: var(--outline); }
+.repo-map .repo-map-me { fill: var(--primary); font-weight: 700; }
+.repo-map-proj line { stroke: var(--primary); stroke-width: 3.5; }
+.repo-map-sug line { stroke-dasharray: 5 4; }
+.repo-map-bad line { stroke: var(--error); stroke-width: 3.5; }
+.repo-map-bad circle { fill: var(--error); }
+.repo-map summary { min-block-size: 24px; display: flex; align-items: center; cursor: pointer; }
+@media (pointer: coarse) { .repo-map summary { min-block-size: 44px; } }

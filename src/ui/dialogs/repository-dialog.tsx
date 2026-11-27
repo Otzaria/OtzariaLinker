@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { repoProgressText } from "./repo-progress";
 import { TYPE_LABELS } from "../../core/links/connection-type";
 import { GUIDED_STEP_TITLES } from "../../state/guided-flow";
 import { DB_LINK_FLAG_LABELS, type DbLinkSummary, type DbLinksUnavailable } from "../../core/links/db-links";
 import type { PairConfidence, PairProposal } from "../../linking/discovery";
-import { isSuspicious, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoRow, type RepoSort } from "../../state/repository";
+import { bookRelations, isSuspicious, repoList, SUSPICIOUS_MIN, SUSPICIOUS_SHARE, unlinkedShare, type RepoFilter, type RepoRow, type RepoSort } from "../../state/repository";
 import { linksReadingText } from "../../linking/coverage";
 import { coverageTrust } from "../workspace/coverage-compute";
 import { useStore } from "../context";
@@ -23,19 +24,23 @@ const COVERAGE_AT_ONCE = 200;
 const n = (x: number) => x.toLocaleString("he");
 /** "ספר אחד" / "5 ספרים": the Hebrew count, never "1 ספרים". */
 const many = (x: number, one: string, other: string) => (x === 1 ? one : `${n(x)} ${other}`);
-const FILTERS = {
+const FILTERS: Record<RepoFilter, string> = {
   all: "כל הספרים",
   "no-links": "בלי קישורים",
+  partial: "מקושרים חלקית (אחרי חישוב כיסוי)",
   flagged: "עם סימוני בדיקה",
   suspicious: "ספרים חשודים",
   unlinked: "שורות רבות בלי קישור (אחרי חישוב כיסוי)",
-} as const;
-type Filter = keyof typeof FILTERS;
+  unreadable: "שהקישורים שלהם לא נקראו",
+};
+type Filter = RepoFilter;
 const SORTS: Record<RepoSort, string> = {
   title: "לפי שם",
   "links-asc": "מעט קישורים תחילה",
   "links-desc": "הרבה קישורים תחילה",
   "unlinked-share": "הכי פחות מכוסים תחילה (אחרי חישוב כיסוי)",
+  problems: "הכי הרבה סימוני בדיקה תחילה",
+  related: "הכי הרבה ספרים מקושרים תחילה",
 };
 const CONFIDENCE: Record<PairConfidence, string> = { high: "ביטחון גבוה", medium: "ביטחון בינוני", low: "ביטחון נמוך" };
 const ENDS_LABEL = {
@@ -68,27 +73,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
   }, [repo.books.value]);
 
   // the list: filtered and sorted from the small rows; only a page of it is in the page
-  const list = useMemo(() => {
-    const q = query.trim();
-    const out = repo.books.value.filter((b) => {
-      if (q && !b.title.includes(q)) return false;
-      const r = rows.get(b.key);
-      if (filter === "all") return true;
-      if (!r || r.unavailable) return false;
-      if (filter === "no-links") return r.total === 0;
-      if (filter === "flagged") return r.flags.length > 0;
-      if (filter === "suspicious") return isSuspicious(r);
-      return (unlinkedShare(r) ?? 0) >= 0.5;
-    });
-    const byName = new Intl.Collator("he");
-    if (sort === "title") out.sort((a, b) => byName.compare(a.title, b.title));
-    const total = (k: string) => rows.get(k)?.total;
-    const share = (k: string) => (rows.get(k) ? unlinkedShare(rows.get(k)!) : null);
-    if (sort === "links-asc") out.sort((a, b) => (total(a.key) ?? Infinity) - (total(b.key) ?? Infinity));
-    else if (sort === "links-desc") out.sort((a, b) => (total(b.key) ?? -1) - (total(a.key) ?? -1));
-    else if (sort === "unlinked-share") out.sort((a, b) => (share(b.key) ?? -1) - (share(a.key) ?? -1));
-    return out;
-  }, [repo.books.value, rows, query, sort, filter]);
+  const list = useMemo(() => repoList(repo.books.value, rows, { query, filter, sort }), [repo.books.value, rows, query, sort, filter]);
   useEffect(() => setShown(PAGE), [query, sort, filter, source?.info.id]);
 
   const picked = repo.pickedBooks.value;
@@ -142,6 +127,11 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
               <p class="muted" style="margin:0">
                 הניתוח קורא את הקישורים של כל ספר במסד, אחד אחד, ומראה איפה חסרים קישורים. הוא רק קורא: שום דבר לא נכתב למסד, ושום דבר לא רץ בלי שתפעילו אותו: "השלמת קישורים" רק פותחת את התהליך המודרך עם הספרים שבחרתם, והוא מתחיל לרוץ כשתלחצו שם על "הפעלה".
               </p>
+              {repo.repositories.value.length < 2 && (
+                <p class="small" style="margin:0">
+                  המסד: <b>{source.info.label}</b>
+                </p>
+              )}
               {repo.repositories.value.length > 1 && (
                 <label class="field">
                   המסד
@@ -165,9 +155,15 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                         </button>
                       )}
                       {totals.counted > 0 && (
-                        <button class="btn text" onClick={() => void repo.analyze(true)}>
-                          ניתוח מחדש מההתחלה
-                        </button>
+                        <>
+                          <button class="btn text" onClick={() => void repo.analyze(true)}>
+                            ניתוח מחדש מההתחלה
+                          </button>
+                          <button class="btn text" onClick={() => repo.saveReport()} title="קובץ CSV עם שורה לכל ספר: הקישורים, הסימונים והכיסוי. ספר שלא נקרא נשאר ריק, לא 0">
+                            <Icon name="fl_save" size={18} />
+                            שמירת דוח
+                          </button>
+                        </>
                       )}
                     </>
                   ) : (
@@ -181,7 +177,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                     <span class="sr-only" role="status">{progress.stage === "links" ? "הניתוח רץ." : "חישוב הכיסוי רץ."}</span>
                     <progress max={progress.total || 1} value={progress.done} aria-label="התקדמות הניתוח" aria-valuetext={`${n(progress.done)} מתוך ${n(progress.total)} ספרים`} />
                     <span aria-hidden="true">
-                      {progress.stage === "links" ? "נקראו הקישורים של" : "חושב כיסוי של"} {n(progress.done)} מתוך {n(progress.total)} ספרים. אפשר לעצור, והספרים שנקראו נשמרים.
+                      {repoProgressText(progress)}
                     </span>
                   </div>
                 )}
@@ -211,6 +207,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 <Stat v={totals.counted ? n(totals.noLinks) : "—"} label="ספרים בלי קישורים" />
                 <Stat v={totals.counted ? n(totals.flaggedBooks) : "—"} label="ספרים עם סימוני בדיקה" />
                 <Stat v={totals.counted ? n(totals.suspicious) : "—"} label="ספרים חשודים" bad={totals.suspicious > 0} />
+                {totals.unavailable > 0 && <Stat v={n(totals.unavailable)} label="ספרים שהקישורים שלהם לא נקראו (לא נספרו)" bad />}
               </div>
               {totals.counted > 0 && (
                 <details class="repo-more">
@@ -292,6 +289,9 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                 <button class="btn text small" onClick={() => void repo.countCoverage(list.slice(0, COVERAGE_AT_ONCE).map((b) => b.key))} disabled={busy || !totals.counted || !list.length} title="סופר כמה שורות בכל ספר כבר מקושרות. נעשה לספרים שברשימה, עד 200 בכל פעם">
                   חישוב כיסוי לספרים שברשימה
                 </button>
+                <button class="btn text small" onClick={() => void repo.countCoverage([...picked])} disabled={busy || !totals.counted || !picked.size}>
+                  חישוב כיסוי לנבחרים
+                </button>
               </div>
               <div class="repo-grid">
                 <div>
@@ -309,7 +309,7 @@ export function RepositoryDialog({ onClose }: { onClose: () => void }) {
                   )}
                   {!list.length && <p class="muted">אין ספרים שמתאימים.</p>}
                 </div>
-                {detail && <BookDetail bookKey={detail} onClose={() => setDetail(null)} onLeave={() => ref.current?.close()} />}
+                {detail && <BookDetail bookKey={detail} onClose={() => setDetail(null)} onLeave={() => ref.current?.close()} onShow={setDetail} />}
               </div>
 
               <h3 class="repo-h">זוגות מוצעים</h3>
@@ -386,7 +386,7 @@ function BookRow({ title, row, checked, current, onPick, onOpen }: { title: stri
 }
 
 /** One book: who it is linked to and from, its types and flags, its coverage and the unlinked ranges, and the way into the reader. */
-function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: () => void; onLeave: () => void }) {
+function BookDetail({ bookKey, onClose, onLeave, onShow }: { bookKey: string; onClose: () => void; onLeave: () => void; onShow: (key: string) => void }) {
   const store = useStore();
   const repo = store.repository;
   const book = store.books.value.get(bookKey);
@@ -446,7 +446,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
       {ok && (
         <>
           <p style="margin:0">
-            <b>{n(ok.total)}</b> קישורים: {n(ok.out)} שהספר הוא צד המקור שלהם, {n(ok.in)} שהוא צד היעד.
+            <b>{n(ok.total)}</b> קישורים: {n(ok.out)} שיוצאים מהספר, {n(ok.in)} שמגיעים אליו.
           </p>
           {ok.total === 0 && <p class="muted">לספר אין קישורים במסד: מועמד להשלמת קישורים.</p>}
           {ok.byType.length > 0 && (
@@ -476,6 +476,7 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
               {ok.byBook.length > 10 && <p class="muted small">ועוד {n(ok.byBook.length - 10)} ספרים מקושרים. הרשימה המלאה בלשונית "קישורים מהמסד".</p>}
             </>
           )}
+          <RelationMap bookKey={bookKey} title={book.title} byBook={ok.byBook} onShow={onShow} />
           {ok.flags && ok.flags.length > 0 && (
             <>
               <h4>סימוני בדיקה</h4>
@@ -539,6 +540,83 @@ function BookDetail({ bookKey, onClose, onLeave }: { bookKey: string; onClose: (
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * The book and its direct neighbours only (V7 §3.14), drawn by hand as a small SVG: at most 8 books around it, an arrow per direction of
+ * the database's links, a thick line for the project's links, a dashed one for a suggested pair, red where the QA doubts a link. Folded
+ * until asked for; nothing is drawn beyond the neighbours.
+ */
+function RelationMap({ bookKey, title, byBook, onShow }: { bookKey: string; title: string; byBook: DbLinkSummary["byBook"]; onShow: (key: string) => void }) {
+  const store = useStore();
+  const [open, setOpen] = useState(false);
+  const sourceId = store.repository.source.value?.info.id ?? "";
+  const rels = useMemo(() => {
+    if (!open) return [];
+    const doubted = new Set(store.quality.report.value?.issues.filter((i) => i.problem.severity !== "info").map((i) => i.link.id));
+    const project = store.linksOfBook(bookKey).map((l) => ({ title: (store.sameBook(l.source.book, bookKey) ? l.target : l.source).book.title, problem: doubted.has(l.id) }));
+    return bookRelations(bookKey, sourceId, byBook, project, store.repository.suggestions.value?.proposals ?? []);
+  }, [open, bookKey, byBook]);
+  const cut = (t: string) => (t.length > 16 ? `${t.slice(0, 15)}…` : t);
+  // what each neighbour is, in words: the SVG's text alternative and the keyboard's way through the map (V7 §3.14)
+  const whatOf = (r: (typeof rels)[number]) =>
+    [r.out && `${n(r.out)} קישורים אליו`, r.in && `${n(r.in)} קישורים ממנו`, r.project && `${n(r.project)} בפרויקט`, r.problems && `${n(r.problems)} שהבדיקה מפקפקת בהם`, r.suggested && (r.suggested === "base" ? "בסיס מוצע" : "מוצע כמפרש שלו"), r.external && "מחוץ למסד"].filter(Boolean).join(", ");
+  const listId = `repo-map-list-${bookKey.replace(/[^\w-]/g, "_")}`;
+  return (
+    <details class="repo-map" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>מפת הקשרים של הספר</summary>
+      {open && !rels.length && <p class="muted small">אין לספר קשרים ישירים לספרים אחרים.</p>}
+      {open && rels.length > 0 && (
+        <svg viewBox="0 0 400 260" role="img" aria-label={`${title} ו־${many(rels.length, "ספר אחד שקשור אליו", "ספרים שקשורים אליו")}: מפת הקשרים. הפירוט ברשימה שאחרי המפה.`} aria-describedby={listId}>
+          <defs>
+            <marker id="repo-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0L8 4L0 8z" class="repo-map-head" />
+            </marker>
+          </defs>
+          {rels.map((r, i) => {
+            const a = (2 * Math.PI * i) / rels.length - Math.PI / 2;
+            const x = 200 + 150 * Math.cos(a);
+            const y = 130 + 95 * Math.sin(a);
+            const kind = r.problems ? "bad" : r.project ? "proj" : r.suggested ? "sug" : "db";
+            return (
+              <g key={r.title} class={`repo-map-${kind}`} aria-hidden="true">
+                <title>{`${r.title}: ${whatOf(r)}`}</title>
+                <line x1={200} y1={130} x2={x} y2={y} marker-end={r.out ? "url(#repo-arrow)" : undefined} marker-start={r.in ? "url(#repo-arrow)" : undefined} />
+                <circle cx={x} cy={y} r={5} />
+                <text x={x} y={y + (y < 130 ? -9 : 17)} text-anchor="middle">
+                  {cut(r.title)}
+                </text>
+              </g>
+            );
+          })}
+          <circle cx={200} cy={130} r={7} class="repo-map-me" />
+          <text x={200} y={150} text-anchor="middle" class="repo-map-me">
+            {cut(title)}
+          </text>
+        </svg>
+      )}
+      {open && rels.length > 0 && <p class="muted small">חץ: קישור במסד, לכיוון שלו. קו עבה: קישורים בפרויקט. מקווקו: זוג מוצע. קו עבה אדום: קישור שהבדיקה מפקפקת בו.</p>}
+      {open && rels.length > 0 && (
+        <ul class="repo-rel repo-map-list" id={listId} aria-label="הספרים שבמפה">
+          {rels.map((r) => {
+            const here = !!r.key && !r.external && !!store.books.value.get(r.key);
+            return (
+              <li key={r.title}>
+                <span class="grow">
+                  <b>{r.title}</b> <span class="muted">— {whatOf(r) || "קשור"}</span>
+                </span>
+                {here && (
+                  <button class="btn text small" onClick={() => onShow(r.key!)} aria-label={`מעבר לפרטי הספר ${r.title}`}>
+                    פרטי הספר
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
   );
 }
 

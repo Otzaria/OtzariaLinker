@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { countOf, ETA_AFTER_MS, remainingText } from "../../../src/state/task-progress";
+import { countOf, elapsedText, ETA_AFTER_MS, remainingText, stageText } from "../../../src/state/task-progress";
+
+describe("what a running task says besides its name (V7 §3.16, #41 B11)", () => {
+  const t0 = 1_000_000;
+  it("before its first count, that it is preparing — never a bare 0/0", () => {
+    expect(stageText({ done: 0, total: 0 })).toBe("מכין את העבודה…");
+    expect(stageText({ done: 3, total: 10, count: "ספר 3 מתוך 10" })).toBe("ספר 3 מתוך 10");
+    expect(stageText({ done: 3, total: 10 })).toBe("30%");
+  });
+  it("the time since it started, once it is long enough to matter", () => {
+    expect(elapsedText(t0, t0 + 2_000)).toBeNull();
+    expect(elapsedText(t0, t0 + 12_000)).toBe("0:12");
+    expect(elapsedText(t0, t0 + 125_000)).toBe("2:05");
+    expect(elapsedText(t0, t0 + 3_725_000)).toBe("1:02:05");
+  });
+});
 
 describe("the time left of a long task (audit F21)", () => {
   const t0 = 1_000_000;

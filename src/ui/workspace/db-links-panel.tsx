@@ -117,7 +117,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
   return (
     <>
       <p class="dbl-sum">
-        <b>{summary.total.toLocaleString("he")}</b> קישורים במסד ל"{title}": {summary.out.toLocaleString("he")} שהספר הוא צד המקור שלהם, {summary.in.toLocaleString("he")} שהוא צד היעד; עם {summary.byBook.length.toLocaleString("he")} ספרים.
+        <b>{summary.total.toLocaleString("he")}</b> קישורים במסד ל"{title}": {summary.out.toLocaleString("he")} שהספר מקשר בהם, {summary.in.toLocaleString("he")} שהוא מקושר בהם; עם {summary.byBook.length.toLocaleString("he")} ספרים.
         {summary.method === "scan" && " (במסד הזה אין אינדקס לפי ספר, ולכן הקריאה איטית.)"}
         {summary.unread && ` אלה רק הקישורים שנקראו: ${summary.unread}`}
       </p>
@@ -125,7 +125,7 @@ function Loaded({ summary }: { summary: DbLinkSummary }) {
       <FlagFilter summary={summary} />
       <div class="filters" role="group" aria-label="כיוון">
         {(["all", "out", "in"] as const).map((d) => (
-          <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? `הספר הוא צד המקור של הקישור במסד${advanced ? " (side 0)" : ""}` : d === "in" ? `הספר הוא צד היעד של הקישור במסד${advanced ? " (side 1)" : ""}` : undefined}>
+          <button key={d} class="chip" aria-pressed={(f.dir ?? "all") === d} onClick={() => s.setFilter({ dir: d === "all" ? undefined : d })} title={d === "out" ? `הספר הוא הצד המקשר של הקישור במסד${advanced ? " (side 0)" : ""}` : d === "in" ? `הספר הוא הצד המקושר של הקישור במסד${advanced ? " (side 1)" : ""}` : undefined}>
             {d === "all" ? "שני הכיוונים" : d === "out" ? "יוצאים" : "נכנסים"} <span class="count">{(d === "all" ? summary.total : summary[d]).toLocaleString("he")}</span>
           </button>
         ))}

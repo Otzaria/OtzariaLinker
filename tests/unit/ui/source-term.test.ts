@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
  * The word "מקור" means three things in the product (the book a link starts from, the link type "מקור", and the file or database
  * the books come from). The third one is said "קובץ" / "מסד" / "קובץ או מסד" in text the user reads, so that "המקור" always
  * means a book's role. This guards the phrases that used it for a file or a database in the screens and the state layer
- * (the other layers' messages are the follow-up listed in docs/reviews/QA_V6_PR3.md). Not a general lint: the roles
- * ("ספר המקור", "שורת המקור", "צד המקור") stay.
+ * (the other layers' messages are the follow-up listed in docs/reviews/QA_V6_PR3.md). The roles no longer say "מקור" either
+ * (V7 §3.5): terminology.test.ts guards them.
  */
 const FILE_SENSE = ["באותו מקור", "מקורות שונים", "במקור הזה", "במקור המועדף", "כמקור המועדף", "המקור המועדף", 'המקור "${this.host.sources', "הספרים של מקורות", "מקורות — אפשר"];
 

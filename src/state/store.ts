@@ -15,9 +15,11 @@ import { dropStalePipelineFields } from "../core/links/pipeline-fields";
 import { sefariaRefFromHeRef } from "../core/links/sefaria-ref";
 import { embeddedSefariaTitles, hasSefariaTitle, isSefariaOwned, parseSefariaTitles, type SefariaTitles } from "../core/links/sefaria-titles";
 import { stripTags } from "../core/text/html";
+import { anchorLabelFromHeRef, anchorLabelProblem, replaceAnchorLabel } from "../core/text/anchor-label";
 import type { EngineId } from "../linking/automatic";
+import type { MarkerBasis } from "../linking/ranges";
 import { pairByTitle, pairOne, titleIndex } from "../linking/batch";
-import { addChanges, altTocChange, booksCount, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
+import { addChanges, altTocChange, booksCount, booksOpened, commit, deleteChange, editChange, emptyLinkState, fileChange, filesCount, linksCount, rebindLinks, redo, restoreChange, touch, travel, undo, type AltTocChange, type Change, type LinkState } from "./history";
 import { AltTocState } from "./alt-toc";
 import { CHUNK, LineStore } from "./lines";
 import { BookFind } from "./book-find";
@@ -40,6 +42,7 @@ import { PersonalCsvState } from "./personal-csv";
 import { RepositoryState } from "./repository";
 import { QualityState } from "./quality";
 import { GuidedFlowState, type GuidedStep } from "./guided-flow";
+import { HeadingSearch } from "./heading-search";
 
 /*
  * The application state (stage 14, architecture rule 9): signals for what the screens show, and
@@ -60,9 +63,17 @@ export interface Pick {
   bookKey: string;
   line: number;
   end?: number;
+  /**
+   * Several separate lines picked with Ctrl/Cmd (v3 F-046/F-061): sorted, at least two, the first is `line`; never with
+   * `end` or `anchor`. The builder makes one link from each of them to the other side (one undoable step).
+   */
+  lines?: readonly number[];
   /** word anchor on this line, in RAW offsets of the line's anchor text, with the words for display */
   anchor?: RawAnchor & { text: string };
 }
+
+/** At most this many separate lines are picked with Ctrl/Cmd: each becomes a link, all in one step. */
+export const MAX_PICKED_LINES = 200;
 
 export type NoticeKind = "info" | "success" | "warning" | "error";
 export interface Notice {
@@ -72,6 +83,8 @@ export interface Notice {
   /** longer explanation (list of skipped files, problems…) */
   details?: string[];
   action?: { label: string; run: () => void };
+  /** stays until closed (notice-policy.ts) */
+  sticky?: boolean;
 }
 
 export interface Task {
@@ -152,9 +165,22 @@ export class AppStore {
   readonly repository: RepositoryState;
   /** the guided flow "link a folder to Otzaria" (state/guided-flow.ts, route "#/guided/<step>") */
   readonly guided: GuidedFlowState;
+  /** the headings of many books at once (state/heading-search.ts, version 3's global heading index) */
+  readonly headingSearch: HeadingSearch;
 
   readonly screen = signal<Screen>("home");
-  readonly sources = signal<OpenedSource[]>([]);
+  /** every source this window opened, with all its books */
+  private readonly opened = signal<OpenedSource[]>([]);
+  /**
+   * The open sources as the screens see them: without the books the user removed from the tool (F-035,
+   * `LinkState.removedBooks`, undoable). A source with no removed book is the same object.
+   */
+  readonly sources = computed<OpenedSource[]>(() => {
+    const gone = this.linkState.value.removedBooks;
+    const all = this.opened.value;
+    if (!gone.size) return all;
+    return all.map((s) => (s.books.some((b) => gone.has(b.key)) ? { ...s, books: s.books.filter((b) => !gone.has(b.key)) } : s));
+  });
   readonly linkState = signal<LinkState>(emptyLinkState());
   readonly view = { source: signal<string | null>(null), target: signal<string | null>(null) };
   readonly pick = { source: signal<Pick | null>(null), target: signal<Pick | null>(null) };
@@ -173,6 +199,8 @@ export class AppStore {
   /** id of the link being edited in the builder, or null when creating */
   readonly editing = signal<string | null>(null);
   readonly notices = signal<Notice[]>([]);
+  /** a request to open the coverage section of the "בדיקה" tab and bring it into view (#41 B26): bumped by "כיסוי הספר" */
+  readonly coverageFocus = signal(0);
   /** a request for a reader to scroll to a line and flash it; seq makes repeated requests distinct */
   readonly focus = { source: signal<{ line: number; seq: number } | null>(null), target: signal<{ line: number; seq: number } | null>(null) };
   readonly sideTab = signal<SideTab>("builder");
@@ -220,21 +248,52 @@ export class AppStore {
   readonly allLinks = computed(() => [...this.linkState.value.links.values()]);
   readonly dirty = computed(() => this.linkState.value.revision !== this.savedRevision.value);
 
-  /** The link the builder would create right now, or null while something is missing. */
-  readonly draft = computed<Link | null>(() => {
+  /**
+   * Every link the builder would create right now: one, or one per line picked with Ctrl/Cmd on one side (v3 F-046/F-061).
+   * Empty while something is missing, and when several lines are picked on BOTH sides (draftProblems says why).
+   */
+  readonly drafts = computed<Link[]>(() => {
     const s = this.pick.source.value;
     const t = this.pick.target.value;
+    if (!s || !t || (s.lines && t.lines)) return [];
+    const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    const one = (p: Pick, line: number): Pick => ({ bookKey: p.bookKey, line });
+    if (!edited && s.lines) return s.lines.map((i) => this.composeDraft(undefined, one(s, i), t)!);
+    if (!edited && t.lines) return t.lines.map((i) => this.composeDraft(undefined, s, one(t, i))!);
+    const d = this.composeDraft(edited);
+    return d ? [d] : [];
+  });
+  /** The link the builder would create right now (the first, when several lines are picked), or null while something is missing. */
+  readonly draft = computed<Link | null>(() => this.drafts.value[0] ?? null);
+
+  /**
+   * The link the builder's picks and fields make. `base`: the link being edited, whose other fields (its imported
+   * record's text, key order, file position, continuation…) the edit keeps; without it, a link made from scratch —
+   * what a new link and a copy saved "as an additional link" get (V7 PR3/PR4 review, finding 3). `s`/`t`: one line of
+   * several picked ones (drafts); by default the picks.
+   */
+  private composeDraft(base: Link | undefined, s: Pick | null = this.pick.source.value, t: Pick | null = this.pick.target.value): Link | null {
     if (!s || !t) return null;
     this.lines.tick.value; // heRef depends on loaded lines
     const source: LinkSide = { book: this.refOf(s.bookKey), line: s.line, ...(s.end !== undefined && s.end > s.line && { end: s.end }) };
     const target: LinkSide = { book: this.refOf(t.bookKey), line: t.line, ...(t.end !== undefined && t.end > t.line && { end: t.end }) };
-    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     // fields the builder owns are rebuilt from scratch; everything else of an edited link is kept
     const { anchor: _a, ref1: _r1, ref2: _r2, matched: _m, ...kept } = base ?? ({ id: "draft", status: "new", provenance: "user" } as Link);
+    // several lines picked on one side (drafts): a value typed for that side names ONE place, and copied to every link it
+    // would put them all there — the weekly sync places a link by ref_2/ref_1 (B2). Each link gets its own line's place and
+    // ref, and the builder disables those fields while several lines are picked (V7 round-2 review, finding 1)
+    const manySource = !base && !!this.pick.source.value?.lines;
+    const manyTarget = !base && !!this.pick.target.value?.lines;
     // the Sefaria refs the library's sync needs: typed by the user, else built from the line's heRef (B1)
-    const ref1 = this.draftRef1.value.trim() || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
-    const ref2 = this.draftRef2.value.trim() || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
-    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(s.anchor.label && { label: s.anchor.label }) };
+    const ref1 = (manySource ? "" : this.draftRef1.value.trim()) || (this.isSefariaOwned(source.book) ? (sefariaRefFromHeRef(this.lines.peek(s.bookKey, s.line)?.heRef) ?? "") : "");
+    const ref2 = (manyTarget ? "" : this.draftRef2.value.trim()) || (this.isSefariaOwned(target.book) ? (sefariaRefFromHeRef(this.lines.peek(t.bookKey, t.line)?.heRef) ?? "") : "");
+    // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3); the automatic one carries
+    // the label the user gave the anchor (v3 F-075; a typed one was rewritten by setAnchorLabel)
+    const typed = !manyTarget && this.draftHeRef.value?.trim() ? this.draftHeRef.value : null;
+    const heRef2 = typed ?? (s.anchor?.label ? replaceAnchorLabel(this.autoHeRef(t), s.anchor.label) : this.autoHeRef(t));
+    // the anchor's label is what the generator will read from heRef_2 (Generator.kt:2425) — never one the file does not carry
+    const label = s.anchor ? anchorLabelFromHeRef(heRef2) : null;
+    const anchor: RawAnchor | undefined = s.anchor && { rawStart: s.anchor.rawStart, ...(s.anchor.rawEnd !== undefined && { rawEnd: s.anchor.rawEnd }), ...(label && { label }) };
     // the engine's matched words stay with the side the user did not change (issue #11)
     const matched = base && matchedAfterEdit(base, source, target, anchor);
     const d: Link = {
@@ -242,8 +301,7 @@ export class AppStore {
       source,
       target,
       declaredType: this.draftType.value,
-      // a cleared field falls back to the automatic reference: a blank heRef_2 is never written (B3)
-      heRef2: this.draftHeRef.value?.trim() ? this.draftHeRef.value : this.autoHeRef(t),
+      heRef2,
       ...(anchor && { anchor }),
       ...(matched && { matched }),
       ...(ref1 && { ref1 }),
@@ -252,19 +310,38 @@ export class AppStore {
     };
     // an edited record never keeps the sync's fields for an anchor or line it no longer has (B2)
     return base ? dropStalePipelineFields(base, d).link : d;
-  });
+  }
   readonly draftProblems = computed<Problem[]>(() => {
-    const d = this.draft.value;
+    if (this.pick.source.value?.lines && this.pick.target.value?.lines) {
+      const r = this.roles.value;
+      return [{ code: "builder/multi-both-sides", severity: "error", message: `נבחרו כמה שורות גם ב${r.source.name.replace(/^ה/, "")} וגם ב${r.target.name.replace(/^ה/, "")}. בחרו כמה שורות רק בצד אחד, ושורה אחת (או טווח) בצד השני: מכל שורה ייווצר קישור אליה.` }];
+    }
+    const ds = this.drafts.value;
+    const d = ds[0];
     // editing a copied database link is fine; only its EXPORT waits for the book's links file
     // the library's rules are checked at export (purpose); here they warn, so a link is never blocked from being made
     const { linksFile: _f, ...ctx } = this.validation();
     if (!d) return [];
-    const out = validateLink(d, { ...ctx, purpose: "private" });
     const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    if (ds.length > 1) {
+      // one link per picked line: each is checked, and a problem is said once (its text names the line)
+      const seen = new Map<string, Problem>();
+      for (const x of ds) for (const p of validateLink(x, { ...ctx, purpose: "private" })) if (!seen.has(`${p.code}\n${p.message}`)) seen.set(`${p.code}\n${p.message}`, p);
+      const out = [...seen.values()];
+      // each line's link by the one equality rule, as a single link is (F-070, F-086): one identical link refuses the batch,
+      // and the text names its lines (1-based, on the side where several were picked)
+      const twins = ds.map((x) => this.twinOf(x, base?.id));
+      const many = this.pick.source.value?.lines ? "source" : "target";
+      const identical = ds.flatMap((x, i) => (twins[i]!.identical ? [x[many].line + 1] : []));
+      if (identical.length) out.push({ code: "builder/identical", severity: "error", message: `${IDENTICAL_TEXT} (${identical.length === 1 ? "שורה" : "שורות"} ${identical.join(", ")})` });
+      else if (twins.some((t) => t.sameLines)) out.push({ code: "builder/same-lines", severity: "info", message: "בין חלק מהשורות האלה כבר יש בפרויקט קישור מסוג אחר או בכיוון אחר. הקישורים החדשים יישמרו בנוסף להם." });
+      return out;
+    }
+    const out = validateLink(d, { ...ctx, purpose: "private" });
     if (base) {
       const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
-      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `שורת המקור השתנתה, ולכן ציון ספריא הישן של המקור ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
-      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `שורת היעד השתנתה, ולכן ציון ספריא הישן של היעד ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_2" });
+      if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `השורה בספר המקשר השתנתה, ולכן ציון ספריא הישן שלה ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
+      if (dropped.includes("ref_2") && d.ref2 === undefined) out.push({ code: "edit/ref2-dropped", severity: "warning", message: `השורה בספר המקושר השתנתה, ולכן ציון ספריא הישן שלה ("${base.ref2}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_2" });
       const fields = dropped.filter((x) => x.startsWith("anchor_"));
       if (fields.length) out.push({ code: "edit/pipeline-fields-dropped", severity: "info", message: "פרטים שהסנכרון השבועי של הספרייה רשם על העוגן יוסרו מהקישור, כי העוגן או השורה השתנו.", detail: fields.join(", ") });
     }
@@ -338,8 +415,22 @@ export class AppStore {
     this.exchange = new ExchangeState(this, service, saver);
     this.quality = new QualityState(this, saver);
     this.personalCsv = new PersonalCsvState(this, service, saver);
-    this.repository = new RepositoryState(this, service);
+    this.repository = new RepositoryState(this, service, saver);
     this.guided = new GuidedFlowState(this);
+    this.headingSearch = new HeadingSearch(
+      {
+        books: this.books,
+        sources: this.sources,
+        inUse: () => {
+          const keys = new Set<string>();
+          for (const side of ["source", "target"] as const) if (this.view[side].peek()) keys.add(this.view[side].peek()!);
+          for (const l of this.linkState.peek().links.values()) for (const ref of [l.source.book, l.target.book]) keys.add(this.bookOf(ref)?.key ?? ref.key);
+          return keys;
+        },
+        runTask: (label, run, count) => this.runTask(label, run, count),
+      },
+      service,
+    );
   }
 
   /** the guided flow's step, for the router */
@@ -383,12 +474,18 @@ export class AppStore {
     const orphans = (res.reused ?? []).filter((r) => !openIds.has(r.info.id));
     const fresh = [...res.sources, ...orphans];
     this.lastOpen = { added: fresh.map((x) => x.info.id), reused: reused.map((r) => r.info.id) };
+    // picking the file again asks for its books: one the user removed from the tool comes back (F-035), as an action undo takes back
+    const back = [...this.linkState.peek().removedBooks].filter((k) => reused.some((r) => sourceIdOfBookKey(k) === r.info.id));
+    if (back.length) {
+      const title = (k: string) => this.opened.peek().flatMap((s) => s.books).find((b) => b.key === k)?.title ?? k;
+      this.linkState.value = commit(this.linkState.peek(), back.length === 1 ? `החזרת הספר "${title(back[0]!)}"` : `החזרת ${booksCount(back.length)}`, [], Date.now(), [], [], {}, { restore: back });
+    }
     if (reused.length) {
       const names = reused.map((r) => (r.as ? `"${r.as}" (זהה בתוכנו ל"${r.info.label}")` : `"${r.info.label}"`)).join(", ");
       this.notify("info", reused.length === 1 ? `${names} כבר פתוח, ולכן לא נטען שוב. ממשיכים עם הספרים הפתוחים.` : `${names} כבר פתוחים, ולכן לא נטענו שוב. ממשיכים עם הספרים הפתוחים.`);
     }
     batch(() => {
-      this.sources.value = [...this.sources.value, ...fresh];
+      this.opened.value = [...this.opened.value, ...fresh];
       for (const s of fresh) for (const w of s.info.warnings) this.notify("warning", `${s.info.label}: ${w.message}`);
     });
     if (fresh.length) {
@@ -424,11 +521,14 @@ export class AppStore {
         "warning",
         `${filesCount(res.skipped.length)} ${res.skipped.length === 1 ? "לא נפתח" : "לא נפתחו"}.`,
         res.skipped.map((s) => `${s.path}: ${empty.has(s.path) ? "הקובץ ריק (אין בו אף בייט)." : s.reason}`),
+        undefined,
+        // the reason is what the user needs: it stays until closed (#41 B24 — it faded after 15 seconds)
+        true,
       );
     }
     const opened = fresh.flatMap((s) => s.books);
     if (opened.length) {
-      this.notify("success", `נפתחו ${booksCount(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
+      this.notify("success", `${booksOpened(opened.length)} מ־${res.sources.map((s) => `"${s.info.label}"`).join(", ")}.${this.sources.value.length > res.sources.length ? ` יחד איתם פתוחים ${this.sources.value.length.toLocaleString("he")} קבצים ומסדים — אפשר לקשר בין ספרים של קבצים או מסדים שונים.` : ""}`);
       this.chooseRoles(opened);
       this.toWorkspace();
     } else if (res.documents.length) this.toWorkspace();
@@ -504,7 +604,7 @@ export class AppStore {
         return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
       });
       unbind.done();
-      this.sources.value = this.sources.value.filter((x) => x.info.id !== id);
+      this.opened.value = this.opened.value.filter((x) => x.info.id !== id);
       for (const side of ["source", "target"] as const) {
         if (this.view[side].value?.startsWith(`${id}:`)) this.view[side].value = null;
         if (this.pick[side].value?.bookKey.startsWith(`${id}:`)) this.pick[side].value = null;
@@ -512,6 +612,150 @@ export class AppStore {
     });
     this.forgetEditions((key) => sourceIdOfBookKey(key) === id);
     this.lines.forgetSource(id);
+    if (this.forgetBooks((key) => sourceIdOfBookKey(key) === id)) this.notify("info", `ההצעות של הריצה האחרונה נסגרו, כי ספר שלהן היה ב"${s.info.label}". כדי לחזור אליהן, פתחו אותו שוב והריצו את החיפוש מחדש.`);
+    return true;
+  }
+
+  /**
+   * What still points at books that left the tool (a book removed, a source closed): the suggestion run that touches them
+   * (approving one would link a book that is not open), the edition comparison, the headings read for them (V7 round-2
+   * review, findings 2 and 7). A max-link job is kept: it names its books by title and resumes once they are open again.
+   * True when the suggestion run was dropped.
+   */
+  private forgetBooks(gone: (bookKey: string) => boolean): boolean {
+    const r = this.relink.peek();
+    if (r && (gone(r.oldKey) || gone(r.newKey))) this.relink.value = null;
+    this.headingSearch.forget(gone);
+    return this.suggestions.forgetBooks(gone);
+  }
+
+  /** A task reads the open books: a book or a source must not go from under it. True (with a notice) when one runs. */
+  private busyWith(what: string): boolean {
+    if (this.running.length === 0 && !this.maxLink.running.peek()) return false;
+    this.notify("warning", `${what} בשימוש עכשיו: עבודה רצה על הספרים הפתוחים. חכו שתסתיים (או בטלו אותה) ונסו שוב.`);
+    return true;
+  }
+
+  /**
+   * Version 3's "הסרת ספר" (F-035): one open book leaves the tool together with the project links that touch it,
+   * in ONE action that undo brings back (`LinkState.removedBooks`). The file on the disk and the rest of its source
+   * are untouched. What goes with it: the user's links on it, and its own library links file (forgotten with all its
+   * records, so the export does not write that file — nothing is deleted in the library) and its alt_toc. What
+   * stays: records of ANOTHER book's library file that point at it — removing them would delete them from the
+   * library when that file is exported. Returns whether it was removed.
+   */
+  removeBook(bookKey: string): boolean {
+    const book = this.books.peek().get(bookKey);
+    if (!book || this.busyWith(`"${book.title}"`)) return false;
+    const s = this.linkState.peek();
+    // another open copy of the title keeps what is the title's (its library file and alt_toc)
+    const twin = (this.booksByTitle.peek().get(book.title) ?? []).some((b) => b.key !== bookKey);
+    const ownFile = !twin && s.files.has(book.title);
+    const changes: Change[] = [];
+    let kept = 0;
+    for (const l of s.links.values()) {
+      if (l.provenance === "db" || !(this.sameBook(l.source.book, bookKey) || this.sameBook(l.target.book, bookKey))) continue;
+      if (l.provenance === "file" && !(ownFile && l.source.book.title === book.title)) {
+        if (l.status !== "deleted") kept++;
+        continue;
+      }
+      changes.push({ id: l.id, before: l });
+    }
+    const removed = changes.filter((c) => c.before!.status !== "deleted").length;
+    const files = ownFile ? [fileChange(s, book.title, null)] : [];
+    const alt = !twin && s.altToc.has(book.title) ? [altTocChange(s, book.title, null)] : [];
+    const editing = this.editing.peek();
+    batch(() => {
+      this.linkState.value = commit(s, `הסרת הספר "${book.title}"`, changes, Date.now(), alt, files, {}, { remove: [bookKey] });
+      for (const side of ["source", "target"] as const) {
+        if (this.view[side].peek() === bookKey) this.view[side].value = null;
+        if (this.pick[side].peek()?.bookKey === bookKey) this.pick[side].value = null;
+      }
+      if (editing && changes.some((c) => c.id === editing)) this.clearPicks();
+    });
+    this.find.source.close();
+    this.find.target.close();
+    // the run on the screen, if it touches the book, goes and does not come back with undo: the user runs it again (finding 2)
+    const runDropped = this.forgetBooks((key) => key === bookKey);
+    const at = this.linkState.peek().revision;
+    this.notify(
+      "info",
+      `"${book.title}" הוסר מהכלי${removed ? ` יחד עם ${linksCount(removed)} שנגעו בו` : ""}${ownFile ? " ועם קובץ הקישורים שלו מהספרייה" : ""}. הקובץ במחשב לא השתנה.${kept ? ` ${kept === 1 ? "קישור אחד מקובץ הקישורים של ספר אחר נשאר" : `${linksCount(kept)} מקובצי הקישורים של ספרים אחרים נשארו`} בפרויקט, כי ${kept === 1 ? "הוא חלק" : "הם חלק"} מהקובץ ההוא ומחיקה הייתה מוחקת ${kept === 1 ? "אותו" : "אותם"} מהספרייה.` : ""}${runDropped ? " ההצעות של הריצה האחרונה נסגרו, כי הן נגעו בו; \"ביטול\" לא מחזיר אותן — הריצו את החיפוש שוב." : ""} כדי להחזיר: "ביטול".`,
+      undefined,
+      // only while nothing else was done since: an undo later would take back another action
+      { label: "ביטול", run: () => void (this.linkState.peek().revision === at && this.undo()) },
+    );
+    return true;
+  }
+
+  /**
+   * Version 3's "איפוס מלא" (F-028): every source closed, every link, alt_toc, rejection and the history gone, the
+   * home screen. Never loses work silently: with `save` the project is saved to a file first; work that was not
+   * saved — also with `save`, whose download may fail unseen — goes to the browser's recovery queue (when the autosave
+   * runs) and a notice can bring it back. The Sefaria titles list, the database mappings, the settings and a max-link
+   * job (by titles, resumed when its books are open again) stay, as in version 3. Returns whether it reset.
+   */
+  async resetAll(opts: { save?: boolean } = {}): Promise<boolean> {
+    if (this.resetting || this.busyWith("הקבצים והמסדים הפתוחים")) return false;
+    const ls0 = this.linkState.peek();
+    // read BEFORE the save: saveProject marks the project saved without knowing the download succeeded (a browser may block
+    // it, the disk may be full), so saved or not the work goes aside too (V7 round-2 review, finding 7)
+    const unsaved = this.dirty.peek() && (ls0.links.size > 0 || ls0.altToc.size > 0 || ls0.rejected.size > 0) ? this.projectText() : null;
+    if (opts.save) this.saveProject();
+    // nothing opens while the sources close (runTask refuses): a source opened meanwhile was dropped from the list below and
+    // never closed in the worker (finding 7). What is listed when the closing ends is closed too, until none is left.
+    this.resetting = true;
+    try {
+      const closed = new Set<string>();
+      for (let left = this.opened.peek(); left.length; left = this.opened.peek().filter((s) => !closed.has(s.info.id)))
+        for (const s of left) (closed.add(s.info.id), await this.service.close(s.info.id));
+    } finally {
+      this.resetting = false;
+    }
+    batch(() => {
+      this.opened.value = [];
+      this.linkState.value = emptyLinkState();
+      this.savedRevision.value = 0;
+      for (const side of ["source", "target"] as const) this.view[side].value = null;
+      this.clearPicks();
+      this.suggestions.run.value = null;
+      this.suggestions.current.value = null;
+      this.projectSources.value = [];
+      this.projectBooks.value = new Map();
+      this.projectLibraryChoices.value = [];
+      this.pendingDbs.value = [];
+      this.relink.value = null;
+      this.revealedLink.value = null;
+      this.editionChoices.value = new Map();
+      this.screen.value = "home";
+    });
+    this.forgetEditions(() => true);
+    this.editionOffered.clear();
+    this.countAsked.clear();
+    // what the tool learned of the books and the work on them goes with them (finding 7): the headings read (scope "all" is
+    // a whole database's), the quality report, the max-link evidence, the import's waiting state
+    this.headingSearch.forget(() => true);
+    this.quality.reset();
+    this.maxLink.forgetEvidence();
+    this.exchange.reset();
+    this.find.source.close();
+    this.find.target.close();
+    this.lines.forgetAll();
+    this.dbLinks.forgetSummary();
+    this.changedNoticed.clear();
+    this.log.info("reset", "all", { links: ls0.links.size, saved: !!opts.save, kept: !!unsaved });
+    if (!unsaved) return void this.notify("success", "הכלי אופס: כל הקבצים, המסדים והקישורים נסגרו. הקבצים במחשב לא השתנו."), true;
+    const kept = this.recoveryQueue;
+    if (kept)
+      void kept.add(unsaved).then((ok) => {
+        if (!ok) this.notify("warning", "לא הצלחתי לשמור בדפדפן את העבודה שאופסה. היא זמינה עדיין בכפתור \"החזרת העבודה\" עד שתסגרו את החלון — כדי לא לאבד אותה, החזירו אותה ושמרו אותה לקובץ.");
+      });
+    const count = recoverableCount(unsaved).toLocaleString("he");
+    const later = kept ? ", והיא תוצע שוב גם בפתיחה הבאה של הכלי" : " (השמירה האוטומטית בדפדפן אינה פעילה, ולכן אחרי סגירת החלון היא לא תהיה)";
+    this.notify(opts.save ? "info" : "warning", opts.save ? `הכלי אופס. הפרויקט ירד לקובץ. ליתר ביטחון, אם ההורדה לא הצליחה, העבודה (${count} קישורים והחלטות) נשמרה גם בצד: אפשר להחזיר אותה בכפתור כאן${later}.` : `הכלי אופס. העבודה שלא נשמרה (${count} קישורים והחלטות) נשמרה בצד: אפשר להחזיר אותה בכפתור כאן${later}.`, undefined, {
+      label: "החזרת העבודה",
+      run: () => (void this.recoveryQueue?.take(unsaved), this.openProject("העבודה שאופסה", unsaved)),
+    }, true);
     return true;
   }
 
@@ -568,7 +812,7 @@ export class AppStore {
         return s === l.source.book && t === l.target.book ? l : { ...l, source: { ...l.source, book: s }, target: { ...l.target, book: t } };
       });
       unbind.done();
-      this.sources.value = [];
+      this.opened.value = [];
       this.view.source.value = null;
       this.view.target.value = null;
       this.clearPicks();
@@ -852,11 +1096,36 @@ export class AppStore {
   pickLine(side: Side, bookKey: string, line: number, extend = false): void {
     const cur = this.pick[side].value;
     if (extend && cur && cur.bookKey === bookKey) {
+      // after Ctrl/Cmd: one range over every picked line and the clicked one
       const lo = Math.min(cur.line, line);
-      const hi = Math.max(cur.end ?? cur.line, line, cur.line);
+      const hi = Math.max(cur.end ?? cur.line, line, cur.line, cur.lines?.at(-1) ?? cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
-    if (side === "source") this.sourceMoved(cur);
+    this.afterPick(side, bookKey, cur);
+    if (!extend) this.autoRangeEnd(side, bookKey, line);
+  }
+
+  /**
+   * Ctrl/Cmd+click (v3 F-046/F-061): the line joins the picked lines of that side, or leaves them. A range picked before
+   * becomes its lines, as in v3. Another book, or a link open for editing (an edit is one link), picks the line alone.
+   */
+  toggleLine(side: Side, bookKey: string, line: number): void {
+    const cur = this.pick[side].value;
+    if (this.editing.value || !cur || cur.bookKey !== bookKey) return this.pickLine(side, bookKey, line);
+    const set = new Set(cur.lines ?? Array.from({ length: (cur.end ?? cur.line) - cur.line + 1 }, (_, k) => cur.line + k));
+    if (!set.delete(line)) set.add(line);
+    if (set.size > MAX_PICKED_LINES) {
+      this.notify("warning", `אפשר לבחור עד ${MAX_PICKED_LINES} שורות נפרדות בבת אחת. צרו את הקישורים של השורות שכבר נבחרו, ואז בחרו את הבאות.`);
+      return;
+    }
+    const lines = [...set].sort((a, b) => a - b);
+    this.pick[side].value = !lines.length ? null : lines.length === 1 ? { bookKey, line: lines[0]! } : { bookKey, line: lines[0]!, lines };
+    this.afterPick(side, bookKey, cur);
+  }
+
+  /** What a new pick on `side` changes besides the pick: refs that no longer fit, the active side, the automatic type. */
+  private afterPick(side: Side, bookKey: string, before: Pick | null): void {
+    if (side === "source") this.sourceMoved(before);
     if (side === "target") {
       // a new target makes the old reference wrong — also while editing (UX review #3)
       const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
@@ -917,6 +1186,88 @@ export class AppStore {
     });
   }
 
+  /* ---------------- the builder's range and anchor (v3 F-054, F-055, F-075, F-079) ---------------- */
+
+  private autoEndJob: Promise<void> = Promise.resolve();
+  /** Settles once the automatic range end of the last pick (rangeAutoEnd) is set — "click" mode creates after it. */
+  whenPicked(): Promise<void> {
+    return this.autoEndJob;
+  }
+
+  /** v3's rangeAutoEnd (F-055), per side: a new line picked there runs until the line before the next marker (rangeEndBasis). */
+  private autoRangeEnd(side: Side, bookKey: string, line: number): void {
+    if (!this.prefs.rangeAutoEnd.peek()[side] || this.editing.peek()) return;
+    this.autoEndJob = (async () => {
+      const end = await this.ranges.suggestEnd(bookKey, side, line, undefined, this.prefs.rangeEndBasis.peek());
+      const cur = this.pick[side].peek();
+      // only the pick it was asked for, as it was: a Shift range, Ctrl lines or an anchor made since are the user's own
+      if (end === null || end <= line || !cur || cur.bookKey !== bookKey || cur.line !== line || cur.end !== undefined || cur.lines || cur.anchor) return;
+      this.pick[side].value = { bookKey, line, end };
+    })();
+  }
+
+  /**
+   * The range end typed in the builder (v3 "עד שורה", F-054), 0-based; an end not after the start, or null, removes the
+   * range. An end past the book is refused with the reason. False when nothing changed.
+   */
+  setRangeEnd(side: Side, end: number | null): boolean {
+    const cur = this.pick[side].value;
+    if (!cur || cur.anchor || cur.lines) return false;
+    const count = this.books.value.get(cur.bookKey)?.lineCount ?? this.lines.count(cur.bookKey);
+    if (end !== null && count !== undefined && end >= count) {
+      this.notify("warning", `בספר יש ${count.toLocaleString("he")} שורות, ולכן הטווח לא שונה. כתבו מספר שורה עד ${count.toLocaleString("he")}.`);
+      return false;
+    }
+    this.pick[side].value = { bookKey: cur.bookKey, line: cur.line, ...(end !== null && end > cur.line && { end }) };
+    return true;
+  }
+
+  /**
+   * "Until the next" (v3 F-054): the picked line's range runs to the line before the next marker of that side — what a
+   * marker is, is v3's rangeEndBasis (F-079, a preference); `basis` "book" is v3's "until the end of the book". False when
+   * nothing changed (the user is told why).
+   */
+  async untilNext(side: Side, basis: MarkerBasis = this.prefs.rangeEndBasis.peek()): Promise<boolean> {
+    const pick = this.pick[side].peek();
+    if (!pick || pick.anchor || pick.lines) return false;
+    const end = await this.ranges.suggestEnd(pick.bookKey, side, pick.line, this.editing.peek() ?? undefined, basis);
+    const cur = this.pick[side].peek();
+    // the pick may have moved while the headings were read
+    if (!cur || cur.bookKey !== pick.bookKey || cur.line !== pick.line) return false;
+    if (end === null) return (this.notify("warning", "אורך הספר עדיין לא ידוע, ולכן אי אפשר להציע סוף לטווח."), false);
+    if (end <= pick.line) {
+      const why = basis === "book" ? "השורה הזו היא השורה האחרונה בספר (או שאחריה רק כותרות)" : basis === "links" ? "השורה הבאה כבר מתחילה קישור" : basis === "headings" ? "השורה הבאה היא כותרת" : "השורה הבאה כבר מתחילה קישור או כותרת";
+      return (this.notify("info", `${why}, ולכן אין טווח להציע.`), false);
+    }
+    this.pick[side].value = { bookKey: pick.bookKey, line: pick.line, end };
+    return true;
+  }
+
+  /** v3's "עד הסוף" (F-055): the picked line's range runs to the book's last line (stepping back from a heading). */
+  rangeToEnd(side: Side): Promise<boolean> {
+    return this.untilNext(side, "book");
+  }
+
+  /**
+   * The label of the picked anchor (v3's "סמן" dialog, F-075): Otzaria shows it in the text, and the file carries it as
+   * " אות X" at the end of heRef_2, where the generator reads it. Empty removes it. A label the generator would not read is
+   * refused with the reason. False when nothing changed.
+   */
+  setAnchorLabel(label: string): boolean {
+    const s = this.pick.source.value;
+    if (!s?.anchor) return false;
+    const v = label.trim();
+    const why = anchorLabelProblem(v);
+    if (why) return (this.notify("warning", why), false);
+    batch(() => {
+      const { label: _old, ...a } = s.anchor!;
+      this.pick.source.value = { ...s, anchor: { ...a, ...(v && { label: v }) } };
+      // a reference the user typed keeps its words; only its label changes
+      if (this.draftHeRef.value?.trim()) this.draftHeRef.value = replaceAnchorLabel(this.draftHeRef.value, v);
+    });
+    return true;
+  }
+
   /** heRef_2 when the user did not type one: the database's reference, else "<title> <headings>". */
   autoHeRef(t: Pick): string {
     const book = this.books.value.get(t.bookKey);
@@ -939,46 +1290,76 @@ export class AppStore {
 
   /* ---------------- links ---------------- */
 
-  createFromDraft(): Link | null {
-    const d = this.draft.value;
-    if (!d || this.draftProblems.value.some((p) => p.severity === "error")) return null;
+  /** `asNew` while editing: the draft becomes an ADDITIONAL link (a copy with other ends, V7 §3.10) and the edited one stays as it was. */
+  createFromDraft(opts: { asNew?: boolean } = {}): Link | null {
+    const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
+    // a copy is a NEW link: built from the picks and fields alone, as from scratch — the edited link's imported
+    // record (its text, key order, file position, merge origins), and its continuation, are that link's, not the copy's
+    const copy = opts.asNew && edited;
+    const d = copy ? this.composeDraft(undefined) : this.draft.value;
+    if (!d) return null;
+    if (copy) {
+      // the duplicate check of the draft leaves out the link being edited: a copy on the same lines would be that link twice
+      const same = (a: Link["source"], b: Link["source"]) => a.book.title === b.book.title && a.line === b.line && (a.end ?? a.line) === (b.end ?? b.line);
+      if (same(d.source, edited.source) && same(d.target, edited.target)) {
+        // the side names by the task (roles.ts, V7 §3.5) — not "מקור"/"יעד"
+        const r = this.roles.peek();
+        this.notify("warning", `העותק זהה לקישור שנערך. בחרו שורה אחרת ב${r.target.name.replace(/^ה/, "")} (או ב${r.source.name.replace(/^ה/, "")}), ואז שמרו כקישור נוסף.`);
+        return null;
+      }
+      // the builder's checks, on the copy as it will be made (as draftProblems checks a new link)
+      const { linksFile: _f, ...ctx } = this.validation();
+      if (validateLink(d, { ...ctx, purpose: "private" }).some((p) => p.severity === "error")) return null;
+      // identical to another live link: refused like any new link (F-070, F-086; the one equality rule)
+      if (this.twinOf(d).identical) {
+        this.notify("warning", IDENTICAL_TEXT);
+        return null;
+      }
+      this.editing.value = null;
+    } else if (this.draftProblems.value.some((p) => p.severity === "error")) return null;
     if (this.editing.value) {
       const before = this.linkState.value.links.get(this.editing.value);
       if (!before) return null;
       const after: Link = { ...d, status: before.status === "existing" ? "edited" : before.status };
-      this.apply("עריכת קישור", [{ id: before.id, before, after }, ...this.trimAround(after, before.id)]);
+      this.apply("עריכת קישור", [{ id: before.id, before, after }, ...this.trimAround([after], before.id)]);
       this.clearPicks();
       return after;
     }
-    const link: Link = { ...d, id: this.newLinkId(), status: "new", provenance: "user" };
-    this.apply("יצירת קישור", [...addChanges([link]), ...this.trimAround(link)]);
-    // the editions of the books the link is made on, read now in the background: the project saves them (V7 §1.1)
-    for (const side of [link.source, link.target]) if (this.books.peek().has(side.book.key) && !this.editionTried.has(side.book.key)) void this.learnEdition(side.book.key);
+    // several lines picked with Ctrl/Cmd: a link from each, all in ONE undoable step (v3 F-061, AGENTS §2.5)
+    const made: Link[] = (copy ? [d] : this.drafts.value).map((x) => ({ ...x, id: this.newLinkId(), status: "new", provenance: "user" }));
+    this.apply(made.length === 1 ? "יצירת קישור" : `יצירת ${linksCount(made.length)}`, [...addChanges(made), ...this.trimAround(made)]);
+    // the editions of the books the links are made on, read now in the background: the project saves them (V7 §1.1)
+    for (const link of made)
+      for (const side of [link.source, link.target]) if (this.books.peek().has(side.book.key) && !this.editionTried.has(side.book.key)) void this.learnEdition(side.book.key);
     batch(() => {
       this.pick.target.value = null;
       this.draftHeRef.value = null;
       this.draftRef2.value = "";
-      // keep the source pick only when it was a range/anchor the user may link again; else advance to the next line
+      // keep the source pick only when it was a range/anchor/several lines the user may link again; else advance to the next line
       const s = this.pick.source.value;
-      if (s && !s.anchor && s.end === undefined) {
+      // (a copy keeps it: its point is another target for the same source)
+      if (s && !s.anchor && !s.lines && s.end === undefined && !opts.asNew) {
         this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
         this.draftRef1.value = ""; // the typed ref_1 named the line just linked (finding 1)
       }
     });
-    return link;
+    return made[0]!;
   }
 
   /**
-   * v3's "trim the previous range" (F-064): a range of another link that the new link's start falls
-   * inside is cut to end one line before it, in the same undoable step, and the user is told.
+   * v3's "trim the previous range" (F-064): a range of another link that a new link's start falls
+   * inside is cut to end one line before it, in the same undoable step, and the user is told. Several
+   * new links (Ctrl/Cmd lines) cut a range once, at the first of them. Off with v3's rangeTrimPrevious (F-083).
    */
-  private trimAround(link: Link, exclude?: string): Change[] {
+  private trimAround(links: readonly Link[], exclude?: string): Change[] {
+    if (!this.prefs.rangeTrimPrevious.peek()) return [];
     const keyOf = (ref: BookRef) => this.bookOf(ref)?.key;
     const changes: Change[] = [];
-    for (const side of ["source", "target"] as const) {
-      const key = keyOf(link[side].book);
-      if (key) changes.push(...this.ranges.trimFor(key, side, link[side].line, exclude ?? link.id).filter((c) => !changes.some((x) => x.id === c.id)));
-    }
+    for (const side of ["source", "target"] as const)
+      for (const link of [...links].sort((a, b) => a[side].line - b[side].line)) {
+        const key = keyOf(link[side].book);
+        if (key) changes.push(...this.ranges.trimFor(key, side, link[side].line, exclude ?? link.id).filter((c) => !changes.some((x) => x.id === c.id)));
+      }
     if (changes.length) this.notify("info", changes.length === 1 ? "טווח של קישור קודם קוצר כדי שלא יבלע את הקישור החדש." : `קוצרו הטווחים של ${linksCount(changes.length)} קודמים כדי שלא יבלעו את הקישור החדש.`);
     return changes;
   }
@@ -1016,6 +1397,15 @@ export class AppStore {
     const changes = ids.map((id) => deleteChange(s, id)).filter((c): c is Change => !!c);
     this.apply(changes.length === 1 ? "מחיקת קישור" : `מחיקת ${linksCount(changes.length)}`, changes);
     if (this.editing.value && ids.includes(this.editing.value)) this.clearPicks();
+    // #42 C31: a delete was silent; it says what it did, and an undo is one tap away (the history keeps it too)
+    if (changes.length) {
+      const at = this.linkState.peek().revision;
+      this.notify("info", changes.length === 1 ? "נמחק קישור אחד." : `נמחקו ${linksCount(changes.length)}.`, undefined, {
+        label: "ביטול",
+        // only while nothing else was done since: an undo later would take back another action
+        run: () => void (this.linkState.peek().revision === at && this.undo()),
+      });
+    }
   }
 
   /**
@@ -1110,12 +1500,12 @@ export class AppStore {
     batch(() => {
       this.pendingDbs.value = this.pendingDbs.value.filter((x) => x.token !== p.token);
       this.dbMappings.value = new Map(this.dbMappings.value).set(p.preview.fingerprint, { fingerprint: p.preview.fingerprint, label: p.label, mapping });
-      this.sources.value = [...this.sources.value, src];
+      this.opened.value = [...this.opened.value, src];
       for (const w of src.info.warnings) this.notify("warning", `${src.info.label}: ${w.message}`);
     });
     this.attachLinks();
     if (src.books.length) {
-      this.notify("success", `נפתחו ${booksCount(src.books.length)} מ־"${src.info.label}".`);
+      this.notify("success", `${booksOpened(src.books.length)} מ־"${src.info.label}".`);
       this.chooseRoles(src.books);
     }
     this.toWorkspace();
@@ -1673,7 +2063,11 @@ export class AppStore {
 
   saveProject(): void {
     const t = this.view.source.value ? this.refOf(this.view.source.value).title : "פרויקט";
-    this.saver.save(`${safeFileTitle(t, "פרויקט")}.otzlinker.json`, this.projectText(), "application/json");
+    // the local date and time in the name (#42 C28): saving again made "(1)", "(2)", and the newest was not to be told
+    const d = new Date();
+    const p2 = (x: number) => String(x).padStart(2, "0");
+    const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}-${p2(d.getMinutes())}`;
+    this.saver.save(`${safeFileTitle(t, "פרויקט")} ${stamp}.otzlinker.json`, this.projectText(), "application/json");
     this.savedRevision.value = this.linkState.value.revision;
     this.notify("success", "הפרויקט נשמר. אפשר לפתוח אותו שוב בגרירה לחלון או מהמסך הראשי.");
   }
@@ -1922,9 +2316,9 @@ export class AppStore {
   }
 
   /** shows a notice; its id lets the module that raised it take it back when it no longer holds (U20) */
-  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"]): number {
+  notify(kind: NoticeKind, text: string, details?: string[], action?: Notice["action"], sticky?: boolean): number {
     logNotice(this.log, kind, text, details);
-    const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }) };
+    const n: Notice = { id: ++this.noticeSeq, kind, text, ...(details && { details }), ...(action && { action }), ...(sticky && { sticky }) };
     this.notices.value = [...this.notices.value, n].slice(-6);
     return n.id;
   }
@@ -1939,6 +2333,8 @@ export class AppStore {
    * while another still runs, which hid that one's progress and its cancel (review C16).
    */
   private readonly running: { task: Task }[] = [];
+  /** the full reset is closing the sources (resetAll): no task starts until it is done */
+  private resetting = false;
 
   private showTask(): void {
     this.task.value = this.running.at(-1)?.task ?? null;
@@ -1946,6 +2342,8 @@ export class AppStore {
 
   /** Runs a long task with a cancel and progress; `count` turns the progress into the task's own units (audit F21). */
   async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null> {
+    // while the full reset closes the sources nothing starts: a source it opened would be dropped unclosed (resetAll)
+    if (this.resetting) return void this.notify("warning", "הכלי מתאפס עכשיו: כל הקבצים והמסדים נסגרים. נסו שוב כשהאיפוס יסתיים."), null;
     const ac = new AbortController();
     const logged = logTask(this.log, label);
     const startedAt = Date.now();

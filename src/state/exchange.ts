@@ -87,7 +87,7 @@ export class ExchangeState {
   importLinksFile(path: string, text: string): void {
     const { host } = this;
     const sourceTitle = sourceTitleFromLinksFileName(path);
-    if (!sourceTitle) return void host.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו ספר המקור.`);
+    if (!sourceTitle) return void host.notify("error", `"${path}": שם קובץ קישורים חייב להסתיים ב־‎_links.json, כי ממנו אוצריא יודעת מהו הספר המקשר.`);
     const parsed = parseLinksJson(text);
     const fatal = parsed.issues.find((i) => i.index < 0 && i.level === "error" && (i.code === "file/not-json" || i.code === "file/not-array"));
     if (fatal)
@@ -140,13 +140,23 @@ export class ExchangeState {
         : host.notify("success", `נטענו ${links.length.toLocaleString("he")} קישורים מ־"${path}".${later}`);
       if (early && typeof id === "number") this.earlyNotices.push(id);
     }
-    if (sourceRef.origin === "unknown" && !early) host.notify("info", `ספר המקור "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
+    if (sourceRef.origin === "unknown" && !early) host.notify("info", `הספר המקשר "${sourceTitle}" עדיין לא פתוח. פתחו אותו (או את המסד שבו הוא נמצא) כדי לראות את הקישורים על הטקסט.`);
   }
 
   /** titles that links files loaded before any book named: reported once books open (booksOpened) */
   private readonly awaitingBooks = new Set<string>();
   /** the notices that said "the books are not open yet": taken back when they open (V5 UX audit U20) */
   private earlyNotices: number[] = [];
+
+  /**
+   * Forgets what waits for the user or for books (the full reset): the files waiting for the field-mapping dialog and the
+   * titles of links files loaded before their books opened. The import counter stays, so link ids never collide.
+   */
+  reset(): void {
+    this.pendingRecords.value = [];
+    this.awaitingBooks.clear();
+    this.earlyNotices = [];
+  }
 
   /**
    * Books were opened and the links attached to them (AppStore.attachLinks): of the books that links

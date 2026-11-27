@@ -66,7 +66,7 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
           <div class="records-grid">
             <label class="field">
               <span>
-                ספר המקור
+                הספר המקשר
                 <span class="req" aria-hidden="true"> *</span>
               </span>
               <select
@@ -83,11 +83,11 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
                   <option key={f} value={f}>השדה {f}</option>
                 ))}
               </select>
-              {"fixed" in m.source && <input type="text" aria-label="שם ספר המקור" value={m.source.fixed} onInput={(e) => set({ source: { fixed: e.currentTarget.value } })} />}
+              {"fixed" in m.source && <input type="text" aria-label="שם הספר המקשר" value={m.source.fixed} onInput={(e) => set({ source: { fixed: e.currentTarget.value } })} />}
             </label>
-            {fieldSelect("שורה בספר המקור", "sourceLine", true)}
-            {fieldSelect("ספר היעד (שם)", "targetTitle")}
-            {fieldSelect("שורה בספר היעד", "targetLine", true)}
+            {fieldSelect("שורה בספר המקשר", "sourceLine", true)}
+            {fieldSelect("הספר המקושר (שם)", "targetTitle")}
+            {fieldSelect("שורה בספר המקושר", "targetLine", true)}
             <label class="field">
               סוג הקשר
               <select value={typeValue} onChange={(e) => set({ type: e.currentTarget.value === "\u0000fixed" ? { fixed: "reference" } : { field: e.currentTarget.value } })}>
@@ -111,10 +111,10 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
             </label>
             {advanced && (
               <>
-                {fieldSelect("נתיב ספר היעד (path_2)", "targetPath")}
-                {fieldSelect("שם המקום ביעד (heRef_2)", "heRef2")}
-                {fieldSelect("סוף הטווח במקור", "sourceLineEnd")}
-                {fieldSelect("סוף הטווח ביעד", "targetLineEnd")}
+                {fieldSelect("נתיב הספר המקושר (path_2)", "targetPath")}
+                {fieldSelect("שם המקום בספר המקושר (heRef_2)", "heRef2")}
+                {fieldSelect("סוף הטווח בספר המקשר", "sourceLineEnd")}
+                {fieldSelect("סוף הטווח בספר המקושר", "targetLineEnd")}
                 {fieldSelect("תחילת העוגן (start)", "start")}
                 {fieldSelect("סוף העוגן (end)", "end")}
               </>
@@ -127,7 +127,7 @@ function Mapper({ path, table, initial }: { path: string; table: RecordsTable; i
               <div class="table-wrap">
                 <table class="sug-table" aria-label="תצוגה מקדימה">
                   <thead>
-                    <tr><th>ספר מקור</th><th>שורה</th><th>ספר יעד</th><th>שורה</th><th>סוג</th></tr>
+                    <tr><th>הספר המקשר</th><th>שורה</th><th>הספר המקושר</th><th>שורה</th><th>סוג</th></tr>
                   </thead>
                   <tbody>
                     {preview.files.flatMap((f) =>

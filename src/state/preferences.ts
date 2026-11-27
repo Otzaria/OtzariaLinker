@@ -1,4 +1,5 @@
 import { batch, effect, signal, type Signal } from "@preact/signals";
+import type { MarkerBasis } from "../linking/ranges";
 
 /*
  * User preferences and the workspace layout (ADR 0005). Kept in localStorage — a per-browser
@@ -8,6 +9,9 @@ import { batch, effect, signal, type Signal } from "@preact/signals";
 export type ThemeSetting = "system" | "light" | "dark";
 export type CreateMode = "builder" | "click";
 export type SuggestionsView = "table" | "inline" | "card";
+/** Version 3's four densities (F-133): the padding, size and spacing of the book lines (tokens.css [data-density]). */
+export type Density = "spacious" | "comfortable" | "compact" | "dense";
+export const DENSITIES: readonly Density[] = ["spacious", "comfortable", "compact", "dense"];
 
 export type PanelId = "sources" | "source" | "target" | "side";
 export type LayoutPreset = "four" | "drawer" | "stack";
@@ -30,10 +34,17 @@ export const PRESETS: Record<LayoutPreset, Layout> = {
 export interface Preferences {
   theme: Signal<ThemeSetting>;
   fontScale: Signal<number>;
+  density: Signal<Density>;
   advanced: Signal<boolean>;
   createMode: Signal<CreateMode>;
   suggestionsView: Signal<SuggestionsView>;
   layout: Signal<Layout>;
+  /** v3's rangeEndBasis (F-079): where the builder's "until the next" stops — a link or a heading, a link, a heading, the book's end */
+  rangeEndBasis: Signal<MarkerBasis>;
+  /** v3's rangeAutoEnd (F-055), per side: a new pick on that side runs by itself until the line before the next marker */
+  rangeAutoEnd: Signal<{ source: boolean; target: boolean }>;
+  /** v3's rangeTrimPrevious (F-083): a new link cuts the range of an earlier link it falls inside (same undo step) */
+  rangeTrimPrevious: Signal<boolean>;
   /**
    * Session only, never saved: the user chose a preset or changed the layout (hid or showed a panel,
    * moved a border or a panel) in this session. Until then a window narrower than NARROW_WIDTH gets the
@@ -48,24 +59,57 @@ export interface Preferences {
 export const NARROW_WIDTH = 1200;
 
 const KEY = "otzaria-linker:prefs:v1";
+/** Version 3's one settings key (F-129). Read once, when this version has no settings of its own yet; never written. */
+export const LEGACY_KEY = "otzaria-linker/settings/v2";
+
+const DEFAULTS = { theme: "system" as ThemeSetting, fontScale: 1, density: "comfortable" as Density, advanced: false, createMode: "builder" as CreateMode, suggestionsView: "table" as SuggestionsView, rangeEndBasis: "auto" as MarkerBasis, rangeTrimPrevious: true };
+/** a fresh object each time: a shared one would be the same value in every session that changes it */
+const defaultAutoEnd = (): { source: boolean; target: boolean } => ({ source: false, target: false });
+
+/**
+ * The settings of version 3 that still mean something here: the theme ("auto" was "system"), the density and the
+ * advanced mode. Its other 13 settings have no counterpart (they were removed or became choices on the screen
+ * that uses them, V7_LEGACY_PARITY §4.4), so they are not carried over.
+ */
+function legacySettings(storage: Storage | null): Record<string, unknown> {
+  let old: Record<string, unknown>;
+  try {
+    old = JSON.parse(storage?.getItem(LEGACY_KEY) ?? "null") as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  if (!old || typeof old !== "object") return {};
+  const out: Record<string, unknown> = {};
+  if (old.theme === "auto") out.theme = "system";
+  else if (old.theme === "light" || old.theme === "dark") out.theme = old.theme;
+  if (DENSITIES.includes(old.density as Density)) out.density = old.density;
+  if (typeof old.advanced === "boolean") out.advanced = old.advanced;
+  return out;
+}
 
 export function loadPreferences(storage: Storage | null = safeStorage()): Preferences {
   let saved: Partial<Record<keyof Preferences, unknown>> = {};
   try {
-    saved = JSON.parse(storage?.getItem(KEY) ?? "{}") as typeof saved;
+    const own = storage?.getItem(KEY);
+    // the first run of this version in a browser that ran version 3 starts on its settings (F-129)
+    saved = (own == null ? legacySettings(storage) : JSON.parse(own)) as typeof saved;
   } catch {
     /* corrupt or blocked — start from defaults */
   }
   const pick = <T>(v: unknown, ok: (x: unknown) => boolean, d: T): T => (ok(v) ? (v as T) : d);
   const prefs: Preferences = {
-    theme: signal(pick(saved.theme, (x) => x === "system" || x === "light" || x === "dark", "system" as ThemeSetting)),
-    fontScale: signal(pick(saved.fontScale, (x) => typeof x === "number" && x >= 0.7 && x <= 2, 1)),
-    advanced: signal(pick(saved.advanced, (x) => typeof x === "boolean", false)),
-    createMode: signal(pick(saved.createMode, (x) => x === "builder" || x === "click", "builder" as CreateMode)),
-    suggestionsView: signal(pick(saved.suggestionsView, (x) => x === "table" || x === "inline" || x === "card", "table" as SuggestionsView)),
+    theme: signal(pick(saved.theme, (x) => x === "system" || x === "light" || x === "dark", DEFAULTS.theme)),
+    fontScale: signal(pick(saved.fontScale, (x) => typeof x === "number" && x >= 0.7 && x <= 2, DEFAULTS.fontScale)),
+    density: signal(pick(saved.density, (x) => DENSITIES.includes(x as Density), DEFAULTS.density)),
+    advanced: signal(pick(saved.advanced, (x) => typeof x === "boolean", DEFAULTS.advanced)),
+    createMode: signal(pick(saved.createMode, (x) => x === "builder" || x === "click", DEFAULTS.createMode)),
+    suggestionsView: signal(pick(saved.suggestionsView, (x) => x === "table" || x === "inline" || x === "card", DEFAULTS.suggestionsView)),
     // a narrow window starts on "two texts and a side panel" through fitLayoutToWidth, which keeps
     // this layout to return to when the window is made wide
     layout: signal(pick(saved.layout, isLayout, structuredClone(PRESETS.four))),
+    rangeEndBasis: signal(pick(saved.rangeEndBasis, (x) => x === "auto" || x === "links" || x === "headings" || x === "book", DEFAULTS.rangeEndBasis)),
+    rangeAutoEnd: signal(pick(saved.rangeAutoEnd, isSides, defaultAutoEnd())),
+    rangeTrimPrevious: signal(pick(saved.rangeTrimPrevious, (x) => typeof x === "boolean", DEFAULTS.rangeTrimPrevious)),
     layoutChosen: signal(false),
     layoutAuto: signal(null),
   };
@@ -125,6 +169,60 @@ export function resetLayout(prefs: Preferences, width: number): void {
     prefs.layoutAuto.value = null;
     fitLayoutToWidth(prefs, width);
   });
+}
+
+/**
+ * The side panel's width while the suggestions are reviewed (#41 B23): the table of suggestions holds both lines of each
+ * suggestion, and at 1366px its share of a four-column layout (1.4 of 6.4) left the texts cut to a few words. While
+ * the "הצעות" tab is shown and the user has not set the side panel's width themselves (it is the preset's), the side
+ * panel is as wide as a reader: the readers' width and its own are shared equally (at 1366px about 80px more), and the
+ * books list keeps its width. A border dragged or moved in that tab keeps the widths shown, and from then on they are
+ * the user's own. Only while a reader keeps MIN_READER_PX (from about 1366px in four columns).
+ */
+export const MIN_READER_PX = 380;
+export function effectiveLayout(layout: Layout, sideTab: string, width = Infinity): Layout {
+  if (sideTab !== "suggestions" || layout.hidden.includes("side") || layout.sizes.side !== PRESETS[layout.preset].sizes.side) return layout;
+  // the readers that have a column of their own ("source above target" puts the target in the source's column)
+  const readers = (["source", "target"] as const).filter((p) => layout.order.includes(p) && !layout.hidden.includes(p));
+  const pool = readers.reduce((n, p) => n + layout.sizes[p], layout.sizes.side);
+  const each = pool / (readers.length + 1);
+  if (each <= layout.sizes.side) return layout;
+  // never at the readers' expense below MIN_READER_PX: at 1280px a reader's title row wrapped
+  const shown = layout.order.filter((p) => !layout.hidden.includes(p)).reduce((n, p) => n + layout.sizes[p], 0);
+  if (readers.length && (width * each) / shown < MIN_READER_PX) return layout;
+  const sizes = { ...layout.sizes, side: each };
+  for (const p of readers) sizes[p] = each;
+  return { ...layout, sizes };
+}
+
+/** "איפוס ההגדרות" (version 3's "איפוס לברירות המחדל", F-131): every setting and the layout back to their defaults. */
+export function resetPreferences(prefs: Preferences, width: number): void {
+  batch(() => {
+    prefs.theme.value = DEFAULTS.theme;
+    prefs.fontScale.value = DEFAULTS.fontScale;
+    prefs.density.value = DEFAULTS.density;
+    prefs.advanced.value = DEFAULTS.advanced;
+    prefs.createMode.value = DEFAULTS.createMode;
+    prefs.suggestionsView.value = DEFAULTS.suggestionsView;
+    prefs.rangeEndBasis.value = DEFAULTS.rangeEndBasis;
+    prefs.rangeAutoEnd.value = defaultAutoEnd();
+    prefs.rangeTrimPrevious.value = DEFAULTS.rangeTrimPrevious;
+    resetLayout(prefs, width);
+  });
+}
+
+/** A panel one place towards the start (-1) or the end (+1), swapped with its nearest SHOWN neighbour; at an edge the same layout. */
+export function movePanel(layout: Layout, id: PanelId, delta: -1 | 1): Layout {
+  const shown = layout.order.filter((p) => p === id || !layout.hidden.includes(p));
+  const other = shown[shown.indexOf(id) + delta];
+  if (!shown.includes(id) || !other) return layout;
+  const order = layout.order.map((p) => (p === id ? other : p === other ? id : p));
+  return { ...layout, order };
+}
+
+function isSides(x: unknown): boolean {
+  const s = x as { source: unknown; target: unknown } | null;
+  return !!s && typeof s === "object" && typeof s.source === "boolean" && typeof s.target === "boolean";
 }
 
 const PANELS: readonly PanelId[] = ["sources", "source", "target", "side"];

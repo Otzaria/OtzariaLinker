@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { EngineId } from "../../linking/automatic";
-import { parseSourceFilter, type SourceFilterPreview } from "../../linking/automatic/source-filter";
+import { parseSourceFilter, type SourceFilter, type SourceFilterPreview } from "../../linking/automatic/source-filter";
 import { useStore } from "../context";
 
 /*
@@ -10,10 +10,16 @@ import { useStore } from "../context";
  */
 type Shown = SourceFilterPreview | { error: string };
 
-export function SourceFilterPreviewBox({ engine, source, options }: { engine: EngineId; source: string | null; options: Record<string, unknown> }) {
+/**
+ * `books`: the books the filter applies to — one in a pair run, every commentary of a batch or a max-link plan (#42 C16), where a
+ * choice says which one to look at. `filter`: the run's filter (max-link's runLineFilter); otherwise read from the engine's options.
+ */
+export function SourceFilterPreviewBox({ engine, books, options, filter: given }: { engine: EngineId; books: readonly string[]; options?: Record<string, unknown>; filter?: SourceFilter | null }) {
   const store = useStore();
-  const filter = parseSourceFilter(options["sourceFilter"]);
+  const filter = given !== undefined ? given : parseSourceFilter(options?.["sourceFilter"]);
   const key = filter ? JSON.stringify(filter) : "";
+  const [picked, setPicked] = useState<string | null>(null);
+  const source = picked && books.includes(picked) ? picked : (books[0] ?? null);
   const [shown, setShown] = useState<Shown | null>(null);
   // a changed filter, source or engine makes the old answer stale
   useEffect(() => setShown(null), [key, source, engine]);
@@ -24,6 +30,15 @@ export function SourceFilterPreviewBox({ engine, source, options }: { engine: En
   };
   return (
     <div class="source-filter-preview" style="display:grid;gap:6px">
+      <p class="muted" style="margin:0;font-size:var(--fs-sm)">סינון השורות חל על כל השיטות ועל כל הספרים של ההרצה: שורה שהוא אינו כולל לא תקבל הצעה.</p>
+      {books.length > 1 && (
+        <label class="field">
+          הספר לתצוגה המקדימה
+          <select value={source} onChange={(e) => setPicked(e.currentTarget.value)}>
+            {books.map((k) => <option key={k} value={k}>{store.refOf(k).title}</option>)}
+          </select>
+        </label>
+      )}
       <button class="adv-link" onClick={look} disabled={!!store.task.value}>
         תצוגה מקדימה: אילו שורות ייכנסו
       </button>

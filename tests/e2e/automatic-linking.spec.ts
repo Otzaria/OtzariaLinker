@@ -138,7 +138,7 @@ test("a suggestion shows the target's line number in the table, the step view an
 
 /*
  * Issue 19: the two sides are named by the job — the commentary and its base, the book body and its notes, the citing and
- * the cited book — and by the neutral "מקור"/"יעד" when no job is known (the manual builder). The ids stay `source` and
+ * the cited book — and by the neutral "מקשר"/"מקושר" (V7 §3.5: "מקור" is a file or a database) when no job is known (the manual builder). The ids stay `source` and
  * `target`: the screens carry data-side, which is what tests hold on to.
  */
 test("the sides are named by the job: commentary and base, body and notes, citing and cited — and by data-side", async ({ page }) => {
@@ -153,9 +153,9 @@ test("the sides are named by the job: commentary and base, body and notes, citin
   const pickBtn = (side: "source" | "target") => page.locator(`.book-list li button.side-btn[data-side="${side}"]`).first();
 
   // no job yet: the neutral pair
-  await expect(badge("source")).toHaveText("מקור");
-  await expect(badge("target")).toHaveText("יעד");
-  await expect(pickBtn("source")).toHaveText("מקור");
+  await expect(badge("source")).toHaveText("מקשר");
+  await expect(badge("target")).toHaveText("מקושר");
+  await expect(pickBtn("source")).toHaveText("מקשר");
 
   await page.getByRole("tab", { name: /הצעות/ }).click();
   await page.getByLabel("שיטה").selectOption({ label: "לפי כותרות" });
@@ -306,8 +306,8 @@ test("pair mode: one book against several targets, all methods merged into one r
   const more = page.locator("details.more-targets");
   await expect(more).not.toHaveAttribute("open", "");
   await more.locator("summary").click();
-  await more.getByRole("group", { name: "עוד ספרי יעד" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
-  await page.getByRole("checkbox", { name: /כל השיטות שמתאימות, מאוחדות/ }).check();
+  await more.getByRole("group", { name: "עוד ספרים מקושרים" }).getByRole("checkbox", { name: /^רש"י על בראשית/ }).check();
+  await page.getByRole("radio", { name: /כל השיטות שמתאימות, מאוחדות/ }).click();
   await page.getByRole("button", { name: "חיפוש התאמות" }).click();
   await expect(page.locator(".sug-table tbody tr").first()).toBeVisible({ timeout: 60_000 });
   // one run holding both targets: the summary is a merged (max-link style) run over the two pairs

@@ -174,7 +174,7 @@ function DiffView() {
           שמירת דוח (CSV)
         </button>
       </div>
-      {r.diff.loose && <p class="muted" style="margin:0">מול המסד לא מושווים שם המקום ביעד, ציוני ספריא ועוגנים: המסד לא שומר אותם כמו בקובץ.</p>}
+      {r.diff.loose && <p class="muted" style="margin:0">מול המסד לא מושווים שם המקום בספר המקושר, ציוני ספריא ועוגנים: המסד לא שומר אותם כמו בקובץ.</p>}
       <table class="cmp-table">
         <thead>
           <tr><th>שינוי</th><th>{fname(r.a.name)}</th><th>{fname(r.b.name)}</th></tr>

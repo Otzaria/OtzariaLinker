@@ -81,11 +81,12 @@ describe("citations engine on the real database slice (seforim-v7-mini.db)", () 
     expect(partial.suggestions).toHaveLength(1);
     const byId = new Map(full.suggestions.map((s) => [s.id, s.confidence] as const));
     expect(byId.get(partial.suggestions[0]!.id)).toBe(partial.suggestions[0]!.confidence);
-    // a cancel during the scan: nothing resolved, still no throw
+    // a cancel during the scan: the books it already named are still checked for a moment (#41 B11 — before, nothing was resolved
+    // and the partial result was empty), still no throw, still marked partial
     let early = false;
     const signal2 = { get aborted() { return early; }, throwIfAborted() {} } as unknown as AbortSignal;
-    const none = await citationsJob(reg, src, {}, { signal: signal2, progress: (d) => void (d >= 500 && (early = true)) });
-    expect(none.suggestions).toEqual([]);
-    expect(none.notes.map((n) => n.code)).toContain("engine/aborted");
+    const scanned = await citationsJob(reg, src, {}, { signal: signal2, progress: (d) => void (d >= 500 && (early = true)) });
+    expect(scanned.suggestions.map((s) => s.target.book.title).sort()).toEqual(["ירמיה", "ישעיה"]);
+    expect(scanned.notes.map((n) => n.code)).toContain("engine/aborted");
   });
 });

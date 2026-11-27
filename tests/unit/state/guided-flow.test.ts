@@ -14,6 +14,7 @@ import {
   prevStep,
   resolveStep,
   stepReady,
+  stepSkipped,
   summarizeQa,
   type FlowFacts,
 } from "../../../src/state/guided-flow";
@@ -62,6 +63,15 @@ describe("guided flow — steps", () => {
     expect(resolveStep("run", facts({ books: 3, missingBases: 1 }))).toBe("db");
     expect(resolveStep("run", facts({ books: 3, baseChoices: 1 }))).toBe("run"); // a choice has its default
     expect(resolveStep("plan", facts({ books: 0 }))).toBe("files");
+  });
+
+  it("before the books are open (a reload, a continued flow) nobody knows whether the database is needed: it is not 'not needed' (#42 C31)", () => {
+    expect(stepSkipped("db", facts())).toBe(false);
+    expect(stepSkipped("db", facts({ books: 3 }))).toBe(true);
+    expect(stepSkipped("db", facts({ books: 3, missingBases: 1 }))).toBe(false);
+    // the order of the steps does not change for it: nothing to show past the first step yet
+    expect(nextStep("files", facts())).toBeNull();
+    expect(resolveStep("run", facts())).toBe("files");
   });
 });
 

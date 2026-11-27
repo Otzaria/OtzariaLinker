@@ -157,3 +157,49 @@ describe("an identical link is not made again (F-070, F-072, F-086)", () => {
     expect(live(store)).toHaveLength(1);
   });
 });
+
+describe("several picked lines (V3 F-061) keep the identical-link rule (F-070, F-086)", () => {
+  it("a batch where one line's link is identical to a live one is refused whole, and the builder says why", async () => {
+    const { store, a, b, make } = await opened();
+    expect(make(3, 2)).not.toBeNull();
+    store.pickLine("source", a, 1);
+    store.toggleLine("source", a, 3);
+    store.toggleLine("source", a, 4);
+    store.pickLine("target", b, 2);
+    store.draftType.value = "reference";
+    store.draftTypeTouched.value = true;
+    expect(store.drafts.value.map((d) => d.source.line)).toEqual([1, 3, 4]);
+    expect(codes(store)).toContain("error:builder/identical");
+    expect(store.createFromDraft()).toBeNull();
+    expect(live(store)).toHaveLength(1);
+  });
+
+  it("a batch with only another type on one line's pair is made, with the note", async () => {
+    const { store, a, b, make } = await opened();
+    expect(make(3, 2, "commentary")).not.toBeNull();
+    store.pickLine("source", a, 1);
+    store.toggleLine("source", a, 3);
+    store.pickLine("target", b, 2);
+    store.draftType.value = "reference";
+    store.draftTypeTouched.value = true;
+    expect(codes(store)).not.toContain("error:builder/identical");
+    expect(codes(store)).toContain("info:builder/same-lines");
+    expect(store.createFromDraft()).not.toBeNull();
+    expect(live(store)).toHaveLength(3);
+  });
+});
+
+describe("a copy saved as another link (V7 §3.10) keeps the identical-link rule (F-070, F-086)", () => {
+  it("a copy identical to ANOTHER live link is refused, with the reason; the edited link is unchanged", async () => {
+    const { store, a, b, make } = await opened();
+    const first = make(1, 2)!;
+    expect(make(1, 3)).not.toBeNull();
+    store.editInBuilder(first.id);
+    store.pickLine("target", b, 3);
+    expect(store.createFromDraft({ asNew: true })).toBeNull();
+    expect(live(store)).toHaveLength(2);
+    expect(store.notices.value.some((n) => /קישור זהה כבר קיים/.test(n.text))).toBe(true);
+    expect(store.linkState.value.links.get(first.id)).toMatchObject({ source: { line: 1 }, target: { line: 2 } });
+    void a;
+  });
+});

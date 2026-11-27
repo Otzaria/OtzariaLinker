@@ -20,5 +20,24 @@ export function remainingText(startedAt: number, done: number, total: number, no
   return h <= 1 ? "עוד כשעה" : `עוד כ־${h.toLocaleString("he")} שעות`;
 }
 
+/**
+ * What the progress says next to the bar (V7 §3.16, #41 B11): the task's own count, a percent, or — before the first report, while a
+ * job reads its catalog or a book — that it is preparing. Never an unexplained "0/0".
+ */
+export function stageText(t: { done: number; total: number; count?: string | undefined }): string {
+  if (t.count) return t.count;
+  return t.total > 0 ? `${Math.floor((Math.min(t.done, t.total) / t.total) * 100)}%` : "מכין את העבודה…";
+}
+
+/** The time since a task started ("0:12", "1:02:05"), from the fifth second on: a long silent step still shows that it runs. */
+export function elapsedText(startedAt: number, now: number): string | null {
+  const s = Math.floor((now - startedAt) / 1000);
+  if (s < 5) return null;
+  const two = (n: number) => String(n).padStart(2, "0");
+  const h = Math.floor(s / 3600);
+  const m = Math.floor(s / 60) % 60;
+  return h ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
+}
+
 /** "120 מתוך 300" of a unit ("ספר", "שלב"). */
 export const countOf = (unit: string, n: number, of: number): string => `${unit} ${Math.min(n, of).toLocaleString("he")} מתוך ${of.toLocaleString("he")}`;

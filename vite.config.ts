@@ -5,6 +5,7 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 import { buildInfo } from "./build/plugins/build-info.ts";
 import { licenseNotice } from "./build/plugins/license-notice.ts";
 import { wasmBase64 } from "./build/plugins/wasm-base64.ts";
+import { textGz } from "./build/plugins/text-gz.ts";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
@@ -26,6 +27,7 @@ export default defineConfig({
   define: buildInfo(pkg.version),
   plugins: [
     wasmBase64(),
+    textGz(),
     viteSingleFile({ removeViteModuleLoader: true }),
     licenseNotice({ version: pkg.version, packages: ["preact", "@preact/signals", "fflate", "zstd-wasm-decoder"] }),
   ],

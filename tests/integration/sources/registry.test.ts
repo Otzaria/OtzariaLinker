@@ -105,3 +105,34 @@ describe("a lone CR is warned about when the file is opened (V7 PR1 review, find
     expect(res.sources[0]!.info.warnings.filter((x) => x.code === "source/lone-cr")).toHaveLength(1);
   });
 });
+
+describe("a damaged database or ZIP is called what it is (#41 B24)", () => {
+  it("a .db that is not SQLite is not 'a text file that is not .txt'", async () => {
+    const res = await new SourceRegistry().open([{ path: "seforim.db", blob: new Blob([new Uint8Array(4096).fill(7)]) }]);
+    expect(res.skipped).toHaveLength(1);
+    expect(res.skipped[0]!.reason).not.toContain("קובץ טקסט");
+    expect(res.skipped[0]!.reason).toContain("מסד");
+  });
+  it("a .zip that is not a ZIP says so", async () => {
+    const res = await new SourceRegistry().open([{ path: "books.zip", blob: new Blob(["not a zip at all"]) }]);
+    expect(res.skipped[0]!.reason).not.toContain("קובץ טקסט");
+    expect(res.skipped[0]!.reason).toContain("ZIP");
+  });
+});
+
+describe("a file the browser cannot read says why it may be, and the rest of the drop opens (V7 parity F-012)", () => {
+  /** what Chrome gives for a file another program locks, or one that is only in the cloud (OneDrive files on demand) */
+  const locked = (): Blob => {
+    const b = new Blob(["x"]);
+    const fail = async () => Promise.reject(new DOMException("A requested file or directory could not be found at the time an operation was processed.", "NotReadableError"));
+    return Object.assign(b, { slice: () => Object.assign(new Blob(["x"]), { arrayBuffer: fail }), arrayBuffer: fail }) as Blob;
+  };
+  it("Otzaria may hold the file, or it is in the cloud and not on the computer: a Hebrew reason, no English error", async () => {
+    const res = await new SourceRegistry().open([{ path: "seforim.db", blob: locked() }, { path: "ספר.txt", blob: txt("<h1>ספר</h1>\nשורה") }]);
+    expect(res.sources.flatMap((s) => s.books.map((b) => b.title))).toEqual(["ספר"]);
+    expect(res.skipped).toHaveLength(1);
+    expect(res.skipped[0]!.reason).toContain("אוצריא");
+    expect(res.skipped[0]!.reason).toContain("OneDrive");
+    expect(res.skipped[0]!.reason).not.toMatch(/[A-Za-z]{6,} [a-z]+ [a-z]+/);
+  });
+});

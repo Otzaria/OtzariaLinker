@@ -25,12 +25,12 @@ describe("links in someone else's layout", () => {
     const m: RecordsMapping = { source: { field: "src" }, sourceLine: "l1", targetLine: "l2", targetTitle: "toString", type: { fixed: "reference" }, base: 1 };
     const r = recordsToLinksFiles(t, m, "x.json"); // used to throw a TypeError on the row without "toString"
     expect(r.files.map((f) => [f.sourceTitle, f.rows])).toEqual([["A", 1]]);
-    expect(r.problems).toEqual(["רשומה 2: ספר היעד ריק."]);
+    expect(r.problems).toEqual(["רשומה 2: הספר המקושר ריק."]);
     const t2 = parseRecords(JSON.stringify([{ constructor: "A", l1: 1, tgt: "B", l2: 2 }, { l1: 3, tgt: "B", l2: 4 }]), "x.json")!;
     const r2 = recordsToLinksFiles(t2, { source: { field: "constructor" }, sourceLine: "l1", targetLine: "l2", targetTitle: "tgt", type: { fixed: "reference" }, base: 1 }, "x.json");
     // the second row has no source: reported, not titled "function Object() { [native code] }"
     expect(r2.files.map((f) => f.sourceTitle)).toEqual(["A"]);
-    expect(r2.problems).toEqual(["רשומה 2: ספר המקור ריק."]);
+    expect(r2.problems).toEqual(["רשומה 2: הספר המקשר ריק."]);
   });
 
   it("a short-row sheet under a huge header stays small and fast (security review A5)", () => {
@@ -53,7 +53,7 @@ describe("links in someone else's layout", () => {
     const m = guessRecordsMapping(t);
     expect(m).toMatchObject({ source: { field: "ספר מקור" }, sourceLine: "source_line", targetTitle: "target_book", targetLine: "to_line", type: { field: "type" }, base: 0 });
     expect(mappingGaps(m)).toEqual([]);
-    expect(mappingGaps(guessRecordsMapping(parseRecords("x,y\n1,2", "a.csv")!))).toEqual(["שורה בספר המקור", "שורה בספר היעד", "ספר היעד (שם או נתיב)"]);
+    expect(mappingGaps(guessRecordsMapping(parseRecords("x,y\n1,2", "a.csv")!))).toEqual(["שורה בספר המקשר", "שורה בספר המקושר", "הספר המקושר (שם או נתיב)"]);
   });
 
   it("converts to library records per source book, read back by the links-file parser", () => {
@@ -77,6 +77,6 @@ describe("links in someone else's layout", () => {
     const r = recordsToLinksFiles(t, m, "פירוש_links.csv");
     expect(r.files).toHaveLength(1);
     expect(r.files[0]).toMatchObject({ sourceTitle: "פירוש", rows: 1 });
-    expect(r.problems).toEqual(['רשומה 2: שורת המקור "x" אינו מספר שלם.', "רשומה 3: חסרה שורת המקור.", "רשומה 4: ספר היעד ריק."]);
+    expect(r.problems).toEqual(['רשומה 2: השורה בספר המקשר "x" אינו מספר שלם.', "רשומה 3: חסרה השורה בספר המקשר.", "רשומה 4: הספר המקושר ריק."]);
   });
 });

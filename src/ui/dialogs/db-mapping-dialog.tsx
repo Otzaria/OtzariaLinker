@@ -91,7 +91,7 @@ function Wizard({ pending }: { pending: PendingDb }) {
         </header>
         <div class="body">
           <p class="muted" style="margin:0">
-            המסד אינו במבנה של אוצריא. יש בו {tables.length.toLocaleString("he")} טבלאות. כדי לפתוח אותו, צריך לומר לכלי איפה שמות הספרים ואיפה שורות הטקסט.
+            המסד אינו במבנה של אוצריא. יש בו {tables.length === 1 ? "טבלה אחת" : tables.length.toLocaleString("he")}{tables.length === 1 ? "." : " טבלאות."} כדי לפתוח אותו, צריך לומר לכלי איפה שמות הספרים ואיפה שורות הטקסט.
             {pending.guess ? " ניחשתי לפי השמות והתוכן — בדקו שזה נכון." : noBooks ? "" : " לא מצאתי ניחוש סביר; בחרו בעצמכם."}
           </p>
 
@@ -473,8 +473,8 @@ function LinksFields({ m, tables, onChange }: { m: DbMapping; tables: TablePrevi
       </label>
       {t && (
         <>
-          <ColumnSelect label="שורת המקור (מזהה שורה)" table={t} value={m.links!.source} onChange={(v) => set({ source: v ?? "" })} />
-          <ColumnSelect label="שורת היעד (מזהה שורה)" table={t} value={m.links!.target} onChange={(v) => set({ target: v ?? "" })} />
+          <ColumnSelect label="השורה בספר המקשר (מזהה שורה)" table={t} value={m.links!.source} onChange={(v) => set({ source: v ?? "" })} />
+          <ColumnSelect label="השורה בספר המקושר (מזהה שורה)" table={t} value={m.links!.target} onChange={(v) => set({ target: v ?? "" })} />
           <ColumnSelect label="סוג הקישור (לא חובה)" table={t} value={m.links!.type} optional onChange={(v) => set({ type: v })} />
           <p class="muted map-wide">מזהה שורה = ה־rowid של טבלת השורות. קישורים מהמסד מוצגים ונבדקים, אבל לא מיוצאים.</p>
         </>

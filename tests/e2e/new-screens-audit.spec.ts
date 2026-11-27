@@ -104,7 +104,7 @@ for (const size of SIZES) {
       await page.goto(distUrl);
       await audit(page, "home");
       await page.locator('.task-card[data-path="auto"]').click();
-      await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "קישור ספרים" })).toBeVisible();
       await audit(page, "home: the path's choice");
       await page.keyboard.press("Escape");
       expect(seen.errors).toEqual([]);
@@ -218,8 +218,9 @@ for (const size of SIZES) {
       await dlg.getByRole("button", { name: "מילוי מכותרות הספר" }).click();
       await expect(dlg.getByLabel("כותרת צומת 5")).toHaveValue("x");
       await audit(page, "alt_toc");
-      // Escape closes it, and focus goes back to the button that opened it
+      // Escape with unsaved nodes asks first (V7 §3.18); closing without saving, focus goes back to the button that opened it
       await page.keyboard.press("Escape");
+      await dlg.getByRole("button", { name: "סגירה בלי שמירה" }).click();
       await expect(dlg).toBeHidden();
       expect(await focused(page)).toMatchObject({ tag: "button", name: expect.stringMatching(/^מבני כותרות/) });
       expect(seen.errors).toEqual([]);

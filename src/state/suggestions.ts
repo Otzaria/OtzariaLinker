@@ -9,7 +9,9 @@ import { addChanges, commit, type Change, type LinkState } from "./history";
 import type { BooksService, CallOptions, OpenedSource } from "./services";
 import type { NoticeKind, Pick as LinePick, Side, SideTab } from "./store";
 import { CHUNK, type LineStore } from "./lines";
+import { countOf } from "./task-progress";
 import { htmlToPlainText } from "../core/text/html";
+import { canonicalTypeString, parseConnectionType } from "../core/links/connection-type";
 
 /*
  * Automatic suggestions (stage 8): running an engine on a pair of books, the citations engine on one
@@ -34,7 +36,7 @@ export interface SuggestionsHost {
   autoHeRef(at: { bookKey: string; line: number }): string;
   reveal(side: Side, bookKey: string, line: number): void;
   notify(kind: NoticeKind, text: string, details?: string[]): void;
-  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>): Promise<T | null>;
+  runTask<T>(label: string, run: (opts: CallOptions) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null>;
   /** keys of the open books (of the given keys) the library treats as Sefaria's (AppStore.sefariaOwnedKeys) */
   sefariaOwnedKeys?(keys?: Iterable<string>): string[];
 }
@@ -59,6 +61,10 @@ export interface SuggestionRun {
    * the library, so one that exists there shows as pending — a bulk approval waits for retryDbLinks().
    */
   dbLinksUnread?: readonly { key: string; title: string }[];
+  /** runs the same search again, whole (a stopped run's "הרצה חוזרת", V7 §3.16) */
+  again?: () => Promise<boolean>;
+  /** a batch run: what rerunFailed needs to run some of its books again */
+  batchArgs?: { sourceId: string; options: Record<string, unknown>; choice: { preferSource?: string } };
 }
 
 /** A suggestion as the table shows it: from the user's book to the other (audit F17, F18). */
@@ -203,7 +209,7 @@ export class SuggestionsState {
 
   constructor(
     private readonly host: SuggestionsHost,
-    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines">,
+    private readonly service: Pick<BooksService, "runEngine" | "runCitations" | "runBatch" | "existingLinks" | "lines" | "headings">,
   ) {}
 
   /** A new run replaces the one on the screen: it starts in the engine's order (not the sort of the last run), the card on its first suggestion. */
@@ -238,7 +244,8 @@ export class SuggestionsState {
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const again = () => this.runEngine(engine, sourceKey, targetKey, options);
+    this.startRun({ engine, label: `${source.title} ← ${target.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), from: sourceKey, again, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) this.host.notify("warning", partialNotice(result.suggestions.length));
     else this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} הצעות: ${c.certain} ודאיות, ${c.high} גבוהות, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -251,11 +258,12 @@ export class SuggestionsState {
    */
   async runCitations(sourceKey: string, options: Record<string, unknown> = {}): Promise<boolean> {
     const source = this.host.refOf(sourceKey);
-    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), { ...opts, keepPartial: true }));
+    const result = await this.host.runTask(`מחפש מראי מקומות: ${source.title}…`, (opts) => this.service.runCitations(source, this.withSefaria(options), { ...opts, keepPartial: true }), citationStage);
     if (!result) return false;
     const unread = await this.loadDbLinkKeys([source.key]);
     const partial = isPartial(result);
-    this.startRun({ engine: "citations", label: `מראי מקומות: ${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const again = () => this.runCitations(sourceKey, options);
+    this.startRun({ engine: "citations", label: `${source.title}${partial ? PARTIAL_LABEL : ""}`, result, at: Date.now(), again, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     const c = this.counts.value;
     if (partial) return this.host.notify("warning", partialNotice(result.suggestions.length)), true;
     this.host.notify("success", `נמצאו ${result.suggestions.length.toLocaleString("he")} מראי מקומות: ${c.certain} ודאיים, ${c.high} בוודאות גבוהה, ${c.possible + c.ambiguous} לבדיקה.`);
@@ -268,26 +276,30 @@ export class SuggestionsState {
    * `choice.preferSource`: the source the user chose for bases open in several sources; without it a base chosen among editions
    * by a rule is undecided, and what its pair finds is capped at "possible" (V7 §2.8, #41 B4).
    */
-  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}, choice: { preferSource?: string } = {}): Promise<boolean> {
+  async runBatch(engine: EngineId, sourceId: string, options: Record<string, unknown> = {}, choice: { preferSource?: string } = {}, only?: ReadonlySet<string>): Promise<boolean> {
     const src = this.host.sources.value.find((s) => s.info.id === sourceId);
     if (!src) return false;
     const commentaries = src.books.map((b) => this.host.refOf(b.key));
     const bases = [...this.host.books.value.values()].map((b) => this.host.refOf(b.key));
     const pairs = pairByTitle(commentaries, bases, choice.preferSource);
-    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null);
+    // `only`: some books of the current batch run again (rerunFailed); the others keep their rows and suggestions
+    const prev = only ? this.run.peek() : null;
+    const runnable = pairs.filter((p): p is BatchPair & { target: BookRef } => p.target !== null && (!only || only.has(p.source.key)));
     if (!runnable.length) {
       this.host.notify("warning", "לא זוהה ספר בסיס לאף ספר בקובץ או במסד הזה.", pairs.map((p) => `${p.source.title}: ${p.reason}`));
       return false;
     }
-    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }));
+    const items = await this.host.runTask(`קישור אצוותי: ${runnable.length} ספרים…`, (opts) => this.service.runBatch(engine, runnable.map(({ source, target }) => ({ source, target })), this.withSefaria(options, runnable.flatMap((p) => [p.source.key, p.target.key])), { ...opts, keepPartial: true }), (d, n) => countOf("ספר", d + 1, n));
     if (!items) return false;
     const unread = await this.loadDbLinkKeys(runnable.map((p) => p.source.key));
-    const suggestions: Suggestion[] = [];
-    const notes: Reason[] = [];
+    const mine = (s: Suggestion) => !only || only.has(s.source.book.key) || only.has(s.target.book.key);
+    const suggestions: Suggestion[] = (prev?.result.suggestions ?? []).filter((s) => !mine(s));
+    const notes: Reason[] = [...(prev?.result.notes ?? [])];
     // a cancel keeps the books done and what the last one found (keepPartial); the rest say they did not run
     const reached = new Set(items.map((it) => it.source.key));
     const partial = items.length < runnable.length || items.some((it) => it.result && isPartial(it.result));
-    const rows: BatchRow[] = pairs.map((p) => ({ source: p.source, target: p.target, ...(p.note && { note: p.note }), ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 }));
+    const kept = new Map((prev?.batch ?? []).map((r) => [r.source.key, r]));
+    const rows: BatchRow[] = pairs.map((p) => (only && !only.has(p.source.key) && kept.get(p.source.key)) || { source: p.source, target: p.target, ...(p.note && { note: p.note }), ...((p.reason && { problem: p.reason }) || (p.target && !reached.has(p.source.key) && { problem: "לא רץ: הריצה נעצרה לפני הספר הזה." })), suggestions: 0, certain: 0, high: 0, review: 0 });
     for (const it of items) {
       const row = rows.find((r) => r.source.key === it.source.key)!;
       if (it.error) row.problem = it.error;
@@ -302,11 +314,27 @@ export class SuggestionsState {
       }
       for (const n of result?.notes ?? []) notes.push({ code: n.code, text: `${it.source.title}: ${n.text}` });
     }
-    this.startRun({ engine, label: `אצווה: ${runnable.length} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
+    const paired = pairs.filter((p) => p.target).length;
+    const batchArgs = { sourceId, options, choice };
+    this.startRun({ engine, label: `אצווה: ${paired} מתוך ${pairs.length} ספרים${partial ? PARTIAL_LABEL : ""}`, result: { suggestions, notes, unmatched: [] }, at: Date.now(), batch: rows, batchArgs, again: () => this.runBatch(engine, sourceId, options, choice), ...(unread.length && { dbLinksUnread: unread }), ...(partial && { partial }) });
     if (partial) return this.host.notify("warning", partialNotice(suggestions.length)), true;
     const failed = rows.filter((r) => r.problem).length;
-    this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${runnable.length} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
+    this.host.notify(failed ? "warning" : "success", `האצווה הסתיימה: ${suggestions.length.toLocaleString("he")} הצעות ב־${paired} ספרים${failed ? `; ${failed} ספרים לא קושרו (ראו בטבלת הסיכום)` : ""}.`);
     return true;
+  }
+
+  /** The books of the current batch run that failed or were not reached, and can run again (they have a base). */
+  failedBatchBooks(): string[] {
+    return (this.run.value?.batch ?? []).filter((r) => r.problem && r.target).map((r) => r.source.title);
+  }
+
+  /** Runs again only the failed books of the current batch run, keeping the others' suggestions and every decision (V7 §3.16). */
+  async rerunFailed(): Promise<boolean> {
+    const run = this.run.peek();
+    const keys = (run?.batch ?? []).filter((r) => r.problem && r.target).map((r) => r.source.key);
+    if (!run?.batchArgs || !keys.length) return false;
+    const { sourceId, options, choice } = run.batchArgs;
+    return this.runBatch(run.engine, sourceId, options, choice, new Set(keys));
   }
 
   /**
@@ -342,6 +370,34 @@ export class SuggestionsState {
         unread.map((u) => `${u.title}: ${u.why}`),
       );
     return unread.map(({ key, title }) => ({ key, title }));
+  }
+
+  private readonly unrefMemo = new WeakMap<SuggestionRun, Promise<UnreferencedTargets | null>>();
+
+  /**
+   * Version 3's "יעדים בלי הפניה" (F-102) for the run on the screen: the content lines of the target book, between the
+   * first and the last line a suggestion points at, that no suggestion of the run points at — where a commentary's
+   * match may be missing. Only for a pair run of the dibur-hamatchil or headings engine (one target book); null
+   * otherwise. Read once per run (the target's headings come from the worker).
+   */
+  unreferencedTargets(): Promise<UnreferencedTargets | null> {
+    const run = this.run.peek();
+    if (!run || run.batch || run.maxlink || (run.engine !== "dibur-hamatchil" && run.engine !== "headings")) return Promise.resolve(null);
+    const list = run.result.suggestions;
+    const key = list[0]?.target.book.key;
+    if (!key || list.some((s) => s.target.book.key !== key) || !this.host.books.peek().has(key)) return Promise.resolve(null);
+    let memo = this.unrefMemo.get(run);
+    if (!memo) {
+      memo = this.host
+        .runTask("קורא את כותרות הספר…", (opts) => this.service.headings(key, opts))
+        .then((hs) => {
+          // a read that was cancelled or failed is not this run's answer: forgotten, so asking again reads again (V7 round-2 review, finding 9)
+          if (!hs) return void this.unrefMemo.delete(run), null;
+          return { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) };
+        });
+      this.unrefMemo.set(run, memo);
+    }
+    return memo;
   }
 
   /** Reads again the database links that failed for the current run (review C13). True when all were read. */
@@ -391,6 +447,22 @@ export class SuggestionsState {
     return out;
   }
 
+  /**
+   * Drops the run when a suggestion of it names a book that left the tool (`gone`: removed, or its source closed), as
+   * workerLost does: approving one would make a link to a book that is not open. Undo of a removal brings the book back,
+   * not the run — the user runs it again (V7 round-2 review, finding 2). True when the run was dropped.
+   */
+  forgetBooks(gone: (bookKey: string) => boolean): boolean {
+    const run = this.run.peek();
+    if (!run || !run.result.suggestions.some((s) => gone(s.source.book.key) || gone(s.target.book.key))) return false;
+    batch(() => {
+      this.run.value = null;
+      this.current.value = null;
+      this.rankSnapshot.value = null;
+    });
+    return true;
+  }
+
   approve(ids: readonly string[]): number {
     const run = this.run.value;
     if (!run) return 0;
@@ -398,6 +470,14 @@ export class SuggestionsState {
     const want = new Set(ids);
     const chosen = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists");
     if (!chosen.length) return 0;
+    // a suggestion on a book that is not open (removed, or its source closed) is never approved: its link would point at a
+    // book the user took out (finding 2; forgetBooks drops such a run — this is the second line)
+    const open = this.host.books.peek();
+    const closed = new Set(chosen.flatMap((s) => [s.source.book, s.target.book]).filter((b) => !open.has(b.key)).map((b) => b.title));
+    if (closed.size) {
+      this.host.notify("warning", `ההצעות לא אושרו: ${[...closed].map((t) => `"${t}"`).join(", ")} כבר לא פתוח בכלי. פתחו אותו שוב והריצו את החיפוש מחדש.`);
+      return 0;
+    }
     const existing = this.existingKeys(chosen);
     const links = chosen.flatMap((s) => this.linksOf(s, existing));
     if (chosen.length > 1 && run.dbLinksUnread?.length) {
@@ -428,9 +508,19 @@ export class SuggestionsState {
     this.commit(label, removed.map((id) => ({ id, before: links.get(id)! })), { add: this.keysOf(ids) });
   }
 
-  /** Back to "pending": forgets the rejection (undoable). */
+  /**
+   * Back to "pending", whatever was decided (#41 B22): an approval's links are removed and a rejection is forgotten, in ONE undoable
+   * step. Never a rejection — taking an approval back is not saying no. Pending and "exists" ones are left as they are.
+   */
   reset(ids: readonly string[]): void {
-    this.commit(ids.length === 1 ? "החזרת הצעה להמתנה" : `החזרת ${ids.length.toLocaleString("he")} הצעות להמתנה`, [], { remove: this.keysOf(ids) });
+    const st = this.state.value;
+    const decided = ids.filter((id) => st.get(id) === "approved" || st.get(id) === "rejected");
+    if (!decided.length) return;
+    const { links } = this.host.linkState.value;
+    const want = new Set(decided);
+    const removed = (this.run.value?.result.suggestions ?? []).filter((s) => want.has(s.id)).flatMap((s) => recordsOf(s).map((r) => recordLinkId(s, r.line))).filter((x) => (links.get(x)?.status ?? "deleted") !== "deleted");
+    const n = decided.length;
+    this.commit(n === 1 ? "החזרת הצעה להמתנה" : `החזרת ${n.toLocaleString("he")} הצעות להמתנה`, removed.map((id) => ({ id, before: links.get(id)! })), { remove: this.keysOf(decided) });
   }
 
   private keysOf(ids: readonly string[]): string[] {
@@ -567,10 +657,85 @@ function recordAt(s: Suggestion, line: number): { source: LinkSide; target: Link
   return line === s.target.line ? s : { source: s.source, target: { book: s.target.book, line } };
 }
 
+/** What the suggestions table is narrowed to (V7 §3.11); an absent key does not filter. `book` is the title of the row's target book. */
+export interface SuggestionFilter {
+  confidence?: Confidence;
+  state?: SuggestionState;
+  engine?: EngineId;
+  book?: string;
+  /** a connection type as the file writes it ("commentary") */
+  type?: string;
+}
+
+/** Every method that found a suggestion: a merged (max-link) one carries them all. */
+const enginesOf = (s: Suggestion): readonly EngineId[] => ((s as { engines?: readonly EngineId[] }).engines ?? [s.engine]);
+const typeOf = (s: Suggestion): string => canonicalTypeString(parseConnectionType(s.declaredType).type);
+
+/** Whether a suggestion passes the table's filters; `to` is the end the row shows as the target (SuggestionsState.display). */
+export function suggestionMatches(s: Suggestion, f: SuggestionFilter, state: SuggestionState, to: (s: Suggestion) => LinkSide): boolean {
+  return (!f.confidence || s.confidence === f.confidence) && (!f.state || state === f.state) && (!f.engine || enginesOf(s).includes(f.engine)) && (!f.book || to(s).book.title === f.book) && (!f.type || typeOf(s) === f.type);
+}
+
+/** The methods, target books and connection types of a run, with how many suggestions have each, most first: the choices of the filters. */
+export function suggestionFacets(list: readonly Suggestion[], to: (s: Suggestion) => LinkSide): { engines: [EngineId, number][]; books: [string, number][]; types: [string, number][] } {
+  const count = <K>(keys: (s: Suggestion) => readonly K[]): [K, number][] => {
+    const m = new Map<K, number>();
+    for (const s of list) for (const k of keys(s)) m.set(k, (m.get(k) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
+  return { engines: count(enginesOf), books: count((s) => [to(s).book.title]), types: count((s) => [typeOf(s)]) };
+}
+
+/** The target lines of a run that no suggestion points at (F-102): see SuggestionsState.unreferencedTargets. */
+export interface UnreferencedTargets {
+  readonly bookKey: string;
+  readonly title: string;
+  /** 0-based content lines (headings excluded), in order */
+  readonly lines: readonly number[];
+  /** the first and the last line a suggestion points at (0-based); -1 when none */
+  readonly from: number;
+  readonly through: number;
+  /** how many distinct target lines the suggestions point at */
+  readonly referenced: number;
+}
+
+/**
+ * The lines between the first and the last referenced target line that no suggestion points at, without headings.
+ * A suggestion points at its target line, the whole range it stands for (`end`, `citedSpan`) and every record of a
+ * span (`spanLines`): a line inside a range is referenced.
+ */
+export function unreferencedLines(suggestions: readonly Suggestion[], headings: ReadonlySet<number>): Omit<UnreferencedTargets, "bookKey" | "title"> {
+  const used = new Set<number>();
+  const span = (from: number, to: number) => {
+    for (let i = from; i <= Math.max(from, to); i++) used.add(i);
+  };
+  for (const s of suggestions) {
+    span(s.target.line, s.target.end ?? s.target.line);
+    if (s.citedSpan) span(s.citedSpan.line, s.citedSpan.end);
+    for (const r of s.spanLines ?? []) used.add(r.line);
+  }
+  if (!used.size) return { lines: [], from: -1, through: -1, referenced: 0 };
+  let from = Infinity;
+  let through = -Infinity;
+  for (const l of used) (from = Math.min(from, l)), (through = Math.max(through, l));
+  const lines: number[] = [];
+  for (let i = from; i <= through; i++) if (!used.has(i) && !headings.has(i)) lines.push(i);
+  return { lines, from, through, referenced: new Set(suggestions.map((s) => s.target.line)).size };
+}
+
 /** An engine result cut short by a cancel: the engines stop with an "engine/aborted" note and return what they found. */
 export const isPartial = (r: EngineResult): boolean => r.notes.some((n) => n.code === "engine/aborted");
 const PARTIAL_LABEL = " (חלקי: הריצה נעצרה)";
-const partialNotice = (n: number) => `הריצה נעצרה לפני הסוף: מוצגות ${n.toLocaleString("he")} ההצעות שנמצאו עד העצירה, והן חלקיות — לא כל הספר נבדק. הריצו שוב כדי לקבל את כולן.`;
+const partialNotice = (n: number) =>
+  n
+    ? `הריצה נעצרה לפני הסוף: מוצגות ${n.toLocaleString("he")} ההצעות שנמצאו עד העצירה, והן חלקיות — לא כל הספר נבדק. הריצו שוב כדי לקבל את כולן.`
+    : 'הריצה נעצרה לפני שנמצאו הצעות. מה שנבדק עד העצירה מסוכם בלשונית ההצעות; כדי לחפש בכל הספר לחצו שם "הרצה חוזרת".';
+
+/** The citations job's progress (per mille: the scan of the book, then its target books; workers/citations-job.ts) as the stage it is in. */
+const citationStage = (d: number, n: number): string => {
+  const f = d / n;
+  return !d ? "מכין: קורא את רשימת הספרים הפתוחים" : f < 0.5 ? `קורא את הספר: ${Math.round(f * 200)}%` : `בודק את הספרים המצוטטים: ${Math.min(100, Math.round((f - 0.5) * 200))}%`;
+};
 
 /** A suggestion's identity across sessions: engine, book titles, lines and anchor — never session keys. */
 export function rejectionKey(s: Suggestion): string {

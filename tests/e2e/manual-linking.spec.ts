@@ -53,13 +53,13 @@ test("open → pick → create → undo/redo → export, offline", async ({ page
   await expect(builder.getByRole("button", { name: "יצירת קישור" })).toBeEnabled();
   await expect(builder.locator(".stored-as")).toContainText("בראשית"); // shows how Otzaria will store it
   // simple mode names the fields in plain Hebrew; the file's field names only in advanced mode (audit F14)
-  await expect(builder).toContainText("שם המקום ביעד");
+  await expect(builder).toContainText("שם המקום בספר המקושר");
   await expect(builder).toContainText("ציון ספריא של היעד (באנגלית)");
   await expect(builder).not.toContainText("heRef_2");
   await expect(builder).not.toContainText("ref_2 —");
   const advanced = page.locator(".app-bar").getByRole("checkbox", { name: /מצב מתקדם/ });
   await advanced.check({ force: true });
-  await expect(builder).toContainText("שם המקום ביעד (heRef_2)");
+  await expect(builder).toContainText("שם המקום בספר המקושר (heRef_2)");
   await advanced.uncheck({ force: true });
   await shot(page, "3-builder");
   await page.keyboard.press("Control+Enter");
@@ -129,11 +129,14 @@ test("the link type picker is grouped into commentary types and link types", asy
   await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
   const select = page.locator(".builder").getByRole("combobox", { name: /^סוג הקשר/ });
   const groups = await select.locator("optgroup").evaluateAll((els) => els.map((g) => ({ label: g.getAttribute("label"), options: [...g.querySelectorAll("option")].map((o) => o.value) })));
-  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו"]);
+  expect(groups.map((g) => g.label)).toEqual(["סוגי מפרש — יופיעו בפאנל המפרשים באוצריא", "סוגי קישור — יופיעו בפאנל הקישורים באוצריא", "כיוון — מפירוש אל ספר הבסיס שלו", "אי אפשר לכתוב בקובץ קישורים"]);
   expect(groups[0]!.options).toEqual(expect.arrayContaining(["commentary", "targum", "footnotes"]));
   expect(groups[1]!.options).toEqual(expect.arrayContaining(["reference", "quotation", "other"]));
   expect(groups[1]!.options).not.toContain("commentary");
   expect(groups[2]!.options).toEqual(["source"]);
+  // V7 §3.6: the types a links file cannot carry are listed, disabled, each with its reason
+  expect(groups[3]!.options).toEqual(["linker", "INLINE_LINKER"]);
+  await expect(select.locator('option[value="linker"]')).toBeDisabled();
   await select.selectOption("quotation");
   await expect(select).toHaveValue("quotation");
   await select.selectOption("footnotes");
@@ -171,4 +174,65 @@ test("link types help: every type, grouped, with where it shows in Otzaria and t
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
   await ctx.close();
+});
+
+/*
+ * V7 §3.10, the visual editor as a whole: a range by Shift, both ends by dragging a line number onto a target line, a link edited and
+ * saved as an ADDITIONAL link (another target for the same source, the original kept), delete, several links chosen at once in the
+ * links tab, and undo/redo of each step.
+ */
+test("visual editor: Shift range, drag between lines, copy a link to another target, delete, multi-select, undo/redo", async ({ page }) => {
+  const seen = watchPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(distUrl);
+  await openFiles(page);
+  await expect(page.locator(".source-row")).toHaveCount(2, { timeout: 30_000 });
+  const books = page.getByRole("region", { name: "קבצים ומסדים" }).locator(".book-list li");
+  await books.filter({ hasText: "פירוש על בראשית" }).locator('button.side-btn[data-side="source"]').click();
+  await books.filter({ hasText: /^בראשית/ }).first().locator('button.side-btn[data-side="target"]').click();
+  const source = page.locator(".reader.source");
+  const target = page.locator(".reader.target");
+  await expect(target.locator(".ln").nth(3)).toBeVisible();
+  const builder = page.locator(".builder");
+
+  // a range: click, then Shift+click
+  await source.locator('.ln[data-i="1"] .tx').click();
+  await source.locator('.ln[data-i="2"] .tx').click({ modifiers: ["Shift"] });
+  await expect(builder.locator(".end.source")).toContainText("שורות 2–3");
+  await builder.getByRole("button", { name: "ניקוי" }).click();
+
+  // drag the source line's number onto a target line: both ends are filled
+  await source.locator('.ln[data-i="1"] .no').dragTo(target.locator('.ln[data-i="2"] .tx'));
+  await expect(builder.locator(".end.source")).toContainText("שורה 2");
+  await expect(builder.locator(".end.target")).toContainText("שורה 3");
+  await builder.getByPlaceholder("Genesis 1:1").fill("Genesis 1:1");
+  await builder.getByRole("button", { name: "יצירת קישור" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+
+  // edit it, pick another target, save it as an additional link: the first stays
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  await page.locator(".link-item").first().getByRole("button", { name: "עריכה" }).click();
+  await target.locator('.ln[data-i="3"] .tx').click();
+  await builder.getByRole("button", { name: "שמירה כקישור נוסף" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+  await expect(target.locator('.ln[data-i="2"] .mark.new')).toHaveText("1");
+  await expect(target.locator('.ln[data-i="3"] .mark.new')).toHaveText("1");
+  await page.getByRole("button", { name: "ביטול הפעולה האחרונה" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+  await page.getByRole("button", { name: "ביצוע חוזר" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+
+  // several at once in the links tab, and delete one
+  await page.getByRole("tab", { name: /קישורים/ }).click();
+  const items = page.locator(".link-item");
+  await expect(items).toHaveCount(2);
+  await items.nth(0).getByRole("checkbox", { name: "בחירה" }).check();
+  await items.nth(1).getByRole("checkbox", { name: "בחירה" }).check();
+  await expect(items.locator('input[type="checkbox"]:checked')).toHaveCount(2);
+  await items.nth(0).getByRole("button", { name: "מחיקה" }).click();
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("1");
+  await page.keyboard.press("Control+z");
+  await expect(source.locator('.ln[data-i="1"] .mark.new')).toHaveText("2");
+  expect(seen.external).toEqual([]);
+  expect(seen.errors).toEqual([]);
 });

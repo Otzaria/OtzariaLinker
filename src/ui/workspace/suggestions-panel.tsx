@@ -5,7 +5,7 @@ import { pairByTitle } from "../../linking/batch";
 import { plainText } from "./plain-text";
 import { splitMatched } from "./matched-words";
 import type { SuggestionsView } from "../../state/preferences";
-import { placeText, type SuggestionState } from "../../state/suggestions";
+import { placeText, suggestionFacets, suggestionMatches, type SuggestionFilter, type SuggestionState } from "../../state/suggestions";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { activatable, rovingKeys, rovingTabIndex } from "../keyboard";
@@ -27,6 +27,18 @@ import { MaxLinkForm, MaxLinkReportView } from "./maxlink-panel";
  * Nothing is linked without approval; approval is one undoable action.
  */
 const STATE_LABEL: Record<SuggestionState, string> = { pending: "ממתינה", approved: "אושרה", rejected: "נדחתה", exists: "כבר קיים" };
+const METHOD_MODE = { one: "השיטה שבחרתם", several: "כמה שיטות שאבחר", auto: "כל השיטות שמתאימות, מאוחדות" } as const;
+/** the pair methods that run without settings of the user's own (a pattern needs one) */
+const PICKABLE: readonly PairEngineId[] = ["headings", "dibur-hamatchil", "footnotes"];
+/** the decision keys, Latin and the Hebrew layout's same key (help §13) */
+const DECIDE_KEYS: Record<string, "approve" | "reject" | "reset"> = { a: "approve", ש: "approve", r: "reject", ר: "reject", delete: "reject", u: "reset", ו: "reset" };
+/** what each level means for the reviewer (V7 §3.11): on the level's chip and badge */
+const CONFIDENCE_HINT: Record<Exclude<Confidence, "none">, string> = {
+  certain: 'הכלי בטוח לגמרי: "אישור כל הוודאיות" מאשר רק אותן',
+  high: "סביר מאוד, אבל כדאי מבט לפני אישור",
+  possible: "ייתכן: בדקו את שני הצדדים לפני אישור",
+  ambiguous: "כמה מקומות מתאימים, או ששיטות חלוקות: בדקו גם את החלופות בכרטיס",
+};
 const VIEW_LABEL: Record<SuggestionsView, string> = { table: "טבלה", inline: "בתוך הטקסט", card: "כרטיס" };
 
 export function SuggestionsPanel() {
@@ -58,7 +70,7 @@ export function SuggestionsPanel() {
             {run.maxlink && <MaxLinkSummary open={report} onToggle={() => setReport(!report)} />}
           </div>
         </div>
-        <button class="btn text" onClick={() => (store.sideTab.value = "qa")} title="בלשונית הבדיקה: אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן">
+        <button class="btn text" onClick={() => ((store.sideTab.value = "qa"), store.coverageFocus.value++)} title="בלשונית הבדיקה: אילו שורות בספר עדיין בלי קישור, וקפיצה אליהן">
           <Icon name="oz_link_check" size={16} />
           כיסוי הספר
         </button>
@@ -83,6 +95,21 @@ export function SuggestionsPanel() {
               <span>{n.text}</span>
             </li>
           ))}
+        </ul>
+      )}
+      {!run.batch && !run.maxlink && (run.engine === "dibur-hamatchil" || run.engine === "headings") && run.result.suggestions.length > 0 && <UnreferencedTargetsView key={run.at} title={run.result.suggestions[0]!.target.book.title} />}
+      {/* a stopped run keeps what it found, says so, and runs again whole on request (#41 B11, V7 §3.16) */}
+      {run.partial && (
+        <ul class="problems" style="padding:0 6px 6px">
+          <li class="warning" role="status">
+            <Icon name="fl_warning" size={16} />
+            <span class="grow">
+              {run.result.suggestions.length
+                ? `הריצה נעצרה לפני הסוף: ${run.result.suggestions.length.toLocaleString("he")} ההצעות שכאן נמצאו עד העצירה, ולא כל הספר נבדק.`
+                : "הריצה נעצרה לפני שנמצאו הצעות. מה שנבדק עד העצירה מסוכם כאן."}
+            </span>
+            {run.again && <button class="btn text" disabled={!!store.task.value} onClick={() => void run.again!()}>הרצה חוזרת</button>}
+          </li>
         </ul>
       )}
       {run.dbLinksUnread?.length ? (
@@ -110,6 +137,54 @@ export function SuggestionsPanel() {
 }
 
 /** After max-link, one line instead of four summaries: how many books, the job's state, and the report on request. */
+const UNREF_SHOWN = 200;
+
+/**
+ * Version 3's "יעדים בלי הפניה" (F-102): the target's lines, between the first and the last a suggestion points at,
+ * that none points at — a commentary's match may be missing there. Read when opened; each line opens in its reader.
+ */
+function UnreferencedTargetsView({ title }: { title: string }) {
+  const store = useStore();
+  const [data, setData] = useState<Awaited<ReturnType<typeof store.suggestions.unreferencedTargets>> | undefined>(undefined);
+  const side = (key: string) => (store.view.source.value === key ? "source" : "target");
+  return (
+    <details
+      class="unref"
+      onToggle={(e) => {
+        // no answer yet, or none (a cancelled read is not kept by the store, finding 9): opening again asks again
+        if ((e.currentTarget as HTMLDetailsElement).open && !data) (setData(undefined), void store.suggestions.unreferencedTargets().then(setData));
+      }}
+    >
+      <summary>שורות ב"{title}" שאף הצעה לא מפנה אליהן</summary>
+      <div class="unref-body">
+        {data === undefined ? (
+          <p class="muted">קורא את הכותרות של "{title}"…</p>
+        ) : !data ? (
+          <p class="muted">אין רשימה להרצה הזו. אם הקריאה בוטלה, סגרו את החלק הזה ופתחו אותו שוב.</p>
+        ) : !data.lines.length ? (
+          <p class="muted">כל שורות התוכן של "{data.title}" בין שורה {(data.from + 1).toLocaleString("he")} לשורה {(data.through + 1).toLocaleString("he")} מקבלות הפניה.</p>
+        ) : (
+          <>
+            <p class="muted">
+              ב"{data.title}", בין שורה {(data.from + 1).toLocaleString("he")} לשורה {(data.through + 1).toLocaleString("he")}: {data.lines.length.toLocaleString("he")} שורות תוכן בלי הפניה (כותרות לא נספרות). אולי חסרה שם התאמה. לחצו על שורה כדי לראות אותה.
+            </p>
+            <ul class="unref-list" aria-label="שורות בלי הפניה">
+              {data.lines.slice(0, UNREF_SHOWN).map((l) => (
+                <li key={l}>
+                  <button class="chip" onClick={() => store.reveal(side(data.bookKey), data.bookKey, l)} aria-label={`שורה ${l + 1} ב${data.title}`}>
+                    {(l + 1).toLocaleString("he")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {data.lines.length > UNREF_SHOWN && <p class="muted">מוצגות {UNREF_SHOWN} הראשונות מתוך {data.lines.length.toLocaleString("he")}.</p>}
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function MaxLinkSummary({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const store = useStore();
   const job = store.maxLink.job.value;
@@ -147,14 +222,18 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const single = info.singleBook === true;
   /** more targets for the same book, and "every method that fits, merged" (issue 26): the run is then a pair plan (state/maxlink.ts pairPlan) */
   const [extra, setExtra] = useState<readonly string[]>([]);
-  const [mergeAll, setMergeAll] = useState(false);
-  const commentaryEngine = engine === "headings" || engine === "dibur-hamatchil";
+  /** how many methods run on the pair (V7 §3.8): the one chosen, several ticked, or every one that fits (the planner's choice) */
+  const [methodMode, setMethodMode] = useState<"one" | "several" | "auto">("one");
+  const [ticked, setTicked] = useState<readonly PairEngineId[]>(["headings", "dibur-hamatchil"]);
   const multiEligible = mode === "pair" && !single && engine !== "pattern";
+  const methods = multiEligible && methodMode !== "one" ? methodMode : "one";
   // ticked books that were closed, or became the book in a reader, no longer count
   const live = extra.filter((k) => store.books.value.has(k) && k !== s && k !== t);
   const targets = [...new Set([t, ...live].filter((k): k is string => !!k && k !== s))];
-  const multi = multiEligible && (live.length > 0 || (mergeAll && commentaryEngine));
-  const ready = single ? !!s : mode === "pair" ? (multi ? !!s && targets.length > 0 : !!s && !!t && s !== t) : !!batchSource;
+  const multi = multiEligible && (live.length > 0 || methods !== "one");
+  /** the methods of a pair plan, and why each runs: what the form shows before the run */
+  const pairPlan = useMemo(() => (multi && s && targets.length ? store.maxLink.pairPlan(s, targets, methods === "auto" ? undefined : methods === "several" ? ticked : [engine as PairEngineId], engine === "footnotes" ? "notes" : undefined) : null), [multi, s, targets.join(), methods, ticked, engine]);
+  const ready = single ? !!s : mode === "pair" ? (multi ? !!pairPlan?.steps.length : !!s && !!t && s !== t) : !!batchSource;
   const preview = useMemo(() => {
     const src = sources.find((x) => x.info.id === batchSource);
     if (mode !== "batch" || !src) return [];
@@ -173,10 +252,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
   const start = async () => {
     const options = check.options;
     if (multi) {
-      const methods: readonly PairEngineId[] | undefined = mergeAll && commentaryEngine ? undefined : [engine as PairEngineId];
-      const plan = store.maxLink.pairPlan(s!, targets, methods, engine === "footnotes" ? "notes" : undefined);
+      if (!pairPlan) return;
       const label = `${store.refOf(s!).title} מול ${targets.map((k) => store.refOf(k).title).join(", ")}`;
-      if (await store.maxLink.run(plan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
+      if (await store.maxLink.run(pairPlan, label, Object.keys(options).length ? { engineOptions: { [engine]: options } } : {})) onDone();
       return;
     }
     const ok = single ? await store.suggestions.runCitations(s!, options) : mode === "pair" ? await store.suggestions.runEngine(engine, s!, t!, options) : await store.suggestions.runBatch(engine, batchSource, options);
@@ -204,7 +282,7 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         <>
           <div class={`end source${s ? " set" : ""}`}>
             <span class="side-badge source">{info.sourceRole}</span>
-            <span>{s ? store.refOf(s).title : "בחרו ספר בחלונית המקור"}</span>
+            <span>{s ? store.refOf(s).title : `בחרו ספר בחלונית "${store.roles.value.source.name}"`}</span>
           </div>
           {single ? (
             <div class="end target set">
@@ -214,23 +292,46 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
           ) : (
             <div class={`end target${t ? " set" : ""}`}>
               <span class="side-badge target">{info.targetRole}</span>
-              <span>{t ? store.refOf(t).title : "בחרו ספר בחלונית היעד"}</span>
+              <span>{t ? store.refOf(t).title : `בחרו ספר בחלונית "${store.roles.value.target.name}"`}</span>
             </div>
           )}
           {multiEligible && (
             <>
               <details class="held more-targets">
-                <summary>עוד ספרי יעד לאותו ספר (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
-                <BookChecklist label="עוד ספרי יעד" selected={live} onChange={setExtra} exclude={[s, t]} />
+                <summary>עוד ספרים שהספר מקושר אליהם (לא חובה){live.length > 0 && ` · נבחרו ${live.length.toLocaleString("he")}`}</summary>
+                <BookChecklist label="עוד ספרים מקושרים" selected={live} onChange={setExtra} exclude={[s, t]} />
               </details>
-              {commentaryEngine && (
-                <label class="check">
-                  <input type="checkbox" checked={mergeAll} onChange={(e) => setMergeAll(e.currentTarget.checked)} />
-                  <span>
-                    <b>כל השיטות שמתאימות, מאוחדות</b>
-                    <span class="muted"> — כותרות ודיבור המתחיל, בתוצאה אחת בלי כפילויות (הבחירה שלמעלה לא נדרשת). סינון השורות שבחרתם חל על כל השיטות.</span>
-                  </span>
-                </label>
+              <div class="filters" style="padding:0" role="radiogroup" aria-label="כמה שיטות" onKeyDown={rovingKeys}>
+                {(["one", "several", "auto"] as const).map((m) => (
+                  <button key={m} class="chip" role="radio" aria-checked={methods === m} tabIndex={rovingTabIndex(methods === m)} onClick={() => setMethodMode(m)}>
+                    {METHOD_MODE[m]}
+                  </button>
+                ))}
+              </div>
+              {methods === "several" && (
+                <fieldset class="ml-engines">
+                  <legend>השיטות שירוצו</legend>
+                  {PICKABLE.map((e) => (
+                    <label key={e} class="check">
+                      <input type="checkbox" checked={ticked.includes(e)} onChange={(ev) => setTicked((p) => (ev.currentTarget.checked ? [...p, e] : p.filter((x) => x !== e)))} />
+                      <span>{ENGINES.find((x) => x.id === e)!.title}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              {/* which methods will run, and why: the plan itself (V7 §3.8) */}
+              {pairPlan && (
+                <ul class="problems" aria-label="מה ירוץ">
+                  {pairPlan.steps.length ? (
+                    pairPlan.steps.map((st) => (
+                      <li key={st.id} class="info">
+                        <span><b>{ENGINES.find((x) => x.id === st.engine)?.title}</b>{st.kind === "pair" && ` ← ${st.target.title}`}: {st.why}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li class="warning"><span>אף שיטה לא מתאימה לזוג הזה. בחרו "שיטה אחת", או שיטות אחרות.</span></li>
+                  )}
+                </ul>
               )}
             </>
           )}
@@ -261,7 +362,9 @@ function RunForm({ onDone, onCancel }: { onDone: () => void; onCancel: (() => vo
         </>
       )}
       <EssentialOptions engine={engine} values={values} check={check} onChange={onOption} />
-      {mode === "pair" && !single && <SourceFilterPreviewBox engine={engine} source={s} options={check.options} />}
+      {/* the filter is the run's, on every path (#40 A1): its preview too (#42 C16) — a pair's source, or the commentaries of a batch */}
+      <SourceFilterPreviewBox engine={engine} books={mode === "pair" ? (s ? [s] : []) : preview.filter((p) => p.target).map((p) => p.source.key)} options={check.options} />
+      {methods !== "one" && multi && <p class="muted" style="margin:0;font-size:var(--fs-sm)">ההגדרות שלמעלה הן של "{info.title}"; השיטות האחרות רצות בהגדרות ברירת המחדל שלהן.</p>}
       {advanced ? (
         <EngineOptions
           engine={engine}
@@ -292,7 +395,17 @@ function BatchSummary() {
   const store = useStore();
   const rows = store.suggestions.run.value?.batch;
   if (!rows) return null;
+  const failed = store.suggestions.failedBatchBooks();
   return (
+    <>
+    {failed.length > 0 && (
+      <div class="row" style="padding:0 6px 6px">
+        <span class="grow muted">{failed.length === 1 ? `ספר אחד לא קושר: ${failed[0]}.` : `${failed.length.toLocaleString("he")} ספרים לא קושרו.`} הסיבה בסיכום לפי ספר.</span>
+        <button class="btn outlined" disabled={!!store.task.value} onClick={() => void store.suggestions.rerunFailed()} title="מריץ שוב רק את הספרים שנכשלו או שלא הגיעו אליהם; ההצעות וההחלטות של השאר נשמרות">
+          הרצה חוזרת לספרים שנכשלו
+        </button>
+      </div>
+    )}
     <details class="held" style="margin:0 6px 6px">
       <summary>סיכום לפי ספר ({rows.length})</summary>
       <table class="sug-table" style="margin-top:6px" aria-label="סיכום לפי ספר">
@@ -312,6 +425,7 @@ function BatchSummary() {
         </tbody>
       </table>
     </details>
+    </>
   );
 }
 
@@ -324,17 +438,20 @@ function TableView() {
   const run = store.suggestions.run.value!;
   const st = store.suggestions.state.value;
   const c = store.suggestions.counts.value;
-  const [conf, setConf] = useState<Confidence | "all">("all");
-  const [state, setState] = useState<SuggestionState | "all">("pending");
+  const [filter, setFilter] = useState<SuggestionFilter>({ state: "pending" });
+  const conf = filter.confidence ?? "all";
+  const state = filter.state ?? "all";
+  /** one filter changed ("" or "all": that filter off), the list from its first page */
+  const narrow = (k: keyof SuggestionFilter, v: string) => (setFilter((f) => ({ ...f, [k]: v === "all" || v === "" ? undefined : v })), setShown(PAGE));
   const [sel, setSel] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(PAGE);
   const ordered = store.suggestions.ordered.value;
   const sortOrder = store.suggestions.sortOrder.value;
-  const rows = useMemo(
-    () => ordered.filter((s) => (conf === "all" || s.confidence === conf) && (state === "all" || st.get(s.id) === state)),
-    [ordered, conf, state, st],
-  );
-  useEffect(() => setSel(new Set()), [conf, state, run, sortOrder]);
+  const to = (s: Suggestion) => store.suggestions.display(s).to;
+  const rows = useMemo(() => ordered.filter((s) => suggestionMatches(s, filter, st.get(s.id)!, to)), [ordered, filter, st]);
+  const facets = useMemo(() => suggestionFacets(ordered, to), [ordered]);
+  useEffect(() => setSel(new Set()), [filter, run, sortOrder]);
+  const decided = [...sel].some((id) => st.get(id) === "approved" || st.get(id) === "rejected");
   // the lines of the shown rows, for the start of each line's text (audit F17)
   useEffect(() => void store.suggestions.loadPreviews(rows.slice(0, shown)), [rows, shown]);
   const certain = c.pending ? store.suggestions.pendingAtLeast("certain").length : 0;
@@ -343,25 +460,36 @@ function TableView() {
 
   return (
     <>
+      {/* the two filter rows share a line where the panel is wide (#41 B23) */}
+      <div class="sug-filters">
       <div class="filters">
         {(["all", "certain", "high", "possible", "ambiguous"] as const).map((k) =>
           k === "all" || c[k] ? (
-            <button key={k} class={`chip${k !== "all" ? ` conf-${k}` : ""}`} aria-pressed={conf === k} onClick={() => (setConf(k), setShown(PAGE))}>
+            <button key={k} class={`chip${k !== "all" ? ` conf-${k}` : ""}`} aria-pressed={conf === k} onClick={() => narrow("confidence", k)} title={k === "all" ? undefined : CONFIDENCE_HINT[k]}>
               {k === "all" ? "כל הוודאויות" : CONFIDENCE_LABELS[k]} {k !== "all" && <span class="count">{c[k].toLocaleString("he")}</span>}
             </button>
           ) : null,
         )}
       </div>
-      <div class="filters" style="padding-top:0">
+      <div class="filters">
         {(["pending", "approved", "rejected", "exists", "all"] as const).map((k) =>
           k === "all" || c[k] ? (
-            <button key={k} class="chip" aria-pressed={state === k} onClick={() => (setState(k), setShown(PAGE))}>
+            <button key={k} class="chip" aria-pressed={state === k} onClick={() => narrow("state", k)}>
               {k === "all" ? "הכול" : STATE_LABEL[k]} {k !== "all" && <span class="count">{c[k].toLocaleString("he")}</span>}
             </button>
           ) : null,
         )}
         <SortSelect onChange={() => setShown(PAGE)} />
       </div>
+      </div>
+      {/* method, target book, connection type: only where the run holds more than one */}
+      {(facets.engines.length > 1 || facets.books.length > 1 || facets.types.length > 1) && (
+        <div class="filters sug-facets" style="padding-top:0">
+          <Facet label="שיטה" all="כל השיטות" value={filter.engine} pairs={facets.engines} name={(e) => ENGINES.find((x) => x.id === e)?.title ?? e} onChange={(v) => narrow("engine", v)} />
+          <Facet label={store.roles.value.target.name} all="כל הספרים" value={filter.book} pairs={facets.books} name={(b) => b} onChange={(v) => narrow("book", v)} />
+          <Facet label="סוג הקשר" all="כל הסוגים" value={filter.type} pairs={facets.types} name={(t) => typeShown(parseConnectionType(t).type)} onChange={(v) => narrow("type", v)} />
+        </div>
+      )}
       <div class="row bulk">
         <button class="btn filled" disabled={!certain || unread} onClick={() => store.suggestions.approve(store.suggestions.pendingAtLeast("certain"))} title={unread ? "מושבת: הקישורים שכבר יש במסד לא נקראו (קריאה חוזרת למעלה)" : "מאשר רק הצעות שהכלי בטוח בהן לגמרי"}>
           <Icon name="oz_link_check" size={18} />
@@ -371,10 +499,11 @@ function TableView() {
           <>
             <button class="btn tonal" onClick={() => (store.suggestions.approve([...sel]), setSel(new Set()))}>אישור {sel.size}</button>
             <button class="btn text danger" onClick={() => (store.suggestions.reject([...sel]), setSel(new Set()))}>דחייה</button>
+            {decided && <button class="btn text" onClick={() => (store.suggestions.reset([...sel]), setSel(new Set()))} title="מבטל את ההחלטה על ההצעות שנבחרו: אישור או דחייה">החזרה להמתנה</button>}
           </>
         )}
+        <BulkApprove />
       </div>
-      <BulkApprove />
       <div class="sug-wrap">
       <table class="sug-table" aria-label="הצעות">
         <thead>
@@ -422,12 +551,25 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
   // a merged (max-link) suggestion carries every method that found it
   const engineText = (("engines" in s && Array.isArray(s.engines) ? (s.engines as readonly string[]) : [s.engine]) as readonly string[]).map((e) => ENGINES.find((x) => x.id === e)?.title ?? e).join(" + ");
   const typeText = typeShown(parseConnectionType(s.declaredType).type);
+  // on a focused row (V7 §3.11): Enter shows it in the readers; A / R / U decide, as in the one-at-a-time views
+  const rowKey = (e: KeyboardEvent, id: string) => {
+    const act = DECIDE_KEYS[e.key.toLowerCase()] ?? (e.key === "Enter" || e.key === " " ? "show" : null);
+    if (!act) return;
+    e.preventDefault();
+    if (act === "show") return store.suggestions.show(id);
+    // a decided row may leave the filter: the focus goes on to the next one
+    const row = e.currentTarget as HTMLElement;
+    const next = (row.nextElementSibling ?? row.previousElementSibling) as HTMLElement | null;
+    if (act === "approve") store.suggestions.approve([id]);
+    else store.suggestions[act]([id]);
+    requestAnimationFrame(() => !row.isConnected && next?.isConnected && next.focus());
+  };
   return (
     <tr
       class={`st-${state}`}
       tabIndex={0}
       onClick={() => store.suggestions.show(s.id)}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && e.target === e.currentTarget && (e.preventDefault(), store.suggestions.show(s.id))}
+      onKeyDown={(e) => e.target === e.currentTarget && !e.ctrlKey && !e.metaKey && !e.altKey && rowKey(e, s.id)}
       title={[`ציון ${scorePercent(s)}`, ...s.reasons.map((r) => r.text)].join(" · ")}
     >
       <td onClick={(e) => e.stopPropagation()}>
@@ -437,17 +579,17 @@ function SugRow({ s, state, checked, onCheck, showScore }: { s: Suggestion; stat
         </label>
       </td>
       <td>{(store.suggestions.run.value?.batch || store.suggestions.run.value?.maxlink) && <span class="muted">{v.from.book.title} </span>}{end(v.from.line, v.from.end)}</td>
-      <td>
+      <td class="to">
         <div>{v.toLabel}</div>
         <div class="where muted">{place}</div>
         {/* narrow: the method and the type under the target; wide (a container query): their own columns */}
-        <div class="meta-inline muted">{engineText} · {typeText}</div>
+        <div class="meta-inline muted" title={`${engineText} · ${typeText}`}>{engineText} · {typeText}</div>
         {snippet && <div class="snippet muted">{snippet}</div>}
       </td>
       <td class="col-meta">{engineText}</td>
       <td class="col-meta">{typeText}</td>
       <td>
-        <span class={`conf conf-${s.confidence}`}>{CONFIDENCE_LABELS[s.confidence]}</span>
+        <span class={`conf conf-${s.confidence}`} title={s.confidence === "none" ? undefined : CONFIDENCE_HINT[s.confidence]}>{CONFIDENCE_LABELS[s.confidence]}</span>
         {/* the numeric score, when the list is sorted by it: inside a level the order is by this number */}
         {showScore && <span class="muted score"> {scorePercent(s)}</span>}
         {s.warnings.length > 0 && <Icon name="fl_warning" size={14} label={s.warnings.map((w) => w.text).join(" ")} />}
@@ -481,7 +623,7 @@ function Decide({ s, state, what }: { s: Suggestion; state: SuggestionState; wha
   };
   return (
     <span class="decide">
-      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reject([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
+      <button class="icon-btn" data-decide="approve" aria-pressed={state === "approved"} onClick={(e) => decide(e, () => (state === "approved" ? store.suggestions.reset([s.id]) : store.suggestions.approve([s.id])))} title="אישור" aria-label={`אישור ${what}`}>
         <Icon name="oz_check" size={18} />
       </button>
       <button class="icon-btn" data-decide="reject" aria-pressed={state === "rejected"} onClick={(e) => decide(e, () => (state === "rejected" ? store.suggestions.reset([s.id]) : store.suggestions.reject([s.id])))} title="דחייה" aria-label={`דחיית ${what}`}>
@@ -511,24 +653,33 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
   useEffect(() => {
     if (s) store.suggestions.show(s.id);
   }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // keys act only when no control has focus: Enter on a focused button must press THAT button (UX review #1)
-      if ((e.target as HTMLElement).closest?.("input, textarea, select, button, a, [role=tab], [contenteditable]") || e.ctrlKey || e.metaKey || e.altKey || !s) return;
-      const k = e.key.toLowerCase();
-      if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
-      else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
-      else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
-      else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  });
+  /*
+   * The review keys act only when the card ITSELF has the focus (V7 PR3/PR4 review, finding 5), never with a modifier: they were
+   * global, so a letter typed while a <summary>, a dialog or a row of another region had the focus decided the shown suggestion —
+   * and "ו" takes an approval back with its links (B22). A control inside the card keeps its own keys: Enter on a focused button
+   * presses THAT button (UX review #1). Clicking the card's text focuses it (tabIndex).
+   */
+  const onKey = (e: KeyboardEvent) => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !s) return;
+    const k = e.key.toLowerCase();
+    if (k === "a" || k === "ש") (e.preventDefault(), store.suggestions.approve([s.id]), go(1, true));
+    else if (k === "r" || k === "delete" || k === "ר") (e.preventDefault(), store.suggestions.reject([s.id]), go(1, true));
+    else if (k === "u" || k === "ו") (e.preventDefault(), store.suggestions.reset([s.id]));
+    else if (k === "n" || k === "מ") (e.preventDefault(), go(1, true));
+    else if (k === "arrowleft" || k === "j") (e.preventDefault(), go(1));
+    else if (k === "arrowright" || k === "k") (e.preventDefault(), go(-1));
+  };
+  /** a decision button that the decision disabled or removed would drop the focus to the page, where the keys no longer act: back to the card */
+  const keepFocus = (e: MouseEvent) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    const card = btn.closest<HTMLElement>(".step-card");
+    requestAnimationFrame(() => (!btn.isConnected || btn.disabled) && card?.isConnected && card.focus({ preventScroll: true }));
+  };
   if (!s) return <p class="empty">אין הצעות.</p>;
   const state = st.get(s.id)!;
 
   return (
-    <div class="builder">
+    <div class="builder step-card" tabIndex={0} role="group" aria-label="ההצעה הנוכחית" aria-keyshortcuts="A R U N" onKeyDown={onKey}>
       <div class="row">
         <button class="icon-btn" onClick={() => go(-1)} disabled={idx === 0} aria-label="הקודמת" title="הקודמת (→)">
           <Icon name="fl_chevron_down" size={18} class="rot-left" />
@@ -570,19 +721,36 @@ export function StepView({ card, standalone }: { card: boolean; standalone?: boo
         </details>
       )}
       <div class="row">
-        <button class="btn filled" onClick={() => (store.suggestions.approve([s.id]), go(1, true))} disabled={state === "approved" || state === "exists"}>
+        <button class="btn filled" onClick={(e) => (store.suggestions.approve([s.id]), go(1, true), keepFocus(e))} disabled={state === "approved" || state === "exists"}>
           <Icon name="oz_check" size={18} />
           אישור <kbd>A</kbd>
         </button>
-        <button class="btn outlined" onClick={() => (store.suggestions.reject([s.id]), go(1, true))} disabled={state === "rejected"}>
+        <button class="btn outlined" onClick={(e) => (store.suggestions.reject([s.id]), go(1, true), keepFocus(e))} disabled={state === "rejected"}>
           <Icon name="oz_cross" size={18} />
           דחייה <kbd>R</kbd>
         </button>
+        {(state === "approved" || state === "rejected") && <button class="btn text" onClick={(e) => (store.suggestions.reset([s.id]), keepFocus(e))}>החזרה להמתנה <kbd>U</kbd></button>}
         <span class="grow" />
-        <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה</button>
+        <button class="btn text" onClick={() => go(1, true)}>לממתינה הבאה <kbd>N</kbd></button>
       </div>
       {!standalone && <p class="muted" style="margin:0;font-size:var(--fs-sm)">שני צדי ההצעה מוצגים ומסומנים בחלוניות הספרים.</p>}
     </div>
+  );
+}
+
+/** One of the table's choice filters (method, target book, type), shown only when the run holds more than one value. */
+function Facet<K extends string>({ label, all, value, pairs, name, onChange }: { label: string; all: string; value: K | undefined; pairs: [K, number][]; name: (k: K) => string; onChange: (v: string) => void }) {
+  if (pairs.length < 2) return null;
+  return (
+    <label class="sort-select">
+      <span>{label}</span>
+      <select aria-label={`סינון לפי ${label}`} value={value ?? ""} onChange={(e) => onChange(e.currentTarget.value)}>
+        <option value="">{all}</option>
+        {pairs.map(([k, n]) => (
+          <option key={k} value={k}>{name(k)} ({n.toLocaleString("he")})</option>
+        ))}
+      </select>
+    </label>
   );
 }
 

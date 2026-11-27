@@ -92,33 +92,38 @@ test("an open database is offered by the next task sheet, and picking it again d
 });
 
 /*
- * Issue 20: the home screen has five paths instead of ten cards; the choice between a commentary, footnotes, citations,
- * several books or a folder against Otzaria is made inside the wizard; every old address still opens its task.
+ * Issue 20, V7 §3.1: the home screen has one card per goal; the choice between a commentary or a notes book, citations,
+ * several books or a folder, and manual linking is made inside the wizard, and no two choices do the same thing: a notes
+ * book is the commentary choice's other answer, in the same sheet. Every old address still opens its task.
  */
-test("home: five paths; the choice is inside the wizard; old #/start/<id> addresses still work", async ({ page }) => {
+test("home: a card per goal; the choice is inside the wizard; one choice for a commentary or notes; old #/start/<id> addresses still work", async ({ page }) => {
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
   const cards = page.locator(".task-card");
-  await expect(cards).toHaveCount(5);
-  await expect(cards.locator("b")).toHaveText(["קישור אוטומטי", "קישור ידני", "ניתוח והשלמת קישורים במאגר", "בדיקה, תיקון ומיזוג קישורים", "פתיחת פרויקט קיים"]);
+  await expect(cards).toHaveCount(4);
+  await expect(cards.locator("b")).toHaveText(["קישור ספרים", "ניתוח והשלמת קישורים במאגר", "בדיקה, תיקון ומיזוג קישורים", "פתיחת פרויקט קיים"]);
 
   // a path asks which task: a radio group the arrows move through
-  await cards.filter({ hasText: "קישור אוטומטי" }).click();
-  const dlg = page.getByRole("dialog", { name: "קישור אוטומטי" });
+  await cards.filter({ hasText: "קישור ספרים" }).click();
+  const dlg = page.getByRole("dialog", { name: "קישור ספרים" });
   const radios = dlg.getByRole("radio");
-  await expect(radios).toHaveCount(5);
+  await expect(radios).toHaveCount(4);
+  await expect(radios.locator("b")).toHaveText(["ספר ופירוש, או ספר והערות שוליים", "מראי מקומות", "כמה ספרים או תיקייה", "קישור ידני"]);
   await expect(radios.first()).toBeChecked();
-  await radios.first().focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(dlg.locator('[data-task="notes"]')).toBeChecked();
   await dlg.getByRole("button", { name: "המשך" }).click();
-  // the task's own sheet, at the address the old card used, with a way back to the choice
-  const sheet = page.getByRole("dialog", { name: "ספר והערות שוליים" });
+  // the commentary's sheet asks which the second book is; the notes answer is the old notes task, in the same sheet
+  let sheet = page.getByRole("dialog", { name: "ספר ופירוש" });
   await expect(sheet).toBeVisible();
-  expect(new URL(page.url()).hash).toBe("#/start/notes");
+  expect(new URL(page.url()).hash).toBe("#/start/commentary");
+  const kind = sheet.getByRole("radiogroup", { name: "הספר השני הוא" });
+  await expect(kind.getByRole("radio", { name: "פירוש על הספר" })).toBeChecked();
+  await kind.getByRole("radio", { name: "ספר הערות שוליים" }).click();
+  sheet = page.getByRole("dialog", { name: "ספר והערות שוליים" });
+  await expect(sheet.getByText("הספר עם מספרי ההערות")).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe("#/start/notes");
   await sheet.getByRole("button", { name: "חזרה" }).click();
-  await expect(page.getByRole("dialog", { name: "קישור אוטומטי" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "קישור ספרים" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("#/start/auto");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -126,7 +131,7 @@ test("home: five paths; the choice is inside the wizard; old #/start/<id> addres
   await expect.poll(() => new URL(page.url()).hash).toMatch(/^(#\/?)?$/);
 
   // the old addresses of the merged cards open their tasks, and the new paths are addresses too
-  for (const [id, title] of [["commentary", "ספר ופירוש"], ["notes", "ספר והערות שוליים"], ["citations", "מראי מקומות"], ["db-db", "מסד מול מסד"], ["relink", "תיקון קישורים אחרי שינוי ספר"], ["fix", "בדיקה, תיקון ומיזוג קישורים"]] as const) {
+  for (const [id, title] of [["commentary", "ספר ופירוש"], ["notes", "ספר והערות שוליים"], ["citations", "מראי מקומות"], ["manual", "קישור ידני"], ["db-db", "מסד מול מסד"], ["relink", "תיקון קישורים אחרי שינוי ספר"], ["fix", "בדיקה, תיקון ומיזוג קישורים"]] as const) {
     await page.goto(`${distUrl}#/start/${id}`);
     await expect(page.getByRole("dialog", { name: title })).toBeVisible();
   }
@@ -134,14 +139,14 @@ test("home: five paths; the choice is inside the wizard; old #/start/<id> addres
   expect(seen.external).toEqual([]);
 });
 
-test("home: 'open an existing project' picks the project file, 'manual' opens its sheet", async ({ page }) => {
+test("home: 'open an existing project' picks the project file; manual linking is a way to link books", async ({ page }) => {
   const seen = watchPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
   const chooser = page.waitForEvent("filechooser");
   await page.locator(".task-card", { hasText: "פתיחת פרויקט קיים" }).click();
   expect((await chooser).isMultiple()).toBeDefined();
-  await page.locator(".task-card", { hasText: "קישור ידני" }).click();
+  await chooseTask(page, "auto", "manual");
   await expect(page.getByRole("dialog", { name: "קישור ידני" })).toBeVisible();
   expect(seen.errors).toEqual([]);
 });

@@ -32,7 +32,7 @@ describe("repository analysis", () => {
     // a book's row: counts only
     const arzot = repo.rows.value.get(key("ארצות החיים"))!;
     expect(arzot).toMatchObject({ total: 6, out: 6, in: 0 });
-    expect(Object.keys(arzot).sort()).toEqual(["ends", "flags", "in", "key", "lineCount", "out", "title", "top", "total", "typesOut"]);
+    expect(Object.keys(arzot).sort()).toEqual(["ends", "flags", "in", "key", "lineCount", "out", "related", "title", "top", "total", "typesOut"]);
     // each link is counted once, at its source. (The slice has links whose target book is not in it: they are never "incoming" here.)
     const rows = [...repo.rows.value.values()];
     expect(t.links).toBe(rows.reduce((n, r) => n + r.out, 0));

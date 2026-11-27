@@ -266,7 +266,7 @@ export class DbLinksState {
       const missing = [...new Set(made.map((m) => m.source.book.title))].filter((t) => this.linksFile(t) === "missing");
       this.host.notify(
         missing.length ? "warning" : "success",
-        `${made.length === 1 ? "הקישור הועתק" : `הועתקו ${linksCount(made.length)}`} לפרויקט. שם המקום ביעד נלקח מהמסד — בדקו אותו.${missing.length ? ` לפני ייצוא טענו את קובץ הקישורים של ${missing.map((t) => `"${t}"`).join(", ")} מהספרייה: ייצוא בלעדיו היה מחליף את הקובץ שבספרייה.` : ""}`,
+        `${made.length === 1 ? "הקישור הועתק" : `הועתקו ${linksCount(made.length)}`} לפרויקט. שם המקום בספר המקושר נלקח מהמסד — בדקו אותו.${missing.length ? ` לפני ייצוא טענו את קובץ הקישורים של ${missing.map((t) => `"${t}"`).join(", ")} מהספרייה: ייצוא בלעדיו היה מחליף את הקובץ שבספרייה.` : ""}`,
         details,
       );
     }

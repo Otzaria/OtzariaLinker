@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { TYPE_GROUP_LABELS, TYPE_LABELS, typeGroups, type ConnectionType } from "../../core/links/connection-type";
+import { TYPE_GROUP_LABELS, TYPE_LABELS, typeGroups, UNSUPPORTED_TYPES, type ConnectionType } from "../../core/links/connection-type";
 import { Icon } from "../icons/icon";
 
 /*
@@ -50,8 +50,11 @@ function TypesHelpDialog({ onClose }: { onClose: () => void }) {
             <h3>מה הייצוא עושה עם הסוג</h3>
             <ul>
               <li>סוג שאינו ברשימה הזו (למשל מקובץ שיובא) הספרייה שומרת כ"אחר", וייבוא אישי באוצריא דוחה את כל הקובץ בגללו. הכלי מזהיר על כך ועוצר את הייצוא לספרייה.</li>
-              <li>"קישור אוטומטי" (LINKER) אוצריא יוצרת בעצמה בכל בנייה של המסד, ואי אפשר לכתוב אותו בקובץ קישורים.</li>
-              <li>"ציטוט בטקסט" (שיטת מראי מקומות, במצב מתקדם) מוכר רק לייבוא האישי של אוצריא: הוא מוחזק בייצוא לספרייה, ומיוצא בבחירה "לשימוש פרטי".</li>
+              {UNSUPPORTED_TYPES.map((u) => (
+                <li key={u.value}>
+                  "{u.label}" (<code dir="ltr">{u.value}</code>): {u.why}.
+                </li>
+              ))}
             </ul>
           </section>
         </div>

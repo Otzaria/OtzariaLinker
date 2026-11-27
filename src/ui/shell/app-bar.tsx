@@ -1,15 +1,18 @@
 import { useEffect, useState } from "preact/hooks";
-import { chooseLayout, PRESETS, resetLayout, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
+import { chooseLayout, DENSITIES, PRESETS, resetLayout, resetPreferences, type Density, type Layout, type LayoutPreset, type PanelId, type ThemeSetting } from "../../state/preferences";
 import type { RoleLabels } from "../../state/roles";
-import { remainingText } from "../../state/task-progress";
+import { elapsedText, remainingText, stageText } from "../../state/task-progress";
 import { useStore } from "../context";
 import { Icon } from "../icons/icon";
 import { HistoryMenu } from "./history-menu";
+import { LogDialog } from "./log-dialog";
 import { Menu, MenuGroup, MenuItem } from "./menu";
+import { ResetDialog } from "./reset-dialog";
 
 const presetLabels = (r: RoleLabels): Record<LayoutPreset, string> => ({ four: "ארבעה טורים", drawer: "שני טקסטים וחלונית צד", stack: `${r.source.short} מעל ${r.target.short}` });
 const panelLabels = (r: RoleLabels): Record<PanelId, string> => ({ sources: "קבצים ומסדים", source: r.source.name, target: r.target.name, side: "החלונית (בונה, קישורים, הצעות)" });
 const THEME_LABELS: Record<ThemeSetting, string> = { system: "לפי המערכת", light: "בהיר", dark: "כהה" };
+const DENSITY_LABELS: Record<Density, string> = { spacious: "מרווחת", comfortable: "רגילה", compact: "צפופה", dense: "צפופה מאוד" };
 
 export function AppBar({ onExport }: { onExport: () => void }) {
   const store = useStore();
@@ -17,12 +20,23 @@ export function AppBar({ onExport }: { onExport: () => void }) {
   const ls = store.linkState.value;
   const task = store.task.value;
   const eta = task ? remainingText(task.startedAt, task.done, task.total, Date.now()) : null;
+  // a running task re-reads the clock every second: a step with no progress report still shows the time going (V7 §3.16)
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!task) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [!task]);
+  const elapsed = task ? elapsedText(task.startedAt, Date.now()) : null;
   const inWorkspace = store.screen.value === "workspace";
   const count = [...ls.links.values()].filter((l) => l.status !== "deleted").length;
   const layout = prefs.layout.value;
   const hidden = layout.hidden;
+  // the settings menu's own dialogs: the diagnostic log and the full reset
+  const [dialog, setDialog] = useState<"log" | "reset" | null>(null);
 
   return (
+    <>
     <header class={`app-bar${inWorkspace ? " ws" : ""}`}>
       <button class="brand" onClick={() => (store.screen.value = "home")} title="למסך הפתיחה" aria-label="מנהל הקישורים — למסך הפתיחה">
         <Icon name="oz_links" size={24} />
@@ -79,10 +93,12 @@ export function AppBar({ onExport }: { onExport: () => void }) {
       {task && !(store.screen.value === "guided" && store.guided.step.value === "run") && (
         <div class="task">
           <span class="task-label" title={task.label}>{task.label}</span>
-          {task.total > 0 && <progress max={task.total} value={task.done} />}
-          {/* the task's own count and the time left, once an estimate means something (audit F21) */}
-          {task.count && <span class="task-count">{task.count}</span>}
+          {/* before the first count the bar moves without a value: the job is preparing, not stuck at 0/0 (#41 B11) */}
+          {task.total > 0 ? <progress max={task.total} value={task.done} /> : <progress />}
+          {/* the task's own count (or that it is preparing), the time left once an estimate means something (audit F21), and the time so far */}
+          {(task.count || !task.total) && <span class="task-count">{stageText(task)}</span>}
           {eta && <span class="task-eta">· {eta}</span>}
+          {elapsed && <span class="task-eta" title="הזמן מאז שהפעולה התחילה">· {elapsed}</span>}
           <button class="btn text" onClick={task.cancel}>ביטול</button>
         </div>
       )}
@@ -119,11 +135,30 @@ export function AppBar({ onExport }: { onExport: () => void }) {
                 <button class="btn outlined" role="menuitem" tabIndex={-1} onClick={() => (prefs.fontScale.value = Math.min(2, +(prefs.fontScale.value + 0.1).toFixed(2)))} aria-label={`הגדלה (עכשיו ${Math.round(prefs.fontScale.value * 100)}%)`}>א+</button>
               </div>
             </MenuGroup>
+            <MenuGroup label="צפיפות שורות הספר">
+              {DENSITIES.map((d) => (
+                <MenuItem key={d} checked={prefs.density.value === d} onSelect={() => ((prefs.density.value = d), close())}>
+                  {DENSITY_LABELS[d]}
+                </MenuItem>
+              ))}
+            </MenuGroup>
             <MenuGroup label="יצירת קישור">
               <MenuItem checked={prefs.createMode.value === "builder"} onSelect={() => ((prefs.createMode.value = "builder"), close())}>בונה עם כפתור יצירה</MenuItem>
               <MenuItem checked={prefs.createMode.value === "click"} onSelect={() => ((prefs.createMode.value = "click"), close())}>לחיצה ולחיצה (יוצר מיד)</MenuItem>
             </MenuGroup>
+            <MenuItem
+              icon="fl_arrow_undo"
+              onSelect={() => {
+                resetPreferences(prefs, innerWidth);
+                store.notify("info", "ההגדרות חזרו לברירת המחדל: ערכת הצבעים, גודל הטקסט, הצפיפות, מצב היצירה והפריסה.");
+                close();
+              }}
+            >
+              איפוס ההגדרות לברירת המחדל
+            </MenuItem>
+            <MenuItem icon="oz_document_text" onSelect={() => (setDialog("log"), close())}>הצגת יומן האבחון</MenuItem>
             <MenuItem icon="fl_arrow_download" onSelect={() => (store.saveDiagnostics(), close())}>שמירת יומן אבחון (לצירוף לדיווח על תקלה)</MenuItem>
+            <MenuItem icon="fl_delete" class="danger" onSelect={() => (setDialog("reset"), close())}>איפוס מלא (סגירת הכול)…</MenuItem>
             <div class="label" dir="ltr" style="text-align:start">OtzariaLinker {__APP_VERSION__} · {__APP_COMMIT__}</div>
           </>
         )}
@@ -134,15 +169,19 @@ export function AppBar({ onExport }: { onExport: () => void }) {
         </button>
       )}
       {inWorkspace && (
-        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
+        <button class="btn filled export" onClick={onExport} disabled={!count && !ls.undo.length} title="ייצוא קובצי ‎_links.json (Ctrl+E)" aria-label={`ייצוא${count ? ` (${count.toLocaleString("he")})` : ""}`}>
           <Icon name="oz_link_download" size={18} />
           <span>
             <span class="lbl">ייצוא</span>
-            {count ? ` (${count.toLocaleString("he")})` : ""}
+            {/* the count: in brackets after the word, a badge of its own when the word is hidden (#42 C31: "(30)" alone at 360px) */}
+            {count ? <span class="cnt">{count.toLocaleString("he")}</span> : ""}
           </span>
         </button>
       )}
     </header>
+    {dialog === "log" && <LogDialog onClose={() => setDialog(null)} />}
+    {dialog === "reset" && <ResetDialog onClose={() => setDialog(null)} />}
+    </>
   );
 }
 

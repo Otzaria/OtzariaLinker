@@ -24,3 +24,14 @@ describe("Otzaria database location hint", () => {
     expect(notice).not.toContain(OTZARIA_DB_DIR); // the notice does not repeat the path it just copied
   });
 });
+
+describe("an Otzaria installed for one user (#16, V7 §3.15)", () => {
+  it("is named too: the library is under %APPDATA%/otzaria/books (app_paths.dart getDefaultLibraryPath), and the file dialog expands %APPDATA%", async () => {
+    const m = await import("../../../src/ui/workspace/otzaria-db-path");
+    expect(m.OTZARIA_DB_DIR_USER).toBe(String.raw`%APPDATA%\otzaria\books`);
+    expect(m.otzariaDbCopyText("user")).toBe(String.raw`%APPDATA%\otzaria\books`);
+    expect(m.otzariaDbCopyText()).toBe(m.OTZARIA_DB_DIR);
+    // the hint says where to see the real place: Otzaria's settings, library location
+    expect(m.OTZARIA_DB_WHERE).toContain("הגדרות");
+  });
+});
