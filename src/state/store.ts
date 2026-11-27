@@ -6,7 +6,7 @@ import { keyOfRecord, readEdition, recordId, type BookRecord } from "./edition";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import { describeMapping, mappingProblems, type DbMapping, type MappingTest, type PendingDb, type SavedDbMapping } from "../core/db-mapping";
 import { AUTHORABLE_TYPES, parseConnectionType } from "../core/links/connection-type";
-import { identicalLinkKey, linePairIdentity } from "../core/links/equality";
+import { identicalLinkKey } from "../core/links/equality";
 import { matchedAfterEdit } from "../core/links/matched";
 import type { BookOrigin, BookRef, Link, LinkSide, RawAnchor } from "../core/links/model";
 import { path2ForTitle, safeFileTitle, titleDeclaresDependencyOn, titleFromPath2 } from "../core/links/titles";
@@ -113,6 +113,26 @@ const choiceKey = (title: string, origin: BookOrigin, source: string | undefined
 
 /** the builder refuses a link identical to a live one (V3 F-070/F-072/F-086; the rule: core/links/equality.ts identicalLinkKey) */
 const IDENTICAL_TEXT = "קישור זהה כבר קיים בפרויקט: אותן שורות ואותו סוג קשר, אחרי ההמרה של אוצריא (במסד שניהם היו קישור אחד). אין צורך ליצור אותו שוב. כדי לקשר אחרת, בחרו שורה אחרת או סוג קשר אחר.";
+
+/**
+ * identicalLinkKey of a link, once per link object (it runs storedForm). A Link is never changed in place — every change makes a
+ * new object — so the key of an object never goes stale.
+ */
+const identicalKeys = new WeakMap<Link, string | null>();
+function keyOfLink(l: Link): string | null {
+  let k = identicalKeys.get(l);
+  if (k === undefined) identicalKeys.set(l, (k = identicalLinkKey(l)));
+  return k;
+}
+
+/** a link's two line numbers, unordered, as one number (store.liveByLines); two pairs may share it, never one pair two keys */
+const linesKey = (l: Link): number => Math.min(l.source.line, l.target.line) * 0x4000000 + Math.max(l.source.line, l.target.line);
+
+/** the same two ends (book title and line), in either direction: linePairIdentity(a) === linePairIdentity(b), without building it */
+function sameEnds(a: Link, b: Link): boolean {
+  const eq = (x: LinkSide, y: LinkSide) => x.line === y.line && x.book.title === y.book.title;
+  return (eq(a.source, b.source) && eq(a.target, b.target)) || (eq(a.source, b.target) && eq(a.target, b.source));
+}
 
 export class AppStore {
   readonly prefs: Preferences;
@@ -302,6 +322,7 @@ export class AppStore {
     // the library's rules are checked at export (purpose); here they warn, so a link is never blocked from being made
     const { linksFile: _f, ...ctx } = this.validation();
     if (!d) return [];
+    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (ds.length > 1) {
       // one link per picked line: each is checked, and a problem is said once (its text names the line)
       const seen = new Map<string, Problem>();
@@ -309,7 +330,7 @@ export class AppStore {
       const out = [...seen.values()];
       // each line's link by the one equality rule, as a single link is (F-070, F-086): one identical link refuses the batch,
       // and the text names its lines (1-based, on the side where several were picked)
-      const twins = ds.map((x) => this.twinOf(x));
+      const twins = ds.map((x) => this.twinOf(x, base?.id));
       const many = this.pick.source.value?.lines ? "source" : "target";
       const identical = ds.flatMap((x, i) => (twins[i]!.identical ? [x[many].line + 1] : []));
       if (identical.length) out.push({ code: "builder/identical", severity: "error", message: `${IDENTICAL_TEXT} (${identical.length === 1 ? "שורה" : "שורות"} ${identical.join(", ")})` });
@@ -317,7 +338,6 @@ export class AppStore {
       return out;
     }
     const out = validateLink(d, { ...ctx, purpose: "private" });
-    const base = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
     if (base) {
       const dropped = dropStalePipelineFields(base, { ...d, ...(base.ref1 !== undefined && { ref1: base.ref1 }), ...(base.ref2 !== undefined && { ref2: base.ref2 }), ...(base.passthrough && { passthrough: base.passthrough }) }).dropped;
       if (dropped.includes("ref_1") && d.ref1 === undefined) out.push({ code: "edit/ref1-dropped", severity: "warning", message: `השורה בספר המקשר השתנתה, ולכן ציון ספריא הישן שלה ("${base.ref1}") הוסר: הסנכרון של הספרייה היה מחזיר את הקישור לשורה הישנה. כתבו את ציון ספריא של השורה החדשה.`, detail: "ref_1" });
@@ -327,29 +347,48 @@ export class AppStore {
     }
     // V3 refused to make or edit into a link IDENTICAL to a live one (F-070, F-072, F-086): by the one equality rule
     const twin = this.twinOf(d, base?.id);
-    if (twin.identical) out.push({ code: "builder/identical", severity: "error", message: IDENTICAL_TEXT });
+    // an edit that keeps the link's identity adds no copy that was not there: one of two identical records of a library file
+    // (export/duplicate flags them) can still be edited, e.g. to fix its heRef_2 (V7 round 2 review, finding 8)
+    if (twin.identical && base && keyOfLink(d) === keyOfLink(base))
+      out.push({ code: "builder/identical-kept", severity: "info", message: "בפרויקט יש עוד קישור זהה לזה (שתי רשומות זהות בקובץ). העריכה מותרת, כי היא לא יוצרת העתק חדש. כדי להשאיר רק אחד, מחקו את ההעתק בלשונית הבדיקה (\"מחיקת העתקים כפולים\")." });
+    else if (twin.identical) out.push({ code: "builder/identical", severity: "error", message: IDENTICAL_TEXT });
     else if (twin.sameLines) out.push({ code: "builder/same-lines", severity: "info", message: "בין שתי השורות האלה כבר יש בפרויקט קישור מסוג אחר או בכיוון אחר. הקישור הזה יישמר בנוסף לו." });
     return out;
   });
 
   /**
+   * The live project links by their two LINE NUMBERS (lowest, highest): built once per change of the links, so the identical-
+   * link check of a draft, or of each of 10,000 links restored together, is one lookup and not a pass over the project
+   * (V7 round 2 review, findings 4, 5). A number key, not linePairIdentity: building strings for 100K links on every change
+   * cost ~60 ms; the books are compared in twinOf, only for the few links of the bucket. Deleted and database links are not in it.
+   */
+  private readonly liveByLines = computed(() => {
+    const m = new Map<number, Link[]>();
+    for (const x of this.linkState.value.links.values()) {
+      if (x.status === "deleted" || x.provenance === "db") continue;
+      const k = linesKey(x);
+      const bucket = m.get(k);
+      if (bucket) bucket.push(x);
+      else m.set(k, [x]);
+    }
+    return m;
+  });
+
+  /**
    * A live project link that is the same as `l` (other than the link `except`): IDENTICAL — one record once Otzaria stores it
    * (core/links/equality.ts identicalLinkKey, the rule of export/duplicate) — or only between the same two lines (another type
-   * or direction, linePairIdentity). Lines are compared first, so a project of 100K links costs one pass of integer compares.
+   * or direction, linePairIdentity). Only the links on the same line numbers (liveByLines) and of the same two books (sameEnds)
+   * are keyed; storedForm turns a link around but never changes its two ends, so an identical link always has them.
    * Database links are not the project's (export/in-db speaks of them).
    */
-  private twinOf(l: Link, except?: string, among: Iterable<Link> = this.linkState.value.links.values()): { identical?: Link; sameLines?: Link } {
-    const lo = Math.min(l.source.line, l.target.line);
-    const hi = Math.max(l.source.line, l.target.line);
+  private twinOf(l: Link, except?: string): { identical?: Link; sameLines?: Link } {
     let key: string | null | undefined;
-    let pair: string | undefined;
     let sameLines: Link | undefined;
-    for (const x of among) {
-      if (x.id === except || x.status === "deleted" || x.provenance === "db") continue;
-      if (Math.min(x.source.line, x.target.line) !== lo || Math.max(x.source.line, x.target.line) !== hi) continue;
-      if (key === undefined) key = identicalLinkKey(l);
-      if (key !== null && identicalLinkKey(x) === key) return { identical: x };
-      if (!sameLines && linePairIdentity(x) === (pair ??= linePairIdentity(l))) sameLines = x;
+    for (const x of this.liveByLines.value.get(linesKey(l)) ?? []) {
+      if (x.id === except || !sameEnds(x, l)) continue;
+      if (key === undefined) key = keyOfLink(l);
+      if (key !== null && keyOfLink(x) === key) return { identical: x };
+      sameLines ??= x;
     }
     return sameLines ? { sameLines } : {};
   }
@@ -1062,7 +1101,7 @@ export class AppStore {
       const hi = Math.max(cur.end ?? cur.line, line, cur.line, cur.lines?.at(-1) ?? cur.line);
       this.pick[side].value = { bookKey, line: lo, ...(hi > lo && { end: hi }) };
     } else this.pick[side].value = { bookKey, line };
-    this.afterPick(side, bookKey);
+    this.afterPick(side, bookKey, cur);
     if (!extend) this.autoRangeEnd(side, bookKey, line);
   }
 
@@ -1081,16 +1120,12 @@ export class AppStore {
     }
     const lines = [...set].sort((a, b) => a - b);
     this.pick[side].value = !lines.length ? null : lines.length === 1 ? { bookKey, line: lines[0]! } : { bookKey, line: lines[0]!, lines };
-    this.afterPick(side, bookKey);
+    this.afterPick(side, bookKey, cur);
   }
 
   /** What a new pick on `side` changes besides the pick: refs that no longer fit, the active side, the automatic type. */
-  private afterPick(side: Side, bookKey: string): void {
-    if (side === "source" && this.editing.value) {
-      // a new source line makes the old ref_1 wrong — the sync would move the link back to it (B2)
-      const edited = this.linkState.value.links.get(this.editing.value);
-      if (edited && !(this.sameBook(edited.source.book, bookKey) && edited.source.line === this.pick.source.value?.line)) this.draftRef1.value = "";
-    }
+  private afterPick(side: Side, bookKey: string, before: Pick | null): void {
+    if (side === "source") this.sourceMoved(before);
     if (side === "target") {
       // a new target makes the old reference wrong — also while editing (UX review #3)
       const edited = this.editing.value ? this.linkState.value.links.get(this.editing.value) : undefined;
@@ -1119,8 +1154,22 @@ export class AppStore {
     else if (titleDeclaresDependencyOn(b, a)) this.draftType.value = "commentary";
   }
 
+  /**
+   * A new source line makes the typed ref_1 wrong — the library's sync would move the link back to the line it names (B2). While
+   * editing: unless the pick is back on the edited link's own line. Else: whenever the source line is another than before (V7
+   * round 2 review, finding 1 — ref_1 was cleared only while editing, so it went with the next link too).
+   */
+  private sourceMoved(before: Pick | null): void {
+    const now = this.pick.source.peek();
+    const edited = this.editing.peek() ? this.linkState.peek().links.get(this.editing.peek()!) : undefined;
+    const kept = edited ? this.sameBook(edited.source.book, now?.bookKey ?? "") && edited.source.line === now?.line : before?.bookKey === now?.bookKey && before?.line === now?.line;
+    if (!kept) this.draftRef1.value = "";
+  }
+
   pickAnchor(side: Side, bookKey: string, line: number, anchor: Pick["anchor"]): void {
+    const cur = this.pick[side].value;
     this.pick[side].value = { bookKey, line, ...(anchor && { anchor }) };
+    if (side === "source") this.sourceMoved(cur);
     this.activeSide.value = side;
     this.autoType();
   }
@@ -1289,7 +1338,10 @@ export class AppStore {
       // keep the source pick only when it was a range/anchor/several lines the user may link again; else advance to the next line
       const s = this.pick.source.value;
       // (a copy keeps it: its point is another target for the same source)
-      if (s && !s.anchor && !s.lines && s.end === undefined && !opts.asNew) this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+      if (s && !s.anchor && !s.lines && s.end === undefined && !opts.asNew) {
+        this.pick.source.value = { bookKey: s.bookKey, line: this.nextContentLine(s.bookKey, s.line) };
+        this.draftRef1.value = ""; // the typed ref_1 named the line just linked (finding 1)
+      }
     });
     return made[0]!;
   }
@@ -1363,15 +1415,18 @@ export class AppStore {
   restoreLinks(ids: readonly string[]): void {
     const s = this.linkState.value;
     const changes: Change[] = [];
+    /** the identity keys of the links this call brings back: a second deleted copy of one of them stays deleted */
+    const back = new Set<string>();
     let refused = 0;
     for (const id of ids) {
       const c = restoreChange(s, id);
       if (!c) continue;
-      const back = c.after!;
-      if (this.twinOf(back, id).identical || this.twinOf(back, id, changes.map((x) => x.after!)).identical) {
+      const key = keyOfLink(c.after!);
+      if (this.twinOf(c.after!, id).identical || (key !== null && back.has(key))) {
         refused++;
         continue;
       }
+      if (key !== null) back.add(key);
       changes.push(c);
     }
     if (changes.length) this.apply(changes.length === 1 ? "שחזור קישור" : `שחזור ${linksCount(changes.length)}`, changes);

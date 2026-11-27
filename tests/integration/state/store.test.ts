@@ -74,6 +74,34 @@ describe("AppStore — the manual linking flow end to end (without UI)", () => {
     expect(store.createFromDraft()).toBeNull();
   });
 
+  // V7 round 2 review, finding 1 (the part before V7): a typed ref_1 names the SOURCE line. It was cleared only while editing,
+  // so after a link was made and the source moved on to the next line — or another source line was picked — the old ref_1 went
+  // into the next link, and the library's sync would have moved that link back to the first line (B2).
+  it("a typed ref_1 is cleared by every new source line: picked, or the automatic move after a link is made", async () => {
+    const { store } = makeStore();
+    await store.openFiles([DB, COMMENTARY]);
+    const bereshit = [...store.books.value.values()].find((b) => b.title === "בראשית")!;
+    const comm = [...store.books.value.values()].find((b) => b.title === "פירוש על בראשית")!;
+    await store.lines.load(bereshit.key, 0, 10);
+    await store.lines.load(comm.key, 0, 3);
+    const verse = [0, 1, 2, 3, 4, 5].find((i) => store.lines.peek(bereshit.key, i)!.heading === null)!;
+    // בראשית is a Sefaria book: its ref_1 is built from the line's heRef, or typed by the user (B1)
+    store.pickLine("source", bereshit.key, verse);
+    store.draftRef1.value = "Genesis 9:9";
+    store.pickLine("source", bereshit.key, verse); // the same line again: still this line's ref
+    expect(store.draftRef1.value).toBe("Genesis 9:9");
+    store.pickLine("source", bereshit.key, verse + 1);
+    expect(store.draftRef1.value).toBe("");
+    store.pickLine("source", bereshit.key, verse);
+    store.draftRef1.value = "Genesis 9:9";
+    store.pickLine("target", comm.key, 1);
+    expect(store.createFromDraft()!.ref1).toBe("Genesis 9:9");
+    expect(store.pick.source.value).toEqual({ bookKey: bereshit.key, line: verse + 1 }); // moved on by itself
+    expect(store.draftRef1.value).toBe("");
+    store.pickLine("target", comm.key, 2);
+    expect(store.draft.value!.ref1).toBe("Genesis 1:2"); // the next verse's own ref, not the typed one
+  });
+
   it("an imported links file binds to books opened later by exact title, and re-exports unchanged", async () => {
     const { store, saved } = makeStore();
     const text = JSON.stringify([{ line_index_1: 2, heRef_2: "בראשית א, א", path_2: "בראשית.txt", line_index_2: 3, "Conection Type": "commentary" }], null, 2);
