@@ -37,6 +37,8 @@ export class LinkListing {
     readonly ms: number,
     private readonly unlisted?: DbLinkSummary["unlisted"],
     private readonly tables?: DbLinkSummary["tables"],
+    /** why some of the book's links were not read (DbLinkSummary.unread) */
+    private readonly unread?: string,
   ) {
     const n = rows.ref.length;
     const order = new Int32Array(n);
@@ -77,6 +79,7 @@ export class LinkListing {
       total: dir.length,
       ...(flagCounts.length && { flags: flagCounts }),
       ...(this.tables && { tables: this.tables }),
+      ...(this.unread && { unread: this.unread }),
       ...(this.unlisted && (this.unlisted.badLine || this.unlisted.noPlace || this.unlisted.orphanSource) && { unlisted: this.unlisted }),
       out,
       in: dir.length - out,

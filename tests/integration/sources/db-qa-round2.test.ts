@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import initSqlJs from "sql.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DbLinkSummary } from "../../../src/core/links/db-links";
 import { DictionaryPool, LineContentCodec, sharedDictionaries } from "../../../src/database/compression/zstd";
+import { DbLinksReader } from "../../../src/database/otzaria/links-reader";
+import { OtzariaDbReader } from "../../../src/database/otzaria/reader";
 import { bytesSource } from "../../../src/database/sqlite/lazy/byte-source";
+import { SqliteFile } from "../../../src/database/sqlite/lazy/sqlite-file";
 import { DbBookSource } from "../../../src/sources/db/db-source";
 import { SourceRegistry } from "../../../src/sources/registry";
 
@@ -167,18 +170,58 @@ describe("H8: the dictionary pool", () => {
     other[100] = other[100]! ^ 0xff;
     const pool = new DictionaryPool();
     const a = new LineContentCodec([dict], pool, "a");
+    // another database's own, different dictionary with the same id is never lent, so it is no conflict (B19)
     const b = new LineContentCodec([other], pool, "b");
-    expect(pool.isConflicted(32768)).toBe(true);
-    b.release();
     expect(pool.isConflicted(32768)).toBe(false);
-    expect(pool.get(32768)).toBeDefined();
-    a.release();
+    expect(pool.get(32768)).toBe(dict);
+    b.release();
+    // a dictionary FILE the user opened can be lent too: with the official one open, the id is ambiguous
+    pool.add(other, "other.dict");
+    expect(pool.isConflicted(32768)).toBe(true);
     expect(pool.get(32768)).toBeUndefined();
+    a.release();
+    expect(pool.isConflicted(32768)).toBe(false);
+    expect(pool.get(32768)).toBe(other);
   });
-  it("a DbBookSource gives its dictionary back to the worker's pool when it closes", async () => {
-    const src = await DbBookSource.open("h8", "seforim.db", bytesSource(new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"))));
-    expect(sharedDictionaries.get(32768)).toBeDefined();
-    src.close();
-    expect(sharedDictionaries.get(32768)).toBeUndefined();
+  it("a DbBookSource gives its dictionary back to the worker's pool when it closes, every time it is opened", async () => {
+    const bytes = new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"));
+    for (let i = 0; i < 3; i++) {
+      const src = await DbBookSource.open(`h8-${i}`, "seforim.db", bytesSource(bytes));
+      expect(sharedDictionaries.get(32768)).toBeDefined();
+      src.close();
+      expect(sharedDictionaries.get(32768)).toBeUndefined();
+    }
+  });
+  // Issue #41 C3: an open that failed half-way left the dictionary in the worker's pool for the rest of the session
+  it("a DbBookSource whose open fails after the dictionary was registered gives it back", async () => {
+    const fail = vi.spyOn(DbLinksReader, "open").mockRejectedValueOnce(new Error("נכשל באמצע הפתיחה"));
+    try {
+      await expect(DbBookSource.open("h8b", "seforim.db", bytesSource(new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"))))).rejects.toThrow("נכשל באמצע הפתיחה");
+      expect(fail).toHaveBeenCalled();
+      expect(sharedDictionaries.get(32768)).toBeUndefined();
+    } finally {
+      fail.mockRestore();
+    }
+  });
+  it("an OtzariaDbReader whose open fails after the dictionary was registered gives it back", async () => {
+    // every table read after the dictionary entered the pool (line_content, line_note, source) fails
+    const table = SqliteFile.prototype.table;
+    let registered = false;
+    const added = vi.spyOn(sharedDictionaries, "add").mockImplementation(function (this: DictionaryPool, ...args: Parameters<DictionaryPool["add"]>) {
+      registered = true;
+      return DictionaryPool.prototype.add.apply(this, args);
+    });
+    const fail = vi.spyOn(SqliteFile.prototype, "table").mockImplementation(async function (this: SqliteFile, name: string) {
+      if (registered) throw new Error("נכשל אחרי המילון");
+      return table.call(this, name);
+    });
+    try {
+      await expect(OtzariaDbReader.open(bytesSource(new Uint8Array(readFileSync("tests/fixtures/db/seforim-v7-mini.db"))))).rejects.toThrow("נכשל אחרי המילון");
+      expect(registered).toBe(true);
+      expect(sharedDictionaries.get(32768)).toBeUndefined();
+    } finally {
+      fail.mockRestore();
+      added.mockRestore();
+    }
   });
 });

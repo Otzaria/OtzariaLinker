@@ -105,8 +105,9 @@ test("two versions of a links file that differ only in the place name: not a con
   await dlg.getByLabel("אחרי (ב)").selectOption({ index: 1 });
   await dlg.getByRole("button", { name: "השוואה", exact: true }).click();
   const chips = dlg.locator(".cmp-diff .chip");
-  await expect(chips).toHaveText([/^סותרים\s*0$/, /^רק שם המקום\s*1$/, /^טווחים חופפים\s*0$/, /^רק ב־.*\s0$/, /^רק ב־.*\s0$/, /^זהים\s*1$/]);
-  await chips.filter({ hasText: "רק שם המקום" }).click();
+  // a ref_2 changed too: not display only, so the "ref" group (V7 §1.7); the display-only group is empty and hidden
+  await expect(chips).toHaveText([/^סותרים\s*0$/, /^ציוני ספריא שונים\s*1$/, /^טווחים חופפים\s*0$/, /^רק ב־.*\s0$/, /^רק ב־.*\s0$/, /^זהים\s*1$/]);
+  await chips.filter({ hasText: "ציוני ספריא שונים" }).click();
   const row = dlg.locator(".cmp-diff .cmp-table tbody tr");
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("שם המקום ביעד: «שם מקום אחר לגמרי»");

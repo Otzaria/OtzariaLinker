@@ -390,14 +390,20 @@ async function runThrough(registry: SourceRegistry, step: Extract<PlanStep, { ki
     for (const sg of r.suggestions) {
       const [mine, mid] = sg.source.book.key === step.source.key ? [sg.source, sg.target] : [sg.target, sg.source];
       if (mid.book.key !== via.book.key) continue;
-      const lines: number[] = [];
-      for (let m = mid.line; m <= scanEnd(mid.line, mid.end ?? mid.line); m++) for (const [a, b] of toBase.get(m) ?? []) for (let x = a; x <= b; x++) lines.push(x);
-      if (!lines.length) {
+      // only the first and the last base line count: the base side's ranges are never expanded line by line (a
+      // range end from a database nobody vouches for — 20,000,000 — cost 400+ MB here, Issue #41 C1)
+      let from = Infinity;
+      let to = -Infinity;
+      for (let m = mid.line; m <= scanEnd(mid.line, mid.end ?? mid.line); m++)
+        for (const [a, b] of toBase.get(m) ?? []) {
+          if (!(b >= a)) continue; // an end before its start (or not a number) is no line at all
+          from = Math.min(from, a);
+          to = Math.max(to, scanEnd(a, b));
+        }
+      if (from > to) {
         unlinked++;
         continue;
       }
-      const from = Math.min(...lines);
-      const to = Math.max(...lines);
       if (to - from > THROUGH_SPAN) {
         spread++;
         continue;
@@ -454,7 +460,7 @@ async function linkedLines(registry: SourceRegistry, a: string, b: string): Prom
   const add = (out: Map<number, [number, number][]>, aSide: { line: number; end?: number }, bSide: { line: number; end?: number }) => {
     for (let x = aSide.line; x <= scanEnd(aSide.line, aSide.end ?? aSide.line); x++) {
       const list = out.get(x) ?? [];
-      list.push([bSide.line, bSide.end ?? bSide.line]);
+      list.push([bSide.line, scanEnd(bSide.line, bSide.end ?? bSide.line)]); // clipped like the own side (Issue #41 C1)
       out.set(x, list);
     }
   };

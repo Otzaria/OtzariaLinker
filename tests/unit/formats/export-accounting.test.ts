@@ -182,6 +182,21 @@ describe("the export report and the Sefaria CSV leave nothing out silently", () 
     for (let i = 0; i < 250; i++) expect(report).toContain(`ספר ב ${i}:`);
   });
 
+  /*
+   * V7 §1.9: an untouched library record of the type "ציטוט בטקסט" (INLINE_LINKER) on a heading, written for private use. The
+   * Sefaria CSV leaves it out for both reasons — and listed it twice, so "N links are not in the CSV" counted it twice, and
+   * rows + left out no longer added up to what the links files write.
+   */
+  it("a link the Sefaria CSV leaves out for two reasons is listed once, with both", () => {
+    const rec: Link = { id: "f0", status: "existing", provenance: "file", source: { book: BOOKS.plain!, line: 0 }, target: { book: BOOKS.other!, line: 4 }, declaredType: "INLINE_LINKER", heRef2: "ספר ב 5", fileIndex: 0 };
+    const plan = planExport([rec], ctxFor("private", { [BOOKS.plain!.title]: "imported" }, false));
+    expect(plan.written.map((x) => x.id)).toEqual(["f0"]);
+    const omitted = sefariaCsvOmissions(plan);
+    expect(omitted.map((o) => o.link.id)).toEqual(["f0"]);
+    expect(omitted[0]!.problems.map((p) => p.detail)).toEqual(["INLINE_LINKER", "export/heading-line"]);
+    expect(planSefariaCsv(plan.written.filter((l) => !omitted.some((o) => o.link.id === l.id)), () => undefined).length + omitted.length).toBe(plan.written.length);
+  });
+
   it("an untouched library record on a heading stays in its links file, and the CSV says it is left out", () => {
     const kept: Link = { id: "f0", status: "existing", provenance: "file", source: { book: BOOKS.plain!, line: 0 }, target: { book: BOOKS.other!, line: 4 }, declaredType: "reference", heRef2: "ספר ב 5", fileIndex: 0 };
     const plan = planExport([kept], ctxFor("submission", { [BOOKS.plain!.title]: "imported" }, false));

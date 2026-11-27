@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { detailDifferences, diffGroup, diffLinks, linkDiffKey, mergeLinkSets } from "../../../src/core/links/link-diff";
 import type { BookRef, Link } from "../../../src/core/links/model";
-import { linkDiffCsv } from "../../../src/formats/report/link-diff-report";
+import { DIFF_KIND_LABELS, diffGroupLabels, diffRowLabel, linkDiffCsv } from "../../../src/formats/report/link-diff-report";
 
 /*
  * The semantic diff of two link sets and the lossless merge of several links files of one book
@@ -102,15 +102,38 @@ describe("diffLinks", () => {
    * printed neither field, so both columns read identically. They are their own group now, and the fields
    * that differ are known (and shown).
    */
-  it("a record that differs only in heRef_2, ref_1 or ref_2 is a 'details' row, not a conflict", () => {
+  it("a record that differs only in heRef_2, ref_1 or ref_2 is not a conflict", () => {
     const d = diffLinks(
       [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40)],
       [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 41)],
     );
     const group = (s: number) => diffGroup(d.rows.find((r) => r.a!.source.line === s)!);
-    expect([1, 2, 3].map(group)).toEqual(["details", "details", "details"]);
-    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(3); // the kind stays: merges still treat it as a disagreement
+    // V7 §1.7: a Sefaria ref (what the weekly sync reads) is told apart from the place's display name
+    expect([1, 2, 3].map(group)).toEqual(["refs", "details", "refs"]);
+    expect(d.rows.filter((r) => r.kind === "details")).toHaveLength(1); // the kinds stay: merges still treat them as a disagreement
+    expect(d.rows.filter((r) => r.kind === "ref")).toHaveLength(2);
     expect(group(4)).toBe("conflict"); // another target line is a real disagreement
+  });
+
+  /*
+   * V7 §1.7 (#15): "display only" and "a ref changed" were one kind ("details") and one group, labelled "only the place
+   * name" — though ref_1/ref_2 are what the library's weekly sync reads, not a display label. heRef_2 alone is display
+   * only; a ref_1/ref_2 difference (with or without heRef_2) is its own kind and group, and a merge never overwrites it.
+   */
+  it("a Sefaria ref change is its own kind and group, apart from a display-only change of heRef_2", () => {
+    const a = [link(1, 10, { ref1: "Genesis 1:1" }), link(2, 20, { heRef2: "x" }), link(3, 30, { ref2: "A" }), link(4, 40, { heRef2: "x", ref2: "A" })];
+    const b = [link(1, 10, { ref1: "Genesis 1:2" }), link(2, 20, { heRef2: "y" }), link(3, 30, { ref2: "B" }), link(4, 40, { heRef2: "y", ref2: "B" })];
+    const d = diffLinks(a, b);
+    const row = (s: number) => d.rows.find((r) => r.a!.source.line === s)!;
+    expect([1, 2, 3, 4].map((s) => row(s).kind)).toEqual(["ref", "details", "ref", "ref"]);
+    expect([1, 2, 3, 4].map((s) => diffGroup(row(s)))).toEqual(["refs", "details", "refs", "refs"]);
+    expect(d.counts).toMatchObject({ ref: 3, details: 1 });
+    expect(DIFF_KIND_LABELS.ref).not.toBe(DIFF_KIND_LABELS.details);
+    expect(diffGroupLabels("א", "ב").refs).not.toBe(diffGroupLabels("א", "ב").details);
+    // a ref change is a disagreement: the merge keeps the preferred side and reports the other
+    const m = mergeLinkSets([{ name: "a", links: a }, { name: "b", links: b }], 0);
+    expect(m.conflicts.map((c) => c.kind).sort()).toEqual(["details", "ref", "ref", "ref"]);
+    expect(m.entries).toHaveLength(4);
   });
 
   it("names the fields that differ, and only those", () => {
@@ -149,6 +172,60 @@ describe("diffLinks", () => {
     // a real difference of words still shows
     const c = diffLinks(a, [link(1, 10, { heRef2: "ספר ג 5", ref1: "Genesis 1:1" })]);
     expect(c.rows.map((r) => r.kind)).toEqual(["details"]);
+  });
+
+  /*
+   * V7 §1.7: "identical" and "the same link, written differently" were one row ("same", "זהה"): a reader could not tell a
+   * record that is byte for byte the other from one whose reference has a doubled space, whose type is "COMMENTARY", whose
+   * keys come in another order or that carries a pipeline field. Both stay "same" (a merge folds them; nothing is a
+   * disagreement), but the second is marked `equivalent`, counted, and labelled apart. Against a database nothing of the
+   * spelling is known, so nothing is marked there.
+   */
+  it("a record written differently that means the same is marked equivalent, apart from an identical one", () => {
+    const a = [
+      link(1, 10),
+      link(2, 20, { heRef2: "ספר ב 5" }),
+      link(3, 30, { declaredType: "commentary" }),
+      link(4, 40, { keyOrder: ["line_index_1", "line_index_2", "heRef_2", "path_2", "Conection Type"] }),
+      link(5, 50),
+      link(6, 60),
+      link(7, 70, { ref1: undefined }),
+    ];
+    const b = [
+      link(1, 10),
+      link(2, 20, { heRef2: "ספר ב  5" }),
+      link(3, 30, { declaredType: "COMMENTARY" }),
+      link(4, 40, { keyOrder: ["path_2", "line_index_1", "line_index_2", "heRef_2", "Conection Type"] }),
+      link(5, 50, { passthrough: { anchor_context: "x" } }),
+      link(6, 60, { fileText: '{"line_index_1": 7.0}' }),
+      link(7, 70, { ref1: "" }),
+    ];
+    const d = diffLinks(a, b);
+    const row = (s: number) => d.rows.find((r) => r.a!.source.line === s)!;
+    expect(d.rows.map((r) => r.kind)).toEqual(Array(7).fill("same"));
+    expect([1, 2, 3, 4, 5, 6, 7].map((s) => row(s).equivalent ?? false)).toEqual([false, true, true, true, true, true, true]);
+    expect(d.equivalent).toBe(6);
+    expect([1, 2].map((s) => diffGroup(row(s)))).toEqual(["identical", "identical"]);
+    expect(diffRowLabel(row(2))).not.toBe(diffRowLabel(row(1)));
+    expect(linkDiffCsv(d, "א", "ב")).toContain(diffRowLabel(row(2)));
+    // the exact twin is paired first, whatever the order
+    const messy = link(2, 20, { heRef2: "ספר ב  5" });
+    const clean = link(2, 20, { heRef2: "ספר ב 5" });
+    expect(diffLinks([clean, messy], [messy, clean]).rows.map((r) => r.equivalent ?? false)).toEqual([false, false]);
+    // a merge folds an equivalent record like an identical one: nothing added, nothing in conflict
+    const m = mergeLinkSets([{ name: "a", links: a }, { name: "b", links: b }], 0);
+    expect([m.entries.length, m.conflicts.length, m.duplicates]).toEqual([7, 0, 7]);
+    // against a database the spelling is not known: nothing is marked
+    expect(diffLinks([db(2, 20)], [link(2, 20, { heRef2: "x  y" })]).rows.map((r) => [r.kind, r.equivalent ?? false])).toEqual([["same", false]]);
+  });
+
+  // V7 §1.7: records are paired by their lines and books, never by text that looks alike
+  it("two records with the same text but other lines or another book are never paired", () => {
+    const words = { heRef2: "המאיר לארץ, סימן יא", ref1: "Genesis 1:1", ref2: "Rashi on Genesis 1:1:1" };
+    const d = diffLinks([link(1, 10, words)], [link(2, 30, words), link(1, 10, words, YEHUDA)]);
+    expect(d.rows.map((r) => r.kind).sort()).toEqual(["added", "added", "removed"]);
+    const m = mergeLinkSets([{ name: "a", links: [link(1, 10, words)] }, { name: "b", links: [link(2, 30, words), link(1, 10, words, YEHUDA)] }], 0);
+    expect([m.entries.length, m.conflicts.length, m.duplicates]).toEqual([3, 0, 0]);
   });
 
   it("the type is compared as the generator parses it, not as a lower-cased string", () => {
@@ -200,6 +277,34 @@ describe("mergeLinkSets", () => {
     expect(m.conflicts.map((c) => c.other.id)).toEqual([base[1]!.id]);
     const both = mergeLinkSets([{ name: "a.json", links: base }, { name: "b.json", links: other }], 0, true);
     expect(both.entries.map((e) => e.link.id)).toContain("o2");
+  });
+
+  /*
+   * V7 §1.7 (found by the round-trip property, compare-roundtrip.test.ts): the diff pairs one link with one link, so when
+   * another source held TWO records of a link the base holds once — the same record, and the same link with a ref_2
+   * (or of another type) — the first paired as "same" and the second was "added": the merge took in a second record
+   * of a link already held, a duplicate in the database that says something else about the same two lines. It is a
+   * conflict with the held link (kept out unless asked), like any other disagreement about a place already held.
+   */
+  it("a second record of the same two lines in another source is a conflict with the link held, not a new link", () => {
+    const held = [link(1, 10)];
+    const other = [link(1, 10, { id: "b1" }), link(1, 10, { id: "b2", ref2: "Rashi on Genesis 1:1:1" }), link(1, 10, { id: "b3", declaredType: "reference" }), link(1, 10, { id: "b4", heRef2: "x  y" }), link(1, 10, { id: "b5", heRef2: "x y" })];
+    const m = mergeLinkSets([{ name: "a", links: held }, { name: "b", links: other }], 0);
+    expect(m.entries.map((e) => [e.link.id, e.origins])).toEqual([[held[0]!.id, ["a", "b"]]]);
+    expect(m.conflicts.map((c) => [c.kind, c.kept.id, c.other.id])).toEqual([
+      ["ref", held[0]!.id, "b2"],
+      ["type", held[0]!.id, "b3"],
+      ["details", held[0]!.id, "b4"],
+    ]);
+    expect(m.duplicates).toBe(2); // b1 = the held link; b5 = b4 written differently, folded within its own source
+    // kept on request, as every conflict is
+    expect(mergeLinkSets([{ name: "a", links: held }, { name: "b", links: other }], 0, true).entries.map((e) => e.link.id)).toEqual([held[0]!.id, "b2", "b3", "b4"]);
+    // two lines that are not held yet still come in, once; a second record of them in the same source is a conflict with the first
+    const fresh = mergeLinkSets([{ name: "a", links: held }, { name: "b", links: [link(2, 20, { id: "n1" }), link(2, 20, { id: "n2", declaredType: "reference" })] }], 0);
+    expect([fresh.entries.map((e) => e.link.id), fresh.conflicts.map((c) => [c.kind, c.kept.id, c.other.id])]).toEqual([
+      [held[0]!.id, "n1"],
+      [["type", "n1", "n2"]],
+    ]);
   });
 
   it("merging is idempotent: the merged set merged with its sources adds nothing", () => {

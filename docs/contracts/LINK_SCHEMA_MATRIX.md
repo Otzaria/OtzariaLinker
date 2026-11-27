@@ -183,8 +183,8 @@ PK הוא `(linkId, side, charStart)`, ולכן ייתכנו כמה עוגנים
 
 | מסד | טבלה | מבנה | כתובת הצד השני |
 |---|---|---|---|
-| `user_books.db` | `user_link` | `sourceTitle`, `sourceCategoryId`, `sourceIsUserBook`, `sourceLineIndex`, `targetTitle`, `targetCategoryId`, `targetIsUserBook`, `targetRef`, `targetLineIndex`, `anchorStart`, `anchorEnd`, `anchorLabel`, `sourceLineIndexEnd`, `targetLineIndexEnd`, `targetRefEnd`, `connectionType TEXT`, `source` (`lib/migration/database/daos/database.dart:850`) | כותרת + lineIndex או ref. **אין** `line.id`. העוגן והטווח הם עמודות בשורה |
-| `user_books.db` | `link` | צורה ישנה בלי `targetLineIndex`/`targetBookOrderIndex` (`database.dart:695`). לא נמצא קוד שכותב אליה | — |
+| `user_books.db` | `user_link` | `sourceTitle`, `sourceCategoryId`, `sourceIsUserBook`, `sourceLineIndex`, `targetTitle`, `targetCategoryId`, `targetIsUserBook`, `targetRef`, `targetLineIndex`, `anchorStart`, `anchorEnd`, `anchorLabel`, `sourceLineIndexEnd`, `targetLineIndexEnd`, `targetRefEnd`, `connectionType TEXT`, `source`, `sourceDb`, `targetDb` (`lib/migration/database/daos/database.dart:881-906` @ `a6be90800`) | כל צד: כותרת + דגל אישי/רשמי + slug של מסד מצורף, ו־lineIndex. **אין** `line.id`. העוגן והטווח הם עמודות בשורה. הפירוט: §6.1 |
+| `user_books.db` | `link` | צורה ישנה בלי `targetLineIndex`/`targetBookOrderIndex` (`database.dart:726-745` @ `a6be90800`). לא נמצא קוד שכותב אליה; במסד אמיתי 0 שורות | — |
 | מסד מצורף / PDC | `external_link` | `sourceBookId`, `sourceLineIndex` (מ־0), `targetSource`, `targetTitle`, `targetRef`, `targetLineIndex`, `connectionType TEXT` (`docs/personal_databases.md`; PDC `builder.dart`) | `targetSource`: `'official'`, ‏library_id של מסד אחר, או NULL (כל המסדים לפי עדיפות). `targetRef` עדיף, ונפתר דרך `line_ref`/`heRef`. אחרת `targetLineIndex`. אם `connectionType` הוא NULL, מתייחסים אליו כ־REFERENCE |
 
 - **יכולת `external_link`:** מספיקות שלוש עמודות, `sourceBookId`, `sourceLineIndex` ו־`targetTitle`
@@ -196,6 +196,73 @@ PK הוא `(linkId, side, charStart)`, ולכן ייתכנו כמה עוגנים
   (`FOOTNOTES`, `SOURCE`, `REFERENCE`, `COMMENTARY`), לא `connection_type.id`. אין מזהה קישור: המזהה בכלי הוא
   `<מקור>:ext:<rowid>`. הקורא ממומש (#13); fixture: `tests/fixtures/db/pdc-personal-mini.db` (DDL אמיתי של v52, שורות
   placeholder, `scripts/fixtures/make_pdc_mini_db.py`).
+
+### 6.1 `user_link` של `user_books.db` (Issue #41 B20)
+
+נקרא בקוד של אוצריא, `Otzaria/otzaria` @ `a6be90800`, לקריאה בלבד. `DB` = `lib/migration/database/daos/database.dart`,
+`UIM` = `lib/user_content_import/models/user_import_models.dart`, `UCR` = `lib/user_content_import/repository/user_content_repository.dart`,
+`ULL` = `lib/user_content_import/services/user_links_loader.dart`, `TBR` = `lib/data/repository/text_book_repository.dart`,
+`BS` = `lib/models/book_source.dart`, `LT` = `lib/models/link_types.dart`.
+
+**שתי צורות של הטבלה.**
+
+| צורה | עמודות | מקור |
+|---|---|---|
+| `title` (הנוכחית) | כל צד לפי `<side>Title` + `<side>IsUserBook` (+ `<side>CategoryId`, `<side>Db`); `sourceLineIndex`, `targetLineIndex`, `targetRef`, `anchorStart/End/Label`, `sourceLineIndexEnd`, `targetLineIndexEnd`, `targetRefEnd`, `connectionType`, `source` | `DB:881-906`; אינדקסים `idx_user_link_source_line (sourceTitle, sourceIsUserBook, sourceLineIndex)`, `idx_user_link_target_line (targetTitle, targetIsUserBook, targetLineIndex)` |
+| `book-id` (הראשונה) | `sourceBookId` (FK לספר אישי במסד), `sourceLineIndex`, `targetTitle`, `targetCategoryId`, `targetIsUserBook`, `targetRef`, `targetLineIndex`, `connectionType`. אין עוגנים, טווחים או slug | `DB` @ `65db26bd2`. השדרוג: `_ensureUserLinkSchema` / `_rebuildUserLinkTable` (`DB:248-334`), שורה ישנה נשמרת עם `sourceIsUserBook=1` |
+
+- עמודות נוספו ב־`ALTER` (`DB:274-295`): `anchorStart`, `anchorEnd`, `anchorLabel`, `sourceLineIndexEnd`, `targetLineIndexEnd`,
+  `targetRefEnd`, `source`, `sourceDb`, `targetDb`. לכן טבלה אמיתית יכולה להיות בלי חלק מהן, והן אופציונליות.
+- **מה המשמעות של כל שדה:**
+  - **`lineIndex` מ־0** בשני הצדדים (`UIM:340-341`). התצוגה מוסיפה 1 (`ULL:104-120`). הייבוא מקובץ מוריד 1 (`user_content_importer.dart:869,889`).
+  - **`<side>IsUserBook`**: 1 = ספר אישי של `user_books.db` עצמו; 0 = הספרייה הרשמית (`UIM:350`; `BS:19-21`). NULL נקרא כ־0
+    (`as int? ?? 0`, `UCR:673-692`).
+  - **`<side>Db`**: slug של מסד מצורף שבו הצד. כשהוא קיים, הדגל 0 והקטגוריה NULL (`UIM:373-376`). slug לא חוקי לא נחשב, והדגל
+    קובע (`UIM:399-405`, `BS:23-29`). ה־slug הוא `schema_meta.library_id` של המסד, ואם אין, שם הקובץ בלי סיומת, אחרי ניקוי
+    (`attached_library_probe.dart:203-229`).
+  - **`<side>CategoryId`**: מצמצם כותרת שנמצאת פעמיים. NULL = כל קטגוריה (`UCR:565-567, 609-611`).
+  - **`*LineIndexEnd`**: סוף טווח, 0-based, כולל (`UIM:367-369`).
+  - **`anchorStart`/`anchorEnd`/`anchorLabel`**: בצד **המקור**, אופסטים **גולמיים** כפי שנכתבו ב־`start`/`end` של קובץ ה־native
+    (`UIM:360-365`; `ULL:115-116`, `anchorOffsetsAreRaw: true`). אלה לא האופסטים הגלויים של `link_anchor`.
+  - **`targetRef`**: תווית בלבד. הייבוא כבר פתר אותה לשורה (`user_link_ref_resolver.dart:13-37`). שורה בלי `targetLineIndex`
+    לא מוצגת (`ULL:64-70`).
+  - **`connectionType`**: שם הסוג כטקסט (`LT`). קישור נכנס מוצג בסוג ההפוך (`LT:123-127`), וקישורי `LINKER` לא מוצגים מצד היעד
+    (`UCR:623`). הייבוא שומר `LINKER` כ־`COMMENTARY` (OTZARIA_COMPATIBILITY §4).
+- **איך האפליקציה קוראת:** לספר שנפתח היא קוראת `forward` (שורות שהצד המקור שלהן הוא הספר: כותרת + דגל + `sourceDb IS ?`)
+  ו־`inverse` (שורות שהיעד שלהן הוא הספר) (`UCR:555-637`), וממזגת אותן עם הקישורים מהמסד הרשמי (`TBR:244-263`). לכן קישור
+  אישי מופיע גם בספר רשמי.
+
+**מה הכלי עושה** (`src/database/otzaria/user-links-reader.ts`, `src/sources/db/db-source.ts`):
+
+- **זיהוי:** `capabilities.userLinkSchema` לפי העמודות שקיימות (`USER_LINK_REQUIRED`). העמודות שחסרות בהן אופציונליות.
+  טבלה בלי עמודת חובה (כולל `targetIsUserBook`, בלעדיה צד היה מנוחש), או טבלה `WITHOUT ROWID`, לא נקראת. במקרה כזה
+  יש אזהרה `db/user-link-not-read`, ולכל ספר במסד יש `SourceBook.linksUnread`. אז הכיסוי הוא "לא ידוע" (`LinksReading`
+  `unknown`/`unreadable`), סיכום הקישורים נושא `unread`, סכום הספרים בפאנל מדלג על הספר, ובשורה של הספר במאגר כתוב שאינו זמין. אף
+  אחד מהם לא אומר "0 קישורים".
+- **קריאה:** סריקה אחת של הטבלה, שנשמרת כמערכים (`UserLinkIndex`). הדף קורא שורות לפי rowid. לספר של המסד מוצגות השורות
+  שמתחילות בו ("יוצאים") ושורות שמסתיימות בו ואינן מתחילות בו ("נכנסים"). קישור בתוך הספר נספר פעם אחת. המזהה הוא
+  `<מקור>:user:<rowid>`, עם `dbTable: "user_link"` ו־provenance `db`. אפשר להציג ולהעתיק לפרויקט, אבל לא לייצא כמו שהוא
+  (AGENTS §3).
+- **הצד השני:** צד אישי (דגל 1, בלי slug) הוא ספר של המסד הזה לפי כותרת מדויקת, ועם קטגוריה אם יש. אם אין ספר כזה, הצד
+  לא נפתר (`unresolved:`, origin `personal`). צד רשמי נפתר רק בספרייה הפתוחה. צד עם slug נפתר רק במסד שה־slug שלו
+  (`otzariaSlug`) שווה. אם המקור לא פתוח, הצד לא נפתר (origin `otzaria`/`personal`). צד אף פעם לא נקשר לספר באותה כותרת מסוג
+  אחר.
+- **טווח ועוגן:** `*End` עובר דרך `rangeEnd` כמו כל טווח במסד. סוף שאינו מספר שלם, שאינו אחרי ההתחלה, או שגדול
+  מ־`MAX_BOOK_LINES` לא נלקח. הסוף נחתך לפי אורך הספר כשהאורך ידוע. העוגן הוא `Link.anchor` (`RawAnchor`), כמו בקובץ.
+  "העתקה לפרויקט" מעתיקה אותו כמו שהוא לרשומה שלא מתהפכת, ואם הרשומה מתהפכת היא מזהירה `adopt/anchor-lost`.
+- **סוג:** NULL או ריק נחשב REFERENCE. כל שם אחר עובר דרך `parseConnectionType`, ושם לא מוכר נחשב OTHER.
+- **שורות שאינן קישור:** שורה עם מספר שורה שאינו מספר שלם חיובי נספרת ב־`unlisted.badLine`. שורה בלי `targetLineIndex`, או
+  עם דגל שאינו מספר שלם, נספרת ב־`noPlace`. שורת `book-id` שהספר שלה לא קיים נספרת ב־`orphanSource`.
+- **כמה טבלאות במסד אחד** (`link` + `external_link` + `user_link`): כל קישור מופיע פעם אחת. שורה בטבלה מאוחרת יותר, שחוזרת
+  על שורה של טבלה קודמת (אותו כיוון, שורה, ספר ושורה בצד השני, וסוג), נושרת. `DbLinkSummary.tables.userLink` אומר כמה
+  שורות נתנה הטבלה.
+- **מגבלות:**
+  1. שורה ששני הצדדים שלה מחוץ למסד (רשמי ← רשמי, `8a37b7a91`) לא מוצגת. הכלי מציג קישורים לפי ספרי המסד, וספר הספרייה
+     לא מקבל את הקישורים האישיים שלו מ־`user_books.db`.
+  2. שני ספרים אישיים באותה כותרת, ושורה בלי קטגוריה: הכלי בוחר את הראשון (המזהה הנמוך). האפליקציה מציגה את השורה בשניהם.
+  3. בצד היעד, `LINKER` מוצג כקישור נכנס, בסוג השמור ולא בסוג ההפוך.
+  4. אין מסד `user_books.db` אמיתי עם קישורים בבדיקות. הבדיקות רצות על fixtures מה־DDL האמיתי
+     (`tests/fixtures/schemas/user-books.sql`, `user-books-user-link-v1.sql`), עם שורות placeholder.
 
 ## 7. איך לקרוא, לכל ספר
 

@@ -11,6 +11,7 @@ import { booksService } from "./books-service";
 import { hashLocation } from "./hash-location";
 import { Router } from "../state/router";
 import { idbStore } from "./idb-store";
+import { autosaveWindow } from "./autosave-window";
 import { WorkerHost, type HostedWorker } from "./worker-host";
 import SourcesWorker from "../workers/sources.worker.ts?worker&inline";
 
@@ -37,7 +38,11 @@ const saver: Saver = {
 const store = new AppStore(service, saver);
 host.onLost = (reason) => store.workerLost(reason);
 const kv = idbStore();
-store.startAutosave(kv);
+// each window saves under its own key (#41 B17): a refresh keeps the window's id, a new tab gets its own
+void autosaveWindow().then(
+  (w) => store.startAutosave(kv, undefined, w),
+  () => store.startAutosave(kv, undefined, { id: crypto.randomUUID(), live: async () => null }),
+);
 // how far a guided flow got (state/guided-flow.ts): a reload or a closed tab can continue it
 store.guided.startPersist(kv);
 // the max-link job (state/maxlink.ts): a reload or a closed tab can resume it, and re-run only what changed

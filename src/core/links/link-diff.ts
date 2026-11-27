@@ -1,4 +1,5 @@
 import { parseConnectionType } from "./connection-type";
+import { linePairIdentity } from "./equality";
 import type { Link, LinkSide } from "./model";
 import { storedForm } from "./stored-form";
 
@@ -11,12 +12,14 @@ import { storedForm } from "./stored-form";
  * the two sides are paired in rounds, from the strictest relation to the loosest, each link once:
  *
  *   same       identical (when a database is compared: the same stored link and ranges — a database
- *              keeps neither heRef_2 nor the refs, and its anchors are visible offsets)
+ *              keeps neither heRef_2 nor the refs, and its anchors are visible offsets); marked
+ *              `equivalent` when it means the same but is written otherwise (spacing, spelling, key order…)
  *   range      the same stored link, a range end differs
  *   anchor     … the word anchor differs
  *   direction  … the record is written the other way round (source ↔ target, "source" ↔ "commentary")
  *   type       … the declared type differs; or the same two lines with another stored type
- *   details    … only heRef_2 / ref_1 / ref_2 differ
+ *   ref        … ref_1 / ref_2 differ (the Sefaria refs the library's weekly sync reads), heRef_2 maybe too
+ *   details    … only heRef_2 differs: the target's display name, nothing Otzaria stores
  *   target     the same source line and target book, another target line ("conflict")
  *   moved      the same target line and source book, another source line ("moved to another line")
  *   removed    only in A
@@ -25,9 +28,9 @@ import { storedForm } from "./stored-form";
  * Linear in the number of links (hash buckets), so 100K-link files compare in well under a second.
  * Pure; the one equality rule (equality.ts) is its "same stored link" level.
  */
-export type LinkDiffKind = "same" | "range" | "anchor" | "type" | "direction" | "details" | "target" | "moved" | "removed" | "added";
+export type LinkDiffKind = "same" | "range" | "anchor" | "type" | "direction" | "ref" | "details" | "target" | "moved" | "removed" | "added";
 
-export const LINK_DIFF_KINDS: readonly LinkDiffKind[] = ["same", "range", "anchor", "type", "direction", "details", "target", "moved", "removed", "added"];
+export const LINK_DIFF_KINDS: readonly LinkDiffKind[] = ["same", "range", "anchor", "type", "direction", "ref", "details", "target", "moved", "removed", "added"];
 
 export interface LinkDiffRow {
   readonly kind: LinkDiffKind;
@@ -37,28 +40,38 @@ export interface LinkDiffRow {
   readonly b?: Link;
   /** "target"/"range": the two ranges still share a line */
   readonly overlap?: boolean;
+  /**
+   * "same" only: the two mean the same but are not written the same (spacing or invisible marks in a reference,
+   * the type's spelling, key order, a pipeline field, the exact text of the record). Never set against a database.
+   */
+  readonly equivalent?: boolean;
 }
 
 export interface LinkDiff {
   readonly rows: readonly LinkDiffRow[];
   readonly counts: Readonly<Record<LinkDiffKind, number>>;
+  /** of the "same" rows, those marked `equivalent` (written differently) */
+  readonly equivalent: number;
   /** a database was one of the sides: anchors and the text fields were not compared */
   readonly loose: boolean;
 }
 
 /**
- * What a row means for a reader: the six groups the comparison screen filters by. "details" is the same
- * stored link whose only difference is heRef_2 / ref_1 / ref_2 (#15): wording of the target's place, not a
- * disagreement about the link — so it is not a "conflict". Only the GROUP is separate; the row's `kind`
- * stays "details", which `mergeLinkSets` still reports as a disagreement (nothing held is overwritten).
+ * What a row means for a reader: the groups the comparison screen filters by. "details" is the same stored
+ * link whose only difference is heRef_2 (#15): the display name of the target's place, not a disagreement
+ * about the link — so it is not a "conflict". "refs" is the same stored link with other ref_1 / ref_2: the
+ * Sefaria refs the library's weekly sync reads, so not display only (V7 §1.7), and not another target
+ * either. Only the GROUPS are separate; `mergeLinkSets` still reports both kinds as a disagreement
+ * (nothing held is overwritten).
  */
-export type LinkDiffGroup = "identical" | "conflict" | "details" | "overlap" | "onlyA" | "onlyB";
+export type LinkDiffGroup = "identical" | "conflict" | "refs" | "details" | "overlap" | "onlyA" | "onlyB";
 
 export function diffGroup(r: LinkDiffRow): LinkDiffGroup {
   if (r.kind === "same") return "identical";
   if (r.kind === "removed") return "onlyA";
   if (r.kind === "added") return "onlyB";
   if (r.kind === "details") return "details";
+  if (r.kind === "ref") return "refs";
   return r.kind === "range" || r.overlap ? "overlap" : "conflict";
 }
 
@@ -113,6 +126,24 @@ const typeKey = (l: Link) => {
   const t = parseConnectionType(l.declaredType);
   return t.known ? t.type : `?${l.declaredType.trim().toLowerCase().replace(/\s+/g, "_")}`;
 };
+/**
+ * How the record is WRITTEN, beyond what it means: the references and the type as spelled, `null` for the type, path_2,
+ * key order, the fields the tool keeps without knowing (passthrough), and the record's own text when the writer would
+ * spell it otherwise (fileText). Only tells "identical" from "equivalent". What is not known is taken as the writer's
+ * own form: a link made in the tool has no file text and no path of its own; it has no key order either, so key orders
+ * are compared only when both records have one. Plain field comparisons: it runs for every "same" pair.
+ */
+const passthroughText = (l: Link) => (l.passthrough && Object.keys(l.passthrough).length ? JSON.stringify(l.passthrough) : "");
+const sameWriting = (x: Link, y: Link) =>
+  x.heRef2 === y.heRef2 &&
+  x.ref1 === y.ref1 &&
+  x.ref2 === y.ref2 &&
+  x.declaredType === y.declaredType &&
+  (x.typeNull === true) === (y.typeNull === true) &&
+  (x.targetPath ?? `${x.target.book.title}.txt`) === (y.targetPath ?? `${y.target.book.title}.txt`) &&
+  (x.fileText ?? "") === (y.fileText ?? "") &&
+  (!x.passthrough && !y.passthrough ? true : passthroughText(x) === passthroughText(y)) &&
+  (!x.keyOrder || !y.keyOrder || (x.keyOrder.length === y.keyOrder.length && x.keyOrder.every((k, i) => k === y.keyOrder![i])));
 const overlaps = (x: LinkSide, y: LinkSide) => x.line <= span(y) && y.line <= span(x);
 const id = (o: Oriented) => `${at(o.s)}>${at(o.t)}:${o.type}`;
 const rangeKey = (o: Oriented) => `${span(o.s)}:${span(o.t)}`;
@@ -130,9 +161,11 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
   const rows: LinkDiffRow[] = [];
   const usedA = new Uint8Array(A.length);
   const usedB = new Uint8Array(B.length);
+  let nEquivalent = 0;
 
-  // one round: bucket the unpaired B by a key, then pair each unpaired A with the first B of its key
-  const round = (key: (o: Oriented) => string, kind: (x: Oriented, y: Oriented) => LinkDiffKind) => {
+  // one round: bucket the unpaired B by a key, then pair each unpaired A with the first B of its key — or, given
+  // `prefer`, with the first that it prefers when the bucket holds several
+  const round = (key: (o: Oriented) => string, kind: (x: Oriented, y: Oriented) => LinkDiffKind, prefer?: (x: Oriented, y: Oriented) => boolean) => {
     const buckets = new Map<string, number[]>();
     B.forEach((o, i) => {
       if (usedB[i]) return;
@@ -146,23 +179,31 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
       const list = buckets.get(key(x));
       if (!list) return;
       let j: number | undefined;
-      while ((j = list.shift()) !== undefined && usedB[j]);
+      if (prefer && list.length > 1) {
+        const pick = list.findIndex((c) => !usedB[c] && prefer(x, B[c]!));
+        if (pick >= 0) j = list.splice(pick, 1)[0];
+      }
+      if (j === undefined) while ((j = list.shift()) !== undefined && usedB[j]);
       if (j === undefined) return;
       const y = B[j]!;
       usedA[i] = usedB[j] = 1;
       const k = kind(x, y);
       const overlap = (k === "target" && overlaps(x.t, y.t)) || (k === "moved" && overlaps(x.s, y.s));
-      rows.push({ kind: k, a: x.l, b: y.l, ...(overlap && { overlap }) });
+      const equivalent = k === "same" && !loose && !sameWriting(x.l, y.l);
+      if (equivalent) nEquivalent++;
+      rows.push({ kind: k, a: x.l, b: y.l, ...(overlap && { overlap }), ...(equivalent && { equivalent }) });
     });
   };
 
-  round(full, () => "same");
+  // the exact twin (also as written) first, so that a record is "equivalent" only when no identical one is there
+  round(full, () => "same", loose ? undefined : (x, y) => sameWriting(x.l, y.l));
   round(id, (x, y) =>
     rangeKey(x) !== rangeKey(y) ? "range"
     : loose ? "same"
     : anchorKey(x.l) !== anchorKey(y.l) ? "anchor"
     : x.flipped !== y.flipped ? "direction"
     : typeKey(x.l) !== typeKey(y.l) ? "type"
+    : seenRef(x.l.ref1) !== seenRef(y.l.ref1) || seenRef(x.l.ref2) !== seenRef(y.l.ref2) ? "ref"
     : "details",
   );
   // the same two lines, either way round: another stored type, or the record turned around
@@ -179,7 +220,7 @@ export function diffLinks(a: readonly Link[], b: readonly Link[]): LinkDiff {
   B.forEach((y, j) => usedB[j] || rows.push({ kind: "added", b: y.l }));
   const counts = Object.fromEntries(LINK_DIFF_KINDS.map((k) => [k, 0])) as Record<LinkDiffKind, number>;
   for (const r of rows) counts[r.kind]++;
-  return { rows, counts, loose };
+  return { rows, counts, equivalent: nEquivalent, loose };
 }
 
 /** A source of a merge: one links file (or the project's links of the book), with the name its links keep as their origin. */
@@ -210,13 +251,17 @@ export interface LinkMerge {
  * of its links is kept as it is (also its own duplicates — never dropped silently); each other source,
  * in order, is diffed against what is held so far: a "same" link only adds its origin, a new one is
  * added, and a link that says something else about a place already held (another target, type, range,
- * anchor…) is a CONFLICT — kept out unless `keepConflicts`, so nothing held is ever overwritten.
+ * anchor…) is a CONFLICT — kept out unless `keepConflicts`, so nothing held is ever overwritten. A record of
+ * two lines already held is never a new link, even when the diff had nothing left to pair it with.
  */
 export function mergeLinkSets(sources: readonly MergeSource[], preferred: number, keepConflicts = false): LinkMerge {
   const base = sources[preferred];
   type Entry = { link: Link; origins: string[]; base: boolean };
   const entries: Entry[] = (base?.links ?? []).map((link) => ({ link, origins: [base!.name], base: true }));
   const byLink = new Map<Link, Entry>(entries.map((e) => [e.link, e]));
+  /** the first link held of each two lines (equality.ts "same-lines"): a later record of them is no NEW link */
+  const byLines = new Map<string, Entry>();
+  for (const e of entries) if (!byLines.has(linePairIdentity(e.link))) byLines.set(linePairIdentity(e.link), e);
   const conflicts: MergeConflict[] = [];
   let duplicates = 0;
   sources.forEach((src, i) => {
@@ -233,8 +278,13 @@ export function mergeLinkSets(sources: readonly MergeSource[], preferred: number
       entries.map((e) => e.link),
       own,
     );
-    for (const r of d.rows) {
-      if (r.kind === "removed") continue;
+    for (const row of d.rows) {
+      if (row.kind === "removed") continue;
+      // The diff pairs one link with one: a second record of two lines already held (the first paired as "same")
+      // comes out "added". It is no new link — the database would hold the lines twice — but a disagreement
+      // about them (another ref, type, anchor…), or the same link again; also within one source (V7 §1.7).
+      const held = row.kind === "added" ? byLines.get(linePairIdentity(row.b!)) : undefined;
+      const r: LinkDiffRow = held ? { ...diffLinks([held.link], [row.b!]).rows[0]!, a: held.link } : row;
       if (r.kind === "same") {
         const e = byLink.get(r.a!)!;
         if (!e.origins.includes(src.name)) e.origins.push(src.name);
@@ -246,6 +296,7 @@ export function mergeLinkSets(sources: readonly MergeSource[], preferred: number
         const e = { link: r.b!, origins: [src.name], base: false };
         entries.push(e);
         byLink.set(e.link, e);
+        if (!byLines.has(linePairIdentity(e.link))) byLines.set(linePairIdentity(e.link), e);
       }
     }
   });

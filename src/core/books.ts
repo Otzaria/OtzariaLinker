@@ -37,6 +37,12 @@ export interface SourceBook {
    * database, so the library may hold a links file for it (the export then asks for that file).
    */
   hasSourceLinks?: boolean;
+  /**
+   * Some of the book's links in its database cannot be read (Hebrew, why and what to do): its source has a links table in a layout
+   * it does not know (user_link, db/user-link-not-read). Every count of the book's database links is then partial: coverage says
+   * "unknown", never "no links" (state/coverage.ts).
+   */
+  linksUnread?: string;
 }
 
 export interface SourceLine {

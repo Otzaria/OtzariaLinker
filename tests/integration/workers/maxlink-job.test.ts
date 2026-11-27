@@ -282,6 +282,20 @@ describe("maxlinkJob — a commentary on a commentary, carried to the base of it
     expect(res.items[1]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`)).toEqual(["3>4", "5>2"]);
   });
 
+  it("a hostile range end on the base side is not expanded line by line: the place is too wide to carry (Issue #41 C1)", async () => {
+    // the intermediate's line 3 is linked to the base's lines 4..20,000,000 (a database nobody vouches for); the
+    // intermediate side was clipped by scanEnd, the base side was pushed into an array one line at a time (+400 MB)
+    const wide = [{ id: "w1", source: { book: base, line: 4, end: 20_000_000 }, target: { book: mid, line: 3 }, declaredType: "commentary" }, links[1]!];
+    const reg = { lines: async (key: string) => BOOKS[key]!, existingLinks: async (key: string) => wide.filter((l) => l.source.book.key === key || l.target.book.key === key) } as unknown as SourceRegistry;
+    const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });
+    const t0 = performance.now();
+    const res = await maxlinkJob(reg, plan.steps, {}, {});
+    expect(res.items[1]!.error).toBeUndefined();
+    expect(res.items[1]!.result!.suggestions.map((s) => `${s.source.line}>${s.target.line}`)).toEqual(["5>2"]);
+    expect(res.items[1]!.result!.notes[0]!.text).toContain("רחב מדי");
+    expect(performance.now() - t0).toBeLessThan(2000);
+  });
+
   it("an intermediate place with no link to the base carries nothing", async () => {
     links.pop();
     const plan = planMaxLink({ selected: ["d:3"], library, singleEngines: [], engines: new Set(["headings"]) });

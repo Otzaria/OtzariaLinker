@@ -221,7 +221,10 @@ export class RepositoryState {
 
   private rowOf(source: OpenedSource, book: SourceBook, s: DbLinkSummary | DbLinksUnavailable): RepoRow {
     const base = { key: book.key, title: book.title, ...(book.lineCount !== undefined && { lineCount: book.lineCount }) };
-    if (!("total" in s)) return { ...base, total: 0, out: 0, in: 0, typesOut: {}, ends: { same: 0, library: 0, other: 0, unresolved: 0 }, flags: [], top: [], unavailable: s.reason };
+    // a book whose links were not all read (DbLinkSummary.unread) is not counted: its 0, or any count, would look like the whole
+    const none = (unavailable: string): RepoRow => ({ ...base, total: 0, out: 0, in: 0, typesOut: {}, ends: { same: 0, library: 0, other: 0, unresolved: 0 }, flags: [], top: [], unavailable });
+    if (!("total" in s)) return none(s.reason);
+    if (s.unread) return none(s.unread);
     const typesOut: Partial<Record<ConnectionType, number>> = {};
     for (const t of s.byType) if (t.out) typesOut[t.type] = t.out;
     const ends = { same: 0, library: 0, other: 0, unresolved: 0 };

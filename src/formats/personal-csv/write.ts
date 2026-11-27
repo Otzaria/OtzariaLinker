@@ -186,7 +186,7 @@ export function writePersonalLinksCsv(rows: readonly PersonalLinkRow[], options:
   return { files };
 }
 
-export type PersonalCsvProblemCode = "csv/header" | "csv/fields" | "csv/line" | "csv/constants" | "csv/type" | "csv/empty-field" | "csv/duplicate" | "csv/unknown-target" | "csv/unknown-position";
+export type PersonalCsvProblemCode = "csv/header" | "csv/fields" | "csv/line" | "csv/constants" | "csv/type" | "csv/empty-field" | "csv/duplicate" | "csv/unknown-target" | "csv/unknown-position" | "csv/line-break";
 
 export interface PersonalCsvProblem {
   code: PersonalCsvProblemCode;
@@ -279,6 +279,11 @@ export function validatePersonalRows(rows: readonly PersonalLinkRow[], v: Person
     const p = (code: PersonalCsvProblemCode, text: string) => out.push({ code, line: at, text });
     if (!r.sourceBook.trim() || !r.targetBook.trim() || !r.position.trim()) {
       p("csv/empty-field", "שם ספר המקור, שם הספר שביעד או כותרת המקום ריקים.");
+      continue;
+    }
+    // Otzaria reads the file line by line: a quoted field over two lines would split the row (#42 C23)
+    if (/[\r\n]/.test(r.sourceBook + r.targetBook + r.position + (r.sourceCategory ?? ""))) {
+      p("csv/line-break", "באחד השדות (שם ספר או כותרת המקום) יש מעבר שורה, ואוצריא קוראת את הקובץ שורה אחר שורה. תקנו את השם או את הכותרת.");
       continue;
     }
     if (!Number.isInteger(r.sourceLine) || r.sourceLine < 1) {

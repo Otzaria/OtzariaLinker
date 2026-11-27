@@ -1,4 +1,4 @@
-import { parseConnectionType, type ConnectionType } from "./connection-type";
+import { isInlineLinkerType, parseConnectionType, type ConnectionType } from "./connection-type";
 import type { Link, LinkSide } from "./model";
 import { storedForm } from "./stored-form";
 
@@ -41,6 +41,17 @@ export function storedLinkIdentity(l: Ends & Pick<Link, "declaredType"> & { prov
 }
 
 const identity = (s: LinkSide, t: LinkSide, type: ConnectionType) => `${end(s)}>${end(t)}:${type}`;
+
+/**
+ * The key under which two links of a project are ONE record once Otzaria stores them — "identical" (V3's dedupKey, F-070/F-072/
+ * F-086): the stored identity above, and for an INLINE_LINKER (private use, LINK_FORMATS §1.12) its anchor too, because the app
+ * stores one record per anchor of it. The export's `export/duplicate` and the builder's refusal of an identical link both use
+ * this key, so they can never disagree. Null: the generator would not store the link at all.
+ */
+export function identicalLinkKey(l: Ends & Pick<Link, "declaredType" | "anchor"> & { provenance?: Link["provenance"] }): string | null {
+  const base = storedLinkIdentity(l);
+  return base !== null && isInlineLinkerType(l.declaredType) ? `${base}|inline|${l.anchor?.rawStart ?? ""}-${l.anchor?.rawEnd ?? ""}` : base;
+}
 
 /** The two lines of a link, unordered: equal for the same lines in any direction and of any type. */
 export function linePairIdentity(l: Ends): string {

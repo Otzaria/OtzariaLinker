@@ -30,7 +30,8 @@ export const INLINE_LINKER_LABEL = "ציטוט בטקסט";
 export const INLINE_LINKER_SUPPORT = {
   commit: "6f71470e",
   commitDate: "2026-11-20",
-  checkedOn: "2026-11-22",
+  // V7: checked again on 2026-11-26 with the public releases API — the newest release is still 0.9.98.3+809, without it
+  checkedOn: "2026-11-26",
   latestStable: "0.9.98.3+809",
   latestStableDate: "2026-11-02",
   supportedFrom: null as string | null,
@@ -40,8 +41,8 @@ export const INLINE_LINKER_SUPPORT = {
 export function inlineLinkerVersionNote(): string {
   const s = INLINE_LINKER_SUPPORT;
   return s.supportedFrom
-    ? `ציטוט בטקסט תלוי בגרסת אוצריא: הוא נתמך מגרסה ${s.supportedFrom} (בדיקה מ־${s.checkedOn}). בגרסה ישנה יותר הייבוא האישי ידחה אותו כסוג קישור לא מוכר.`
-    : `ציטוט בטקסט תלוי בגרסת אוצריא: נכון ל־${s.checkedOn} הוא קיים רק בענף dev של אוצריא (commit ${s.commit}, ${s.commitDate}) ועדיין לא בגרסה שפורסמה. הגרסה היציבה האחרונה שנבדקה, ${s.latestStable} (${s.latestStableDate}), לא מכירה אותו, והייבוא האישי שלה ידחה אותו כסוג קישור לא מוכר.`;
+    ? `ציטוט בטקסט תלוי בגרסת אוצריא: הוא נתמך מגרסה ${s.supportedFrom} (בדיקה מ־${s.checkedOn}). בגרסה ישנה יותר הייבוא האישי ידחה אותו כסוג קישור לא מוכר — ואיתו את כל קובץ הקישורים של הספר, גם את הקישורים האחרים שבו.`
+    : `ציטוט בטקסט תלוי בגרסת אוצריא: נכון ל־${s.checkedOn} הוא קיים רק בענף dev של אוצריא (commit ${s.commit}, ${s.commitDate}) ועדיין לא בגרסה שפורסמה. הגרסה היציבה האחרונה שנבדקה, ${s.latestStable} (${s.latestStableDate}), לא מכירה אותו, והייבוא האישי שלה ידחה אותו כסוג קישור לא מוכר — ואיתו את כל קובץ הקישורים של הספר, גם את הקישורים האחרים שבו (נבדק באוצריא 0.9.98.3, בדיקה חיה 16).`;
 }
 
 /**

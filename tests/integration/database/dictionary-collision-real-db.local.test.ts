@@ -1,6 +1,6 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
-import { sharedDictionaries } from "../../../src/database/compression/zstd";
+import { OFFICIAL_DICTIONARY_SHA256, sharedDictionaries } from "../../../src/database/compression/zstd";
 import type { ByteSource } from "../../../src/database/sqlite/lazy/byte-source";
 import { DbBookSource } from "../../../src/sources/db/db-source";
 
@@ -33,8 +33,11 @@ describe.runIf(official && personal)("dictID 32768 in two open databases", () =>
     for (const order of [["official", "personal"], ["personal", "official"]] as const) {
       const opened = new Map<string, DbBookSource>();
       for (const [i, which] of order.entries()) opened.set(which, await DbBookSource.open(`s${i + 1}`, which === "official" ? "seforim.db" : "personal.db", source(which === "official" ? official! : personal!)));
-      // both dictionaries are in the shared pool now: the id is marked as a conflict, and each database still decodes
-      expect(sharedDictionaries.isConflicted(32768)).toBe(true);
+      // both dictionaries are in the shared pool now; only the official one may be lent to a database that lacks
+      // one (B19: v52's own dictionary shares the dictID, not the identity), and each database decodes with its own
+      expect(sharedDictionaries.isConflicted(32768)).toBe(false);
+      expect(sharedDictionaries.lend(32768)?.sha256).toBe(OFFICIAL_DICTIONARY_SHA256);
+      expect(sharedDictionaries.unlendableOrigins(32768)).toEqual(["personal.db"]);
       for (const [which, src] of opened) {
         let read = 0;
         for (const b of (await src.books()).slice(0, 60)) {
@@ -45,6 +48,10 @@ describe.runIf(official && personal)("dictID 32768 in two open databases", () =>
         console.log(`${which}: ${read} books read (order ${order.join(" then ")})`);
         expect(read, which).toBeGreaterThanOrEqual(3);
       }
+      // closed, both give their dictionaries back: the next order starts from an empty pool
+      for (const src of opened.values()) src.close();
+      expect(sharedDictionaries.lend(32768)).toBeUndefined();
+      expect(sharedDictionaries.unlendableOrigins(32768)).toEqual([]);
     }
   });
 });

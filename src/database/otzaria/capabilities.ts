@@ -23,7 +23,14 @@ export interface DbCapabilities {
   coverage: boolean;
   suppressedSides: boolean;
   externalLinks: boolean;
+  /** a `user_link` table exists (Otzaria's user_books.db); whether it can be read is `userLinkSchema` */
   userLinks: boolean;
+  /**
+   * which user_link layout the table's columns are (docs/contracts/LINK_SCHEMA_MATRIX.md §6.1): "title" — each side by title +
+   * isUserBook flag (database.dart:881-906 @ a6be90800), "book-id" — the first one, the source by sourceBookId (@ 65db26bd2);
+   * null when there is no table, or it lacks a column both layouts need (it is then not read, and the reader warns)
+   */
+  userLinkSchema: UserLinkSchema | null;
   toc: boolean;
   altToc: boolean;
   sources: boolean;
@@ -35,6 +42,19 @@ export interface DbCapabilities {
 }
 
 export const READABLE_SCHEMA = 7;
+
+export type UserLinkSchema = "title" | "book-id";
+
+/**
+ * The columns each user_link layout cannot do without. The optional ones (sourceCategoryId, targetCategoryId, targetRef,
+ * anchor*, *End, targetRefEnd, source, sourceDb, targetDb) were added later, some by ALTER (_ensureUserLinkSchema,
+ * database.dart:248-295 @ a6be90800), so a table may lack them; targetIsUserBook is in both layouts and is what tells a
+ * personal book from a library one, so a table without it is not read (a side would be guessed).
+ */
+export const USER_LINK_REQUIRED: Readonly<Record<UserLinkSchema, readonly string[]>> = {
+  title: ["sourceTitle", "sourceIsUserBook", "sourceLineIndex", "targetTitle", "targetIsUserBook", "targetLineIndex", "connectionType"],
+  "book-id": ["sourceBookId", "sourceLineIndex", "targetTitle", "targetIsUserBook", "targetLineIndex", "connectionType"],
+};
 
 export async function detectCapabilities(file: SqliteFile): Promise<DbCapabilities> {
   const schema = await file.schema();
@@ -104,6 +124,7 @@ export async function detectCapabilities(file: SqliteFile): Promise<DbCapabiliti
     suppressedSides: has("link_suppressed_side"),
     externalLinks: has("external_link"),
     userLinks: has("user_link"),
+    userLinkSchema: has("user_link") ? ((["title", "book-id"] as const).find((k) => USER_LINK_REQUIRED[k].every((c) => col("user_link", c))) ?? null) : null,
     toc: has("tocentry"),
     altToc: has("alt_toc_structure"),
     sources: has("source") && col("book", "sourceId"),

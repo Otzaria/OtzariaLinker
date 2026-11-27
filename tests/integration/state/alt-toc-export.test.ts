@@ -155,3 +155,18 @@ describe("AppStore — Sefaria-layout CSV export", () => {
     expect(saved).toEqual([{ name: "פירוש על חומש שלי.links.csv", data: csv[0]!.text, mime: "text/csv;charset=utf-8" }]);
   });
 });
+
+describe("an export with nothing to write (#42 C24)", () => {
+  it("says so, instead of returning without a word", async () => {
+    const { store, saved } = makeStore();
+    await store.openFiles([BOOK]);
+    const plan = (await store.exchange.prepareExport())!;
+    const before = store.notices.value.length;
+    store.exchange.saveExport(plan);
+    expect(saved).toEqual([]);
+    const said = store.notices.value.slice(before);
+    expect(said).toHaveLength(1);
+    expect(said[0]!.kind).toBe("warning");
+    expect(said[0]!.text).toContain("לא נוצר קובץ");
+  });
+});

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { canonicalTypeString, parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
 import { diffGroup, type LinkDiffGroup, type LinkDiffRow } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
-import { DIFF_KIND_LABELS, detailsText, diffGroupLabels } from "../../formats/report/link-diff-report";
+import { DIFF_KIND_LABELS, detailsText, diffGroupLabels, diffRowLabel } from "../../formats/report/link-diff-report";
 import { PROJECT_SET } from "../../state/link-compare";
 import { useStore } from "../context";
 import { pickFiles } from "../files";
@@ -15,7 +15,7 @@ import { ltr } from "../shell/file-name";
  * Files picked here are only read for the comparison; a merge is applied to the project as ONE
  * undoable action, after its preview.
  */
-const GROUPS: readonly LinkDiffGroup[] = ["conflict", "details", "overlap", "onlyA", "onlyB", "identical"];
+const GROUPS: readonly LinkDiffGroup[] = ["conflict", "refs", "details", "overlap", "onlyA", "onlyB", "identical"];
 const PAGE = 100;
 
 export function CompareDialog({ onClose }: { onClose: () => void }) {
@@ -90,7 +90,7 @@ export function CompareDialog({ onClose }: { onClose: () => void }) {
             <ul class="cmp-sets">
               {sets.map((s) => (
                 <li key={s.id}>
-                  <b>{fname(s.name)}</b> <span class="muted">{s.links.length.toLocaleString("he")} קישורים{s.skipped ? ` (ועוד ${s.skipped.toLocaleString("he")} שאינם יכולים להיות בקובץ: זיהוי אוטומטי וספריא)` : ""}</span>
+                  <b>{fname(s.name)}</b> <span class="muted">{s.links.length.toLocaleString("he")} קישורים{s.skipped ? ` (ועוד ${s.skipped.toLocaleString("he")} שאינם יכולים להיות בקובץ: זיהוי אוטומטי וספריא)` : ""}{s.unreadable ? ` (ועוד ${s.unreadable.toLocaleString("he")} רשומות פגומות שלא נקראו ולא מושוות)` : ""}</span>
                   {s.id !== PROJECT_SET && (
                     <button class="icon-btn" title="הסרה מההשוואה" aria-label={`הסרת ${s.name}`} onClick={() => c.forget(s.id)}>
                       <Icon name="fl_dismiss" size={16} />
@@ -135,9 +135,9 @@ const typeText = (raw: string, advanced: boolean) => {
 };
 const linkText = (l: Link | undefined, advanced: boolean) => (l ? `${place(l.source)} ← ${place(l.target)} · ${typeText(l.declaredType, advanced)}${l.anchor ? ` · עוגן ${l.anchor.rawStart}` : ""}` : "—");
 
-/** a link in a table cell; a "details" row adds the fields that differ — otherwise both columns read the same (#15) */
+/** a link in a table cell; a "details" or "ref" row adds the fields that differ — otherwise both columns read the same (#15) */
 function Cell({ l, advanced, kind, a, b, side }: { l: Link | undefined; advanced: boolean; kind: string; a?: Link; b?: Link; side: "a" | "b" }) {
-  const extra = kind === "details" ? detailsText(a, b, side) : "";
+  const extra = kind === "details" || kind === "ref" ? detailsText(a, b, side) : "";
   return (
     <td>
       {linkText(l, advanced)}
@@ -163,7 +163,7 @@ function DiffView() {
   return (
     <section class="cmp-diff" aria-label="תוצאת ההשוואה">
       <div class="filters" style="padding:0">
-        {GROUPS.filter((g) => g !== "details" || counts[g] > 0).map((g) => (
+        {GROUPS.filter((g) => (g !== "details" && g !== "refs") || counts[g] > 0).map((g) => (
           <button key={g} class="chip" aria-pressed={group === g} onClick={() => (setGroup(g), setShown(PAGE))}>
             {labels[g]} <span class="count">{counts[g].toLocaleString("he")}</span>
           </button>
@@ -182,7 +182,7 @@ function DiffView() {
         <tbody>
           {rows.slice(0, shown).map((x: LinkDiffRow, i) => (
             <tr key={i} class={`k-${x.kind}`}>
-              <td>{DIFF_KIND_LABELS[x.kind]}</td>
+              <td>{diffRowLabel(x)}</td>
               <Cell l={x.a} advanced={advanced} kind={x.kind} a={x.a} b={x.b} side="a" />
               <Cell l={x.b} advanced={advanced} kind={x.kind} a={x.a} b={x.b} side="b" />
             </tr>

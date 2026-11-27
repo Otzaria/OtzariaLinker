@@ -183,7 +183,7 @@ CREATE INDEX idx_line_book_index ON line(bookId, lineIndex)
 - כל מסד נפתח ומפוענח **עם המילון של עצמו** מתוך `zstd_dict` שלו. אסור להניח שה־`dictID` בכותרת המסגרת מזהה מילון ברמת הסשן.
 - **נבדק בפועל (2026-11-22):** `tests/integration/database/dictionary-collision-real-db.local.test.ts` פותח את שני המסדים יחד, בשני הסדרים, ו־`sharedDictionaries.isConflicted(32768)` הוא true; מכל מסד נקראות שורות של 3 ספרים לפחות, מפוענחות עם המילון של עצמו (הרצה מקומית עם `OTZARIA_DB` ו־`OTZARIA_PERSONAL_DB`: 1 passed).
 - [DATABASE_SUPPORT_MATRIX §3.4](../contracts/DATABASE_SUPPORT_MATRIX.md) מניח שמסד PDC מעתיק את המילון הרשמי. ב־v52 זה לא נכון: המילון קטן בהרבה ושונה.
-- מסד אישי שדחוס במילון הרשמי **בלי** `zstd_dict` משלו לא ייפתר נכון בבריכת מילונים משותפת. זה לא נבדק בפועל בתוכנה.
+- מסד אישי שדחוס במילון הרשמי **בלי** `zstd_dict` משלו לא נפתר נכון בבריכת מילונים שבוחרת לפי dictID בלבד (B19, issue #41): כשרק v52 פתוח, הוא קיבל את המילון של v52. **תוקן (2026-11-26):** הבריכה שואלת רק את המילון הרשמי (לפי SHA-256) או קובץ מילון שהמשתמש פתח; `tests/integration/database/zstd.test.ts` (על מילון שני עם אותו dictID) ו־`dictionary-identity-real-db.local.test.ts` (על הרשמי האמיתי). מסד v52 עצמו לא היה זמין בבדיקה הזו. מאז, `isConflicted(32768)` כששני המסדים פתוחים הוא false: רק הרשמי מותר לשאילה.
 
 ## 8. מה לא נמדד
 

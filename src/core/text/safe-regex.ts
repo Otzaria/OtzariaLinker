@@ -1,3 +1,5 @@
+import { backtrackingCost } from "./regex-cost";
+
 /*
  * A guard for regular expressions typed by the user (engine options). JavaScript regexes backtrack
  * and a synchronous run cannot be interrupted, so a careless pattern could freeze the worker; every
@@ -13,6 +15,13 @@ const MAX_UNBOUNDED_QUANTIFIERS = 2;
 const WIDE_RANGE = 8;
 /** every unbounded quantifier is rewritten to at most this many repetitions (security review #7) */
 export const QUANTIFIER_CAP = 64;
+/**
+ * The most backtracking work (regex-cost.ts) a pattern may need at one position of a line. What the
+ * guard accepted before stays in: two capped quantifiers over the same letters (`a{1,500}a{1,500}b`,
+ * `.*x.*y`, ~8,600) and every preset (at most ~6,400). On a 20,000-character line of the worst text
+ * for it, a pattern at this bound ran 0.16–0.25 s in V8; `a{1,8}` five times (~70,000) is refused.
+ */
+export const MAX_BACKTRACKING_COST = 10_000;
 
 export type PatternCheck = { readonly ok: true; readonly regex: RegExp } | { readonly ok: false; readonly reason: string };
 
@@ -28,7 +37,10 @@ export type PatternCheck = { readonly ok: true; readonly regex: RegExp } | { rea
  * theirs, so `a{1,500}a{1,500}a{1,500}b` is refused instead of running for minutes.
  * Then every unbounded quantifier is BOUNDED (`*` → `{0,64}`, `+` → `{1,64}`, `{n,}` → `{n,n+64}`, `{n,m}` → `{n,min(m,n+64)}`),
  * so even a polynomial pattern like `a*a*b` costs at most ~line × 64² steps; markers are short, so
- * no real marker pattern is affected. Lines longer than MAX_CUSTOM_REGEX_INPUT are not searched.
+ * no real marker pattern is affected. Last, the work the bounded pattern can need at one position
+ * of a line is bounded (regex-cost.ts, MAX_BACKTRACKING_COST): the shape rules alone let chains of
+ * narrow ranges (`a{1,8}a{1,8}…`), alternations that overlap (`(a|aa)(a|aa)…`) and optional
+ * groups through, and those multiply. Lines longer than MAX_CUSTOM_REGEX_INPUT are not searched.
  */
 export function checkCustomPattern(pattern: string, flags = "", limits: { readonly maxLength?: number } = {}): PatternCheck {
   const p = String(pattern ?? "");
@@ -47,6 +59,19 @@ export function checkCustomPattern(pattern: string, flags = "", limits: { readon
   } catch (e) {
     return { ok: false, reason: `ביטוי רגולרי לא תקין: ${(e as Error).message}` };
   }
+  // the rules above are about shapes; this bounds the work itself — what runs, after the capping (Issue #41 B16)
+  let cost: number;
+  try {
+    cost = backtrackingCost(regex.source, safeFlags, { cap: QUANTIFIER_CAP, budget: MAX_BACKTRACKING_COST });
+  } catch {
+    cost = Infinity;
+  }
+  if (cost > MAX_BACKTRACKING_COST)
+    return {
+      ok: false,
+      reason:
+        "הביטוי עלול להקפיא את הכלי: כמה חלקים בו יכולים להתאים לאותם תווים זה אחר זה (למשל a{1,8}a{1,8}a{1,8}, או (a|aa)(a|aa)), ויש יותר מדי דרכים לחלק ביניהם שורה. אחדו חלקים סמוכים לחלק אחד (a{3,24}), צמצמו טווחים, או הפרידו ביניהם בתו קבוע.",
+    };
   if (new RegExp(p, safeFlags.replace("g", "")).test("")) return { ok: false, reason: "הביטוי מתאים גם למחרוזת ריקה, ולכן היה מסמן כל מקום בשורה." };
   return { ok: true, regex };
 }

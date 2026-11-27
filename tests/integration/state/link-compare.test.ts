@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { buildExportReport } from "../../../src/formats/report/export-report";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
 import { AppStore } from "../../../src/state/store";
@@ -89,11 +90,34 @@ describe("comparing a book's links: database, files, project", () => {
     const file = exp.files.find((f) => f.name === FILE_NAME)!;
     expect(file.text.startsWith(V1.slice(0, -2))).toBe(true);
     expect(JSON.parse(file.text)).toEqual([LIB_1, ...DB_ROWS, expect.objectContaining({ line_index_1: 500, line_index_2: 2000 })]);
+    // V7 §1.9: before → after for the file it replaces, in the plan and in the report
+    expect([file.before, file.records, file.isNewFile]).toEqual([6, 7, false]);
+    expect(buildExportReport({ date: "d", app: "t", format: "json", links: exp, altToc: exp.altToc })).toContain(`links/${FILE_NAME}  (7 רשומות; בקובץ שנטען היו 6)`);
 
     // one undo takes the whole merge back, the file record too
     store.undo();
     expect(store.allLinks.value).toEqual([]);
     expect(store.dbLinks.linksFile("ארצות החיים")).toBe("missing");
+  });
+
+  /*
+   * V7 §1.7 (unverifiable): a record of a compared file that the parser cannot decode was dropped from the set without a
+   * word — the comparison then said nothing about it, as if the file did not hold it. It is counted on the set and said
+   * when the file is added, and a merge that keeps such a file as the book's file says the record is not in it.
+   */
+  it("a record of a compared file that cannot be read is counted and said, never left out silently", async () => {
+    const { store } = await opened();
+    const broken = JSON.stringify([LIB_1, { ...DB_ROWS[0], line_index_2: "x" }, DB_ROWS[1]], null, 2);
+    const before = store.notices.value.length;
+    store.compare.addFiles([{ path: `a/${FILE_NAME}`, text: broken }, { path: `b/${FILE_NAME}`, text: V1 }]);
+    const [a, b] = store.compare.setsOf("ארצות החיים");
+    expect([a!.links.length, a!.unreadable, b!.links.length, b!.unreadable ?? 0]).toEqual([2, 1, 6, 0]);
+    const said = store.notices.value.slice(before);
+    expect(said.filter((n) => n.kind === "warning").map((n) => n.text)).toEqual([expect.stringMatching(/a\/ארצות החיים_links\.json.*רשומה אחת.*לא הושוו/)]);
+    // the merge that keeps the broken file as the book's file says that the record is not in it
+    const mark = store.notices.value.length;
+    expect(store.compare.applyMerge("ארצות החיים", ["file:0", "file:1"], "file:0", false)).toBe(4);
+    expect(store.notices.value.slice(mark).some((n) => n.kind === "warning" && /רשומה אחת.*לא נקראה/.test(n.text))).toBe(true);
   });
 
   it("never overwrites: a file is not preferred over an edited copy in the project; the project as base adds only what is new", async () => {

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { SourceRegistry } from "../../../src/sources/registry";
 import { loadPreferences } from "../../../src/state/preferences";
@@ -34,11 +35,33 @@ describe("SourceRegistry: a file opens once", () => {
     expect(res.reused).toHaveLength(1);
   });
 
-  it("another file name, or another last-modified time, is another database", async () => {
+  // V7 §1.6 / #42 C29: this test said the opposite before — a byte-identical copy under another name was loaded as a second
+  // source, every book listed twice. The identity is now the content and the last-modified time, not the name (a copy made in
+  // the file manager keeps the time).
+  it("a byte-identical copy under another name is the same database", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open([DB()]);
+    const copy = await r.open([DB("copy.db")]);
+    expect(copy.sources).toEqual([]);
+    expect(copy.reused![0]!.info.id).toBe(first.sources[0]!.info.id);
+    expect(copy.reused![0]!.as).toBe("copy.db");
+  });
+
+  // V7 PR1 review, finding 6: in WAL mode SQLite does not bump the header's change counter on every commit, so a database
+  // changed in place (same size, the change outside the samples) looked "already open" without the last-modified time
+  it("the same bytes with another last-modified time are another state of the file: opened again", async () => {
     const r = new SourceRegistry();
     await r.open([DB()]);
-    expect((await r.open([DB("copy.db")])).sources).toHaveLength(1);
     expect((await r.open([DB("seforim.db", 1_800_000_000_000)])).sources).toHaveLength(1);
+  });
+
+  it("the same name and size with other content is another database, also when only the middle differs", async () => {
+    const r = new SourceRegistry();
+    await r.open([DB()]);
+    const other = new Uint8Array(BYTES);
+    const mid = Math.floor(other.length / 2);
+    other[mid] = (other[mid]! + 1) & 0xff; // not in the header, not in the first or the last page
+    expect((await r.open([{ path: "seforim.db", blob: new File([other], "seforim.db", { lastModified: 1_700_000_000_000 }) }])).sources).toHaveLength(1);
   });
 
   it("a plain Blob (no last-modified) is identified by name, size and header", async () => {
@@ -127,5 +150,117 @@ describe("AppStore: no duplicate sources, no duplicate books", () => {
     await busy;
     expect(await store.closeSource(id)).toBe(true);
     expect(store.sources.value).toHaveLength(0);
+  });
+});
+
+/*
+ * V3 F-016 (legacy addBooks, OtzariaLinker-v3.html:2858): a book was added once per source, path and title. V4 deduplicated
+ * databases only: a text file or a folder picked again opened as another source, every book listed twice. A text book is now
+ * known by its name, size, last-modified time and the bytes at its start, middle and end (an entry of a ZIP: all its bytes); one
+ * already open is not opened again.
+ */
+const TXT = (path: string, text: string, lastModified = 1_700_000_000_000) => ({ path, blob: new File([text], path.split("/").at(-1)!, { lastModified }) });
+const FOLDER = () => [TXT("mine/ספר א.txt", "<h1>ספר א</h1>\nשורה 1\nשורה 2"), TXT("mine/ספר ב.txt", "<h1>ספר ב</h1>\nשורה 1")];
+
+describe("SourceRegistry: a text file or folder opens once (F-016)", () => {
+  it("the same .txt file picked twice is one source; the second pick reports it as reused", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open([TXT("ספר א.txt", "<h1>ספר א</h1>\nשורה 1")]);
+    const again = await r.open([TXT("ספר א.txt", "<h1>ספר א</h1>\nשורה 1")]);
+    expect(again.sources).toEqual([]);
+    expect(again.reused?.map((s) => s.info.id)).toEqual([first.sources[0]!.info.id]);
+  });
+
+  it("the same folder picked twice is one source", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open(FOLDER());
+    const again = await r.open(FOLDER());
+    expect(again.sources).toEqual([]);
+    expect(again.reused?.map((s) => s.info.id)).toEqual([first.sources[0]!.info.id]);
+  });
+
+  it("a file of an open folder picked alone is not another book", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open(FOLDER());
+    const one = await r.open([FOLDER()[1]!]);
+    expect(one.sources).toEqual([]);
+    expect(one.reused?.[0]!.info.id).toBe(first.sources[0]!.info.id);
+  });
+
+  it("the folder picked again with a new file opens the new file only", async () => {
+    const r = new SourceRegistry();
+    await r.open(FOLDER());
+    const more = await r.open([...FOLDER(), TXT("mine/ספר ג.txt", "<h1>ספר ג</h1>\nשורה 1")]);
+    expect(more.sources).toHaveLength(1);
+    expect(more.sources[0]!.books.map((b) => b.title)).toEqual(["ספר ג"]);
+    expect(more.reused).toHaveLength(1);
+  });
+
+  it("the same name with other content, or changed since (another time), is another edition: opened", async () => {
+    const r = new SourceRegistry();
+    await r.open([TXT("ספר א.txt", "<h1>ספר א</h1>\nשורה 1")]);
+    expect((await r.open([TXT("ספר א.txt", "<h1>ספר א</h1>\nשורה 2")])).sources).toHaveLength(1);
+    expect((await r.open([TXT("ספר א.txt", "<h1>ספר א</h1>\nשורה 1", 1_800_000_000_000)])).sources).toHaveLength(1);
+    // the same content under another name is another book (its title is its name)
+    expect((await r.open([TXT("ספר אחר.txt", "<h1>ספר א</h1>\nשורה 1")])).sources).toHaveLength(1);
+  });
+
+  it("closing the source releases its files: picked again, they open", async () => {
+    const r = new SourceRegistry();
+    const first = await r.open(FOLDER());
+    r.close(first.sources[0]!.info.id);
+    const again = await r.open(FOLDER());
+    expect(again.sources).toHaveLength(1);
+    expect(again.reused).toBeUndefined();
+  });
+
+  it("the same ZIP picked twice is one source", async () => {
+    const zip = () => ({ path: "books.zip", blob: new Blob([zipSync({ "ספר א.txt": strToU8("<h1>ספר א</h1>\nשורה 1") })]) });
+    const r = new SourceRegistry();
+    const first = await r.open([zip()]);
+    expect(first.sources).toHaveLength(1);
+    const again = await r.open([zip()]);
+    expect(again.sources).toEqual([]);
+    expect(again.reused?.[0]!.info.id).toBe(first.sources[0]!.info.id);
+  });
+
+  // V7 round 2 review, finding 3: a ZIP entry has no last-modified time, and the identity read only the first 64 KiB and the last
+  // 4 KiB — a second edition of a book in another ZIP, the same size and one letter changed in the middle, was "already open"
+  it("a book in another ZIP that differs only in the middle (the same name and size) is another edition: opened", async () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `שורה ${i + 1} של הספר, עם מעט טקסט כדי שהקובץ יהיה גדול`);
+    const v52 = lines.join("\n");
+    const mid = Math.floor(lines.length / 2);
+    const v53 = [...lines.slice(0, mid), lines[mid]!.replace("ספר", "ספד"), ...lines.slice(mid + 1)].join("\n");
+    const zip = (name: string, text: string) => ({ path: name, blob: new Blob([zipSync({ "ספר.txt": strToU8(text) })]) });
+    expect(strToU8(v52).length).toBe(strToU8(v53).length);
+    expect(strToU8(v52).length).toBeGreaterThan(3 * 64 * 1024); // the change is far from the first 64 KiB and the last 4 KiB
+    const r = new SourceRegistry();
+    expect((await r.open([zip("v52.zip", v52)])).sources).toHaveLength(1);
+    const second = await r.open([zip("v53.zip", v53)]);
+    expect(second.reused).toBeUndefined();
+    expect(second.sources).toHaveLength(1);
+    // the same bytes in another ZIP are the same book
+    const third = await r.open([zip("copy.zip", v52)]);
+    expect(third.sources).toEqual([]);
+    expect(third.reused).toHaveLength(1);
+  });
+
+  it("a .txt on disk with the same name, size and time but another middle is another edition: opened", async () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `שורה ${i + 1} של הספר, עם מעט טקסט כדי שהקובץ יהיה גדול`);
+    const mid = Math.floor(lines.length / 2);
+    const r = new SourceRegistry();
+    await r.open([TXT("ספר.txt", lines.join("\n"))]);
+    const other = [...lines.slice(0, mid), lines[mid]!.replace("ספר", "ספד"), ...lines.slice(mid + 1)].join("\n");
+    expect((await r.open([TXT("ספר.txt", other)])).sources).toHaveLength(1);
+  });
+
+  it("in the app: the same folder twice keeps one source and one entry per book, and says it is open", async () => {
+    const store = makeStore();
+    await store.openFiles(FOLDER());
+    await store.openFiles(FOLDER());
+    expect(store.sources.value).toHaveLength(1);
+    expect(store.books.value.size).toBe(2);
+    expect(store.lastOpen.reused).toEqual([store.sources.value[0]!.info.id]);
+    expect(store.notices.value.some((m) => m.text.includes("כבר פתוח"))).toBe(true);
   });
 });

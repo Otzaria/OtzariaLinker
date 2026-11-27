@@ -1,5 +1,5 @@
 import { humanCsvCell } from "../../core/csv";
-import { detailDifferences, type DetailField, diffGroup, type LinkDiff, type LinkDiffGroup, type LinkDiffKind } from "../../core/links/link-diff";
+import { detailDifferences, type DetailField, diffGroup, type LinkDiff, type LinkDiffGroup, type LinkDiffKind, type LinkDiffRow } from "../../core/links/link-diff";
 import type { Link, LinkSide } from "../../core/links/model";
 
 /*
@@ -12,12 +12,16 @@ export const DIFF_KIND_LABELS: Readonly<Record<LinkDiffKind, string>> = {
   anchor: "עוגן שונה",
   type: "סוג שונה",
   direction: "כיוון הפוך",
-  details: "שם מקום/ref שונה",
+  ref: "ציון ספריא שונה",
+  details: "שם המקום שונה",
   target: "יעד שונה",
   moved: "עבר לשורה אחרת",
   removed: "נמחק",
   added: "נוסף",
 };
+
+/** A row's change in words: a "same" row written differently (V7 §1.7) says so, apart from an identical one. */
+export const diffRowLabel = (r: Pick<LinkDiffRow, "kind" | "equivalent">): string => (r.equivalent ? "זהה במשמעות, כתוב אחרת" : DIFF_KIND_LABELS[r.kind]);
 
 /** "רק במסד", "רק בפרויקט", "רק ב־x_links.json" */
 const only = (name: string) => (name.startsWith("ה") && !name.includes(".") ? `רק ב${name.slice(1)}` : `רק ב־${name}`);
@@ -25,6 +29,7 @@ const only = (name: string) => (name.startsWith("ה") && !name.includes(".") ? `
 export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffGroup, string>> => ({
   identical: "זהים",
   conflict: "סותרים",
+  refs: "ציוני ספריא שונים",
   details: "רק שם המקום",
   overlap: "טווחים חופפים",
   onlyA: only(a),
@@ -35,7 +40,7 @@ export const diffGroupLabels = (a: string, b: string): Readonly<Record<LinkDiffG
 export const DETAIL_LABELS: Readonly<Record<DetailField, string>> = { heRef2: "שם המקום ביעד", ref1: "ציון ספריא בספר המקור", ref2: "ציון ספריא בספר היעד" };
 
 /**
- * What a "details" row says on each side: only the fields that differ, quoted so that a space or an empty
+ * What a "details" or "ref" row says on each side: only the fields that differ, quoted so that a space or an empty
  * value is visible ("שם המקום ביעד: «x» ← «y»" shows the two as the same line would hide it, #15).
  */
 export function detailsText(a: Link | undefined, b: Link | undefined, side: "a" | "b"): string {
@@ -53,6 +58,6 @@ export function linkDiffCsv(d: LinkDiff, a: string, b: string): string {
   const side = (n: string) => [`${n}: ספר מקור`, "שורה", "ספר יעד", "שורה", "סוג", "עוגן", "שם המקום ביעד", "ref_1", "ref_2"];
   const groups = diffGroupLabels(a, b);
   const head = ["קבוצה", "שינוי", ...side(a), ...side(b)];
-  const rows = d.rows.map((r) => [groups[diffGroup(r)], DIFF_KIND_LABELS[r.kind], ...sideCells(r.a), ...sideCells(r.b)].map(esc).join(","));
+  const rows = d.rows.map((r) => [groups[diffGroup(r)], diffRowLabel(r), ...sideCells(r.a), ...sideCells(r.b)].map(esc).join(","));
   return `﻿${[head.map(esc).join(","), ...rows].join("\r\n")}\r\n`;
 }

@@ -14,6 +14,16 @@ export interface BookRef {
   readonly origin: BookOrigin;
   /** Sefaria priority-list base book (Tanakh, Bavli…). undefined = not known; affects flip/downgrade. */
   readonly isBaseBook?: boolean;
+  /**
+   * Only on an unresolved book of a saved project: the label of the source it was read from
+   * (StoredBook.source), kept so that the right one of same-titled books binds when it opens (#41 B18).
+   */
+  readonly source?: string;
+  /**
+   * Only on an unresolved book (V7 §1.1): its edition (core/text/fingerprint.ts editionFingerprint) when known — what tells it
+   * apart from a book of the same title, origin and source label (StoredBook.edition).
+   */
+  readonly edition?: string;
 }
 
 export interface LinkSide {
@@ -65,8 +75,8 @@ export interface DbAnchor {
  */
 export const DB_LINK_FLAGS = ["target-out-of-range", "header-target", "header-source", "reverse-duplicate", "ambiguous-title", "source-out-of-range"] as const;
 export type DbLinkFlag = (typeof DB_LINK_FLAGS)[number];
-/** The table of a database link: the official `link`, or the `external_link` of a personal database (Personal-DB-Creator). */
-export type DbLinkTable = "link" | "external_link";
+/** The table of a database link: the official `link`, the `external_link` of a personal database (Personal-DB-Creator), or the `user_link` of Otzaria's user_books.db. */
+export type DbLinkTable = "link" | "external_link" | "user_link";
 
 export type LinkStatus = "new" | "edited" | "existing" | "deleted";
 

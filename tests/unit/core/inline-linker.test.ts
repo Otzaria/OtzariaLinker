@@ -198,7 +198,7 @@ describe("INLINE_LINKER depends on the Otzaria version (no promise for every ver
     expect(note).toMatch(/תלוי בגרסת אוצריא/);
     expect(note).toContain("dev");
     expect(note).toContain("0.9.98.3+809");
-    expect(note).toContain("2026-11-22"); // when it was checked
+    expect(note).toContain("2026-11-26"); // when it was checked (V7: measured again with the public releases API)
     expect(note).toMatch(/עדיין לא בגרסה שפורסמה/);
     expect(note).not.toMatch(/בכל הגרסאות|כל גרסה|נתמך בכל/);
   });

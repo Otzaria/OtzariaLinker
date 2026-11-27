@@ -1,12 +1,13 @@
 import { MAX_BOOK_LINES } from "../../core/limits";
 import { CONNECTION_TYPES, canonicalTypeString } from "../../core/links/connection-type";
-import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type Link } from "../../core/links/model";
+import { DB_LINK_FLAGS, type BookOrigin, type BookRef, type DbLinkFlag, type DbLinkTable, type Link } from "../../core/links/model";
 import { headingLevel } from "../../core/text/html";
 import type { LibraryAltTocStructure } from "../../core/alt-toc/model";
 import { readAltToc } from "../../database/otzaria/alt-toc-reader";
 import { ExternalLinksReader, type ExternalLinkRow, type InternalLinks } from "../../database/otzaria/external-links-reader";
 import { DbLinksReader, type DbLinkRow } from "../../database/otzaria/links-reader";
 import { OtzariaDbReader, type DbBook, type DbLine } from "../../database/otzaria/reader";
+import { UserLinksReader, type UserLinkIndex, type UserLinkRow, type UserLinkSide } from "../../database/otzaria/user-links-reader";
 import { TocLines } from "../../database/otzaria/toc-lines";
 import type { ByteSource } from "../../database/sqlite/lazy/byte-source";
 import type { BookSource, LineChunk, SourceBook, SourceInfo, SourceLine } from "../book-source";
@@ -36,6 +37,8 @@ export class DbBookSource implements BookSource {
     private readonly links: DbLinksReader | null,
     /** the links of a database that has no `link` table: its `external_link` (Personal-DB-Creator) */
     private readonly ext: ExternalLinksReader | null = null,
+    /** the personal links of Otzaria's user_books.db (`user_link`, Issue #41 B20) */
+    private readonly user: UserLinksReader | null = null,
   ) {}
 
   /** where an external_link row's target lives (other sources): set by the registry, absent in a lone source */
@@ -44,21 +47,37 @@ export class DbBookSource implements BookSource {
   private internalRun: SharedRun<InternalLinks> | null = null;
   /** why external_link is not read, when the database has one that cannot be (open() warned already) */
   private extProblem = "";
+  /** why user_link is not read, when the database has one that cannot be (open() warned already, db/user-link-not-read): every count of a book is then partial */
+  private userProblem = "";
   private titleToId: Map<string, number> | null = null;
 
   static async open(id: string, label: string, src: ByteSource): Promise<DbBookSource> {
-    const reader = await OtzariaDbReader.open(src);
+    const reader = await OtzariaDbReader.open(src, label);
+    // the reader holds the database's dictionaries in the worker's pool: a failure past this point must release them,
+    // or they stay there (and can make a dictionary id conflicted) for the rest of the session (Issue #41 C3)
+    try {
+      return await DbBookSource.build(id, label, reader);
+    } catch (err) {
+      reader.close();
+      throw err;
+    }
+  }
+
+  private static async build(id: string, label: string, reader: OtzariaDbReader): Promise<DbBookSource> {
     const links = await DbLinksReader.open(reader.file, reader.caps);
     // a database with both tables lists the links of both, each once (mergeParts); external_link alone is a personal database (#13)
     const extProblems: { code: string; message: string }[] = [];
     const ext = await ExternalLinksReader.open(reader.file, reader.caps, (p) => extProblems.push(p));
-    const warnings = [...reader.caps.warnings, ...extProblems];
+    const userProblems: { code: string; message: string }[] = [];
+    const user = await UserLinksReader.open(reader.file, reader.caps, (p) => userProblems.push(p));
+    const warnings = [...reader.caps.warnings, ...extProblems, ...userProblems];
     if (ext && !ext.indexed)
       warnings.push({ code: "db/external-links-unindexed", message: "לטבלת הקישורים החיצוניים (external_link) במסד אין אינדקס לפי ספר, ולכן הצגת הקישורים של ספר תסרוק את כל הטבלה: איטי במסד גדול. כדי להאיץ, צרו במסד אינדקס על (sourceBookId, sourceLineIndex) בכלי שיצר אותו." });
     if (links && !links.indexed)
       warnings.push({ code: "db/links-unindexed", message: "לטבלת הקישורים במסד אין אינדקס לפי שורה, ולכן הצגת קישורים קיימים תהיה איטית במסד גדול." });
-    const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links, ext);
+    const s = new DbBookSource({ id, kind: "otzaria-db", label, warnings }, reader, links, ext, user);
     s.extProblem = extProblems.map((p) => p.message).join(" ");
+    s.userProblem = userProblems.map((p) => p.message).join(" ");
     for (const b of await reader.books()) s.booksById.set(b.id, b);
     const badTotals = [...s.booksById.values()].filter((b) => b.declaredTotalInvalid !== undefined);
     if (badTotals.length)
@@ -89,6 +108,8 @@ export class DbBookSource implements BookSource {
       ...(b.dependenceType !== null && { dependence: b.dependenceType }),
       ...(this.commentatorOf.has(b.id) && { linkedBases: this.commentatorOf.get(b.id)!.filter((id) => this.booksById.has(id)).map((id) => this.keyOf(id)) }),
       ...(this.withLinks.has(b.id) && { hasSourceLinks: true }),
+      // the table is there but not read: which books have links in it is not known, so none of them may look like a book with none
+      ...(this.userProblem && { linksUnread: this.userProblem }),
     }));
   }
 
@@ -112,12 +133,22 @@ export class DbBookSource implements BookSource {
   }
 
   async existingLinks(bookKey: string, from: number, to: number): Promise<Link[]> {
-    const fromExt = this.ext ? await this.externalLinksAt(this.idOf(bookKey), from, to) : [];
-    if (!this.links) return fromExt;
-    const lines = await this.reader.lineEntries(this.idOf(bookKey));
-    const ids = lines.filter((e) => e.index >= from && e.index <= to).map((e) => e.id);
-    const fromLink = (await this.links.atLines(ids)).map((r) => this.toLink(r));
-    return fromExt.length ? [...fromLink, ...fromExt.filter((e) => !fromLink.some((l) => sameLink(l, e)))] : fromLink;
+    const id = this.idOf(bookKey);
+    const parts: Link[][] = [];
+    if (this.links) {
+      const lines = await this.reader.lineEntries(id);
+      const ids = lines.filter((e) => e.index >= from && e.index <= to).map((e) => e.id);
+      parts.push((await this.links.atLines(ids)).map((r) => this.toLink(r)));
+    }
+    if (this.ext) parts.push(await this.externalLinksAt(id, from, to));
+    if (this.user) parts.push(await this.userLinksAt(id, from, to));
+    // each table's links, a link that a table before it already gave dropped (the same rule as the listing's merge, mergeParts)
+    const out: Link[] = [];
+    for (const part of parts) {
+      const before = out.slice();
+      for (const l of part) if (!before.some((k) => sameLink(k, l))) out.push(l);
+    }
+    return out;
   }
 
   /**
@@ -126,7 +157,7 @@ export class DbBookSource implements BookSource {
    * only for the page shown.
    */
   async linkListing(bookKey: string, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void } = {}): Promise<LinkListing | string> {
-    if (!this.links && !this.ext) return `במסד "${this.info.label}" אין טבלת קישורים (link) ואין בו קישורים חיצוניים (external_link). ${this.extProblem || "ייתכן שזו גרסה ישנה או מסד אישי בלי קישורים."}`;
+    if (!this.links && !this.ext && !this.user) return `במסד "${this.info.label}" אין טבלת קישורים (link) ואין בו קישורים חיצוניים (external_link). ${[this.extProblem, this.userProblem].filter(Boolean).join(" ") || "ייתכן שזו גרסה ישנה או מסד אישי בלי קישורים."}`;
     const id = this.idOf(bookKey);
     let run = this.listings.get(id);
     if (!run || run.cancelled) {
@@ -150,7 +181,8 @@ export class DbBookSource implements BookSource {
     const parts: ListingPart[] = [];
     if (this.links) parts.push(await this.buildListing(id, ctx));
     if (this.ext) parts.push(await this.buildExternalListing(id, ctx));
-    return mergeParts(bookKey, parts, Math.round(performance.now() - t0));
+    if (this.user) parts.push(await this.buildUserListing(id, ctx));
+    return mergeParts(bookKey, parts, Math.round(performance.now() - t0), this.userProblem || undefined);
   }
 
   private async buildListing(id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<ListingPart> {
@@ -166,12 +198,13 @@ export class DbBookSource implements BookSource {
       other[i] = otherAt.get(rows.other[i]!)!;
     }
     return {
+      table: "link",
       rows: { ref: rows.ids, dir: rows.dir, other, type: rows.type, ownIndex },
       otherLine: rows.otherLine,
       keys: others.map((b) => this.keyOf(b)),
       fetch: async (ids) => {
         const got = new Map((await this.links!.byIds(ids)).map((r) => [r.id, this.toLink(r)]));
-        return ids.map((i) => got.get(i)).filter((l): l is Link => !!l);
+        return ids.map((i) => got.get(i));
       },
       method: rows.method,
     };
@@ -185,10 +218,11 @@ export class DbBookSource implements BookSource {
 
   /** The open sources changed (a library opened or closed): what the listings resolved may be stale. */
   targetsChanged(): void {
-    if (this.ext) {
+    if (this.ext || this.user) {
       this.listings.clear();
       this.targets.clear();
       this.libraryTitles.clear();
+      this.userTargets.clear();
     }
   }
 
@@ -383,6 +417,7 @@ export class DbBookSource implements BookSource {
       k++;
     }
     return {
+      table: "external_link",
       rows: lis,
       otherLine,
       keys,
@@ -392,7 +427,7 @@ export class DbBookSource implements BookSource {
           const l = await this.externalToLink(r, true);
           if (l) got.set(r.rowid, l);
         }
-        return refs.map((x) => got.get(Math.abs(x))).filter((l): l is Link => !!l);
+        return refs.map((x) => got.get(Math.abs(x)));
       },
       method: this.ext!.indexed ? "index" : "scan",
       unlisted,
@@ -436,6 +471,161 @@ export class DbBookSource implements BookSource {
     };
   }
 
+  /* ---------------- user_link (Otzaria's user_books.db, Issue #41 B20) ---------------- */
+
+  /** the one scan of user_link, shared by every caller (its own signal: see SharedRun); a cancelled or failed scan is not cached */
+  private userRun: SharedRun<UserLinkIndex> | null = null;
+  /** a side that is not a book of this database → the open book it names (memoized; cleared when the open sources change) */
+  private readonly userTargets = new Map<string, Promise<ResolvedTarget>>();
+  /** this database's books by exact title, every id of the title, lowest first */
+  private ownByTitle: Map<string, number[]> | null = null;
+
+  private userIndex(ctx: RunContext = {}): Promise<UserLinkIndex> {
+    if (!this.userRun || this.userRun.cancelled) {
+      const fresh = new SharedRun((c) => this.user!.index((side) => this.ownOf(side), c));
+      this.userRun = fresh;
+      fresh.result.catch(() => this.userRun === fresh && (this.userRun = null));
+    }
+    return this.userRun.join(ctx);
+  }
+
+  /**
+   * The book of THIS database a user_link side names (UserLinksReader OwnBookOf). A personal side (flag 1, no attached database) is
+   * its exact title, narrowed by the row's category when it has one (NULL = any, user_content_repository.dart:565-567; two books of
+   * the title and no category: the first, lowest id); a "book-id" source is its id (-2: no such book). A library or attached side
+   * is never a book of this database, whatever its title (B20: never bound to a same-titled book of the other kind). A side whose
+   * flag is unknown names the book of its title, so that the row is counted there as not a link (it is never listed).
+   */
+  private ownOf(side: UserLinkSide): number {
+    if (side.bookId !== null) return this.booksById.has(side.bookId) ? side.bookId : -2;
+    if (side.db !== null || side.user === false) return -1;
+    if (!this.ownByTitle) {
+      const m = new Map<string, number[]>();
+      for (const b of [...this.booksById.values()].sort((a, b) => a.id - b.id)) {
+        const list = m.get(b.title);
+        if (list) list.push(b.id);
+        else m.set(b.title, [b.id]);
+      }
+      this.ownByTitle = m;
+    }
+    const ids = this.ownByTitle.get(side.title);
+    if (!ids) return -1;
+    if (side.category === null || side.user === null) return ids[0]!;
+    return ids.find((id) => this.booksById.get(id)?.categoryId === side.category) ?? -1;
+  }
+
+  /**
+   * The open book a side that is not this database's names: the library's book of that title (flag 0), or the book of an attached
+   * database named by its slug. A PERSONAL side this database does not have is in no other source (only user_books.db holds the
+   * app's personal books): it stays unresolved. Nothing is bound across kinds.
+   */
+  private userTarget(side: UserLinkSide): Promise<ResolvedTarget> {
+    const memo = `${side.user}\u0000${side.db ?? ""}\u0000${side.title}`;
+    let p = this.userTargets.get(memo);
+    if (!p) {
+      p = (async (): Promise<ResolvedTarget> => {
+        if (side.user !== false && side.db === null) return { book: null, own: false };
+        const t = await this.resolver?.book(side.title, side.db ?? "official", this.info.id, side.db === null ? "library-id" : "slug");
+        return t ? { book: { key: t.key, title: t.title, origin: t.origin, ...(t.isBaseBook !== undefined && { isBaseBook: t.isBaseBook }) }, own: false, ...(t.lineCount !== undefined && { lineCount: t.lineCount }) } : { book: null, own: false };
+      })();
+      this.userTargets.set(memo, p);
+    }
+    return p;
+  }
+
+  /** a side no open source has: its title alone, with the KIND the row gives it (a personal title never binds to a library book, B18) */
+  private unresolvedSide(side: UserLinkSide): BookRef {
+    return { key: `unresolved:${side.title}`, title: side.title, origin: side.user !== false || side.db !== null ? "personal" : "otzaria" };
+  }
+
+  /** A book's user_link rows: those that start in it ("out"), and those that end in it and do not start there ("in"). */
+  private async buildUserListing(id: number, ctx: { signal?: AbortSignal; progress?: (done: number, total: number) => void }): Promise<ListingPart> {
+    const ix = await this.userIndex(ctx);
+    const outs = ix.out.get(id) ?? [];
+    const ins = ix.in.get(id) ?? [];
+    const n = outs.length + ins.length;
+    const keys: string[] = [];
+    const keyAt = new Map<string, number>();
+    const slot = (key: string) => keyAt.get(key) ?? (keyAt.set(key, keys.length), keys.push(key) - 1);
+    const keyOfSide = async (book: number, side: number) => (book >= 0 ? this.keyOf(book) : ((await this.userTarget(ix.sides[side]!)).book?.key ?? `unresolved:${ix.sides[side]!.title}`));
+    const lis = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n) };
+    const otherLine = new Int32Array(n);
+    let k = 0;
+    for (const [dir, list] of [[0, outs], [1, ins]] as const)
+      for (const i of list) {
+        lis.ref[k] = ix.rowid[i]!;
+        lis.dir[k] = dir;
+        lis.other[k] = slot(dir === 0 ? await keyOfSide(ix.targetBook[i]!, ix.targetSide[i]!) : await keyOfSide(ix.sourceBook[i]!, ix.sourceSide[i]!));
+        lis.type[k] = ix.type[i]!;
+        lis.ownIndex[k] = dir === 0 ? ix.sourceLine[i]! : ix.targetLine[i]!;
+        otherLine[k] = dir === 0 ? ix.targetLine[i]! : ix.sourceLine[i]!;
+        k++;
+      }
+    const u = ix.unlistedByBook.get(id);
+    return {
+      table: "user_link",
+      rows: lis,
+      otherLine,
+      keys,
+      fetch: (refs) => this.userLinksByRowid(refs),
+      // the table is read once per open database (a scan, then kept); a book's listing is a lookup in memory after that
+      method: "index",
+      unlisted: { badLine: u?.badLine ?? 0, noPlace: u?.noPlace ?? 0, orphanSource: ix.orphanSource },
+    };
+  }
+
+  private async userLinksByRowid(rowids: number[]): Promise<(Link | undefined)[]> {
+    const got = new Map<number, Link>();
+    for (const r of await this.user!.byRowids(rowids)) {
+      const l = await this.userToLink(r);
+      if (l) got.set(r.rowid, l);
+    }
+    return rowids.map((x) => got.get(x));
+  }
+
+  /** The user_link rows on the lines [from, to] of a book (its own end on those lines; a link inside the book by either end). */
+  private async userLinksAt(bookId: number, from: number, to: number): Promise<Link[]> {
+    const ix = await this.userIndex();
+    const on = (line: number) => line >= from && line <= to;
+    const ids: number[] = [];
+    for (const i of ix.out.get(bookId) ?? []) if (on(ix.sourceLine[i]!) || (ix.targetBook[i] === bookId && on(ix.targetLine[i]!))) ids.push(ix.rowid[i]!);
+    for (const i of ix.in.get(bookId) ?? []) if (on(ix.targetLine[i]!)) ids.push(ix.rowid[i]!);
+    return (await this.userLinksByRowid(ids)).filter((l): l is Link => !!l);
+  }
+
+  /**
+   * One user_link row as a link in its STORED direction (source side → target side), provenance "db", read-only. The ends of a
+   * range are clamped like every database range (rangeEnd); the anchor is the source line's raw offsets, as the links file wrote
+   * them (RawAnchor). null for a row that is no link (the index counts those as unlisted).
+   */
+  private async userToLink(r: UserLinkRow): Promise<Link | null> {
+    if (r.sourceLine === null || r.targetLine === null || r.source.user === null || r.target.user === null) return null;
+    const sb = this.ownOf(r.source);
+    const tb = this.ownOf(r.target);
+    if (sb === -2) return null;
+    const end = async (own: number, side: UserLinkSide): Promise<{ book: BookRef; total: number | null }> => {
+      if (own >= 0) return { book: this.bookRef(own), total: this.booksById.get(own)?.totalLines ?? null };
+      const t = await this.userTarget(side);
+      return { book: t.book ?? this.unresolvedSide(side), total: t.lineCount ?? null };
+    };
+    const S = await end(sb, r.source);
+    const T = await end(tb, r.target);
+    const sEnd = rangeEnd(r.sourceLine, r.sourceEnd, S.total);
+    const tEnd = rangeEnd(r.targetLine, r.targetEnd, T.total);
+    const table: DbLinkTable = "user_link";
+    return {
+      id: `${this.info.id}:user:${r.rowid}`,
+      status: "existing",
+      provenance: "db",
+      dbTable: table,
+      source: { book: S.book, line: r.sourceLine, ...(sEnd !== undefined && { end: sEnd }) },
+      target: { book: T.book, line: r.targetLine, ...(tEnd !== undefined && { end: tEnd }) },
+      declaredType: canonicalTypeString(this.user!.typeOf(r.typeName)),
+      heRef2: r.targetRef?.trim() ? r.targetRef : `${T.book.title} ${r.targetLine + 1}`,
+      ...(r.anchor && { anchor: { rawStart: r.anchor.start, ...(r.anchor.end !== undefined && { rawEnd: r.anchor.end }), ...(r.anchor.label && { label: r.anchor.label }) } }),
+    };
+  }
+
   async altToc(bookKey: string): Promise<LibraryAltTocStructure[] | null> {
     if (!this.reader.caps.altToc) return null;
     const index = new Map((await this.reader.lineEntries(this.idOf(bookKey))).map((e) => [e.id, e.index]));
@@ -462,6 +652,9 @@ export class DbBookSource implements BookSource {
     this.booksById.clear();
     this.listings.clear();
     this.internalRun = null;
+    this.userRun = null;
+    this.userTargets.clear();
+    this.ownByTitle = null;
     this.reader.close();
     this.titleToId = null;
     this.targets.clear();
@@ -479,7 +672,10 @@ export class DbBookSource implements BookSource {
         ...(b && b.isBaseBook !== null && { isBaseBook: b.isBaseBook }),
       };
     };
-    const end = (e: DbLinkRow["source"]) => ({ book: ref(e.bookId), line: e.lineIndex, ...(e.endIndex !== undefined && e.endIndex > e.lineIndex && { end: e.endIndex }) });
+    const end = (e: DbLinkRow["source"]) => {
+      const last = rangeEnd(e.lineIndex, e.endIndex, this.booksById.get(e.bookId)?.totalLines ?? null);
+      return { book: ref(e.bookId), line: e.lineIndex, ...(last !== undefined && { end: last }) };
+    };
     return {
       id: `${this.info.id}:link:${r.id}`,
       status: "existing",
@@ -523,6 +719,18 @@ export function isLibraryDb(kind: string, label: string, books: Iterable<Pick<Db
   return false;
 }
 
+/**
+ * The end of a stored range as a link may carry it, or undefined (no range). link_range.endLineIndex comes from a database
+ * nobody vouches for, and every loop over a range walks to it (Issue #41 C1: 20,000,000 cost 400+ MB in the max-link job).
+ * Only a whole line number past a whole start is an end (an end that is not after its start is ignored, AGENTS §3); one
+ * no book can reach (MAX_BOOK_LINES) is dropped, and one past the book's declared length is clamped to its last line.
+ */
+export function rangeEnd(line: number, end: number | undefined, totalLines: number | null): number | undefined {
+  if (end === undefined || !Number.isInteger(line) || line < 0 || !Number.isInteger(end) || end <= line || end >= MAX_BOOK_LINES) return undefined;
+  const last = totalLines !== null && totalLines > 0 ? Math.min(end, totalLines - 1) : end;
+  return last > line ? last : undefined;
+}
+
 interface ResolvedTarget {
   book: BookRef | null;
   /** the target is a book of this very database */
@@ -533,14 +741,15 @@ interface ResolvedTarget {
 
 /** One table's part of a book's links: compact rows plus how to fetch the full links of a page. */
 interface ListingPart {
+  table: DbLinkTable;
   rows: ListingRows;
-  /** 0-based line at the other end where the row says it without a lookup, else -1 (for the merge of two tables) */
+  /** 0-based line at the other end where the row says it without a lookup, else -1 (for the merge of several tables) */
   otherLine: Int32Array;
   keys: string[];
-  /** a ref of this part (a link id; for external_link -rowid) → the links, in order */
-  fetch: (refs: number[]) => Promise<Link[]>;
+  /** refs of this part (a link id; for external_link -rowid; for user_link the rowid) → their links, aligned (undefined: none) */
+  fetch: (refs: number[]) => Promise<(Link | undefined)[]>;
   method: "index" | "scan";
-  /** external_link rows of the book that could not be listed (see DbLinkSummary.unlisted) */
+  /** external_link / user_link rows of the book that could not be listed (see DbLinkSummary.unlisted) */
   unlisted?: { badLine: number; noPlace: number; orphanSource: number };
 }
 
@@ -548,62 +757,82 @@ interface ListingPart {
 const sameLink = (a: Link, b: Link) => a.source.book.key === b.source.book.key && a.source.line === b.source.line && a.target.book.key === b.target.book.key && a.target.line === b.target.line && a.declaredType === b.declaredType;
 
 /**
- * One listing from the parts of a book: one part is its own listing; two (a database with a `link` table AND
- * `external_link`) are concatenated, a ref telling which table it is from by its sign, and an external row that
- * repeats a `link` row (same own line, other book, other line, type; known for rows that point out) is dropped.
+ * One listing from the parts of a book (`link`, `external_link`, `user_link`, in this order, each that the database has). One
+ * part is its own listing. Several are concatenated, and a row of a later table that repeats a row of an earlier one (same
+ * direction, own line, other book, other line and type; known only where the row says its far line: `link` only for the rows that
+ * point out) is dropped. A merged row's ref is its position; a page asks each table for its own rows. `unread`: why some of the
+ * book's links were not read at all (DbLinkSummary.unread).
  */
-function mergeParts(bookKey: string, parts: ListingPart[], ms: number): LinkListing {
-  if (parts.length === 1) return new LinkListing(bookKey, parts[0]!.rows, parts[0]!.keys, parts[0]!.fetch, parts[0]!.method, ms, parts[0]!.unlisted);
-  const [link, ext] = parts as [ListingPart, ListingPart];
-  const keys = [...link.keys];
-  const keyAt = new Map(keys.map((k, i) => [k, i]));
+function mergeParts(bookKey: string, parts: ListingPart[], ms: number, unread?: string): LinkListing {
+  const sumUnlisted = (list: ListingPart[]) => {
+    const u = list.filter((p) => p.unlisted).map((p) => p.unlisted!);
+    return u.length ? { badLine: u.reduce((n, x) => n + x.badLine, 0), noPlace: u.reduce((n, x) => n + x.noPlace, 0), orphanSource: u.reduce((n, x) => n + x.orphanSource, 0) } : undefined;
+  };
+  if (parts.length === 1) {
+    const p = parts[0]!;
+    return new LinkListing(bookKey, p.rows, p.keys, async (refs) => (await p.fetch(refs)).filter((l): l is Link => !!l), p.method, ms, p.unlisted, undefined, unread);
+  }
+  const keys: string[] = [];
+  const keyAt = new Map<string, number>();
   const slot = (k: string) => keyAt.get(k) ?? (keyAt.set(k, keys.length), keys.push(k) - 1);
   const seen = new Set<string>();
-  for (let i = 0; i < link.rows.ref.length; i++) if (link.rows.dir[i] === 0 && link.otherLine[i]! >= 0) seen.add(`${link.rows.ownIndex[i]}|${link.keys[link.rows.other[i]!]}|${link.otherLine[i]}|${link.rows.type[i]}`);
-  const keep: number[] = [];
-  for (let i = 0; i < ext.rows.ref.length; i++) {
-    const dup = ext.rows.dir[i] === 0 && ext.otherLine[i]! >= 0 && seen.has(`${ext.rows.ownIndex[i]}|${ext.keys[ext.rows.other[i]!]}|${ext.otherLine[i]}|${ext.rows.type[i]}`);
-    if (!dup) keep.push(i);
-  }
-  const nl = link.rows.ref.length;
-  const n = nl + keep.length;
-  const linkHasIncoming = link.rows.dir.some((x) => x === 1);
-  const tables = {
-    link: nl,
-    externalLink: keep.length,
-    duplicatesDropped: ext.rows.ref.length - keep.length,
-    // an incoming external row has no known far line on the link side, so it is not compared; say so when there is anything to compare it with
-    incomingUnchecked: linkHasIncoming ? keep.filter((i) => ext.rows.dir[i] === 1).length : 0,
-  };
-  const rows = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n), flags: new Uint8Array(n) };
-  for (let i = 0; i < nl; i++) {
-    rows.ref[i] = link.rows.ref[i]!;
-    rows.dir[i] = link.rows.dir[i]!;
-    rows.other[i] = link.rows.other[i]!;
-    rows.type[i] = link.rows.type[i]!;
-    rows.ownIndex[i] = link.rows.ownIndex[i]!;
-  }
-  keep.forEach((i, j) => {
-    rows.ref[nl + j] = ext.rows.ref[i]!;
-    rows.dir[nl + j] = ext.rows.dir[i]!;
-    rows.other[nl + j] = slot(ext.keys[ext.rows.other[i]!]!);
-    rows.type[nl + j] = ext.rows.type[i]!;
-    rows.ownIndex[nl + j] = ext.rows.ownIndex[i]!;
-    rows.flags[nl + j] = ext.rows.flags?.[i] ?? 0;
+  const kept: [part: number, row: number][] = [];
+  let duplicatesDropped = 0;
+  const keyOf = (p: ListingPart, i: number) => `${p.rows.dir[i]}|${p.rows.ownIndex[i]}|${p.keys[p.rows.other[i]!]}|${p.otherLine[i]}|${p.rows.type[i]}`;
+  parts.forEach((p, pi) => {
+    const mine: string[] = [];
+    for (let i = 0; i < p.rows.ref.length; i++) {
+      const known = p.otherLine[i]! >= 0;
+      if (known && seen.has(keyOf(p, i))) {
+        duplicatesDropped++;
+        continue;
+      }
+      if (known) mine.push(keyOf(p, i));
+      kept.push([pi, i]);
+    }
+    // rows of one table are never dropped as repeats of each other (two rows there are two links of the database)
+    for (const k of mine) seen.add(k);
   });
+  const n = kept.length;
+  const rows = { ref: new Float64Array(n), dir: new Uint8Array(n), other: new Int32Array(n), type: new Uint8Array(n), ownIndex: new Int32Array(n), flags: new Uint8Array(n) };
+  kept.forEach(([pi, i], g) => {
+    const p = parts[pi]!;
+    rows.ref[g] = g;
+    rows.dir[g] = p.rows.dir[i]!;
+    rows.other[g] = slot(p.keys[p.rows.other[i]!]!);
+    rows.type[g] = p.rows.type[i]!;
+    rows.ownIndex[g] = p.rows.ownIndex[i]!;
+    rows.flags[g] = p.rows.flags?.[i] ?? 0;
+  });
+  const keptOf = (t: DbLinkTable) => kept.filter(([pi]) => parts[pi]!.table === t).length;
+  const link = parts.find((p) => p.table === "link");
+  const linkHasIncoming = !!link && link.rows.dir.some((x) => x === 1);
+  const tables = {
+    link: keptOf("link"),
+    externalLink: keptOf("external_link"),
+    duplicatesDropped,
+    // an incoming row of another table has no known far line on the link side, so it is not compared; say so when there is anything to compare it with
+    incomingUnchecked: linkHasIncoming ? kept.filter(([pi, i]) => parts[pi]!.table !== "link" && parts[pi]!.rows.dir[i] === 1).length : 0,
+    ...(parts.some((p) => p.table === "user_link") && { userLink: keptOf("user_link") }),
+  };
   return new LinkListing(
     bookKey,
     rows,
     keys,
     async (refs) => {
-      const [a, b] = await Promise.all([link.fetch(refs.filter((x) => x > 0)), ext.fetch(refs.filter((x) => x < 0))]);
-      const byId = new Map([...a, ...b].map((l) => [l.id, l]));
-      const sid = bookKey.split(":")[0];
-      return refs.map((x) => byId.get(x > 0 ? `${sid}:link:${x}` : `${sid}:ext:${-x}`)).filter((l): l is Link => !!l);
+      const got = new Map<number, Link>();
+      for (let pi = 0; pi < parts.length; pi++) {
+        const mine = refs.filter((g) => kept[g]![0] === pi);
+        if (!mine.length) continue;
+        const links = await parts[pi]!.fetch(mine.map((g) => parts[pi]!.rows.ref[kept[g]![1]]!));
+        mine.forEach((g, j) => links[j] && got.set(g, links[j]));
+      }
+      return refs.map((g) => got.get(g)).filter((l): l is Link => !!l);
     },
-    link.method === "index" && ext.method === "index" ? "index" : "scan",
+    parts.every((p) => p.method === "index") ? "index" : "scan",
     ms,
-    ext.unlisted,
+    sumUnlisted(parts),
     tables,
+    unread,
   );
 }

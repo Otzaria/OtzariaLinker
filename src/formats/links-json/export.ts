@@ -1,7 +1,7 @@
 import { zipSync, strToU8 } from "fflate";
 import { LinkerError } from "../../core/errors";
 import type { Link } from "../../core/links/model";
-import { exportVerdicts, type Problem, type ValidationContext } from "../../core/links/validate";
+import { exportVerdicts, FILE_LEVEL_CODES, type Problem, type ValidationContext } from "../../core/links/validate";
 import { linkToRecord } from "./convert";
 import type { JsonLayout } from "./layout";
 import { serializeLinksJson } from "./serialize";
@@ -29,6 +29,8 @@ export interface ExportFile {
   records: number;
   /** true when no links file was imported for this book — the library may already have one */
   isNewFile: boolean;
+  /** the records of the book's links file as it was loaded, which this file replaces (absent: none loaded) — "before → after" */
+  before?: number;
   /**
    * Private use: records of OTHER books' links written into this book's file (a commentary's "source"
    * link, written here as "commentary" — validate.ts PRIVATE_TO_BASE), by the book whose link they are
@@ -59,6 +61,8 @@ export interface ExportOptions {
   layouts?: (sourceTitle: string) => JsonLayout | undefined;
   /** the book's library file was loaded (it may hold no records): its file is not "new" */
   loadedFile?: (sourceTitle: string) => boolean;
+  /** how many records the book's loaded links file had (ExportFile.before) */
+  recordsBefore?: (sourceTitle: string) => number | undefined;
 }
 
 export function planExport(links: readonly Link[], ctx: ValidationContext, opts: ExportOptions = {}): ExportPlan {
@@ -98,12 +102,14 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
     .map(([title, list]) => {
       const ordered = [...list].sort(fileOrder);
       const from = movedIn.get(title);
+      const before = opts.recordsBefore?.(title);
       return {
         name: `${title}_links.json`,
         sourceTitle: title,
         text: serializeLinksJson(ordered.map(linkToRecord), opts.layouts?.(title)),
         records: ordered.length,
         isNewFile: !importedTitles.has(title) && !opts.loadedFile?.(title),
+        ...(before !== undefined && { before }),
         ...(from && { movedIn: [...from].sort(([a], [b]) => cmp(a, b)).map(([t, records]) => ({ from: t, records })) }),
       };
     });
@@ -128,6 +134,46 @@ export function planExport(links: readonly Link[], ctx: ValidationContext, opts:
   };
   assertExportAccounting(links, plan);
   return plan;
+}
+
+/*
+ * What the export does with EACH link the project holds (V7 §1.9) — every live, non-database link gets exactly one:
+ *
+ *   written      a new or edited link, written as a record
+ *   unchanged    a library record the user did not touch, written back as it was
+ *   merged       written, but the same stored link as another link of this export: the database holds them as one
+ *   blocked      held back only because its book's whole file is held (the file's problem, or another link's)
+ *   needs-fix    held back for an error of its own
+ *   unsupported  held back because no links file can carry it (a "linker" record, Sefaria↔Sefaria, INLINE_LINKER for
+ *                the library), or written to the links files but left out of the chosen format (`omitted`: the
+ *                Sefaria CSV's sefariaCsvOmissions)
+ *
+ * Derived from the plan only, so it can never disagree with what is written: written + unchanged + merged = plan.written,
+ * blocked + needs-fix + unsupported = plan.heldBack (plus `omitted` moved from the first to the last).
+ */
+export const EXPORT_OUTCOMES = ["written", "unchanged", "merged", "blocked", "needs-fix", "unsupported"] as const;
+export type ExportOutcome = (typeof EXPORT_OUTCOMES)[number];
+
+/** what no links file can carry: the generator skips the record, or the library does not know the type */
+const UNSUPPORTED_CODES: ReadonlySet<string> = new Set(["export/linker", "export/sefaria-both", "export/inline-linker-private-only"]);
+
+export function exportOutcomes(plan: Pick<ExportPlan, "written" | "heldBack" | "warned">, omitted: Iterable<string> = []): Map<string, ExportOutcome> {
+  const out = new Map<string, ExportOutcome>();
+  const left = new Set(omitted);
+  const duplicate = new Set(plan.warned.filter((w) => w.problems.some((p) => p.code === "export/duplicate")).map((w) => w.link.id));
+  for (const l of plan.written) out.set(l.id, left.has(l.id) ? "unsupported" : l.status === "existing" ? "unchanged" : duplicate.has(l.id) ? "merged" : "written");
+  for (const { link, problems } of plan.heldBack) {
+    const errors = problems.filter((p) => p.severity === "error");
+    out.set(link.id, errors.some((p) => UNSUPPORTED_CODES.has(p.code)) ? "unsupported" : errors.some((p) => !FILE_LEVEL_CODES.has(p.code)) ? "needs-fix" : "blocked");
+  }
+  return out;
+}
+
+/** How many links got each outcome (every outcome named, also at 0). */
+export function exportOutcomeCounts(outcomes: ReadonlyMap<string, ExportOutcome>): Record<ExportOutcome, number> {
+  const n = Object.fromEntries(EXPORT_OUTCOMES.map((o) => [o, 0])) as Record<ExportOutcome, number>;
+  for (const o of outcomes.values()) n[o]++;
+  return n;
 }
 
 /**

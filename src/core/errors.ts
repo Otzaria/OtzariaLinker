@@ -4,6 +4,7 @@
  */
 export type ErrorCode =
   | "archive/unsafe-path"
+  | "archive/duplicate-path"
   | "export/unsafe-path"
   | "export/library-record-dropped"
   | "export/accounting"
@@ -19,11 +20,14 @@ export type ErrorCode =
   | "db/book-too-large"
   | "db/compressed-unknown-dictionary"
   | "db/dictionary-conflict"
+  | "db/dictionary-mismatch"
   | "db/dictionary-too-large"
   | "db/not-sqlite"
   | "db/wal"
   | "db/no-books"
   | "db/schema-newer"
+  /** a warning, not thrown: user_books.db's user_link exists but is in a layout the reader does not know (user-links-reader.ts) */
+  | "db/user-link-not-read"
   | "source/closed"
   | "db/mapping-invalid"
   | "db/mapping-unknown-token"

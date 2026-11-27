@@ -67,6 +67,8 @@ export type LinksReading =
   | { readonly state: "counted"; readonly count: number }
   | { readonly state: "none" }
   | { readonly state: "unknown"; readonly why: "not-requested" | "not-read" }
+  /** some of the book's links are in a table its database cannot read (SourceBook.linksUnread, db/user-link-not-read): what was read is not all */
+  | { readonly state: "unknown"; readonly why: "unreadable"; readonly message: string }
   | { readonly state: "failed"; readonly message: string };
 
 /** The sentence a screen shows for a reading: a failed read never reads like "no links". */
@@ -77,6 +79,7 @@ export function linksReadingText(r: LinksReading): string {
     case "none":
       return "נקראו הקישורים של הספר מהמסד: אין לו קישורים שם.";
     case "unknown":
+      if (r.why === "unreadable") return `חלק מהקישורים של הספר במסד לא נקראו, ולכן לא ידוע כמה שורות מקושרות (זה אינו "אין קישורים"). ${r.message}`;
       return r.why === "not-requested"
         ? "הקישורים שבמסד לא נספרו (נספרו רק קישורי הפרויקט), ולכן לא ידוע כמה שורות כבר מקושרות שם."
         : "הקישורים של הספר לא נקראו, ולכן לא ידוע כמה שורות מקושרות.";

@@ -46,20 +46,23 @@ describe("the bundle is what the tool writes", () => {
     expect(buildLiveTestBundle().files).toEqual(bundle.files);
   });
 
+  // V7 live test 17: a target that is the user's own text book always carries a reminder that it must already be in Otzaria's
+  // personal folder (export/private-target-must-exist) — the bundle installs those books, so the reminder is the only warning allowed
+  const REMINDER = "export/private-target-must-exist";
   it("nothing is held back, and the tool's validation has no error and no warning on the main links", () => {
     for (const plan of Object.values(bundle.plans)) expect(plan.heldBack).toEqual([]);
     const main = bundle.cases.filter((c) => c.id.startsWith("L"));
     expect(main).toHaveLength(12);
-    for (const c of main) expect(c.tool.filter((p) => p.severity !== "info"), c.id).toEqual([]);
+    for (const c of main) expect(c.tool.filter((p) => p.severity !== "info" && p.code !== REMINDER), c.id).toEqual([]);
     // the same verdict from validateExport itself, on the moved links of check 15
     const updated = { ...BUNDLE_BOOKS, [BASE]: bookLines(BASE, "update") };
     const problems = validateExport(bundle.plans.update.written, validationContext(updated));
-    expect([...problems.values()].flat().filter((p) => p.severity !== "info")).toEqual([]);
+    expect([...problems.values()].flat().filter((p) => p.severity !== "info" && p.code !== REMINDER)).toEqual([]);
   });
 
   it("several databases (dbs/): no warning; the source link goes to the personal database's book", () => {
     const d = bundle.cases.filter((c) => c.id.startsWith("D"));
-    expect(d.map((c) => [c.id, c.tool.filter((p) => p.severity !== "info").map((p) => p.code)])).toEqual([["D1", []], ["D2", []], ["D3", []]]);
+    expect(d.map((c) => [c.id, c.tool.filter((p) => p.severity !== "info" && p.code !== REMINDER).map((p) => p.code)])).toEqual([["D1", []], ["D2", []], ["D3", []]]);
     expect(d.map((c) => c.file)).toEqual([`dbs/${PERSONAL_DB.title}_links.json`, `dbs/${PERSONAL_DB.title}_links.json`, `dbs/${GENESIS.title}_links.json`]);
     expect(d[1]!.tool.map((p) => p.code)).toContain("export/private-source-to-base");
   });

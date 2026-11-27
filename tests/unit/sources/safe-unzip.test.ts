@@ -23,6 +23,13 @@ describe("safeArchivePath", () => {
     "rejects %j",
     (input) => expect(safeArchivePath(input)).toBeNull(),
   );
+
+  // Issue #41 B15: the reading side applies the export side's rule (export.ts isSafeZipPath) — no control
+  // character — and refuses bidi controls that make a name show as something else in an RTL list.
+  it.each(["a\u0001b.txt", "books/a\u001fb.txt", "a\u007f.txt", "‮txt.exe", "a/⁦b⁩.txt", `${"a/".repeat(600)}b.txt`])(
+    "rejects odd path #%#",
+    (input) => expect(safeArchivePath(input)).toBeNull(),
+  );
 });
 
 describe("safeUnzip", () => {
@@ -57,6 +64,23 @@ describe("safeUnzip", () => {
   it("caps the number of entries", () => {
     const files = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`f${i}.txt`, strToU8("x")]));
     expect(codeOf(() => safeUnzip(zipSync(files), { limits: { maxEntries: 10 } }))).toBe("archive/too-many-entries");
+  });
+
+  it("refuses two entries that normalize to the same path (Issue #41 B15)", () => {
+    const zip = zipSync({ "ספרים/א.txt": strToU8("first"), "./ספרים/א.txt": strToU8("second") });
+    expect(codeOf(() => safeUnzip(zip))).toBe("archive/duplicate-path");
+  });
+
+  it("a duplicate among entries that include() skips is harmless", () => {
+    const zip = zipSync({ "a.bin": new Uint8Array([1]), "./a.bin": new Uint8Array([2]), "b.txt": strToU8("b") });
+    expect(safeUnzip(zip, { include: (p) => p.endsWith(".txt") }).map((e) => e.path)).toEqual(["b.txt"]);
+  });
+
+  it("stops when its signal is aborted (Issue #41 B15)", () => {
+    const zip = zipSync({ "a.txt": strToU8("a") });
+    const controller = new AbortController();
+    controller.abort();
+    expect(() => safeUnzip(zip, { signal: controller.signal })).toThrow(expect.objectContaining({ name: "AbortError" }));
   });
 
   it("reports a damaged archive as corrupt, never as a foreign exception", () => {

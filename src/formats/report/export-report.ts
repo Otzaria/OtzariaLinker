@@ -3,7 +3,7 @@ import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-ty
 import { isRange, type Link } from "../../core/links/model";
 import { problemText } from "../../core/links/validate";
 import type { AltTocExportPlan } from "../alt-toc/export";
-import type { ExportPlan } from "../links-json/export";
+import { exportOutcomeCounts, exportOutcomes, type ExportPlan } from "../links-json/export";
 import { sefariaCsvOmissions, type SefariaCsvFile } from "../sefaria-csv/write";
 import { nextStepsText, type ExportPurpose } from "./next-steps";
 
@@ -65,9 +65,15 @@ export function buildExportReport(r: ReportInput): string {
   L.push(row("  מהם חדשים", c.new));
   L.push(row("  מהם ערוכים", c.edited));
   L.push(row("  מהם נשמרו כמו שהם", c.kept));
+  // the outcome of every link (V7 §1.9, exportOutcomes): written ones that are one link in the database, and why the rest wait
+  const o = exportOutcomeCounts(exportOutcomes(links));
+  if (o.merged) L.push(row("  מהם יאוחדו במסד עם קישור זהה", o.merged));
   L.push(row("נמחקו מהקבצים", c.deleted));
   if (c.deletionsHeld) L.push(row("מחיקות שלא יגיעו לספרייה", c.deletionsHeld));
   L.push(row("לא ייוצאו (שגיאה)", c.heldBack));
+  if (o["needs-fix"] && o["needs-fix"] !== c.heldBack) L.push(row("  מהם צריכים תיקון", o["needs-fix"]));
+  if (o.blocked) L.push(row("  מהם מחכים לקובץ של הספר", o.blocked));
+  if (o.unsupported) L.push(row("  מהם שקובץ קישורים לא יכול לשאת", o.unsupported));
   if (c.movedToBase) L.push(row("\"מקור\" שנכתבו אצל הבסיס", c.movedToBase));
   L.push(row("קובצי קישורים", r.format === "json" ? links.files.length : r.csv?.length ?? 0));
   L.push(row("טווחים בצד המקור", w.filter((l) => isRange(l.source)).length));
@@ -92,7 +98,7 @@ export function buildExportReport(r: ReportInput): string {
   if (r.format === "json") {
     for (const f of links.files) {
       const moved = f.movedIn?.reduce((n, m) => n + m.records, 0) ?? 0;
-      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות)${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : !f.isNewFile ? "  [מחליף את הקובץ של הספר בספרייה, שנטען לכלי]" : ""}`);
+      L.push(`  links/${f.name}  (${f.records.toLocaleString("he")} רשומות${f.before !== undefined ? `; בקובץ שנטען היו ${f.before.toLocaleString("he")}` : ""})${f.isNewFile && moved < f.records ? "  [קובץ חדש: אם לספר כבר יש קובץ בספרייה, הוא יוחלף]" : !f.isNewFile ? "  [מחליף את הקובץ של הספר בספרייה, שנטען לכלי]" : ""}`);
       for (const m of f.movedIn ?? [])
         L.push(`      מהן ${m.records.toLocaleString("he")} קישורים של "${m.from}" אל הספר הזה, מסוג "מקור", שנכתבים כאן כפירוש: כך באוצריא שלכם (ייבוא אישי) "${m.from}" יופיע בפאנל המפרשים של "${f.sourceTitle}"${r.technical ? ' ("Conection Type": "commentary")' : ""}`);
     }

@@ -133,3 +133,15 @@ describe("storedForm — generator orientation rules", () => {
     expect(storedLinkIdentity(fromRashi)).toBe(storedLinkIdentity(fromBereshit));
   });
 });
+
+describe("a record of type INLINE_LINKER (#42 C22)", () => {
+  it("is not called an unknown type: it is the private 'citation in the text', named with its Otzaria-version note", async () => {
+    const { parseLinksJson } = await import("../../../src/formats/links-json/parse");
+    for (const t of ["INLINE_LINKER", "ציטוט בטקסט"]) {
+      const issues = parseLinksJson(JSON.stringify([{ ...REC, "Conection Type": t }])).issues;
+      expect(issues.map((i) => i.code)).toEqual(["record/inline-linker"]);
+      expect(issues[0]!.message).toContain("ציטוט בטקסט");
+      expect(issues[0]!.message).toContain("dev");
+    }
+  });
+});

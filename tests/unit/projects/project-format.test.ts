@@ -176,4 +176,34 @@ describe("project file — the books' line counts (V5 P1-10)", () => {
     raw.bookLines = { title: "א", lines: 3 };
     expect(parseProject(JSON.stringify(raw), bind).bookLines).toEqual([]);
   });
+
+  // V7 §1.1 (items 4, 6): by title only, two books of one title shared one entry — the second book's count was lost and the
+  // first's applied to both. An entry is now per book: title, origin, source and edition (all optional for older files).
+  it("is kept per book: two books of one title are two entries, each with its origin, source and edition", () => {
+    const two = [
+      { title: "ספר", lines: 4, origin: "personal" as const, source: "a.db", edition: "4:0123456789abcdef" },
+      { title: "ספר", lines: 9, origin: "personal" as const, source: "b.db", edition: "9:fedcba9876543210" },
+      { title: "ספר", lines: 4, origin: "personal" as const, source: "user_books.db", edition: "4:1111111111111111" },
+      { title: "ספר", lines: 4, origin: "personal" as const, source: "user_books.db", edition: "4:2222222222222222" },
+    ];
+    expect(parseProject(serializeProject({ ...base, bookLines: two }, "4.0.0"), bind).bookLines).toEqual(two);
+    const raw = JSON.parse(serializeProject(base, "4.0.0"));
+    // untrusted: an origin that is not one, a source without an origin, an edition that is not one are dropped
+    raw.bookLines = [{ title: "ספר", lines: 2, origin: "x", source: "a.db", edition: "<script>" }, { title: "ספר", lines: 2, origin: "otzaria", edition: "2:zz" }];
+    expect(parseProject(JSON.stringify(raw), bind).bookLines).toEqual([{ title: "ספר", lines: 2 }, { title: "ספר", lines: 2, origin: "otzaria" }]);
+  });
+
+  it("a book's edition goes with a link only when the project names it (StoredBook.edition), and comes back on the unresolved book", () => {
+    const X: BookRef = { key: "s1:11", title: "ספר", origin: "personal" };
+    const link = (id: string, book: BookRef) => ({ id, status: "new" as const, provenance: "user" as const, source: { book: B, line: 1 }, target: { book, line: 2 }, declaredType: "reference", heRef2: "x" });
+    const text = serializeProject({ ...base, links: [link("a", X), link("b", { ...X, key: "s2:11" })], sourceOf: () => "user_books.db", editionOf: (k) => (k === "s2:11" ? "4:2222222222222222" : undefined) }, "4.0.0");
+    const stored = JSON.parse(text).links.map((l: { target: { book: unknown } }) => l.target.book);
+    expect(stored).toEqual([
+      { title: "ספר", origin: "personal", source: "user_books.db" },
+      { title: "ספר", origin: "personal", source: "user_books.db", edition: "4:2222222222222222" },
+    ]);
+    const back = parseProject(text, (b) => ({ ...b, key: `unresolved:${b.title}` })).links.map((l) => l.target.book);
+    expect(back[1]).toMatchObject({ source: "user_books.db", edition: "4:2222222222222222" });
+    expect(back[0]).not.toHaveProperty("edition");
+  });
 });

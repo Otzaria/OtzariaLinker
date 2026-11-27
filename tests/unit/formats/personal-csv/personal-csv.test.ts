@@ -186,3 +186,11 @@ describe("validatePersonalRows — the all-or-nothing rules of the import", () =
 });
 
 
+
+describe("a line break inside a field (#42 C23)", () => {
+  const row = (position: string): PersonalLinkRow => ({ sourceLine: 3, sourceBook: "ספר", targetBook: "בראשית", position, type: "פירוש" });
+  it("is refused: Otzaria reads the file line by line, so a quoted multi-line field would split the row", () => {
+    for (const p of ["פרק א\nפסוק ב", "פרק א\rפסוק ב", "פרק א\r\n"]) expect(validatePersonalRows([row(p)]).map((x) => x.code)).toEqual(["csv/line-break"]);
+    expect(validatePersonalRows([row("פרק א")])).toEqual([]);
+  });
+});

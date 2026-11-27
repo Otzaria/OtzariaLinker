@@ -26,6 +26,25 @@ describe("validateLink — generator gates", () => {
   it("an empty heading line does not exist in the database", () => expect(codes(link({ target: { book: B, line: 5 } }))).toContain("error:export/line-not-in-db"));
   it("legacy: שורה מחוץ לתחום נחסמת בייצוא", () => expect(codes(link({ target: { book: B, line: 10 } }))).toContain("error:export/line-out-of-range"));
   it("an unloaded line is reported as not verified, not guessed", () => expect(codes(link({ target: { book: B, line: 9 } }))).toEqual(["info:export/line-not-verified"]));
+  // V3 F-087 (legacy validate, OtzariaLinker-v3.html:3045): a link from a line to the very same line was an error. The generator
+  // knows a book by its title, so two editions of one title (a text file and the database) are the same book here too.
+  it("legacy F-087: a link from a line to the very same line is an error; internal links of a book are not", () => {
+    const same = link({ source: { book: A, line: 3 }, target: { book: A, line: 3 } });
+    expect(codes(same)).toContain("error:export/same-line");
+    const p = validateLink(same, ctx).find((x) => x.code === "export/same-line")!;
+    expect(p.message).toContain("שורה 4");
+    expect(p.message).not.toMatch(TECH_WORDS);
+    // another edition of the same title is the same book for Otzaria
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: { ...A, key: "other-edition" }, line: 3 } }))).toContain("error:export/same-line");
+    // legitimate internal links: another line of the same book, a range that starts on the line, a range that holds it
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: A, line: 4 } }))).not.toContain("error:export/same-line");
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: A, line: 3, end: 6 } }))).not.toContain("error:export/same-line");
+    expect(codes(link({ source: { book: A, line: 2, end: 6 }, target: { book: A, line: 3 } }))).not.toContain("error:export/same-line");
+    // the same line number in another book is an ordinary link
+    expect(codes(link({ source: { book: A, line: 3 }, target: { book: B, line: 3 } }))).not.toContain("error:export/same-line");
+    // the very same range on both sides is the very same lines
+    expect(codes(link({ source: { book: A, line: 3, end: 6 }, target: { book: A, line: 3, end: 6 } }))).toContain("error:export/same-line");
+  });
   it("linker is never imported; an unknown type becomes OTHER", () => {
     expect(codes(link({ declaredType: "linker" }))).toContain("error:export/linker");
     expect(codes(link({ declaredType: "sifrei mitsvot" }))).toContain("warning:export/unknown-type");
@@ -393,5 +412,35 @@ describe("the library's link-file list is a hint (a warning), not a hold", () =>
     expect(p.message).toContain("2026-11-22");
     expect(p.message).toMatch(/ייתכן/);
     expect(validateLink(link(), { ...snap, libraryMayHaveFile: () => true }).map((x) => x.code)).not.toContain("export/library-file-snapshot");
+  });
+});
+
+/*
+ * V7 live test 17 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md, finding א): in Otzaria 0.9.98.3 a links file whose target book is
+ * not in the user's library is refused WHOLE (importFiles is atomic) — the valid links of the file too. The tool cannot know
+ * the user's personal folder, so a private export says it once per target book that is the user's own text book.
+ */
+describe("private use: a target that is the user's own text book (live test 17)", () => {
+  const MINE = book("ספר שלי");
+  const OTHER = book("ספר אחר שלי");
+  const priv: ValidationContext = { ...ctx, purpose: "private", personalImportSide: (b) => (b === MINE || b === OTHER ? "personal" : "other") };
+  const codes = (ls: Link[], c: ValidationContext = priv) => [...validateExport(ls, c).values()].flat().map((p) => `${p.severity}:${p.code}`);
+  it("is warned: the whole file is refused if the book is not in the personal folder", () => {
+    const l = link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" });
+    expect(codes([l])).toContain("warning:export/private-target-must-exist");
+    const p = validateLink(l, priv).find((x) => x.code === "export/private-target-must-exist")!;
+    expect(p.message).toContain("ספר אחר שלי");
+    expect(p.message).toContain("כל קובץ הקישורים");
+  });
+  it("not for a library target, and not for the library purpose", () => {
+    expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: SEF, line: 2 }, declaredType: "commentary", ref2: "Genesis 1:2" })])).not.toContain("warning:export/private-target-must-exist");
+    expect(codes([link({ source: { book: MINE, line: 1 }, target: { book: OTHER, line: 2 }, declaredType: "reference" })], { ...ctx, personalImportSide: priv.personalImportSide })).not.toContain("warning:export/private-target-must-exist");
+  });
+});
+
+describe("the INLINE_LINKER note says the whole file is refused by a version without it (live test 16)", () => {
+  it("names the whole links file", async () => {
+    const { inlineLinkerVersionNote } = await import("../../../src/core/links/connection-type");
+    expect(inlineLinkerVersionNote()).toContain("כל קובץ הקישורים");
   });
 });

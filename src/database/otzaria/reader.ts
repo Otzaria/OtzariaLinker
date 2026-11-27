@@ -56,7 +56,8 @@ export class OtzariaDbReader {
     private readonly t: { book: TableInfo; line: TableInfo; content: TableInfo | null; note: TableInfo | null; source: TableInfo | null },
   ) {}
 
-  static async open(src: ByteSource): Promise<OtzariaDbReader> {
+  /** `label` names the database in messages about its dictionaries (DictionaryPool binds each one to its database). */
+  static async open(src: ByteSource, label = "מסד פתוח"): Promise<OtzariaDbReader> {
     const file = await SqliteFile.open(src);
     const caps = await detectCapabilities(file);
     const book = await file.table("book");
@@ -69,13 +70,20 @@ export class OtzariaDbReader {
         if (d instanceof Uint8Array) dicts.push(d);
       }
     }
-    return new OtzariaDbReader(file, caps, new LineContentCodec(dicts, undefined, "מסד פתוח"), {
-      book,
-      line,
-      content: caps.text === "line_content" ? await file.table("line_content") : null,
-      note: caps.lineNotes ? await file.table("line_note") : null,
-      source: caps.sources ? await file.table("source") : null,
-    });
+    // the codec offers the dictionaries to the worker's pool: an open that fails after it must take them back (Issue #41 C3)
+    const codec = new LineContentCodec(dicts, undefined, label);
+    try {
+      return new OtzariaDbReader(file, caps, codec, {
+        book,
+        line,
+        content: caps.text === "line_content" ? await file.table("line_content") : null,
+        note: caps.lineNotes ? await file.table("line_note") : null,
+        source: caps.sources ? await file.table("source") : null,
+      });
+    } catch (err) {
+      codec.release();
+      throw err;
+    }
   }
 
   /** The database is closed: its dictionaries leave the worker's pool. */

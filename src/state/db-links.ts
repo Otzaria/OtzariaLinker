@@ -99,7 +99,8 @@ export class DbLinksState {
   /**
    * How many links the database already has for each of these books (the links of both ends counted once per book, as
    * DbLinkSummary.total), without touching the links tab's own state; a book with none to read (a text file, a database with
-   * no link table) or whose read failed is absent. No progress shown: a caller that reads many books says so itself.
+   * no link table), whose read failed, or whose links were not all read (DbLinkSummary.unread) is absent. No progress shown: a
+   * caller that reads many books says so itself.
    */
   async totalsOf(bookKeys: readonly string[], signal?: AbortSignal): Promise<Map<string, number>> {
     const out = new Map<string, number>();
@@ -108,7 +109,8 @@ export class DbLinksState {
       if (signal?.aborted) break;
       try {
         const s = await this.service.dbLinkSummary(k, signal ? { signal } : {});
-        if ("total" in s) out.set(k, s.total);
+        // a summary that did not read all the book's links (DbLinkSummary.unread) is no total: the book is left out, like a failed read
+        if ("total" in s && !s.unread) out.set(k, s.total);
       } catch {
         /* a book that cannot be read is simply not counted */
       }
