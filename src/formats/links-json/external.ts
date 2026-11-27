@@ -3,7 +3,7 @@ import { detectLayout, stringifyElement, stringifyInLayout, DEFAULT_LAYOUT } fro
 import type { BookRef, Link, LinkSide } from "../../core/links/model";
 import { isRange } from "../../core/links/model";
 import { linePairIdentity } from "../../core/links/equality";
-import { titleFromPath2 } from "../../core/links/titles";
+import { otzariaBookTitle, titleFromPath2 } from "../../core/links/titles";
 
 /*
  * Links from a book of a personal library to a book of the OFFICIAL library, as the zmanenu-library source format writes them
@@ -99,7 +99,8 @@ export function externalRecords(links: readonly Link[], ctx: ExternalContext): E
  * duplicate), as a path_2 record beside a book_2 one, or as a heRef_2 record beside a line_index_2 one. They are read here as
  * "the same lines" (core/links/equality.ts linePairIdentity: by title, either direction, any type — the one rule, not a second):
  *   • a record inside the repository: line_index_1 of the file's book ↔ line_index_2 of book_2 (or path_2's title, cut at its last dot
- *     as the official generator does);
+ *     as the official generator does), that title as written and as the title rules make it (otzariaBookTitle, the repository's books'
+ *     titles: a name with two spaces is the same book);
  *   • a target_library record to the official library ("official", "רשמי", or "any"/"כל", which tries the official library first):
  *     by line when it gives line_index_2, and by the official line's heRef when it gives heRef_2 (`officialRefKey`). Its book_2 (or
  *     path_2) is the official title as it is (Otzaria/zmanenu-library docs/format.md, "target_library").
@@ -137,8 +138,12 @@ export function recordedLinks(title: string, text: string, into: RecordedLinks =
     if (lib !== null && !OFFICIAL_NAMES.has(lib)) continue;
     const other = typeof rec.book_2 === "string" ? rec.book_2 : typeof rec.path_2 === "string" ? (lib === null ? titleFromPath2(rec.path_2) : rec.path_2) : null;
     if (!other?.trim()) continue;
+    // a book of the repository by the title rules too (V7 round 2 review, finding 11): the run names the repository's books as Otzaria
+    // does (otzariaBookTitle, headless/repo-layout.ts), and a record names one as its FILE does ("ספר  לדוגמה", two spaces). The name
+    // as written stays as well. An official title is the library's exact title (the generator matches titles exactly): as it is.
+    const names = lib === null ? new Set([other, otzariaBookTitle(other)]) : [other];
     const at = line(rec.line_index_2);
-    if (at !== null) into.pairs.add(linePairIdentity({ source: side(title, own), target: side(other, at) }));
+    if (at !== null) for (const name of names) into.pairs.add(linePairIdentity({ source: side(title, own), target: side(name, at) }));
     if (lib !== null && typeof rec.heRef_2 === "string" && rec.heRef_2.trim()) into.officialRefs.add(officialRefKey(title, own, other, rec.heRef_2));
   }
   return into;

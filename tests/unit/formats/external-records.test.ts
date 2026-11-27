@@ -122,6 +122,30 @@ describe("recordedLinks", () => {
     expect([...got.officialRefs]).toEqual([officialRefKey("ביאור", 7, "בראשית", "בראשית, א, ג")]);
   });
 
+  // V7 round 2 review, finding 11: a book's title is what the title rules make of its file name (core/links/titles.ts
+  // otzariaBookTitle, as the runner names the repository's books), and a record names the book as its FILE does ("ספר  לדוגמה", two
+  // spaces). Compared as written, the pair was not known and the run wrote it again.
+  it("a book_2 or path_2 inside the repository is read with the title rules: a file name with two spaces is the same book", () => {
+    const text = JSON.stringify([
+      { line_index_1: 3, line_index_2: 5, book_2: "ספר  לדוגמה", "Conection Type": "source" },
+      { line_index_1: 4, line_index_2: 6, path_2: "תיקייה/ספר  אחר.txt", "Conection Type": "reference" },
+      { line_index_1: 5, line_index_2: 7, book_2: ' ספר "שלישי" ', "Conection Type": "reference" },
+    ]);
+    const got = recordedLinks("ביאור", text);
+    expect(got.pairs.has(pair("ביאור", 2, "ספר לדוגמה", 4))).toBe(true);
+    expect(got.pairs.has(pair("ביאור", 3, "ספר אחר", 5))).toBe(true);
+    expect(got.pairs.has(pair("ביאור", 4, "ספר ״שלישי״", 6))).toBe(true);
+    // the name as written is kept too (a book whose title is that exact name)
+    expect(got.pairs.has(pair("ביאור", 2, "ספר  לדוגמה", 4))).toBe(true);
+  });
+
+  it("a target_library record keeps the official title as it is (the official library matches titles exactly)", () => {
+    const text = JSON.stringify([{ line_index_1: 7, target_library: "official", book_2: "בראשית  רבה", line_index_2: 4, heRef_2: "x", "Conection Type": "source" }]);
+    const got = recordedLinks("ביאור", text);
+    expect([...got.pairs]).toEqual([pair("ביאור", 6, "בראשית  רבה", 3)]);
+    expect([...got.officialRefs]).toEqual([officialRefKey("ביאור", 6, "בראשית  רבה", "x")]);
+  });
+
   it("a file that is not a JSON array adds nothing", () => {
     expect(recordedLinks("x", "{").pairs.size).toBe(0);
     expect(recordedLinks("x", "{}").pairs.size).toBe(0);
