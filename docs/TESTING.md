@@ -311,6 +311,7 @@ npx vitest run tests/integration/live-test/bundle.test.ts
 | Fixture | מה יש בו | איך הופק |
 |---|---|---|
 | `tests/fixtures/db/seforim-v7-mini.db` | פרוסה אמיתית של `seforim.db` (סכמה 7): בראשית, אונקלוס, ספר עם `line_note`, שורות רש"י שמקושרות לבראשית; קישורים עם עוגנים, טווחים, coverage ו־suppressed sides; מילון ה־zstd הרשמי | `scripts/fixtures/make_mini_db.py` |
+| `tests/fixtures/db/otzaria-user-books-live.db` | `user_books.db` **שאוצריא עצמה כתבה** (0.9.98.3, עותק נייד מבודד, ריצה חיה 3): 7 ספרים אישיים סינתטיים ו־28 שורות `user_link`, כולל הקישורים שנוצרו בממשק הכלי. בלי טקסט של ספרים. משמש את `user-links-otzaria-made.test.ts` | הועתק אחרי סגירת אוצריא; המקור וה־SHA-256 ב־[`README.md`](../tests/fixtures/db/README.md) |
 | `tests/fixtures/linking/footnotes/midrash-vayisau.json` | הזוג היחיד בספרייה שמקושר ב־FOOTNOTES, עם 16 הקישורים | `scripts/fixtures/make_footnotes_fixture.py` (דורש את חבילת `zstandard`) |
 | `tests/fixtures/contracts/*.json` | רשומות אמיתיות מקובצי הספרייה, עם השורות שהן הפיקו במסד | `tests/fixtures/contracts/tools/*.py`, תיעוד ב־[`README.md`](../tests/fixtures/contracts/README.md) |
 | `tests/fixtures/schemas/v0.sql` … `v7.sql` | ה־DDL של כל גרסת סכמה | [`contracts/DATABASE_SUPPORT_MATRIX.md`](contracts/DATABASE_SUPPORT_MATRIX.md) |
