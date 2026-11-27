@@ -92,7 +92,7 @@ test("filter by method, decide from the keyboard on a row, and take a selection 
 
 test("a citations search: the bar says its stage, and a cancel keeps the run on the screen with a re-run (#41 B11)", async ({ page }) => {
   const seen = watchPage(page);
-  const lines = ["<h1>חיבור גדול</h1>", "<h2>פרק א</h2>", ...Array.from({ length: 40_000 }, (_, i) => `שורה ${i + 1} כמו שנאמר (בראשית א, ${["א", "ב", "ג", "כח"][i % 4]}) ועוד מילים.`)];
+  const lines = ["<h1>חיבור גדול</h1>", "<h2>פרק א</h2>", ...Array.from({ length: 160_000 }, (_, i) => `שורה ${i + 1} כמו שנאמר (בראשית א, ${["א", "ב", "ג", "כח"][i % 4]}) ועוד מילים.`)];
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(distUrl);
   const chooser = page.waitForEvent("filechooser");
