@@ -164,6 +164,39 @@ describe("the runner on a repository shaped like Otzarya-Unofficial-Books", { ti
     expect(text.split("\r\n").filter((l) => /^\d+,ביאור חדש על בראשית,/.test(l))).toHaveLength(9);
   });
 
+  // V7 round 2 review, finding 11: an existing links.csv whose header is not this tool's exact one gave no rows (parsePersonalLinksCsv
+  // trusts only its own header), so its rows were written again with no word. The build reads the files by column name: another
+  // order of the columns, or without קטגוריית_מקור, is the same file to it, and its rows are read; a file the build cannot read
+  // (a column a row's identity needs is missing) stops the run with the file and the columns, so nothing is written on a guess.
+  it("an existing links.csv with its columns in another order is read: its rows are not written again", async () => {
+    const root = fresh("csv-order");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const csv01 = join(repo, "ספרים/קבצי קישורים וסדר הדורות/קישורים/01/links.csv");
+    writeFileSync(csv01, "﻿ספר_מקור,מקור,ספר_יעד,מיקום_יעד,סוג,מקור_אישי,יעד_אישי\r\nספר ישן,3,בראשית,פרק א,פירוש,כן,לא\r\nביאור חדש על בראשית,4,בראשית,פרק א,תרגום,כן,לא\r\n");
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--dry-run", "--json", ...HIGH]);
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(r.out) as RunReport;
+    expect(rep.links.external).toBe(10);
+    expect(rep.external.written).toBe(9);
+    expect(rep.alreadyInRepository).toBe(1);
+  });
+
+  it("an existing links.csv the build cannot read (a column is missing): the run stops, names the file and the columns, writes nothing", async () => {
+    const root = fresh("csv-unknown");
+    const repo = join(root, "unofficial-books");
+    cpSync(UNOFFICIAL, repo, { recursive: true });
+    const csv01 = join(repo, "ספרים/קבצי קישורים וסדר הדורות/קישורים/01/links.csv");
+    writeFileSync(csv01, "﻿שורה,ספר,יעד,מיקום_יעד,סוג\r\n4,ביאור חדש על בראשית,בראשית,פרק א,תרגום\r\n");
+    const out = join(fresh("csv-unknown-out"), "out");
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--out", out, ...HIGH]);
+    expect(r.code).toBe(1);
+    expect(r.out).toBe("");
+    expect(r.err).toContain("ספרים/קבצי קישורים וסדר הדורות/קישורים/01/links.csv");
+    expect(r.err).toMatch(/מקור, ספר_מקור, ספר_יעד/);
+    expect(existsSync(out)).toBe(false);
+  });
+
   // found on the real clone of Otzarya-Unofficial-Books (V7 round 2, item 8): its links files of "X על אבות" link to the official
   // "משנה אבות" by path_2. The runner loaded the repository's files before it opened the database, so every such record was reported
   // "the book was not found by its exact name; Otzaria will skip such a link" — 14 notices, 6,014 lines, all wrong.
@@ -301,6 +334,40 @@ describe("the runner on a repository shaped like zmanenu-library", { timeout: 60
     expect(rep.alreadyInRepository).toBe(4);
     expect(readFileSync(join(out, REPORT_TXT), "utf8")).toMatch(/כבר כתובים ברשומות של המאגר: 4/);
   });
+
+  // V7 round 2 review, finding 11: the run names a book by the title rules (otzariaBookTitle: "ספר  לדוגמה", two spaces, is "ספר
+  // לדוגמה"), and a kept-aside record names it as its FILE does. recordedLinks compared book_2 / path_2 as written, so the pair was
+  // not known and the run wrote it again in the other book's file.
+  it("a book_2 / path_2 record that names a book as its file does (two spaces) is known: the pair is not written again", async () => {
+    const root = fresh("zm-spaces");
+    const repo = join(root, "zmanenu");
+    cpSync(ZMANENU, repo, { recursive: true });
+    const books = join(repo, "source/books/הלכה");
+    writeFileSync(join(books, "ספר  לדוגמה.txt"), readFileSync(join(books, "ספר לדוגמה.txt")));
+    rmSync(join(books, "ספר לדוגמה.txt"));
+    writeFileSync(
+      join(repo, "source/links/ביאור על ספר לדוגמה_links.json"),
+      `${JSON.stringify(
+        [
+          { line_index_1: 3, line_index_2: 3, book_2: "ספר  לדוגמה", "Conection Type": "source" },
+          { line_index_1: 4, line_index_2: 4, path_2: "ספר  לדוגמה.txt", "Conection Type": "reference" },
+        ],
+        null,
+        2,
+      )}\n`,
+    );
+    const out = fresh("zm-spaces-out");
+    const r = await untouched(repo, ["--repo", repo, "--db", DB, "--out", out, ...HIGH]);
+    expect(r.err).toBe("");
+    expect(r.code).toBe(0);
+    const rep = JSON.parse(readFileSync(join(out, REPORT_JSON), "utf8")) as RunReport;
+    expect(rep.books.titles).toContain("ספר לדוגמה");
+    const base = parseLinksJson(readFileSync(join(out, "source/links/ספר לדוגמה_links.json"), "utf8"));
+    const pairs = base.records.map((x) => `${x.line_index_1}:${x.line_index_2}`);
+    expect(pairs).not.toContain("3:3");
+    expect(pairs).not.toContain("4:4");
+    expect(base.records).toHaveLength(28);
+  });
 });
 
 describe("the runner refuses what would overwrite or write into the repository", { timeout: 60_000 }, () => {
@@ -370,6 +437,20 @@ describe("the runner refuses what would overwrite or write into the repository",
     expect(n?.details?.join(" ")).toMatch(/seforim\.db/);
     const text = await cli(["--repo", ZMANENU, "--db", bad, "--dry-run"]);
     expect(text.out).toMatch(/seforim\.db: /);
+  });
+
+  // V7 round 2 review, finding 6: a --db that exists but is a folder was opened as nothing, and the run went on with no database
+  // while the report said "מסד אוצריא: <the folder>" — every link to the official library was dropped with no word, and exit 0.
+  it("--db that is a folder, not a file: refused as wrong arguments, nothing run or written", async () => {
+    const out = join(fresh("db-folder"), "out");
+    const r = await untouched(ZMANENU, ["--repo", ZMANENU, "--db", "tests/fixtures/db", "--out", out]);
+    expect(r.code).toBe(2);
+    expect(r.out).toBe("");
+    expect(r.err).toMatch(/tests[\\/]fixtures[\\/]db/);
+    expect(r.err).toMatch(/תיקייה/);
+    expect(existsSync(out)).toBe(false);
+    const dry = await cli(["--repo", ZMANENU, "--db", "tests/fixtures/db", "--dry-run", "--json"]);
+    expect([dry.code, dry.out]).toEqual([2, ""]);
   });
 
   it("wrong arguments exit with 2 and the usage", async () => {

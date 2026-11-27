@@ -266,6 +266,35 @@ export function parsePersonalLinksCsv(text: string): { rows: PersonalLinkRow[]; 
   return { rows, problems };
 }
 
+/** The columns a row's identity (personalRowKey) needs. */
+export const PERSONAL_KEY_COLUMNS = ["מקור", "ספר_מקור", "ספר_יעד", "מיקום_יעד"] as const;
+
+/**
+ * The rows an EXISTING links.csv already holds, as personalRowKey keys (V7 round 2 review, finding 11), so a run does not write them
+ * again. Not parsePersonalLinksCsv, which trusts only this tool's exact header: the build of Otzarya-Unofficial-Books reads its files by
+ * COLUMN NAME (build_personal_db.py, csv.DictReader; read as a data contract), so a file with the columns in another order, without
+ * קטגוריית_מקור or with a column more is the same file to it, and is read here the same way. The names are matched as written (the
+ * build does not trim them either); a leading BOM is not part of the first name. `missing`: the key columns the header lacks — such a
+ * file is not one the build can read, and its rows cannot be compared (no keys then). A row whose line is not a number from 1, or with
+ * an empty key field, is no row of the build either. The type is not read: a row is the same link in any type (personalRowKey).
+ */
+export function readPersonalRowKeys(text: string): { keys: Set<string>; missing: string[] } {
+  const recs = records(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  const header = recs[0] ?? [];
+  const at = PERSONAL_KEY_COLUMNS.map((c) => header.indexOf(c));
+  const missing = PERSONAL_KEY_COLUMNS.filter((_, i) => at[i] === -1);
+  const keys = new Set<string>();
+  if (missing.length) return { keys, missing };
+  const [line, sourceBook, targetBook, position] = at as [number, number, number, number];
+  for (const f of recs.slice(1)) {
+    const n = (f[line] ?? "").trim();
+    const r = { sourceLine: Number(n), sourceBook: f[sourceBook] ?? "", targetBook: f[targetBook] ?? "", position: f[position] ?? "" };
+    if (!/^[1-9]\d*$/.test(n) || !r.sourceBook || !r.targetBook || !r.position) continue;
+    keys.add(personalRowKey(r));
+  }
+  return { keys, missing };
+}
+
 export interface PersonalValidation {
   /** whether the official database has a book of this title */
   targetExists?(title: string): boolean;

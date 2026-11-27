@@ -42,7 +42,8 @@ export type ErrorCode =
   | "repo/not-found"
   | "repo/unsafe-out"
   | "repo/exists"
-  | "repo/bad-args";
+  | "repo/bad-args"
+  | "repo/unreadable";
 
 export class LinkerError extends Error {
   override readonly name = "LinkerError";

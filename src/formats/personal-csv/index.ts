@@ -4,6 +4,8 @@ export {
   personalLinkRows,
   personalRowKey,
   personalRowLine,
+  PERSONAL_KEY_COLUMNS,
+  readPersonalRowKeys,
   validatePersonalRows,
   writePersonalLinksCsv,
   type PersonalCsvFile,

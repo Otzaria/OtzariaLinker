@@ -7,7 +7,7 @@ import { linePairIdentity } from "../core/links/equality";
 import type { Link } from "../core/links/model";
 import { appendRecords, externalRecords, officialRefKey, recordedLinks, type RecordedLinks } from "../formats/links-json/external";
 import { parseLinksJson } from "../formats/links-json/parse";
-import { parsePersonalLinksCsv, personalRowKey } from "../formats/personal-csv";
+import { PERSONAL_LINKS_HEADER, readPersonalRowKeys } from "../formats/personal-csv";
 import { detectRepoLayout, filterBooks, nextCsvFolders, type RepoLayout } from "../headless/repo-layout";
 import type { Confidence, EngineId } from "../linking/automatic";
 import { SourceRegistry } from "../sources/registry";
@@ -107,6 +107,10 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
   const out = o.out ? checkOut(o.repo, o.out) : null;
   if (!out && !o.dryRun) throw new LinkerError("repo/bad-args", "חסר --out: תיקייה ריקה שאליה ייכתבו הקבצים. הכלי לעולם אינו כותב לתוך המאגר. להרצה בלי כתיבה, הוסיפו --dry-run.");
   if (o.db && !existsSync(o.db)) throw new LinkerError("repo/not-found", `מסד הספרים "${o.db}" לא נמצא. תנו את הנתיב ל־seforim.db של אוצריא.`, { path: o.db });
+  // a folder (or anything not a file) is not a database: run without it, the report would name it as used and every link to the
+  // official library would drop with no word (V7 round 2 review, finding 6)
+  if (o.db && !statSync(o.db).isFile())
+    throw new LinkerError("repo/bad-args", `הנתיב "${o.db}" ${statSync(o.db).isDirectory() ? "הוא תיקייה" : "אינו קובץ רגיל"}, לא קובץ מסד. תנו ב־--db את הנתיב לקובץ המסד עצמו (seforim.db).`, { path: o.db });
 
   const repo = await openRepo(o.repo);
   const layout = detectRepoLayout(repo.paths);
@@ -190,10 +194,20 @@ async function run(o: RunOptions, dbBlob: Blob | null): Promise<{ report: RunRep
     // internal ones), which are not links.csv rows and are not "not written" there
     // and not a row the repository's links.csv files already hold: they are imported into the personal database, not seforim.db, so
     // nothing else knows them (V7 round 2, items 8-9)
+    // read by column name, as their build reads them; a file it could not read stops the run, said — its rows cannot be compared,
+    // and writing on would risk the duplicates silently (V7 round 2 review, finding 11)
     const listed = new Set<string>();
     for (const folder of layout.csvFolders ?? []) {
       const path = `${layout.csvRoot}/${folder}/links.csv`;
-      if (repo.paths.includes(path)) for (const r of parsePersonalLinksCsv(await repo.text(path)).rows) listed.add(personalRowKey(r));
+      if (!repo.paths.includes(path)) continue;
+      const got = readPersonalRowKeys(await repo.text(path));
+      if (got.missing.length)
+        throw new LinkerError(
+          "repo/unreadable",
+          `הקובץ "${path}" במאגר אינו links.csv שאפשר לקרוא: חסרות בכותרת שלו העמודות ${got.missing.join(", ")} (הכותרת המוכרת: ${PERSONAL_LINKS_HEADER.join(",")}). בלי לקרוא אותו אי אפשר לדעת אילו שורות כבר במאגר, ולכן לא נכתב דבר. תקנו את הכותרת של הקובץ ונסו שוב. כדי ליצור בינתיים רק קישורים בתוך המאגר, הריצו בלי --db.`,
+          { path },
+        );
+      for (const k of got.keys) listed.add(k);
     }
     const csv = await store.personalCsv.prepare({ only: new Set(external.map((l) => l.id)), listed, sourceName: (t) => fileName.get(t) ?? t });
     if (csv) {
