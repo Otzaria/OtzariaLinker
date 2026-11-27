@@ -26,9 +26,10 @@ export interface BookSource {
   /**
    * For each run [from, to] of a book's lines, the match index (core/links/equality.ts) of existingLinks(bookKey, from, to) — exactly
    * that, read in one pass and without building what the identities do not need (V7 round 2 item 11). Optional, and null when the
-   * source cannot do it cheaper: the registry then reads existingLinks() run by run.
+   * source cannot do it cheaper: the registry then reads existingLinks() run by run. A cancel stops it between its reads (it throws
+   * the abort).
    */
-  existingMatchIndexes?(bookKey: string, runs: readonly (readonly [number, number])[]): Promise<LinkMatchList[] | null>;
+  existingMatchIndexes?(bookKey: string, runs: readonly (readonly [number, number])[], signal?: AbortSignal): Promise<LinkMatchList[] | null>;
   /**
    * The whole book, chunk by chunk, for a scan (in-book search). Optional: without it the registry
    * pages through lines(); a source implements it when it can read a whole book more cheaply.

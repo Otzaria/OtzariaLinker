@@ -206,8 +206,11 @@ export class DbLinksReader {
    * the runs it was asked for — and without anchors, range ends or suppressed sides (no part of a link's identity: equality.ts).
    * Null without the line indexes (atLines() would scan the whole table; the caller reads run by run instead).
    */
-  async atLinesBare(lineIds: Iterable<number>): Promise<{ rows: DbLinkRow[]; foundBy: Map<number, number[]> } | null> {
+  async atLinesBare(lineIds: Iterable<number>, signal?: AbortSignal): Promise<{ rows: DbLinkRow[]; foundBy: Map<number, number[]> } | null> {
     if (!this.indexed) return null;
+    // a cancel is seen between the reads (each one ordered walk), not inside one (V7 round 2 review, finding 11)
+    const step = () => signal?.throwIfAborted();
+    step();
     const keys = [...new Set(lineIds)].sort((a, b) => a - b).map((id) => [id]);
     const foundBy = new Map<number, number[]>();
     const add = (linkId: number, lineId: number) => {
@@ -216,13 +219,17 @@ export class DbLinksReader {
       else foundBy.set(linkId, [lineId]);
     };
     for (const rec of await this.file.seekIndexMany(this.ix.out!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    step();
     for (const rec of await this.file.seekIndexMany(this.ix.in!, keys)) add(Number(rec.at(-1)), Number(rec[0]));
+    step();
     if (this.ix.coverage) for (const rec of await this.file.seekIndexMany(this.ix.coverage, keys)) add(Number(rec[1]), Number(rec[0]));
-    return { rows: await this.rows(new Set(foundBy.keys()), false), foundBy };
+    step();
+    return { rows: await this.rows(new Set(foundBy.keys()), false, signal), foundBy };
   }
 
-  private async rows(linkIds: Set<number>, details = true): Promise<DbLinkRow[]> {
+  private async rows(linkIds: Set<number>, details = true, signal?: AbortSignal): Promise<DbLinkRow[]> {
     const links = await this.file.getMany(this.t.link, linkIds);
+    signal?.throwIfAborted();
     const L = (n: string) => col(this.t.link, n);
     const [sb, tb, sl, tl, tli, cti, ctText] = [L("sourceBookId"), L("targetBookId"), L("sourceLineId"), L("targetLineId"), L("targetLineIndex"), L("connectionTypeId"), L("connectionType")];
 

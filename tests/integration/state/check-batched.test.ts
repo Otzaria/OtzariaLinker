@@ -129,3 +129,56 @@ describe("the check reads the database links of a book in one call, with the sam
     expect(now.calls.existingMatchIndexes).toBeLessThan(old.calls.existingLinks);
   });
 });
+
+/*
+ * V7 round 2 review, finding 11: the one-pass read (DbSource.existingMatchIndexes, DbLinksReader.atLinesBare) took no signal, so a
+ * cancelled check went on reading the line indexes, the link rows and the line rows of every run to the end — the cancel was seen only
+ * by the next book. It now stops between its reads. Watched on the database file the reads go through.
+ */
+describe("a cancel stops the batched read between its reads", () => {
+  type Reads = Record<"seekIndexMany" | "getMany", (...a: unknown[]) => Promise<unknown>>;
+  async function opened() {
+    const reg = new SourceRegistry();
+    const src = (await reg.open([SEFORIM()])).sources[0]!;
+    const ber = src.books.find((b) => b.title === "בראשית")!;
+    const source = (reg as unknown as { of(key: string): BookSource }).of(ber.key);
+    const file = (source as unknown as { links: { file: Reads } }).links.file;
+    return { reg, key: ber.key, file };
+  }
+  const RUNS: [number, number][] = [
+    [0, 40],
+    [60, 90],
+    [200, 230],
+  ];
+
+  it("cancelled after the first index read: nothing more is read, and the call fails as cancelled", async () => {
+    const { reg, key, file } = await opened();
+    const ac = new AbortController();
+    const after: string[] = [];
+    for (const name of ["seekIndexMany", "getMany"] as const) {
+      const real = file[name].bind(file);
+      file[name] = async (...a: unknown[]) => {
+        if (ac.signal.aborted) after.push(name);
+        const r = await real(...a);
+        if (name === "seekIndexMany") ac.abort();
+        return r;
+      };
+    }
+    await expect(reg.existingMatchIndexes(key, RUNS, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(after).toEqual([]);
+  });
+
+  it("cancelled before: no read at all; never cancelled: the same result as without a signal", async () => {
+    const { reg, key, file } = await opened();
+    const want = await reg.existingMatchIndexes(key, RUNS);
+    expect(want.some((m) => m.pairs.length > 0)).toBe(true);
+    expect(await reg.existingMatchIndexes(key, RUNS, new AbortController().signal)).toEqual(want);
+    let reads = 0;
+    for (const name of ["seekIndexMany", "getMany"] as const) {
+      const real = file[name].bind(file);
+      file[name] = (...a: unknown[]) => (reads++, real(...a));
+    }
+    await expect(reg.existingMatchIndexes(key, RUNS, AbortSignal.abort())).rejects.toMatchObject({ name: "AbortError" });
+    expect(reads).toBe(0);
+  });
+});

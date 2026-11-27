@@ -240,7 +240,8 @@ export class SourceRegistry {
    */
   async existingMatchIndexes(bookKey: string, runs: readonly (readonly [number, number])[], signal?: AbortSignal): Promise<LinkMatchList[]> {
     const s = this.of(bookKey);
-    const fast = s.existingMatchIndexes ? await s.existingMatchIndexes(bookKey, runs) : null;
+    signal?.throwIfAborted();
+    const fast = s.existingMatchIndexes ? await s.existingMatchIndexes(bookKey, runs, signal) : null;
     if (fast) return fast;
     const out: LinkMatchList[] = [];
     for (const [from, to] of runs) {

@@ -160,10 +160,14 @@ export class DbBookSource implements BookSource {
    * database whose links are also (or only) in external_link or user_link, or without the line indexes, returns null: the registry
    * then reads existingLinks() run by run — so the result is always the same as the run-by-run read.
    */
-  async existingMatchIndexes(bookKey: string, runs: readonly (readonly [number, number])[]): Promise<LinkMatchList[] | null> {
+  async existingMatchIndexes(bookKey: string, runs: readonly (readonly [number, number])[], signal?: AbortSignal): Promise<LinkMatchList[] | null> {
     if (!this.links || this.ext || this.user || !this.links.indexed) return null;
+    // a cancel stops the read between its reads (V7 round 2 review, finding 11): the line entries, each index walk, the link rows and
+    // the line rows (atLinesBare); not inside one, which is a single ordered walk
+    signal?.throwIfAborted();
     const id = this.idOf(bookKey);
     const entries = [...(await this.reader.lineEntries(id))].sort((a, b) => a.index - b.index);
+    signal?.throwIfAborted();
     // the line ids of each run, as existingLinks() selects them (index in [from, to]); a line id → the runs it is in
     const runsOf = new Map<number, number[]>();
     runs.forEach(([from, to], r) => {
@@ -181,8 +185,9 @@ export class DbBookSource implements BookSource {
         else runsOf.set(lineId, [r]);
       }
     });
-    const read = await this.links.atLinesBare(runsOf.keys());
+    const read = await this.links.atLinesBare(runsOf.keys(), signal);
     if (!read) return null;
+    signal?.throwIfAborted();
     const perRun = runs.map(() => [] as Link[]);
     for (const row of read.rows) {
       const link = this.toLink(row);
