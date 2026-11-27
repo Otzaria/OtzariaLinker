@@ -1,7 +1,5 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { strToU8 } from "fflate";
-import initSqlJs from "sql.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Link } from "../../../src/core/links/model";
 import { SourceRegistry } from "../../../src/sources/registry";
@@ -9,6 +7,7 @@ import { loadPreferences } from "../../../src/state/preferences";
 import type { BooksService } from "../../../src/state/services";
 import { AppStore } from "../../../src/state/store";
 import { registryService } from "../../support/books-service";
+import { loadSqlJs } from "../../support/sql-js";
 
 /*
  * V7 §1.1 (the owner's round 2, items 1–6 and 11): a link is bound to its book by title, origin, the label of its source and
@@ -19,11 +18,10 @@ import { registryService } from "../../support/books-service";
  * The databases: tests/fixtures/db/pdc-personal-mini.db (a real Personal-DB-Creator slice, its book "PLACEHOLDER base" has 4
  * lines), and the same file with one line's text changed through sql.js (the schema untouched): another edition of that book.
  */
-const require = createRequire(import.meta.url);
 const ORIGINAL = new Uint8Array(readFileSync("tests/fixtures/db/pdc-personal-mini.db"));
 let EDITED: Uint8Array;
 beforeAll(async () => {
-  const SQL = await initSqlJs({ locateFile: (f: string) => require.resolve(`sql.js/dist/${f}`) });
+  const SQL = await loadSqlJs();
   const db = new SQL.Database(ORIGINAL);
   // line 1 of "PLACEHOLDER base" (book 11): another text, the same number of lines
   db.run("UPDATE line_content SET content = 'PLACEHOLDER line 11/1 — another edition' WHERE id = (SELECT id FROM line WHERE bookId = 11 AND lineIndex = 1)");
