@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { computed, signal, type ReadonlySignal } from "@preact/signals";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
 import type { ConnectionType } from "../core/links/connection-type";
@@ -289,7 +290,7 @@ export class RepositoryState {
   /** Saves the analysis so far as a CSV report (repoReportCsv). */
   saveReport(): void {
     const src = this.source.peek();
-    if (src && this.saver) this.saver.save(`ניתוח-מאגר-${new Date().toISOString().slice(0, 10)}.csv`, repoReportCsv(this.books.peek(), this.rows.peek(), src.info.label), "text/csv;charset=utf-8");
+    if (src && this.saver) this.saver.save(`ניתוח-מאגר-${localDateStamp()}.csv`, repoReportCsv(this.books.peek(), this.rows.peek(), src.info.label), "text/csv;charset=utf-8");
   }
 
   get available(): boolean {

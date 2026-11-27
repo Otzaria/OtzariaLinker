@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { pushTo } from "../core/collections";
 import { batch, computed, signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import { sourceIdOfBookKey, type SourceBook } from "../core/books";
@@ -405,7 +406,7 @@ export class MaxLinkState {
   /** The per-book report of the job as CSV. */
   saveJobReport(): void {
     const job = this.job.peek();
-    if (job) this.saver.save(`קישור-מרבי-ספרים-${new Date().toISOString().slice(0, 10)}.csv`, jobCsv(job), "text/csv;charset=utf-8");
+    if (job) this.saver.save(`קישור-מרבי-ספרים-${localDateStamp()}.csv`, jobCsv(job), "text/csv;charset=utf-8");
   }
 
   /** The titles of the job's books (the bases among them) that are not open now: they cannot run until they are. */
@@ -814,6 +815,6 @@ export class MaxLinkState {
 
   saveReport(): void {
     const rep = this.report.value;
-    if (rep) this.saver.save(`קישור-מרבי-${new Date().toISOString().slice(0, 10)}.csv`, reportCsv(rep), "text/csv;charset=utf-8");
+    if (rep) this.saver.save(`קישור-מרבי-${localDateStamp()}.csv`, reportCsv(rep), "text/csv;charset=utf-8");
   }
 }

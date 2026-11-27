@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { sourceIdOfBookKey, type BookHeading, type SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
 import { stripTags } from "../core/text/html";
@@ -135,7 +136,7 @@ export class PersonalCsvState {
   save(bundle: PersonalCsvBundle): void {
     if (!bundle.files.length) return void this.host.notify("warning", "אין קישורים בין ספר אישי לספר של המאגר הרשמי, ולכן אין מה לייצא.");
     const data = zipBundle(bundle.files.map((f) => ({ path: `${f.folder}/${f.name}`, text: f.text })));
-    this.saver.save(`קישורים-לספרייה-האישית-${new Date().toISOString().slice(0, 10)}.zip`, data, "application/zip");
+    this.saver.save(`קישורים-לספרייה-האישית-${localDateStamp()}.zip`, data, "application/zip");
   }
 }
 

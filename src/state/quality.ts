@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { batch, signal, type ReadonlySignal } from "@preact/signals";
 import type { Link } from "../core/links/model";
 import type { ValidationContext } from "../core/links/validate";
@@ -54,7 +55,7 @@ export class QualityState {
   }
 
   saveReport(): void {
-    if (this.report.value) this.saver.save(`בדיקת-קישורים-${new Date().toISOString().slice(0, 10)}.csv`, qaCsv(this.report.value), "text/csv");
+    if (this.report.value) this.saver.save(`בדיקת-קישורים-${localDateStamp()}.csv`, qaCsv(this.report.value), "text/csv");
   }
 
   /** The report as one offline HTML page, grouped by severity and category, with a fix for every issue. */
@@ -63,7 +64,7 @@ export class QualityState {
     if (!report) return;
     const now = new Date();
     const html = buildQaHtml({ report, date: now.toLocaleString("he-IL"), app: APP_VERSION });
-    this.saver.save(`בדיקת-קישורים-${now.toISOString().slice(0, 10)}.html`, html, QA_HTML_MIME);
+    this.saver.save(`בדיקת-קישורים-${localDateStamp(now)}.html`, html, QA_HTML_MIME);
   }
 }
 

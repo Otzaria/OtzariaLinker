@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { embeddedLibraryLinkFiles } from "../core/links/library-link-files";
 import { pushTo } from "../core/collections";
 import { batch, computed, effect, signal, type ReadonlySignal } from "@preact/signals";
@@ -1615,7 +1616,7 @@ export class AppStore {
   saveLineMapping(): void {
     const r = this.relink.value;
     if (!r) return;
-    this.saver.save(`מיפוי-שורות-${new Date().toISOString().slice(0, 10)}.csv`, lineMappingCsv(r.rows, r.diff), "text/csv");
+    this.saver.save(`מיפוי-שורות-${localDateStamp()}.csv`, lineMappingCsv(r.rows, r.diff), "text/csv");
   }
 
   /** Applies chosen items of the relink plan as ONE undoable action. */

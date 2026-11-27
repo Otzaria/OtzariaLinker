@@ -1,3 +1,4 @@
+import { localDateStamp } from "../core/file-date";
 import { signal, type ReadonlySignal, type Signal } from "@preact/signals";
 import type { BookHeading, SourceBook } from "../core/books";
 import type { BookRef, Link } from "../core/links/model";
@@ -422,7 +423,7 @@ export class ExchangeState {
     try {
       assertSafeExportPaths(data);
       if (data.length === 1) this.saver.save(data[0]!.path.split("/").at(-1)!, data[0]!.text, data[0]!.mime);
-      else this.saver.save(`links-${new Date().toISOString().slice(0, 10)}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
+      else this.saver.save(`links-${localDateStamp()}.zip`, zipBundle([...data, { path: REPORT_FILE_NAME, text: this.exportReport(bundle, csv) }]), "application/zip");
     } catch (err) {
       return void host.notify("error", (err as Error).message);
     }
