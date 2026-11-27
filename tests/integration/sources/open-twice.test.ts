@@ -156,7 +156,8 @@ describe("AppStore: no duplicate sources, no duplicate books", () => {
 /*
  * V3 F-016 (legacy addBooks, OtzariaLinker-v3.html:2858): a book was added once per source, path and title. V4 deduplicated
  * databases only: a text file or a folder picked again opened as another source, every book listed twice. A text book is now
- * known by its name, size, last-modified time and the bytes at its start and end; one already open is not opened again.
+ * known by its name, size, last-modified time and the bytes at its start, middle and end (an entry of a ZIP: all its bytes); one
+ * already open is not opened again.
  */
 const TXT = (path: string, text: string, lastModified = 1_700_000_000_000) => ({ path, blob: new File([text], path.split("/").at(-1)!, { lastModified }) });
 const FOLDER = () => [TXT("mine/ספר א.txt", "<h1>ספר א</h1>\nשורה 1\nשורה 2"), TXT("mine/ספר ב.txt", "<h1>ספר ב</h1>\nשורה 1")];
@@ -221,6 +222,36 @@ describe("SourceRegistry: a text file or folder opens once (F-016)", () => {
     const again = await r.open([zip()]);
     expect(again.sources).toEqual([]);
     expect(again.reused?.[0]!.info.id).toBe(first.sources[0]!.info.id);
+  });
+
+  // V7 round 2 review, finding 3: a ZIP entry has no last-modified time, and the identity read only the first 64 KiB and the last
+  // 4 KiB — a second edition of a book in another ZIP, the same size and one letter changed in the middle, was "already open"
+  it("a book in another ZIP that differs only in the middle (the same name and size) is another edition: opened", async () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `שורה ${i + 1} של הספר, עם מעט טקסט כדי שהקובץ יהיה גדול`);
+    const v52 = lines.join("\n");
+    const mid = Math.floor(lines.length / 2);
+    const v53 = [...lines.slice(0, mid), lines[mid]!.replace("ספר", "ספד"), ...lines.slice(mid + 1)].join("\n");
+    const zip = (name: string, text: string) => ({ path: name, blob: new Blob([zipSync({ "ספר.txt": strToU8(text) })]) });
+    expect(strToU8(v52).length).toBe(strToU8(v53).length);
+    expect(strToU8(v52).length).toBeGreaterThan(3 * 64 * 1024); // the change is far from the first 64 KiB and the last 4 KiB
+    const r = new SourceRegistry();
+    expect((await r.open([zip("v52.zip", v52)])).sources).toHaveLength(1);
+    const second = await r.open([zip("v53.zip", v53)]);
+    expect(second.reused).toBeUndefined();
+    expect(second.sources).toHaveLength(1);
+    // the same bytes in another ZIP are the same book
+    const third = await r.open([zip("copy.zip", v52)]);
+    expect(third.sources).toEqual([]);
+    expect(third.reused).toHaveLength(1);
+  });
+
+  it("a .txt on disk with the same name, size and time but another middle is another edition: opened", async () => {
+    const lines = Array.from({ length: 4000 }, (_, i) => `שורה ${i + 1} של הספר, עם מעט טקסט כדי שהקובץ יהיה גדול`);
+    const mid = Math.floor(lines.length / 2);
+    const r = new SourceRegistry();
+    await r.open([TXT("ספר.txt", lines.join("\n"))]);
+    const other = [...lines.slice(0, mid), lines[mid]!.replace("ספר", "ספד"), ...lines.slice(mid + 1)].join("\n");
+    expect((await r.open([TXT("ספר.txt", other)])).sources).toHaveLength(1);
   });
 
   it("in the app: the same folder twice keeps one source and one entry per book, and says it is open", async () => {
