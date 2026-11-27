@@ -234,6 +234,8 @@ interface MatchPart extends MatchParts {
   readonly base: number;
   readonly baseEnd?: number;
   readonly words: { rawStart: number; rawEnd: number };
+  /** the place is before the previous line's (the same test as its dh/backward warning); Placement.localBackward comes from it */
+  readonly backward?: true;
 }
 
 /**
@@ -1001,7 +1003,7 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
         reasons.push(r("dh/continuation", 'גם ההמשך שאחרי "וכו\'" נמצא בספר הבסיס'));
         if (c.contLine > (baseEnd ?? c.line)) baseEnd = c.contLine;
       }
-      return { base: c.line, ...(baseEnd !== undefined ? { baseEnd } : {}), words: { rawStart: tg[c.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd }, reasons, rules, warnings };
+      return { base: c.line, ...(baseEnd !== undefined ? { baseEnd } : {}), words: { rawStart: tg[c.run.tgtStart]!.rawStart, rawEnd: tg[firstLineEnd - 1]!.rawEnd }, reasons, rules, warnings, ...(prevIn !== null && c.line < prevIn && { backward: true as const }) };
     };
 
     let win = cands[0]!;
@@ -1108,7 +1110,8 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       rootScore: score,
       depth: 0,
       ...(tie ? { tie: { ...tie, common } } : {}),
-      ...(window.kind !== "book" ? { localWords: matchedWords, ...(prevIn !== null && win.line < prevIn && { localBackward: true as const }) } : {}),
+      // from the chosen place's part, as its dh/backward warning is: a place moved later (the order pass) takes its part's
+      ...(window.kind !== "book" ? { localWords: matchedWords, ...(part.backward && { localBackward: true as const }) } : {}),
     };
     const out = withMatch(placed, common, part, tie);
     // the other lines that hold the same words are its alternatives, saying why they were not chosen
@@ -1403,9 +1406,14 @@ export function* diburHamatchilSteps(commentary: EngineBook, base: EngineBook, o
       const from = tie.cands[tie.chosen]!;
       const alternatives = [...pl.alternatives.filter((a) => a.line !== to.line), { line: from.line, score: from.score }].sort((a, b) => b.score - a.score);
       const moved: TieState = { cands: tie.cands, chosen: k, why: "order", bracket: [lo, hi] };
-      const { baseEnd: _end, ...rest } = pl;
+      /*
+       * localBackward (SHORT_LOCAL) is the new place's, like its dh/backward warning (withMatch takes both from `to.part`; V7 round 2
+       * review, finding 10). Before, it kept the old place's. That had no effect: a moved place is "ambiguous", and the SHORT_LOCAL cap
+       * below reads only "high" ones (the off-order pass only lowers a level) — but nothing should rely on that.
+       */
+      const { baseEnd: _end, localBackward: _back, ...rest } = pl;
       placements[i] = withMatch(
-        { ...rest, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}), words: to.part.words, score: to.score, rootScore: to.score, confidence: "ambiguous", alternatives, tie: { ...moved, common: tie.common } },
+        { ...rest, base: to.part.base, ...(to.part.baseEnd !== undefined ? { baseEnd: to.part.baseEnd } : {}), ...(rest.localWords !== undefined && to.part.backward && { localBackward: true as const }), words: to.part.words, score: to.score, rootScore: to.score, confidence: "ambiguous", alternatives, tie: { ...moved, common: tie.common } },
         tie.common,
         to.part,
         moved,

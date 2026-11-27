@@ -323,6 +323,27 @@ describe("C21 — forms that were missed", () => {
     expect(tos.map((s) => heRefOf(B.tosBer, s.target.line)!.split(",")[1]!.trim())).toEqual(["יג.", "יג:"]);
   });
 
+  /*
+   * V7 round 2 review, finding 10: after a citation of a commentary's own book ("תוספות על ברכות יג.", "רשב"ם על בבא בתרא קיא.")
+   * "ושם ע"ב ד"ה" was linked at "high" to the START of that commentary's other amud, and its ד"ה placed nothing: the link points at
+   * the amud, not at the words. A coarse place, as B7: at most "possible". Without a ד"ה, "ושם ע"ב" is the amud itself (control).
+   */
+  it.each([
+    ['ועיין תוספות על ברכות יג. ושם ע"ב ד"ה אלא', B.tosBer, "תוספות על ברכות, יג:, א"],
+    ['ועיין רשב"ם על בבא בתרא קיא. ושם ע"ב ד"ה אלא כתבו', B.rashbamBb, 'רשב"ם על בבא בתרא, קיא:, א'],
+  ] as const)("'%s': the other amud of the commentary, at most 'possible' (like B7)", (text, book, amud) => {
+    const to = run(text).suggestions.filter((s) => s.target.book.key === book.key).sort((a, b) => a.target.line - b.target.line);
+    expect(to).toHaveLength(2);
+    expect(to[0]!.confidence).toBe("certain");
+    expect(heRefOf(book, to[1]!.target.line)).toBe(amud);
+    expect(to[1]!.confidence).toBe("possible");
+    expect(to[1]!.reasons.map((x) => x.text).join(" ")).toContain('ד"ה');
+    // without the ד"ה it is the amud itself, as before
+    const bare = run(text.replace(/ ד"ה.*$/, "")).suggestions.filter((s) => s.target.book.key === book.key).sort((a, b) => a.target.line - b.target.line);
+    expect(heRefOf(book, bare[1]!.target.line)).toBe(amud);
+    expect(bare[1]!.confidence).toBe("high");
+  });
+
   it("'ברכות<sup>1</sup> יג:': a note's mark between the name and the place", () => {
     const text = "ועיין ברכות<sup>1</sup> יג: ושם";
     const [s] = one(text, B.ber.key);

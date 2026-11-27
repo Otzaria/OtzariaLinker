@@ -229,7 +229,10 @@ export function runPatternEngine(source: EngineBook, target: EngineBook, options
   if (shared.length)
     notes.push(r("pattern/shared-targets", `${shared.length} שורות ביעד מקבלות יותר מהפניה אחת: ${listed(shared.map(([line, n]) => `שורה ${line + 1} (${n} הפניות)`))}. זה תקין בהפניות, אבל בהערות שוליים זה סימן לטעות בתבנית או בחלוקה לפרקים.`));
   if ((mode === "line" || mode === "chapter-line") && perTarget.size) {
-    const last = Math.max(...perTarget.keys());
+    // a loop, not Math.max(...keys): spreading more than ~120K arguments throws RangeError (a notes book of 200K lines in chapter-line
+    // mode), and a diagnostic note must never fail the run (V7 round 2 review, finding 10)
+    let last = -1;
+    for (const line of perTarget.keys()) if (line > last) last = line;
     const unused = target.lines.filter((l) => l.index <= last && l.heading === null && !perTarget.has(l.index) && stripTags(l.text).trim() !== "").map((l) => l.index);
     if (unused.length)
       notes.push(r("pattern/unreferenced-targets", `${unused.length} שורות ביעד, עד השורה האחרונה שיש אליה הפניה, לא קיבלו אף הפניה (שורות ${listed(unused.map((x) => String(x + 1)))}). בספר הערות זה סימן להפניה שהתבנית לא זיהתה, או למספר שגוי.`));

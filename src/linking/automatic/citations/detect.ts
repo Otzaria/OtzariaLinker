@@ -1499,9 +1499,16 @@ export class CitationScanner {
      * יג.") is that commentary's words.
      */
     const noCommentator = !!dh && !last.c.commentator && !last.c.candidates.some((x) => / על /.test(x.book.title));
+    /*
+     * "תוספות על ברכות יג. … ושם ע"ב ד"ה אלא": the commentary's own book, so the words are its words on the other amud — but the
+     * ד"ה is looked for only after a commentator's name (engine.ts refineDibur reads `dh`, set below only with `commentator`), so
+     * the link is to the START of the amud, not to the words. As coarse as B7: at most "possible" (V7 round 2 review, finding 10;
+     * before, "high"). Without a ד"ה, "ושם ע"ב" is the amud itself and stays `ibid-amud`.
+     */
+    const unplacedDibur = !!dh && !noCommentator && !last.c.commentator;
     const elems: AddrElem[] = [{ ...prev, kind: "daf", amud: a[0], explicit: true }];
     const { maybeAmud: _m, amudGlued: _g, ...daf } = elems[0]!;
-    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: noCommentator ? "dibur-no-commentator" : "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
+    return this.emit(toks, line, { from: i, to: dh ? Math.min(to + 2, toks.length) : to, candidates: last.c.candidates, name: "שם", elems: [daf], evidence: "strong", bracketed: inBracket, ibid: "partial", ibidOf: last.c.seq, form: "forward", numericName: false, rule: noCommentator ? "dibur-no-commentator" : unplacedDibur ? "ibid-amud-dibur" : "ibid-amud", ...(last.c.commentator && { commentator: last.c.commentator, ...(dh && { dh }), ...(last.c.movedFrom && { movedFrom: last.c.movedFrom }) }), ...(last.c.internal && { internal: last.c.internal }) });
   }
 
   /**
