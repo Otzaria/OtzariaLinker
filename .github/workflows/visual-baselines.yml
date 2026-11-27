@@ -26,7 +26,7 @@ jobs:
       - run: npx playwright install chromium-headless-shell
       - name: Screenshots (rewrites all the baselines)
         run: npx playwright test --config playwright.visual.config.ts --update-snapshots=all
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: visual-baselines-win32
           path: tests/visual/__screenshots__/win32/
