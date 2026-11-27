@@ -48,7 +48,7 @@
 |---|---|---|
 | F-070, F-072, F-086 | אי אפשר ליצור, לערוך או לשחזר קישור **זהה** לקישור קיים. כך גם ביצירה מכמה שורות וב"שמירה כקישור נוסף". קישור אחר בין אותן שתי שורות מותר | 1, 3 |
 | F-087 | קישור משורה לאותה שורה הוא שגיאה | 1 |
-| F-016 | קובץ טקסט, תיקייה או ZIP שנבחרו שוב לא נפתחים פעם שנייה | 1 |
+| F-016 | קובץ טקסט, תיקייה או ZIP שנבחרו שוב לא נפתחים פעם שנייה | 1 | |  | undefined ספר בתוך ZIP מזוהה לפי כל הבתים שלו, ולכן מהדורה אחרת באותו גודל נפתחת (סקירת סבב 2).
 | F-046, F-061 | בחירת שורות לא רצופות עם Ctrl/Cmd, וקישור מכל שורה בפעולה אחת | 3 |
 | F-054, F-055 | "עד שורה" בהקלדה, "עד סוף הספר", והצעת סוף אוטומטית (הגדרה לכל צד) | 3 |
 | F-079, F-083 | בבונה: איפה "עד הבא" נעצר, והאם לקצר את הטווח הקודם | 3 |
@@ -139,14 +139,14 @@ TD-H1 (שמירה אוטומטית ואזהרה לפני סגירה), TD-H2 (ק�
 | F-025 | EXISTING; כפילויות מדולגות | 3475, 3487 | `recordToLink`; `validateExport` (`export/duplicate`) | שונה: כפילות נשמרת (קובץ יוצא זהה) ומסומנת | `tests/unit/core/validate.test.ts` "links that collapse into one stored link are flagged as duplicates" | "מחיקת העתקים כפולים" | — |
 | F-026 | דיאלוג דוח ייבוא | `Dialogs.importReport` 5567 | `importLinksFile` → `notify` עם פירוט | הוחלף: הודעה מתקפלת | אין | הודעה | תוכן ההודעה לא נבדק |
 | F-027 | רשימת כותרות ספריא | `Sefaria.loadTitles` 2966 | `sefaria-titles-snapshot.ts`; `AppStore.loadSefariaTitles` | שופר: רשימה מוטמעת, ורשימת הספרייה מחליפה אותה | `tests/integration/state/sefaria-refs.test.ts` "the library's own list of Sefaria titles replaces the embedded one (B6)" | חלון הייצוא | גרירה של הקובץ פותחת אותו כספר |
-| F-028 | "איפוס מלא" | 7123 | — | **הוסר** | אין | לא נגיש | §3.1 |
+| F-028 | "איפוס מלא" | 7123 | — | **הוסר** גם עם שמירה, העבודה נשמרת בצד, כי הכלי לא יודע אם ההורדה הצליחה (סקירת סבב 2). | אין | לא נגיש | §3.1 |
 | F-029 | אין ייבוא `alt_toc` | — | `detectKind`; `AltTocState.importFile` | שופר (TD-M7) | `tests/integration/state/alt-toc-export.test.ts` "an imported _alt_toc.json becomes the book's structures …" | גרירה | — |
 | F-030 | רשימה וירטואלית | `rowHeight` 4491 | `src/ui/workspace/book-picker.tsx` `BookList` (`LIMIT=200`) | הוחלף: עד 200 לכל מקור, ואז חיפוש | חלקי: `tests/e2e/touch-targets.spec.ts` | "קבצים ומסדים" | מעבר ל־200 רק בחיפוש |
 | F-031 | חיפוש תת־מחרוזת | `filterBooks` 4496 | `useBookSearch` | שופר: מתעלם מניקוד וגרשיים, מדרג | חלקי: `tests/e2e/maxlink.spec.ts` | "חיפוש ספר…" | — |
 | F-032 | שבבי סינון | 1186; 4499 | `BookList`, קבוצה לכל מקור | הוחלף | `multi-source.spec.ts` (אותו מבחן) | כותרות הקבוצות | אין סינון לפי סוג |
 | F-033 | תגיות ספר | `bookTag` 4505 | `SourceBadge`; `side-btn[aria-pressed]` | שונה: התג על הקבוצה | `multi-source.spec.ts` | רשימת הספרים | — |
 | F-034 | מתג "פתיחה אל: מקור/יעד" | `setLoadInto` 4565 | `BookList.row`, כפתור לכל צד | הוחלף | `multi-source.spec.ts` | "מקור"/"יעד" בשורה | — |
-| F-035 | הסרת ספר יחיד, עם ביטול | `removeBookAsked` 5293 | רק `AppStore.closeSource` | **הוסר** | `tests/integration/state/export-completeness.test.ts` "close the database and open it again: …" (לסגירת מקור) | ✕ "סגירת <מקור>" | §3.1 |
+| F-035 | הסרת ספר יחיד, עם ביטול | `removeBookAsked` 5293 | רק `AppStore.closeSource` | **הוסר** ריצת ההצעות שנוגעת בספר נסגרת, ו"ביטול" לא מחזיר אותה. אי אפשר לאשר הצעה לספר שאינו פתוח (סקירת סבב 2). | `tests/integration/state/export-completeness.test.ts` "close the database and open it again: …" (לסגירת מקור) | ✕ "סגירת <מקור>" | §3.1 |
 | F-036 | ספירת ספרים | 4530 | `SourcesBody`; `group-head .count` | שונה: לכל מקור | אין | לוח המקורות | — |
 | F-037 | סדר הספרים | 2512/2647 | `OtzariaDbReader.books` (לפי rowid) | לא שופר (היה "לשפר") | אין | — | המסד לא ממוין |
 
@@ -177,7 +177,7 @@ TD-H1 (שמירה אוטומטית ואזהרה לפני סגירה), TD-H2 (ק�
 | F-058 | משפט סיכום | `summarySentence` 4917 | `builder.tsx` `StoredAs` | הוחלף | `manual-linking.spec.ts` (`.stored-as`) | הבונה | לא מזכיר טווח או עוגן |
 | F-059 | אזהרות מקדימות | 5018 | `store.draftProblems` | שופר | `store.test.ts` "a link to a heading line is refused, with the reason" | הבונה | — |
 | F-060 | כפתור יצירה מושבת עם הסבר | `canCreate` 4942 | `Builder` | נשמר | חלקי: אותה בדיקה | "יצירת קישור", Ctrl+Enter | כשחסר צד, Ctrl+Enter שקט |
-| F-061 | יצירה מרובה | `buildLinksFromSelection` 5173 | `store.drafts`; `createFromDraft` | שוחזר (סבב 2): קישור מכל שורה, בפקודה אחת ("יצירת N קישורים") עם ביטול אחד. שגיאה באחת חוסמת את כולן, וההודעה אומרת באיזו שורה. גם קישור זהה לקישור קיים חוסם | `builder-selection.test.ts` "one link from each picked line …"; `identical-links.test.ts` "several picked lines …" | הבונה | כמה שורות בשני הצדדים נדחות, עם הסבר |
+| F-061 | יצירה מרובה | `buildLinksFromSelection` 5173 | `store.drafts`; `createFromDraft` | שוחזר (סבב 2): קישור מכל שורה, בפקודה אחת ("יצירת N קישורים") עם ביטול אחד. שגיאה באחת חוסמת את כולן, וההודעה אומרת באיזו שורה. גם קישור זהה לקישור קיים חוסם שם המקום וציון ספריא נקבעים לכל שורה, והשדות של הצד עם כמה השורות כבויים (סקירת סבב 2). | `builder-selection.test.ts` "one link from each picked line …"; `identical-links.test.ts` "several picked lines …" | הבונה | כמה שורות בשני הצדדים נדחות, עם הסבר |
 | F-062 | heRef אוטומטי | `computeHeRef` 3749 | `store.autoHeRef` | שונה: קודם heRef מהמסד | `store.test.ts` "open → pick → create → undo/redo → export"; `compat-edit.test.ts` "a cleared field and a blank database reference fall back to title and line" | "שם המקום ביעד" | שרשרת הכותרות לא נבדקת |
 | F-063 | חסימה רק על שגיאות | 5195 | `store.createFromDraft` | נשמר | `store.test.ts` "a link to a heading line is refused, with the reason" | הבונה | — |
 | F-064 | קיצור הטווח הקודם | `trimPrevious` 3299 | `store.trimAround` → `RangesState.trimFor` | שופר: באותו צעד ביטול, עם הודעה | `ranges.test.ts` "a new link inside another link's range cuts that range — in the same undo step" | אוטומטי | — |
