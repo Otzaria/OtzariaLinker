@@ -81,7 +81,7 @@ jobs:
       - run: npm ci
       # scripts/package-release.mjs fails the build on any network access in the file and above the size budget
       - run: npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: OtzariaLinker-html
           # the file and its SHA-256 (written by scripts/package-release.mjs), to check a downloaded copy
@@ -89,7 +89,7 @@ jobs:
             dist/OtzariaLinker.html
             dist/SHA256SUMS
       # the very file the E2E jobs test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: e2e-dist
           path: dist/
@@ -168,7 +168,7 @@ jobs:
       - run: npx playwright test --project=${{ matrix.project }}
       - name: Upload the E2E traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces-${{ matrix.project }}
           path: test-results/
@@ -199,7 +199,7 @@ jobs:
       - run: npx playwright test --project=webkit
       - name: Upload the E2E traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-traces-webkit
           path: test-results/
@@ -227,7 +227,7 @@ jobs:
         run: npx playwright test --config playwright.visual.config.ts
       - name: Upload the differences
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-diffs
           path: test-results/
