@@ -52,12 +52,15 @@ describe("full reset (V7 parity F-028)", () => {
     expect(store.linkState.value.links.size).toBe(1);
   });
 
-  it("with saving: the project file is saved first, and nothing is left aside", async () => {
+  // changed on purpose in V7 round 2 (review finding 7): it said "nothing is left aside", but the tool cannot know the
+  // download succeeded — the work is kept aside as well, and the notice says why
+  it("with saving: the project file is saved first, and the work is kept aside as well", async () => {
     const { store, saved } = await withWork();
     await store.resetAll({ save: true });
     expect(saved.map((s) => s.name).some((n) => n.endsWith(".otzlinker.json"))).toBe(true);
     expect(store.linkState.value.links.size).toBe(0);
-    expect(store.notices.value.at(-1)).toMatchObject({ kind: "success" });
+    expect(store.notices.value.at(-1)).toMatchObject({ kind: "info", sticky: true });
+    expect(store.notices.value.at(-1)!.text).toContain("אם ההורדה לא הצליחה");
   });
 
   it("the unsaved work goes to the browser's recovery queue when the autosave runs", async () => {
@@ -81,5 +84,105 @@ describe("full reset (V7 parity F-028)", () => {
     expect(store.linkState.value.links.size).toBe(1);
     release();
     await running;
+  });
+});
+
+/*
+ * V7 round-2 review, finding 7: the reset kept work only when it was not saved — but "save first" cannot know the
+ * download succeeded; it left behind what the tool knew of the books (edition choices, counts asked, the headings of a
+ * whole database), the quality report, the max-link evidence and the import's pending state; and a source opened
+ * while the sources were closing was dropped from the list without being closed in the worker.
+ */
+describe("full reset: nothing lost, nothing left (V7 round-2 review, finding 7)", () => {
+  const memKv = () => {
+    const mem = new Map<string, string>();
+    const kv: KeyValueStore = { get: async (k) => mem.get(k) ?? null, set: async (k, v) => void mem.set(k, v), delete: async (k) => void mem.delete(k) };
+    return { mem, kv };
+  };
+  type Inner = { editionChoices: { value: ReadonlyMap<string, string> }; editionOffered: Set<string>; countAsked: Set<string> };
+
+  it("with saving, the work still goes to the recovery queue — the download may have failed — and the notice can bring it back", async () => {
+    const { store, saved } = await withWork();
+    const { mem, kv } = memKv();
+    store.startAutosave(kv, 0);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await store.resetAll({ save: true })).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(saved.map((s) => s.name).some((n) => n.endsWith(".otzlinker.json"))).toBe(true);
+    const queue = JSON.parse(mem.get(`${AUTOSAVE_KEY}:recovered`) ?? "[]") as string[];
+    expect(queue).toHaveLength(1);
+    expect(JSON.parse(queue[0]!).links).toHaveLength(1);
+    const notice = store.notices.value.at(-1)!;
+    expect(notice.action?.label).toBe("החזרת העבודה");
+    notice.action!.run();
+    expect(store.linkState.value.links.size).toBe(1);
+  });
+
+  it("forgets what it knew of the books: edition choices and offers, counts asked, the headings read", async () => {
+    const { store } = await withWork();
+    const inner = store as unknown as Inner;
+    expect(await store.headingSearch.build("light")).toBe(true);
+    expect(store.headingSearch.status.value).not.toBeNull();
+    inner.editionChoices.value = new Map([["x", "y"]]);
+    inner.editionOffered.add("x");
+    inner.countAsked.add("x");
+    await store.resetAll();
+    expect(inner.editionChoices.value.size).toBe(0);
+    expect(inner.editionOffered.size).toBe(0);
+    expect(inner.countAsked.size).toBe(0);
+    expect(store.headingSearch.status.value).toBeNull();
+    expect((store.headingSearch as unknown as { read: Map<string, unknown> }).read.size).toBe(0);
+  });
+
+  it("closing a source forgets the headings read for its books", async () => {
+    const { store } = await withWork();
+    await store.openFiles([txt("אחר.txt", ["<h1>אחר</h1>", "<h2>פרק</h2>", "שורה"])]);
+    expect(await store.headingSearch.build("light")).toBe(true);
+    const read = (store.headingSearch as unknown as { read: Map<string, unknown> }).read;
+    const other = store.sources.value.find((s) => s.books.some((b) => b.title === "אחר"))!.info.id;
+    expect([...read.keys()].some((k) => k.startsWith(`${other}:`))).toBe(true);
+    expect(await store.closeSource(other)).toBe(true);
+    expect([...read.keys()].some((k) => k.startsWith(`${other}:`))).toBe(false);
+    expect(read.size).toBeGreaterThan(0);
+  });
+
+  it("forgets the quality report, the max-link evidence and the records waiting for a mapping", async () => {
+    const { store } = await withWork();
+    expect(await store.quality.run()).not.toBeNull();
+    store.maxLink.evidence.value = new Map([["k", []]]);
+    store.maxLink.checkedCount.value = 3;
+    store.exchange.pendingRecords.value = [{ path: "x.csv" } as never];
+    await store.resetAll();
+    expect(store.quality.report.value).toBeNull();
+    expect(store.maxLink.evidence.value.size).toBe(0);
+    expect(store.maxLink.checkedCount.value).toBe(0);
+    expect(store.maxLink.report.value).toBeNull();
+    expect(store.exchange.pendingRecords.value).toEqual([]);
+  });
+
+  it("a source opened while the reset closes the sources is not dropped unclosed: nothing opens until the reset is done", async () => {
+    const reg = new SourceRegistry();
+    const svc = registryService(reg);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const closed: string[] = [];
+    const slow: typeof svc = Object.assign(Object.create(Object.getPrototypeOf(svc) as object) as typeof svc, svc, {
+      close: async (id: string) => {
+        await gate;
+        closed.push(id);
+        return svc.close(id);
+      },
+    });
+    const store = new AppStore(slow, { save: () => {} }, loadPreferences(null));
+    await store.openFiles([BASE]);
+    const resetting = store.resetAll();
+    await store.openFiles([COMM]);
+    release();
+    expect(await resetting).toBe(true);
+    // every source the worker holds is one the store lists (or none): no source open in the worker and missing from the list
+    const listed = new Set(store.sources.value.map((s) => s.info.id));
+    const held = (await svc.open([COMM])).reused?.map((r) => r.info.id) ?? [];
+    for (const id of held) expect(listed.has(id)).toBe(true);
+    expect(store.sources.value).toEqual([]);
   });
 });

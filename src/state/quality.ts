@@ -45,6 +45,14 @@ export class QualityState {
     return report;
   }
 
+  /** Forgets the report (the full reset: its links and books are gone). */
+  reset(): void {
+    batch(() => {
+      this.report.value = null;
+      this.revision.value = -1;
+    });
+  }
+
   saveReport(): void {
     if (this.report.value) this.saver.save(`בדיקת-קישורים-${new Date().toISOString().slice(0, 10)}.csv`, qaCsv(this.report.value), "text/csv");
   }

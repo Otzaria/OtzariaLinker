@@ -652,15 +652,27 @@ export class AppStore {
   /**
    * Version 3's "איפוס מלא" (F-028): every source closed, every link, alt_toc, rejection and the history gone, the
    * home screen. Never loses work silently: with `save` the project is saved to a file first; work that was not
-   * saved goes to the browser's recovery queue (when the autosave runs) and a notice can bring it back. The
-   * Sefaria titles list, the database mappings and the settings stay, as in version 3. Returns whether it reset.
+   * saved — also with `save`, whose download may fail unseen — goes to the browser's recovery queue (when the autosave
+   * runs) and a notice can bring it back. The Sefaria titles list, the database mappings, the settings and a max-link
+   * job (by titles, resumed when its books are open again) stay, as in version 3. Returns whether it reset.
    */
   async resetAll(opts: { save?: boolean } = {}): Promise<boolean> {
-    if (this.busyWith("הקבצים והמסדים הפתוחים")) return false;
-    if (opts.save) this.saveProject();
+    if (this.resetting || this.busyWith("הקבצים והמסדים הפתוחים")) return false;
     const ls0 = this.linkState.peek();
+    // read BEFORE the save: saveProject marks the project saved without knowing the download succeeded (a browser may block
+    // it, the disk may be full), so saved or not the work goes aside too (V7 round-2 review, finding 7)
     const unsaved = this.dirty.peek() && (ls0.links.size > 0 || ls0.altToc.size > 0 || ls0.rejected.size > 0) ? this.projectText() : null;
-    for (const s of this.opened.peek()) await this.service.close(s.info.id);
+    if (opts.save) this.saveProject();
+    // nothing opens while the sources close (runTask refuses): a source opened meanwhile was dropped from the list below and
+    // never closed in the worker (finding 7). What is listed when the closing ends is closed too, until none is left.
+    this.resetting = true;
+    try {
+      const closed = new Set<string>();
+      for (let left = this.opened.peek(); left.length; left = this.opened.peek().filter((s) => !closed.has(s.info.id)))
+        for (const s of left) (closed.add(s.info.id), await this.service.close(s.info.id));
+    } finally {
+      this.resetting = false;
+    }
     batch(() => {
       this.opened.value = [];
       this.linkState.value = emptyLinkState();
@@ -675,9 +687,18 @@ export class AppStore {
       this.pendingDbs.value = [];
       this.relink.value = null;
       this.revealedLink.value = null;
+      this.editionChoices.value = new Map();
       this.screen.value = "home";
     });
     this.forgetEditions(() => true);
+    this.editionOffered.clear();
+    this.countAsked.clear();
+    // what the tool learned of the books and the work on them goes with them (finding 7): the headings read (scope "all" is
+    // a whole database's), the quality report, the max-link evidence, the import's waiting state
+    this.headingSearch.forget(() => true);
+    this.quality.reset();
+    this.maxLink.forgetEvidence();
+    this.exchange.reset();
     this.find.source.close();
     this.find.target.close();
     this.lines.forgetAll();
@@ -690,7 +711,9 @@ export class AppStore {
       void kept.add(unsaved).then((ok) => {
         if (!ok) this.notify("warning", "לא הצלחתי לשמור בדפדפן את העבודה שאופסה. היא זמינה עדיין בכפתור \"החזרת העבודה\" עד שתסגרו את החלון — כדי לא לאבד אותה, החזירו אותה ושמרו אותה לקובץ.");
       });
-    this.notify("warning", `הכלי אופס. העבודה שלא נשמרה (${recoverableCount(unsaved).toLocaleString("he")} קישורים והחלטות) נשמרה בצד: אפשר להחזיר אותה בכפתור כאן${kept ? ", והיא תוצע שוב גם בפתיחה הבאה של הכלי" : " (השמירה האוטומטית בדפדפן אינה פעילה, ולכן אחרי סגירת החלון היא לא תהיה)"}.`, undefined, {
+    const count = recoverableCount(unsaved).toLocaleString("he");
+    const later = kept ? ", והיא תוצע שוב גם בפתיחה הבאה של הכלי" : " (השמירה האוטומטית בדפדפן אינה פעילה, ולכן אחרי סגירת החלון היא לא תהיה)";
+    this.notify(opts.save ? "info" : "warning", opts.save ? `הכלי אופס. הפרויקט ירד לקובץ. ליתר ביטחון, אם ההורדה לא הצליחה, העבודה (${count} קישורים והחלטות) נשמרה גם בצד: אפשר להחזיר אותה בכפתור כאן${later}.` : `הכלי אופס. העבודה שלא נשמרה (${count} קישורים והחלטות) נשמרה בצד: אפשר להחזיר אותה בכפתור כאן${later}.`, undefined, {
       label: "החזרת העבודה",
       run: () => (void this.recoveryQueue?.take(unsaved), this.openProject("העבודה שאופסה", unsaved)),
     }, true);
@@ -2255,6 +2278,8 @@ export class AppStore {
    * while another still runs, which hid that one's progress and its cancel (review C16).
    */
   private readonly running: { task: Task }[] = [];
+  /** the full reset is closing the sources (resetAll): no task starts until it is done */
+  private resetting = false;
 
   private showTask(): void {
     this.task.value = this.running.at(-1)?.task ?? null;
@@ -2262,6 +2287,8 @@ export class AppStore {
 
   /** Runs a long task with a cancel and progress; `count` turns the progress into the task's own units (audit F21). */
   async runTask<T>(label: string, run: (opts: { signal?: AbortSignal; onProgress?: (d: number, t: number) => void }) => Promise<T>, count?: (done: number, total: number) => string): Promise<T | null> {
+    // while the full reset closes the sources nothing starts: a source it opened would be dropped unclosed (resetAll)
+    if (this.resetting) return void this.notify("warning", "הכלי מתאפס עכשיו: כל הקבצים והמסדים נסגרים. נסו שוב כשהאיפוס יסתיים."), null;
     const ac = new AbortController();
     const logged = logTask(this.log, label);
     const startedAt = Date.now();
