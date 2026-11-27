@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useState } from "preact/hooks";
 import type { ContinuePlan } from "../../linking/ranges";
 import { problemText } from "../../core/links/validate";
 import { parseConnectionType, TYPE_LABELS } from "../../core/links/connection-type";
@@ -239,7 +239,9 @@ function RangeRow({ side, pick }: { side: Side; pick: Pick }) {
   const store = useStore();
   const shown = pick.end !== undefined ? String(pick.end + 1) : "";
   const [text, setText] = useState(shown);
-  useEffect(() => setText(shown), [pick.bookKey, pick.line, pick.end]);
+  // A layout effect: the field takes the new pick's value as the pick renders. A plain effect ran after paint, through a
+  // timer, and on a busy machine a number typed in between was wiped (CI flake on Dependabot #36, builder-selection.spec).
+  useLayoutEffect(() => setText(shown), [pick.bookKey, pick.line, pick.end]);
   const count = store.books.value.get(pick.bookKey)?.lineCount ?? store.lines.count(pick.bookKey);
   const basis = store.prefs.rangeEndBasis.value;
   const commit = () => {
@@ -292,7 +294,8 @@ function AnchorLabel() {
   const label = store.draft.value?.anchor?.label ?? store.pick.source.value?.anchor?.label ?? "";
   const [text, setText] = useState(label);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => (setText(label), setError(null)), [label]);
+  // a layout effect, as the range end's: a plain effect ran after paint and wiped a label typed in between
+  useLayoutEffect(() => (setText(label), setError(null)), [label]);
   const commit = () => {
     const why = anchorLabelProblem(text.trim());
     setError(why);
