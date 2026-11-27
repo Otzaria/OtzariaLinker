@@ -4,7 +4,7 @@
  * - the library: links/ and alt_toc/ go into otzaria-library (USER_GUIDE §1, §10), and the generator
  *   builds the Otzaria database from it;
  * - the user's own Otzaria: the app's personal-library import of `_links.json` files (0.9.98+,
- *   LIVE_TESTING.md §1). It is read from the app's code and NOT yet tested live, and the text says so;
+ *   LIVE_TESTING.md §1), tested inside the open app 0.9.98.3 (docs/reviews/V7_LIVE_OTZARIA_TESTS.md), with what those runs saw;
  * - a database file: the tool opens databases read-only and never writes links into one.
  */
 export type ExportPurpose = "submission" | "private";
@@ -47,8 +47,12 @@ const PERSONAL: NextStepsRoute = {
     'קישור מפירוש אל הספר שעליו נכתב (סוג "מקור") נכתב בשימוש פרטי בקובץ הקישורים של ספר הבסיס, כפירוש, כדי שבאוצריא שלכם הפירוש יופיע בפאנל המפרשים שלו. קובץ כזה נקרא בשם ספר הבסיס גם כשהבסיס הוא ספר של הספרייה הרשמית, וזה תקין: הוא מוסיף לו קישורים ואינו מחליף את הקישורים שיש לו בספרייה.',
     "שני הספרים של כל קישור צריכים להיות באוצריא באותו שם בדיוק. ספר שלכם (קובץ טקסט) בשם של ספר מהספרייה הרשמית לא יקבל את הקישורים: אוצריא דוחה את כל הקובץ. ספר ממסד אישי בשם של ספר מהספרייה לא יקבל אותם גם כן: אוצריא מחברת אותם לספר שבספרייה.",
     'שגיאה אחת בקובץ גורמת לאוצריא לדחות את כולו. לכן בחלון הייצוא בחרו "שימוש פרטי": כך הכלי עוצר מראש חלק ממה שהייבוא הזה דוחה, למשל סוג קשר לא מוכר.',
+    // live test 22: the links are kept by the book's title; a renamed book keeps them under the old one, with no message
+    "אחרי הייבוא אל תשנו את השם של ספר שלכם שיש לו קישורים: אוצריא שומרת את הקישורים לפי שם הספר, ואחרי שינוי שם הם נשארים בלי ספר, בלי הודעה. אם שיניתם, פתחו את הספר בכלי בשמו החדש, ייצאו שוב והחליפו את קובצי הקישורים הישנים.",
+    // live finding ד: after a rescan the database has the new links, but a tab that is open keeps showing the old ones
+    'אחרי שמחליפים קובץ קישורים ולוחצים "סרוק מחדש", סגרו את הספר ופתחו אותו שוב: לשונית שכבר פתוחה ממשיכה להציג את הקישורים הישנים. וקובץ שנמצא בתיקייה לא מייבאים שוב גם ב"ייבוא נתונים": העותק הזה לא מתעדכן כשהקובץ משתנה.',
   ],
-  note: "המסלול הזה נבדק בקוד של אוצריא עם קבצים מהכלי (16.11.2026), אבל עוד לא בתוך האפליקציה הפתוחה.",
+  note: 'המסלול הזה נבדק בתוך אוצריא 0.9.98.3, עם קבצים מהכלי (בדיקות חיות, 26–27.11.2026). הגרסה הזו לא קולטת קובצי alt_toc (כותרות חלופיות), ולא את הסוג "ציטוט בטקסט" (INLINE_LINKER).',
 };
 
 const DATABASE: NextStepsRoute = {
