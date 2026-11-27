@@ -140,6 +140,28 @@ test("the range end typed, until the end of the book, until the next heading; th
   expect(seen.external).toEqual([]);
 });
 
+test("a range end typed right after a pick is kept, even when the machine is busy (CI flake on #36)", async ({ page }) => {
+  // On a busy machine timers run late. The field used to take the new pick's value in an effect, which Preact runs after
+  // paint through a zero-delay timer, so a number typed before that timer fired was wiped, and Enter made no range. Here
+  // every zero-delay timer is held back 300 ms on purpose.
+  await page.addInitScript(() => {
+    const st = window.setTimeout.bind(window);
+    window.setTimeout = ((cb: TimerHandler, ms?: number, ...a: unknown[]) => st(cb, ms ? ms : 300, ...a)) as typeof window.setTimeout;
+  });
+  const seen = watchPage(page);
+  await open(page);
+  const end = builder(page).locator(".end.source");
+  const typed = end.getByRole("spinbutton", { name: /סוף הטווח/ });
+  for (const [line, last] of [[2, "10"], [4, "12"], [6, "9"]] as const) {
+    await ln(source(page), line).click();
+    await typed.fill(last);
+    await typed.press("Enter");
+    await expect(end).toContainText(`שורות ${line + 1}–${last}`);
+  }
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
 test("what was there stays: Shift+click picks a range, and 'until the next link' stops one line before it", async ({ page }) => {
   const seen = watchPage(page);
   await open(page);
@@ -192,6 +214,36 @@ test("the anchor's label: written into the place name as ' אות X', replaced, 
   await label.press("Enter");
   await expect(place).toHaveValue(auto);
 
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
+test("the anchor's label typed right after another is kept, even when the machine is busy", async ({ page }) => {
+  // the same as the range end: the field took the new label in an effect after paint; here zero-delay timers run 300 ms late
+  await page.addInitScript(() => {
+    const st = window.setTimeout.bind(window);
+    window.setTimeout = ((cb: TimerHandler, ms?: number, ...a: unknown[]) => st(cb, ms ? ms : 300, ...a)) as typeof window.setTimeout;
+  });
+  const seen = watchPage(page);
+  await open(page);
+  await ln(target(page), 1).click();
+  await page.evaluate(() => {
+    const tx = document.querySelector('.reader.source .ln[data-i="3"] .tx')!;
+    const node = tx.firstChild!;
+    const at = node.textContent!.indexOf("מספר");
+    getSelection()!.setBaseAndExtent(node, at, node, at + 6);
+    tx.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  const end = builder(page).locator(".end.source");
+  await expect(end.locator("mark.anchor-hl")).toHaveText("מספר 3");
+  const label = end.getByRole("textbox", { name: "תווית העוגן" });
+  const place = builder(page).getByRole("textbox", { name: /^שם המקום/ });
+  const auto = await place.inputValue();
+  for (const x of ["ג", "ד", "ה"]) {
+    await label.fill(x);
+    await label.press("Enter");
+    await expect(place).toHaveValue(`${auto} אות ${x}`);
+  }
   expect(seen.errors).toEqual([]);
   expect(seen.external).toEqual([]);
 });
