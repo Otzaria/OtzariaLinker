@@ -51,7 +51,7 @@ jobs:
           cp dist/SHA256SUMS _site/SHA256SUMS
           cp legacy/OtzariaLinker-v3.html _site/v3.html
           touch _site/.nojekyll
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
