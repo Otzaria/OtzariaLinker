@@ -66,6 +66,29 @@ test("Ctrl/Cmd+click picks several lines, and one action makes a link from each 
   expect(seen.external).toEqual([]);
 });
 
+test("several target lines: the place field is off and says why — each link gets its own line's place (V7 round-2 review, finding 1)", async ({ page }) => {
+  const seen = watchPage(page);
+  await open(page);
+  await ln(source(page), 1).click();
+  await ln(target(page), 1).click();
+  const place = builder(page).getByRole("textbox", { name: /^שם המקום/ });
+  await expect(place).toBeEnabled();
+  await ln(target(page), 2).click({ modifiers: ["ControlOrMeta"] });
+  await ln(target(page), 3).click({ modifiers: ["ControlOrMeta"] });
+  await expect(place).toBeDisabled();
+  await expect(place).toHaveValue("");
+  await expect(builder(page)).toContainText("נבחרו כמה שורות");
+  await builder(page).getByRole("button", { name: "יצירת 3 קישורים" }).click();
+  for (const i of [1, 2, 3]) await expect(target(page).locator(`.ln[data-i="${i}"] .mark.new`)).toHaveText("1");
+  // one line again: the field is back
+  await ln(source(page), 4).click();
+  await ln(target(page), 1).click();
+  await expect(place).toBeEnabled();
+  await expect(builder(page)).not.toContainText("נבחרו כמה שורות");
+  expect(seen.errors).toEqual([]);
+  expect(seen.external).toEqual([]);
+});
+
 test("the range end typed, until the end of the book, until the next heading; the range settings", async ({ page }) => {
   const seen = watchPage(page);
   await open(page);

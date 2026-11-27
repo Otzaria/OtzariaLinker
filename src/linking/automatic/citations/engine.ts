@@ -770,7 +770,8 @@ export function scoreOf(c: Citation, t: AliasTarget, r: Resolution, addressed = 
   if (c.rule === "responsa-author") s -= PENALTY.responsaAuthor;
   if (t.otherWork) s -= PENALTY.otherWork;
   if (c.rule === "ibid-far") s -= PENALTY.ibidFar;
-  if (c.rule === "dibur-no-commentator") s -= PENALTY.diburNoCommentator;
+  // "ושם ע"ב ד"ה" after a commentary's own book (detect.ts ibidAmud): the start of its amud, the ד"ה not placed — as coarse as B7
+  if (c.rule === "dibur-no-commentator" || c.rule === "ibid-amud-dibur") s -= PENALTY.diburNoCommentator;
   if (c.quantityLike) s -= PENALTY.quantityLike;
   if (c.rule === "single-bare" || c.rule === "numeric-name-verse") s -= PENALTY.looseForm;
   // "התוס' בדף ט"ו ע"ב ד"ה": the daf is written, the tractate is the context's
@@ -852,6 +853,7 @@ const RULE_REASON: Readonly<Record<string, string>> = {
   "yalkut-parsha": "\"ילקוט\" ואחריו פרשה בתורה, בלי רמז: כל הפרשה בילקוט שמעוני על התורה",
   "commentator-named": "לפני ההפניה נכתב שם של פירוש על הספר הזה (כפי שהספרייה קוראת לו), ולכן הקישור הוא לפירוש",
   "ibid-amud": "\"שם\" ועמוד בלבד (\"ושם ע\"ב\"): העמוד האחר של הדף שבהפניה הקודמת, באותו ספר (ואם היא של מפרש — בפירוש שלו)",
+  "ibid-amud-dibur": "\"ושם ע\"ב ד\"ה\" אחרי הפניה לפירוש עצמו: העמוד האחר של הדף בפירוש הזה. הד\"ה לא אותר בעמוד, ולכן הקישור הוא לתחילת העמוד, גס (לכל היותר \"אפשרית\"); בדקו באיזו שורה בעמוד מתחיל הד\"ה",
   "ibid-far": "ה\"שם\" רחוק מההפניה שהוא משלים (יותר משש שורות, בלי כותרת ביניהם)",
   "single-bare": "אחרי שם של ספר בתנ\"ך או של מדרש רבה נכתב מספר אחד בלבד, בלי סימן ובלי סוגריים, במקום שהמשפט נגמר בו: הפרק (הפרשה) כולו. צורה רופפת, ולכן לכל היותר \"אפשרית\"",
   "numeric-name-verse": "שם הספר הוא גם מספר (\"שמ\"א\"), ואחריו שני מספרים בלי סוגריים: פרק ופסוק. צורה רופפת, ולכן לכל היותר \"אפשרית\"",

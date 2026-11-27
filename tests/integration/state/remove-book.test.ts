@@ -119,3 +119,87 @@ describe("removing one book from the tool, with its links (V7 parity F-035)", ()
     await running;
   });
 });
+
+/*
+ * What still pointed at a book after it left the tool (V7 round-2 review, finding 2): the suggestion run on the screen,
+ * the edition comparison, the heading search. A run touching the book is dropped (like workerLost): approving one of
+ * its suggestions would make a link to a book the user removed. Undo of the removal brings the book and its links
+ * back, not the run: the user runs it again (USER_GUIDE "הסרת ספר").
+ */
+describe("removing a book: nothing left that points at it (V7 round-2 review, finding 2)", () => {
+  const DB = () => ({ path: "seforim.db", blob: new Blob([readFileSync("tests/fixtures/db/seforim-v7-mini.db")]) });
+  const HEB = ["א", "ב", "ג", "ד", "ה"];
+  const BIUR = () => ({ path: "ביאור על בראשית.txt", blob: new Blob([strToU8(["<h1>ביאור על בראשית</h1>", "<h2>פרק א</h2>", ...HEB.flatMap((h, i) => [`<h3>פסוק ${h}</h3>`, `ביאור לפסוק ${i + 1}`])].join("\n"))]) });
+  async function ran() {
+    const store = makeStore();
+    await store.openFiles([DB(), BIUR()]);
+    expect(await store.suggestions.runEngine("headings", key(store, "ביאור על בראשית"), key(store, "בראשית"))).toBe(true);
+    expect(store.suggestions.pendingAtLeast("certain").length).toBeGreaterThan(0);
+    return store;
+  }
+
+  it("a run that touches the removed book is dropped, and nothing of it can be approved; undo brings the book back, not the run", async () => {
+    const store = await ran();
+    const ids = store.suggestions.pendingAtLeast("certain");
+    const bereshit = key(store, "בראשית");
+    expect(store.removeBook(bereshit)).toBe(true);
+    expect(store.suggestions.run.value).toBeNull();
+    expect(store.suggestions.current.value).toBeNull();
+    expect(store.suggestions.approve(ids)).toBe(0);
+    expect(store.allLinks.value).toEqual([]);
+    expect(store.notices.value.at(-1)!.text).toContain("ההצעות");
+    store.undo();
+    expect(store.books.value.has(bereshit)).toBe(true);
+    expect(store.suggestions.run.value).toBeNull();
+  });
+
+  it("a run that does not touch the removed book stays", async () => {
+    const store = await ran();
+    await store.openFiles([OTHER]);
+    const run = store.suggestions.run.value;
+    expect(store.removeBook(key(store, "אחר"))).toBe(true);
+    expect(store.suggestions.run.value).toBe(run);
+  });
+
+  it("approve refuses a suggestion whose book is not open, and says why (defence in depth)", async () => {
+    const store = await ran();
+    const run = store.suggestions.run.value!;
+    const ids = store.suggestions.pendingAtLeast("certain");
+    store.removeBook(key(store, "בראשית"));
+    // a run kept from before (any path that missed the removal): its suggestions name a book that is not open
+    store.suggestions.run.value = run;
+    expect(store.suggestions.approve(ids)).toBe(0);
+    expect(store.allLinks.value).toEqual([]);
+    expect(store.notices.value.at(-1)!.kind).toBe("warning");
+    expect(store.notices.value.at(-1)!.text).toContain("בראשית");
+  });
+
+  it("closing the source of a book of the run drops the run too", async () => {
+    const store = await ran();
+    const dbId = store.sources.value.find((s) => s.books.some((b) => b.title === "בראשית"))!.info.id;
+    expect(await store.closeSource(dbId)).toBe(true);
+    expect(store.suggestions.run.value).toBeNull();
+    expect(store.suggestions.current.value).toBeNull();
+  });
+
+  it("the edition comparison of a removed book is dropped: its plan would move links to a book that is not open", async () => {
+    const store = makeStore();
+    await store.openFiles([BASE]);
+    await store.openFiles([txt("בסיס.txt", ["<h1>בסיס</h1>", "שורה ראשונה", "שורה חדשה", "שורה שנייה", "שורה שלישית"])]);
+    const [oldKey, newKey] = [...store.books.value.values()].filter((b) => b.title === "בסיס").map((b) => b.key);
+    expect(newKey).toBeDefined();
+    expect(await store.planRelinkFor(oldKey!, newKey!)).toBe(true);
+    expect(store.relink.value).not.toBeNull();
+    store.removeBook(newKey!);
+    expect(store.relink.value).toBeNull();
+  });
+
+  it("the heading search does not answer with a removed book", async () => {
+    const store = makeStore();
+    await store.openFiles([BASE, OTHER]);
+    expect(await store.headingSearch.build("light")).toBe(true);
+    expect(store.headingSearch.search("בסיס", "light").hits.map((h) => h.title)).toContain("בסיס");
+    store.removeBook(key(store, "בסיס"));
+    expect(store.headingSearch.search("בסיס", "light").hits).toEqual([]);
+  });
+});

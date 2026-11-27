@@ -78,6 +78,19 @@ describe("the run's ranges: until the next match (v3 F-104)", () => {
     expect(out.map((s) => s.source.end)).toEqual([undefined, undefined]);
   });
 
+  it("with a line filter, the next match is one the filter keeps: a suggestion the guard drops does not end a range (V7 round 2 review, finding 10)", () => {
+    // the headings engine reads every line (a structure engine); the filter keeps only the lines that start with a "[א]"-style marker, so
+    // the suggestion of line 4 (no marker) is dropped by the guard — and the target range before it must run over that verse
+    const marked = book("c6", "ביאור על בראשית", ["<h2>פרק א</h2>", "<h3>פסוק א</h3>", "[א] אלפא. פירוש", "<h3>פסוק ב</h3>", "גמא פירוש", "<h3>פסוק ג</h3>", "[ב] הא. פירוש"]);
+    const tgt = (r: { suggestions: readonly Suggestion[] }) => r.suggestions.map((s) => [s.source.line, s.target.line, s.target.end ?? null]);
+    // without the filter: three suggestions, each target range stops before the next one
+    expect(tgt(runEngine("headings", marked, BASE, { targetRange: "next-match" }))).toEqual([[2, 2, null], [4, 3, null], [6, 4, null]]);
+    const r = runEngine("headings", marked, BASE, { targetRange: "next-match", sourceFilter: { prefix: { preset: "square" } } });
+    // with it: the suggestion of line 4 is gone, so (א) at 2 runs to 3 (the line before (ג), the next kept target)
+    expect(tgt(r)).toEqual([[2, 2, 3], [6, 4, null]]);
+    expect(r.notes.some((n) => n.code === "source-filter/guard")).toBe(true);
+  });
+
   it("no range on a Sefaria book (the weekly sync remaps only the start), with a note", () => {
     const sparse = book("c5", "ביאור על בראשית", ["<h2>פרק א</h2>", "<h3>פסוק א</h3>", "אלפא. פירוש", "1", "2"], "sefaria");
     const r = runEngine("headings", sparse, BASE, { sourceRange: "next-match" });

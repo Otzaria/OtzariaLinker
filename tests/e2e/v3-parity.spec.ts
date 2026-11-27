@@ -78,12 +78,15 @@ test("full reset: asks first, saves the project when asked, and unsaved work can
   await page.keyboard.press("Escape");
   await expect(dlg).toHaveCount(0);
   await expect(page.locator(".reader.source")).toBeVisible();
-  // with saving: the project file is downloaded first, and nothing is left to bring back
+  // with saving: the project file is downloaded first — and, since the tool cannot know the download succeeded, the work
+  // is kept aside as well (V7 round-2 review, finding 7)
   await settings(page, /^איפוס מלא/);
   const download = page.waitForEvent("download");
   await page.getByRole("dialog", { name: "איפוס מלא" }).getByRole("button", { name: "שמירת הפרויקט ואיפוס" }).click();
   expect((await download).suggestedFilename()).toMatch(/\.otzlinker\.json$/);
-  await expect(page.locator(".notice", { hasText: "הכלי אופס: כל הקבצים" })).toBeVisible();
+  const savedToo = page.locator(".notice", { hasText: "הכלי אופס. הפרויקט ירד לקובץ" });
+  await expect(savedToo).toContainText("אם ההורדה לא הצליחה");
+  await expect(savedToo.getByRole("button", { name: "החזרת העבודה" })).toBeVisible();
   await expect(page.locator(".task-card").first()).toBeVisible();
   // without saving: back home, and the work can come back from the notice
   await open(page);

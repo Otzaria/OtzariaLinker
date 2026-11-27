@@ -174,6 +174,16 @@ export class ExchangeState {
   private earlyNotices: number[] = [];
 
   /**
+   * Forgets what waits for the user or for books (the full reset): the files waiting for the field-mapping dialog and the
+   * titles of links files loaded before their books opened. The import counter stays, so link ids never collide.
+   */
+  reset(): void {
+    this.pendingRecords.value = [];
+    this.awaitingBooks.clear();
+    this.earlyNotices = [];
+  }
+
+  /**
    * Books were opened and the links attached to them (AppStore.attachLinks): of the books that links
    * files loaded earlier name, say once which are still not open — the warning their import held back.
    */

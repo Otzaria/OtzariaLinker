@@ -84,7 +84,7 @@ export class SourceRegistry {
   private readonly byIdentity = new Map<string, string>();
   private readonly identityOf = new Map<string, string>();
   /**
-   * The identity of each open text book (textIdentity: its name, size, last-modified time and first and last bytes) → its
+   * The identity of each open text book (textIdentity: its name, size, last-modified time and a fingerprint of its content) → its
    * source id, and each text source's identities (to release them on close). V3 added a book once (F-016); a folder or a
    * .txt picked again opened as another source, every book twice.
    */
@@ -478,7 +478,9 @@ export class SourceRegistry {
         if (/\.txt$/i.test(f.path) || !/\.[a-z0-9]{1,5}$/i.test(f.path)) {
           const head = new Uint8Array(await f.blob.slice(0, SNIFF).arrayBuffer());
           const tail = f.blob.size > SNIFF ? new Uint8Array(await f.blob.slice(Math.max(SNIFF, f.blob.size - TAIL)).arrayBuffer()) : new Uint8Array(0);
-          texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()), identity: textIdentity(f.path, f.blob.size, (f.blob as Partial<File>).lastModified, head, tail) });
+          const midAt = Math.max(SNIFF, Math.floor(f.blob.size / 2) - TAIL / 2);
+          const middle = f.blob.size > SNIFF + TAIL ? new Uint8Array(await f.blob.slice(midAt, Math.min(midAt + TAIL, f.blob.size)).arrayBuffer()) : new Uint8Array(0);
+          texts.push({ path: f.path, read: async () => new Uint8Array(await f.blob.arrayBuffer()), identity: textIdentity(f.path, f.blob.size, (f.blob as Partial<File>).lastModified, `${bytesFingerprint(head)}|${bytesFingerprint(middle)}|${bytesFingerprint(tail)}`) });
           const enc = decodeText(head, { partial: f.blob.size > SNIFF }).encoding;
           if (hasLoneCr(head, f.blob.size > SNIFF)) loneCr.push(f.path);
           if (enc !== "utf-8") notUtf8.push(`${f.path} (${enc})`);
@@ -545,7 +547,7 @@ export class SourceRegistry {
       const path = `${nameOf(f.path)}/${e.path}`;
       const kind = detectKind(e.bytes.subarray(0, HEAD), e.path);
       if (kind === "links-json" || kind === "alt-toc-json" || kind === "project") result.documents.push({ path, kind, text: documentText(e.bytes) });
-      else if (kind === "text" && /\.txt$/i.test(e.path)) all.push({ path: e.path, read: async () => e.bytes, identity: textIdentity(e.path, e.bytes.length, undefined, e.bytes.subarray(0, SNIFF), e.bytes.subarray(Math.max(SNIFF, e.bytes.length - TAIL))) });
+      else if (kind === "text" && /\.txt$/i.test(e.path)) all.push({ path: e.path, read: async () => e.bytes, identity: textIdentity(e.path, e.bytes.length, undefined, `all:${bytesFingerprint(e.bytes)}`) });
       else result.skipped.push({ path, reason: "קובץ בתוך הארכיון שאינו ספר ‎.txt או קובץ קישורים." });
     }
     // the same ZIP picked again opens nothing new (F-016), as a folder; synchronous from the check to add()
@@ -615,16 +617,20 @@ async function fileIdentity(f: InputFile): Promise<string> {
 /** a text book as it is opened, with its identity (textIdentity) */
 type IdentifiedText = TextFile & { readonly identity: string };
 
-/** the bytes at a text book's end that its identity reads (with the first SNIFF bytes, read anyway for the encoding) */
+/** the bytes at a text book's end, and from its middle, that its identity reads (with the first SNIFF bytes, read anyway for the encoding) */
 const TAIL = 4096;
 
 /**
- * The identity of a text book (V3 F-016): its file name (the book's title), size, last-modified time, and its first 64 KiB and
- * last 4 KiB. Not the folder: the same file picked alone or inside its folder is the same book. Cheap on purpose — a library
- * folder has thousands of books, and the first bytes are read anyway; a book edited since has another time or size.
+ * The identity of a text book (V3 F-016): its file name (the book's title), size, last-modified time, and a fingerprint of its
+ * content. Not the folder: the same file picked alone or inside its folder is the same book.
+ * - A file on disk: its first 64 KiB, 4 KiB from its middle and its last 4 KiB. Cheap on purpose — a library folder has thousands
+ *   of books, and the first bytes are read anyway; a book edited since has another time or size.
+ * - An entry of a ZIP: ALL its bytes (V7 round 2 review, finding 3). An entry has no last-modified time, so two editions of a book
+ *   in two archives, of one size and differing in one letter outside the samples, looked like one. Its bytes are in memory
+ *   already, and one pass of FNV-1a over them is cheap next to the unzip.
  */
-function textIdentity(path: string, size: number, lastModified: number | undefined, head: Uint8Array, tail: Uint8Array): string {
-  return `${nameOf(path)}|${size}|${lastModified ?? ""}|${bytesFingerprint(head)}|${bytesFingerprint(tail)}`;
+function textIdentity(path: string, size: number, lastModified: number | undefined, content: string): string {
+  return `${nameOf(path)}|${size}|${lastModified ?? ""}|${content}`;
 }
 
 /** A CR byte not followed by LF (a lone CR, #41 B10); the last byte of a cut head is not judged. */

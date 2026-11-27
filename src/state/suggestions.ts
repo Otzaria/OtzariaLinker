@@ -380,7 +380,11 @@ export class SuggestionsState {
     if (!memo) {
       memo = this.host
         .runTask("קורא את כותרות הספר…", (opts) => this.service.headings(key, opts))
-        .then((hs) => (hs ? { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) } : null));
+        .then((hs) => {
+          // a read that was cancelled or failed is not this run's answer: forgotten, so asking again reads again (V7 round-2 review, finding 9)
+          if (!hs) return void this.unrefMemo.delete(run), null;
+          return { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) };
+        });
       this.unrefMemo.set(run, memo);
     }
     return memo;
@@ -415,6 +419,22 @@ export class SuggestionsState {
     return out;
   }
 
+  /**
+   * Drops the run when a suggestion of it names a book that left the tool (`gone`: removed, or its source closed), as
+   * workerLost does: approving one would make a link to a book that is not open. Undo of a removal brings the book back,
+   * not the run — the user runs it again (V7 round-2 review, finding 2). True when the run was dropped.
+   */
+  forgetBooks(gone: (bookKey: string) => boolean): boolean {
+    const run = this.run.peek();
+    if (!run || !run.result.suggestions.some((s) => gone(s.source.book.key) || gone(s.target.book.key))) return false;
+    batch(() => {
+      this.run.value = null;
+      this.current.value = null;
+      this.rankSnapshot.value = null;
+    });
+    return true;
+  }
+
   approve(ids: readonly string[]): number {
     const run = this.run.value;
     if (!run) return 0;
@@ -422,6 +442,14 @@ export class SuggestionsState {
     const want = new Set(ids);
     const chosen = run.result.suggestions.filter((s) => want.has(s.id) && st.get(s.id) !== "approved" && st.get(s.id) !== "exists");
     if (!chosen.length) return 0;
+    // a suggestion on a book that is not open (removed, or its source closed) is never approved: its link would point at a
+    // book the user took out (finding 2; forgetBooks drops such a run — this is the second line)
+    const open = this.host.books.peek();
+    const closed = new Set(chosen.flatMap((s) => [s.source.book, s.target.book]).filter((b) => !open.has(b.key)).map((b) => b.title));
+    if (closed.size) {
+      this.host.notify("warning", `ההצעות לא אושרו: ${[...closed].map((t) => `"${t}"`).join(", ")} כבר לא פתוח בכלי. פתחו אותו שוב והריצו את החיפוש מחדש.`);
+      return 0;
+    }
     const existing = this.existingKeys(chosen);
     const links = chosen.flatMap((s) => this.linksOf(s, existing));
     if (chosen.length > 1 && run.dbLinksUnread?.length) {

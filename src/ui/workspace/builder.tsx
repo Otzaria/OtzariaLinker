@@ -44,6 +44,11 @@ export function Builder() {
   // the ref the builder built from the line's heRef (B1): shown as the placeholder until the user types one
   const autoRef1 = !store.draftRef1.value.trim() ? store.draft.value?.ref1 : undefined;
   const autoRef2 = !store.draftRef2.value.trim() ? store.draft.value?.ref2 : undefined;
+  // several lines picked on one side: each link gets its own line's place and Sefaria ref, so the fields of that side are
+  // off — a value typed there would name one place for all the links (V7 round-2 review, finding 1)
+  const manySource = !editing && !!s?.lines;
+  const manyTarget = !editing && !!t?.lines;
+  const perLine = (side: "source" | "target") => `נבחרו כמה שורות ${inRole(store.roles.value[side].name)}: לכל קישור ייקבע הערך של השורה שלו, ולכן אי אפשר לכתוב כאן ערך אחד.`;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -95,8 +100,9 @@ export function Builder() {
       <label class="field">
         {/* the file's field names only in advanced mode (audit F14) */}
         {advanced ? `שם המקום ${inRole(store.roles.value.target.name)} (heRef_2)` : `שם המקום ${inRole(store.roles.value.target.name)}`}
-        <input type="text" value={draft?.heRef2 ?? ""} placeholder={`ייקבע לפי השורה ${inRole(store.roles.value.target.name)}`} onInput={(e) => (store.draftHeRef.value = e.currentTarget.value)} disabled={!t} />
-        {store.draftHeRef.value !== null && t && (
+        <input type="text" value={manyTarget ? "" : (draft?.heRef2 ?? "")} placeholder={manyTarget ? "לפי כל שורה" : `ייקבע לפי השורה ${inRole(store.roles.value.target.name)}`} onInput={(e) => (store.draftHeRef.value = e.currentTarget.value)} disabled={!t || manyTarget} />
+        {manyTarget && <span class="muted">{perLine("target")}</span>}
+        {store.draftHeRef.value !== null && t && !manyTarget && (
           <button class="adv-link" onClick={() => (store.draftHeRef.value = null)}>חזרה לשם האוטומטי</button>
         )}
       </label>
@@ -104,13 +110,15 @@ export function Builder() {
       {srcSefaria && (
         <label class="field">
           {advanced ? "ref_1 — ציון ספריא באנגלית של המקור" : "ציון ספריא של המקור (באנגלית)"}
-          <input type="text" dir="ltr" placeholder={autoRef1 ?? "Genesis 1:1"} title={autoRef1 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} />
+          <input type="text" dir="ltr" placeholder={manySource ? "לפי כל שורה" : (autoRef1 ?? "Genesis 1:1")} title={autoRef1 && !manySource ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={manySource ? "" : store.draftRef1.value} onInput={(e) => (store.draftRef1.value = e.currentTarget.value)} disabled={manySource} />
+          {manySource && <span class="muted">{perLine("source")}</span>}
         </label>
       )}
       {tgtSefaria && (
         <label class="field">
           {advanced ? "ref_2 — ציון ספריא באנגלית של היעד" : "ציון ספריא של היעד (באנגלית)"}
-          <input type="text" dir="ltr" placeholder={autoRef2 ?? "Genesis 1:1"} title={autoRef2 ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={store.draftRef2.value} onInput={(e) => (store.draftRef2.value = e.currentTarget.value)} />
+          <input type="text" dir="ltr" placeholder={manyTarget ? "לפי כל שורה" : (autoRef2 ?? "Genesis 1:1")} title={autoRef2 && !manyTarget ? "נבנה אוטומטית משם המקום שבמסד; אפשר לכתוב ערך אחר" : undefined} value={manyTarget ? "" : store.draftRef2.value} onInput={(e) => (store.draftRef2.value = e.currentTarget.value)} disabled={manyTarget} />
+          {manyTarget && <span class="muted">{perLine("target")}</span>}
         </label>
       )}
 
