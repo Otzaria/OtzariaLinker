@@ -37,4 +37,21 @@ describe("unreferenced target lines (V7 parity F-102)", () => {
     store.suggestions.run.value = { engine: "headings", label: "x", at: 0, batch: [], result: { suggestions: [s(1)], notes: [], unmatched: [] } };
     expect(await store.suggestions.unreferencedTargets()).toBeNull();
   });
+
+  it("a read that failed or was cancelled is not kept: asking again for the same run reads again (V7 round-2 review, finding 9)", async () => {
+    const svc = registryService(new SourceRegistry());
+    let fail = 1;
+    const flaky: typeof svc = Object.assign(Object.create(Object.getPrototypeOf(svc) as object) as typeof svc, svc, {
+      headings: (key: string, opts?: { signal?: AbortSignal }) => (fail-- > 0 ? Promise.reject(Object.assign(new Error("cancelled"), { code: "cancelled" })) : svc.headings(key, opts)),
+    });
+    const store = new AppStore(flaky, { save: () => {} }, loadPreferences(null));
+    const BASE = { path: "בסיס.txt", blob: new Blob([strToU8(["<h1>בסיס</h1>", "א", "ב", "<h2>פרק ב</h2>", "ג", "ד", "ה"].join("\n"))]) };
+    await store.openFiles([BASE]);
+    const base = [...store.books.value.values()][0]!;
+    const ref = { key: base.key, title: base.title, origin: base.origin };
+    const s = (line: number) => sug(`x${line}`, line, { target: { book: ref, line } });
+    store.suggestions.run.value = { engine: "dibur-hamatchil", label: "x", at: 0, result: { suggestions: [s(1), s(6)], notes: [], unmatched: [] } };
+    expect(await store.suggestions.unreferencedTargets()).toBeNull();
+    expect(await store.suggestions.unreferencedTargets()).toEqual({ bookKey: base.key, title: "בסיס", lines: [2, 4, 5], from: 1, through: 6, referenced: 2 });
+  });
 });

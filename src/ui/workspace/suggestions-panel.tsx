@@ -151,7 +151,8 @@ function UnreferencedTargetsView({ title }: { title: string }) {
     <details
       class="unref"
       onToggle={(e) => {
-        if ((e.currentTarget as HTMLDetailsElement).open && data === undefined) void store.suggestions.unreferencedTargets().then(setData);
+        // no answer yet, or none (a cancelled read is not kept by the store, finding 9): opening again asks again
+        if ((e.currentTarget as HTMLDetailsElement).open && !data) (setData(undefined), void store.suggestions.unreferencedTargets().then(setData));
       }}
     >
       <summary>שורות ב"{title}" שאף הצעה לא מפנה אליהן</summary>
@@ -159,7 +160,7 @@ function UnreferencedTargetsView({ title }: { title: string }) {
         {data === undefined ? (
           <p class="muted">קורא את הכותרות של "{title}"…</p>
         ) : !data ? (
-          <p class="muted">אין רשימה להרצה הזו.</p>
+          <p class="muted">אין רשימה להרצה הזו. אם הקריאה בוטלה, סגרו את החלק הזה ופתחו אותו שוב.</p>
         ) : !data.lines.length ? (
           <p class="muted">כל שורות התוכן של "{data.title}" בין שורה {(data.from + 1).toLocaleString("he")} לשורה {(data.through + 1).toLocaleString("he")} מקבלות הפניה.</p>
         ) : (

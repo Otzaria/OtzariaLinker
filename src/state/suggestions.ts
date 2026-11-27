@@ -390,7 +390,11 @@ export class SuggestionsState {
     if (!memo) {
       memo = this.host
         .runTask("קורא את כותרות הספר…", (opts) => this.service.headings(key, opts))
-        .then((hs) => (hs ? { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) } : null));
+        .then((hs) => {
+          // a read that was cancelled or failed is not this run's answer: forgotten, so asking again reads again (V7 round-2 review, finding 9)
+          if (!hs) return void this.unrefMemo.delete(run), null;
+          return { bookKey: key, title: this.host.books.peek().get(key)?.title ?? key, ...unreferencedLines(list, new Set(hs.map((h) => h.line))) };
+        });
       this.unrefMemo.set(run, memo);
     }
     return memo;
